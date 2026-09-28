@@ -1,4 +1,4 @@
-/* 客户端基础样式：Bruno 风格（浅色、细边框、紧凑）。颜色令牌在此集中定义。 */
+/* 客户端基础样式：本地优先 API Client，颜色令牌对齐 design/design-export/design-spec.md。 */
 * {
   box-sizing: border-box;
 }
@@ -10,31 +10,81 @@ body,
   margin: 0;
 }
 
-body {
-  font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 13px;
-  color: var(--app-text);
-  background: var(--app-bg);
-  -webkit-font-smoothing: antialiased;
+/* 弹窗打开时整页布局被挤扁的根因：
+   naive-ui 的 useLockHtmlScroll 用 `window.innerWidth - html.offsetWidth` 估算滚动条宽度，
+   再给 <html> 加 margin-right 补偿。界面缩放（uiScale）是把 zoom 设在 <html> 上的，
+   此时 offsetWidth 是「缩放后的 CSS 像素」而 innerWidth 是「视觉像素」，
+   于是 zoom=1.5 时会算出 (1280 - 853) = 427px 的假滚动条宽度，整页宽度被压到近一半（实测 .app 1280 → 640）。
+   本应用外壳不依赖页面滚动（各面板自带滚动），补偿无意义，直接置零。 */
+html {
+  margin-right: 0 !important;
+}
+
+/* 拖动分隔条期间：禁止选中文本，并保持光标形状 */
+body.dragging {
+  user-select: none;
+}
+
+body.dragging.col,
+body.dragging.col * {
+  cursor: col-resize !important;
+}
+
+body.dragging.row,
+body.dragging.row * {
+  cursor: row-resize !important;
 }
 
 :root {
-  --app-bg: #f5f5f6;
+  /* 通用色板（design-spec §1） */
+  --app-bg: #f5f5f5;
   --app-panel: #ffffff;
-  --app-sidebar: #f7f7f8;
-  --app-border: #e4e4e7;
-  --app-border-strong: #d4d4d8;
-  --app-text: #2b2f33;
-  --app-muted: #8a8f98;
+  --app-sidebar: #f5f5f5;
+  --app-border: #e3e3e3;
+  --app-border-strong: #d0d3d6;
+  --app-text: #202124;
+  --app-text-2: #3c4043;
+  --app-muted: #5f6368;
+  --app-placeholder: #a0a4ab;
   --app-accent: #18a058;
-  --app-send: #f97316;
-  --app-send-hover: #ea6a0c;
-  --app-row-hover: #ececee;
-  --app-active: #eef7f1;
+  --app-accent-dark: #0e7a3e;
+  --app-accent-tint: #e8f5ee;
+  --app-info: #2080f0;
+  --app-info-dark: #1060c0;
+  --app-info-tint: #e8f0fe;
+  --app-send: #18a058;
+  --app-send-hover: #36ad6a;
+  --app-row-hover: #ececec;
+  --app-active: #e8f5ee;
+  /* 代码着色（design-spec §1 第 24 行） */
+  --app-code-key: #0550ae;
+  --app-code-string: #116329;
+  --app-code-number: #0550ae;
+  --app-code-boolean: #b26a00;
+  --app-code-null: #8a9199;
+  --app-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --app-shadow-pop: 0 16px 48px -8px rgba(0, 0, 0, 0.25);
+  /* 外壳固定尺寸（design-spec §2） */
+  --app-titlebar-h: 44px;
+  --app-toolbar-h: 48px;
+  --app-statusbar-h: 28px;
+}
+
+body {
+  /* 内置字体优先：不依赖系统是否装了中文字体；后面的系统字体仅作兜底。 */
+  font-family: 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  color: var(--app-text);
+  background: var(--app-bg);
+  /* 禁止合成粗体/斜体：中文缺粗体字面时不再把笔画硬撑粗 */
+  font-synthesis: none;
+  /* WebKitGTK 上灰度渲染比次像素更干净，避免文字边缘发毛 */
+  -webkit-font-smoothing: antialiased;
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--app-mono);
 }
 
 /* n-config-provider 会渲染一层包裹节点，不撑满会让内部 flex 布局高度塌陷 */

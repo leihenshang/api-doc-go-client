@@ -229,12 +229,13 @@ type scanResult struct {
 	reqs      map[string]*Request // uid → request
 	reqByPath map[string]*Request
 	uidByDir  map[string]string // 目录相对路径 → folder.yml 的 uid
+	nameByDir map[string]string // 目录相对路径 → folder.yml 的显示名（重命名后与目录名不同）
 }
 
 func (c *Collection) scan() (*scanResult, error) {
 	res := &scanResult{
 		reqs: map[string]*Request{}, reqByPath: map[string]*Request{},
-		uidByDir: map[string]string{},
+		uidByDir: map[string]string{}, nameByDir: map[string]string{},
 	}
 	err := filepath.WalkDir(c.Dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -296,6 +297,9 @@ func (c *Collection) scan() (*scanResult, error) {
 			if head.Meta.UID != "" {
 				res.uidByDir[dir] = head.Meta.UID
 			}
+			if head.Info.Name != "" {
+				res.nameByDir[dir] = head.Info.Name
+			}
 		}
 		return nil
 	})
@@ -328,9 +332,13 @@ func (c *Collection) Tree() ([]*Node, error) {
 			parent = ""
 		}
 		p := ensureDir(parent)
-		n := &dirNode{name: filepath.Base(dir), path: dir}
+		name := res.nameByDir[dir] // 优先 folder.yml 的显示名（重命名后与目录名不同）
+		if name == "" {
+			name = filepath.Base(dir)
+		}
+		n := &dirNode{name: name, path: dir}
 		dirs[dir] = n
-		p.children = append(p.children, &Node{Type: "folder", UID: res.uidByDir[dir], Name: n.name, Path: dir, Children: nil})
+		p.children = append(p.children, &Node{Type: "folder", UID: res.uidByDir[dir], Name: name, Path: dir, Children: nil})
 		return n
 	}
 	// 挂请求
@@ -341,6 +349,12 @@ func (c *Collection) Tree() ([]*Node, error) {
 		}
 		n := ensureDir(dir)
 		n.children = append(n.children, &Node{Type: "request", UID: r.UID, Name: r.Name, Path: r.Path, Method: r.Method})
+	}
+	// 空分组（只有 folder.yml、暂无请求）也必须出现在树里，否则建完就"消失"
+	for dir := range res.uidByDir {
+		if dir != "" {
+			ensureDir(dir)
+		}
 	}
 	// 组装 + 排序（分组在前；组内 seq 升序、名称次之）
 	var build func(children []*Node) []*Node
@@ -582,18 +596,135 @@ func (c *Collection) CreateRequest(folder, name, method string) (*Request, error
 }
 
 // CreateFolder 新建分组（目录 + folder.yml）。
-func (c *Collection) CreateFolder(name string) error {
+// CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
+func (c *Collection) CreateFolder(parent, name string) error {
 	if !namePattern.MatchString(name) {
 		return fmt.Errorf("名称含非法字符或为空")
 	}
-	rel := sanitizeFileName(name)
+	base, err := c.resolveFolder(parent)
+	if err != nil {
+		return err
+	}
+	rel := joinRel(base, sanitizeFileName(name))
 	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(rel)), 0o755); err != nil {
 		return err
 	}
-	if _, ok := c.folderUID(rel); !ok {
-		return c.ensureFolderYML(rel, name)
+	return c.ensureFolderYML(rel, name)
+}
+
+// RenameFolder 改分组显示名（目录名与 uid 保持不变，避免路径漂移）。
+func (c *Collection) RenameFolder(uid, name string) error {
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("名称含非法字符或为空")
 	}
-	return nil
+	dir, err := c.findDir(uid)
+	if err != nil {
+		return err
+	}
+	full := filepath.Join(c.Dir, filepath.FromSlash(dir), "folder.yml")
+	data, err := os.ReadFile(full)
+	if os.IsNotExist(err) {
+		return c.ensureFolderYML(dir, name)
+	}
+	if err != nil {
+		return fmt.Errorf("读取分组描述: %w", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("解析分组描述: %w", err)
+	}
+	info, _ := doc["info"].(map[string]any)
+	if info == nil {
+		info = map[string]any{"type": "folder"}
+	}
+	info["name"] = name
+	doc["info"] = info
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("序列化分组描述: %w", err)
+	}
+	return os.WriteFile(full, out, 0o644)
+}
+
+// DeleteFolder 删除空分组（有子分组/请求时拒绝，避免误删）；目录移入 .trash。
+func (c *Collection) DeleteFolder(uid string) error {
+	dir, err := c.findDir(uid)
+	if err != nil {
+		return err
+	}
+	if dir == "" {
+		return fmt.Errorf("不能删除集合根目录")
+	}
+	if !c.folderEmpty(dir) {
+		return fmt.Errorf("分组非空：请先删除其下的分组与请求")
+	}
+	return c.moveToTrash(filepath.Join(c.Dir, filepath.FromSlash(dir)))
+}
+
+// RenameRequest 改请求显示名（文件名与 uid 保持不变）。
+func (c *Collection) RenameRequest(uid, name string) error {
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("名称含非法字符或为空")
+	}
+	res, err := c.scan()
+	if err != nil {
+		return err
+	}
+	r, ok := res.reqs[uid]
+	if !ok {
+		return errNotFound
+	}
+	r.Name = name
+	return c.SaveRequest(r)
+}
+
+// resolveFolder 校验并规范化分组相对路径（必须是集合内已存在的目录）。
+func (c *Collection) resolveFolder(parent string) (string, error) {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(parent)))
+	if clean == "." || clean == "/" {
+		return "", nil
+	}
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return "", fmt.Errorf("非法的分组路径")
+	}
+	if _, ok := c.folderUID(clean); !ok {
+		return "", fmt.Errorf("分组不存在: %s", clean)
+	}
+	return clean, nil
+}
+
+func (c *Collection) findDir(uid string) (string, error) {
+	res, err := c.scan()
+	if err != nil {
+		return "", err
+	}
+	for dir, u := range res.uidByDir {
+		if u == uid {
+			return dir, nil
+		}
+	}
+	return "", errNotFound
+}
+
+// folderEmpty 分组是否为空（仅允许 folder.yml 与保留文件）。
+func (c *Collection) folderEmpty(dir string) bool {
+	entries, err := os.ReadDir(filepath.Join(c.Dir, filepath.FromSlash(dir)))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			return false
+		}
+		if reserved[name] || strings.HasPrefix(name, "folder.") {
+			continue
+		}
+		if ext := strings.ToLower(filepath.Ext(name)); ext == ".yml" || ext == ".yaml" {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Collection) folderUID(dir string) (string, bool) {

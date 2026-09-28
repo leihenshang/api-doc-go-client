@@ -10,8 +10,8 @@ export function ClearHistory() {
   return window['go']['app']['App']['ClearHistory']();
 }
 
-export function CreateFolder(arg1) {
-  return window['go']['app']['App']['CreateFolder'](arg1);
+export function CreateFolder(arg1, arg2) {
+  return window['go']['app']['App']['CreateFolder'](arg1, arg2);
 }
 
 export function CreateRequest(arg1, arg2, arg3) {
@@ -20,6 +20,10 @@ export function CreateRequest(arg1, arg2, arg3) {
 
 export function DeleteEnv(arg1) {
   return window['go']['app']['App']['DeleteEnv'](arg1);
+}
+
+export function DeleteFolder(arg1) {
+  return window['go']['app']['App']['DeleteFolder'](arg1);
 }
 
 export function DeleteRequest(arg1) {
@@ -50,12 +54,24 @@ export function PickDirectory() {
   return window['go']['app']['App']['PickDirectory']();
 }
 
+export function Quit() {
+  return window['go']['app']['App']['Quit']();
+}
+
 export function ReadRequest(arg1) {
   return window['go']['app']['App']['ReadRequest'](arg1);
 }
 
 export function ReloadCollection() {
   return window['go']['app']['App']['ReloadCollection']();
+}
+
+export function RenameFolder(arg1, arg2) {
+  return window['go']['app']['App']['RenameFolder'](arg1, arg2);
+}
+
+export function RenameRequest(arg1, arg2) {
+  return window['go']['app']['App']['RenameRequest'](arg1, arg2);
 }
 
 export function ResolveText(arg1, arg2) {
@@ -80,4 +96,16 @@ export function SendRequest(arg1, arg2) {
 
 export function SetHeadlessDir(arg1) {
   return window['go']['app']['App']['SetHeadlessDir'](arg1);
+}
+
+export function WindowIsMaximised() {
+  return window['go']['app']['App']['WindowIsMaximised']();
+}
+
+export function WindowMinimise() {
+  return window['go']['app']['App']['WindowMinimise']();
+}
+
+export function WindowToggleMaximise() {
+  return window['go']['app']['App']['WindowToggleMaximise']();
 }

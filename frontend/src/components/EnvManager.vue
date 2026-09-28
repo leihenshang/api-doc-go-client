@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 环境变量管理：新建/删除环境，编辑变量（敏感值明文只落 *.secrets.yml，由 Go 层拆分存储）。
-import { NButton, NCheckbox, NInput, NModal, NPopconfirm } from 'naive-ui'
+import { NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm } from 'naive-ui'
+import { CloseOutline } from '@vicons/ionicons5'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCollectionStore } from '@/stores/collection'
@@ -100,7 +101,9 @@ function close(): void {
               :type="v.secret ? 'password' : 'text'"
             />
             <n-checkbox v-model:checked="v.secret" size="small">{{ t('env.secret') }}</n-checkbox>
-            <n-button text size="tiny" @click="delVar(i)">✕</n-button>
+            <n-button text size="tiny" @click="delVar(i)">
+              <n-icon :component="CloseOutline" :size="13" />
+            </n-button>
           </div>
           <n-button text size="tiny" type="primary" @click="addVar">{{ t('env.addVar') }}</n-button>
           <p class="hint muted">{{ t('env.saveHint') }}</p>

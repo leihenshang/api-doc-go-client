@@ -15,19 +15,38 @@ const (
 	defaultTTLS  = 30
 	defaultMaxRD = 5
 	defaultLimit = 200
+
+	// defaultRespSize 响应区默认占比（%）。
+	defaultRespSize = 44
 )
 
 // Settings 全局设置：请求级 settings 未覆盖时生效。
 type Settings struct {
-	InsecureSSL     bool `json:"insecureSsl"` // 跳过 TLS 证书校验（自签/内网证书）
-	TimeoutSec      int  `json:"timeoutSec"`
-	FollowRedirects bool `json:"followRedirects"`
-	MaxRedirects    int  `json:"maxRedirects"`
-	PersistCookies  bool `json:"persistCookies"`
-	HistoryLimit    int  `json:"historyLimit"`
+	InsecureSSL     bool    `json:"insecureSsl"` // 跳过 TLS 证书校验（自签/内网证书）
+	TimeoutSec      int     `json:"timeoutSec"`
+	FollowRedirects bool    `json:"followRedirects"`
+	MaxRedirects    int     `json:"maxRedirects"`
+	PersistCookies  bool    `json:"persistCookies"`
+	HistoryLimit    int     `json:"historyLimit"`
+	UIScale         float64 `json:"uiScale"`        // 界面缩放倍率（1 = 100%）
+	ResponseLayout  string  `json:"responseLayout"` // 响应区位置：right | bottom
+	ResponseSize    int     `json:"responseSize"`   // 响应区占比（%）：right 时为宽度、bottom 时为高度，可拖动调整
 }
 
-// Default 默认设置：跟随重定向、30s 超时、持久化 Cookie、保留 200 条历史。
+const (
+	// LayoutRight / LayoutBottom 响应区布局取值。
+	LayoutRight  = "right"
+	LayoutBottom = "bottom"
+
+	minUIScale = 0.75
+	maxUIScale = 3.0
+
+	// 响应区占比上下限：留出请求区可视空间，避免拖到 0 后无法拖回。
+	MinRespSize = 20
+	MaxRespSize = 80
+)
+
+// Default 默认设置：跟随重定向、30s 超时、持久化 Cookie、保留 200 条历史、响应区在右侧。
 func Default() Settings {
 	return Settings{
 		TimeoutSec:      defaultTTLS,
@@ -35,6 +54,9 @@ func Default() Settings {
 		MaxRedirects:    defaultMaxRD,
 		PersistCookies:  true,
 		HistoryLimit:    defaultLimit,
+		UIScale:         1,
+		ResponseLayout:  LayoutRight,
+		ResponseSize:    defaultRespSize,
 	}
 }
 
@@ -49,6 +71,15 @@ func (s Settings) Normalize() Settings {
 	}
 	if s.HistoryLimit <= 0 {
 		s.HistoryLimit = def.HistoryLimit
+	}
+	if s.UIScale < minUIScale || s.UIScale > maxUIScale {
+		s.UIScale = def.UIScale
+	}
+	if s.ResponseLayout != LayoutBottom {
+		s.ResponseLayout = LayoutRight
+	}
+	if s.ResponseSize < MinRespSize || s.ResponseSize > MaxRespSize {
+		s.ResponseSize = def.ResponseSize
 	}
 	return s
 }

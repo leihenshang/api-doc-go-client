@@ -47,6 +47,7 @@ export namespace collection {
 	    name: string;
 	    value: string;
 	    enabled: boolean;
+	    description?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new KV(source);
@@ -57,6 +58,7 @@ export namespace collection {
 	        this.name = source["name"];
 	        this.value = source["value"];
 	        this.enabled = source["enabled"];
+	        this.description = source["description"];
 	    }
 	}
 	export class Body {
@@ -311,6 +313,9 @@ export namespace config {
 	    maxRedirects: number;
 	    persistCookies: boolean;
 	    historyLimit: number;
+	    uiScale: number;
+	    responseLayout: string;
+	    responseSize: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -324,6 +329,9 @@ export namespace config {
 	        this.maxRedirects = source["maxRedirects"];
 	        this.persistCookies = source["persistCookies"];
 	        this.historyLimit = source["historyLimit"];
+	        this.uiScale = source["uiScale"];
+	        this.responseLayout = source["responseLayout"];
+	        this.responseSize = source["responseSize"];
 	    }
 	}
 

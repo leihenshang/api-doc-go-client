@@ -4,6 +4,8 @@ export interface KV {
   name: string
   value: string
   enabled: boolean
+  /** 参数说明（对齐设计稿参数表 Description 列；Go 侧同名字段保证落盘 round-trip） */
+  description?: string
 }
 
 export type BodyType = 'none' | 'json' | 'text' | 'form' | 'multipart'
@@ -106,6 +108,12 @@ export interface Settings {
   maxRedirects: number
   persistCookies: boolean
   historyLimit: number
+  /** 界面缩放倍率（1 = 100%） */
+  uiScale: number
+  /** 响应区位置 */
+  responseLayout: 'right' | 'bottom'
+  /** 响应区占比（%）：right 为宽度、bottom 为高度，可拖动调整（20–80） */
+  responseSize: number
 }
 
 /** 一条发送历史（internal/history.Entry）。 */

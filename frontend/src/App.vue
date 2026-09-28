@@ -1,9 +1,7 @@
 <script setup lang="ts">
-// 根组件：工具栏（集合名/环境/动作）+ 侧栏（集合树）+ 多 TAB 工作台（编辑/响应横向分屏）。
-// naive-ui 的 useMessage 必须在 provider 后代中调用，而 App 自身的 setup 不是自己的
-// NMessageProvider 的后代 —— 因此这里用离散 API（createDiscreteApi）取 message。
+// 根组件（AppShell，design-spec §2）：标题栏 → 工具栏 → 三栏主体（侧栏 / 标签+请求+响应）→ 状态栏。
+// 请求区与响应区的位置由全局设置 responseLayout 决定，占比由分隔条拖动调整（松手落盘）。
 import {
-  createDiscreteApi,
   NButton,
   NConfigProvider,
   NForm,
@@ -12,39 +10,140 @@ import {
   NModal,
   NSelect,
   NSpin,
-  NTag,
-  zhCN,
+  dateEnUS,
+  dateZhCN,
   enUS,
+  zhCN,
 } from 'naive-ui'
-import { computed, onMounted, ref, watch } from 'vue'
+import type { GlobalThemeOverrides } from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CommandPalette from '@/components/CommandPalette.vue'
 import EnvManager from '@/components/EnvManager.vue'
-import EnvPicker from '@/components/EnvPicker.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
+import Overview from '@/components/Overview.vue'
+import RequestBar from '@/components/RequestBar.vue'
 import RequestEditor from '@/components/RequestEditor.vue'
 import ResponsePanel from '@/components/ResponsePanel.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import StatusBar from '@/components/StatusBar.vue'
 import TabBar from '@/components/TabBar.vue'
+import TitleBar from '@/components/TitleBar.vue'
+import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api } from '@/lib/ipc'
+import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
+import { useSettingsStore } from '@/stores/settings'
 import { useTabsStore } from '@/stores/tabs'
+import type { TreeNode } from '@/types'
 
 const coll = useCollectionStore()
 const tabs = useTabsStore()
+const settings = useSettingsStore()
 const { t, locale } = useI18n()
 
 const naiveLocale = computed(() => (locale.value === 'en-US' ? enUS : zhCN))
-const { message } = createDiscreteApi(['message'], {
-  configProviderProps: computed(() => ({ locale: naiveLocale.value })),
-})
+const naiveDateLocale = computed(() => (locale.value === 'en-US' ? dateEnUS : dateZhCN))
+
+// 主题令牌取自 design-spec §1：控件圆角 6px、主色 #18a058、信息色 #2080f0、底 #f5f5f5。
+const themeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#18a058',
+    primaryColorHover: '#36ad6a',
+    primaryColorPressed: '#0c7a43',
+    primaryColorSuppl: '#18a058',
+    infoColor: '#2080f0',
+    infoColorHover: '#4098fc',
+    infoColorPressed: '#1060c0',
+    borderColor: '#e3e3e3',
+    bodyColor: '#f5f5f5',
+    cardColor: '#ffffff',
+    textColorBase: '#202124',
+    fontSize: '13px',
+    borderRadius: '6px',
+    borderRadiusSmall: '4px',
+    fontFamily:
+      "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+  },
+  Card: {
+    paddingMedium: '16px 20px',
+    borderRadiusMedium: '10px',
+  },
+  DataTable: {
+    thColor: '#fafafa',
+    thFontWeight: '500',
+  },
+}
 
 const showEnvManager = ref(false)
 const showSettings = ref(false)
 const showHistory = ref(false)
-const sideOpen = ref(true)
+const showPalette = ref(false)
 const lastDir = localStorage.getItem('client.lastDir') ?? ''
+
+// 界面缩放：作用在根元素上，弹层（teleport 到 body）也会一起缩放
+watchEffect(() => {
+  document.documentElement.style.zoom = String(settings.uiScale || 1)
+})
+
+const requestCount = computed(() => {
+  const walk = (nodes: TreeNode[]): number =>
+    nodes.reduce((n, x) => n + (x.type === 'request' ? 1 : walk(x.children ?? [])), 0)
+  return walk(coll.tree)
+})
+
+// ---- 请求区 / 响应区分栏 ----
+const workEl = ref<HTMLElement | null>(null)
+const respSize = ref(settings.responseSize)
+// 拖动中不覆盖本地值，避免落盘往返把拖动位置"回跳"
+let resizing = false
+
+watch(
+  () => settings.responseSize,
+  (v) => {
+    if (!resizing) respSize.value = v
+  },
+)
+
+// 响应区尺寸：flex-basis 百分比（right 生效为宽度、bottom 生效为高度）
+const respStyle = computed(() => ({ flexBasis: `${respSize.value}%` }))
+
+function setLayout(layout: 'right' | 'bottom'): void {
+  if (settings.responseLayout === layout) return
+  void settings.save({ ...settings.form, responseLayout: layout })
+}
+
+function startResize(e: PointerEvent): void {
+  const box = workEl.value
+  if (!box) return
+  e.preventDefault()
+  resizing = true
+  const horizontal = settings.responseLayout === 'right'
+  // 四舍五入 + 20~80 夹取，与 Go 侧 config.Normalize 的范围一致
+  const clamp = (n: number): number => Math.min(80, Math.max(20, Math.round(n)))
+
+  const move = (ev: PointerEvent): void => {
+    const r = box.getBoundingClientRect()
+    respSize.value = horizontal
+      ? clamp(((r.right - ev.clientX) / r.width) * 100)
+      : clamp(((r.bottom - ev.clientY) / r.height) * 100)
+  }
+  const stop = (): void => {
+    resizing = false
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+    document.body.classList.remove('dragging', 'col', 'row')
+    void settings.save({ ...settings.form, responseSize: respSize.value })
+  }
+
+  document.body.classList.add('dragging', horizontal ? 'col' : 'row')
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop)
+  window.addEventListener('pointercancel', stop)
+}
 
 // ---- 打开 / 切换集合 ----
 async function openCollection(dir: string): Promise<void> {
@@ -67,16 +166,55 @@ async function openCollection(dir: string): Promise<void> {
   }
 }
 
+function pickEnv(name: string): void {
+  coll.setEnv(name)
+  tabs.refreshResolve()
+}
+
+// ---- 命令面板动作 ----
+function onCommand(key: string): void {
+  if (key === 'open-dir') void openCollection('')
+  else if (key === 'new-request') openCreate()
+  else if (key === 'reload') void coll.reload()
+  else if (key === 'toggle-layout') setLayout(settings.responseLayout === 'right' ? 'bottom' : 'right')
+  else if (key === 'history') showHistory.value = true
+  else if (key === 'settings') showSettings.value = true
+}
+
+function onHotkey(e: KeyboardEvent): void {
+  // 命令面板打开时它自己接管键盘，避免 Ctrl+Enter 等落到编辑器
+  if (showPalette.value) return
+  if (!e.ctrlKey && !e.metaKey) return
+  const key = e.key.toLowerCase()
+  if (key === 'k') {
+    e.preventDefault()
+    showPalette.value = true
+  } else if (key === 'enter') {
+    e.preventDefault()
+    if (tabs.active) void tabs.send(tabs.active.key)
+  } else if (key === 'n') {
+    e.preventDefault()
+    openCreate()
+  } else if (key === 'e') {
+    e.preventDefault()
+    showEnvManager.value = true
+  }
+}
+
 onMounted(() => {
+  void settings.load()
+  window.addEventListener('keydown', onHotkey)
   if (lastDir) void openCollection(lastDir)
 })
 
-// ---- 新建请求 / 分组弹窗 ----
+onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
+
+// ---- 新建请求弹窗（folder 由侧栏传入） ----
 const showCreate = ref(false)
 const createForm = ref({ name: '', folder: '', method: 'GET' })
 const folderOptions = computed(() => {
   const out: { label: string; value: string }[] = [{ label: t('prompt.folder'), value: '' }]
-  const walk = (nodes: typeof coll.tree): void => {
+  const walk = (nodes: TreeNode[]): void => {
     for (const n of nodes) {
       if (n.type === 'folder') {
         out.push({ label: n.name, value: n.path })
@@ -88,41 +226,17 @@ const folderOptions = computed(() => {
   return out
 })
 
-function openCreate(): void {
-  createForm.value = { name: '', folder: '', method: 'GET' }
+function openCreate(folder = ''): void {
+  createForm.value = { name: '', folder, method: 'GET' }
   showCreate.value = true
 }
 
 async function submitCreate(): Promise<void> {
   if (!createForm.value.name.trim()) return
   try {
-    const r = await api.createRequest(createForm.value.folder, createForm.value.name.trim(), createForm.value.method)
+    const r = await coll.createRequest(createForm.value.folder, createForm.value.name.trim(), createForm.value.method)
     showCreate.value = false
-    await coll.reload()
     tabs.openDoc(r)
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-const showFolder = ref(false)
-const folderName = ref('')
-
-async function submitFolder(): Promise<void> {
-  if (!folderName.value.trim()) return
-  try {
-    await api.createFolder(folderName.value.trim())
-    showFolder.value = false
-    await coll.reload()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-async function deleteRequest(uid: string): Promise<void> {
-  try {
-    await tabs.deleteRequest(uid)
-    await coll.reload()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
@@ -130,11 +244,6 @@ async function deleteRequest(uid: string): Promise<void> {
 
 function envSaved(): void {
   tabs.refreshResolve()
-}
-
-function toggleLang(): void {
-  locale.value = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
-  localStorage.setItem('client.lang', locale.value)
 }
 
 // 集合切换后刷新解析预览
@@ -145,53 +254,101 @@ watch(
 </script>
 
 <template>
-  <n-config-provider :locale="naiveLocale">
+  <n-config-provider :locale="naiveLocale" :date-locale="naiveDateLocale" :theme-overrides="themeOverrides">
     <div class="app">
+      <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区 -->
+      <title-bar />
+
       <n-spin :show="coll.loading">
         <template v-if="coll.ready && coll.info">
-          <header class="toolbar">
-            <button class="menu" :title="t('toolbar.toggleSide')" @click="sideOpen = !sideOpen">☰</button>
-            <span class="brand">API-DOC</span>
-            <n-tag size="small" :bordered="false" class="ws" :title="coll.dir">{{ coll.name }}</n-tag>
-            <span class="sp" />
-            <env-picker
-              :envs="coll.info.envs"
-              :model-value="coll.currentEnv"
-              @update:model-value="coll.setEnv($event); tabs.refreshResolve()"
-              @manage="showEnvManager = true"
-            />
-            <n-button size="small" @click="openCreate">{{ t('toolbar.newRequest') }}</n-button>
-            <n-button size="small" @click="showFolder = true">{{ t('toolbar.newFolder') }}</n-button>
-            <n-button size="small" quaternary :title="t('toolbar.reload')" @click="coll.reload()">⟳</n-button>
-            <n-button size="small" quaternary :title="t('toolbar.openDir')" @click="openCollection('')">📂</n-button>
-            <n-button size="small" quaternary :title="locale" @click="toggleLang">{{ locale === 'zh-CN' ? 'EN' : '中' }}</n-button>
-            <n-button size="small" quaternary :title="t('history.title')" @click="showHistory = true">🕘</n-button>
-            <n-button size="small" quaternary :title="t('settings.title')" @click="showSettings = true">⚙</n-button>
-          </header>
+          <toolbar
+            :name="coll.name"
+            :dir="coll.dir"
+            :envs="coll.info.envs"
+            :current-env="coll.currentEnv"
+            @open-other="openCollection('')"
+            @reload="coll.reload()"
+            @history="showHistory = true"
+            @settings="showSettings = true"
+            @palette="showPalette = true"
+            @manage-env="showEnvManager = true"
+            @update:currentEnv="pickEnv"
+          />
 
           <div class="body">
-            <aside v-show="sideOpen" class="side">
-              <sidebar :tree="coll.tree" @open="tabs.openRequest($event)" @delete="deleteRequest" />
+            <aside class="side">
+              <sidebar
+                :tree="coll.tree"
+                :name="coll.name"
+                :active-uid="tabs.active?.uid ?? ''"
+                @open="tabs.openRequest($event)"
+                @new-request="openCreate"
+              />
             </aside>
+
             <main class="main">
               <tab-bar
                 :tabs="tabs.tabs"
                 :active-key="tabs.activeKey"
                 @select="tabs.setActive($event)"
+                @select-overview="tabs.setActive('')"
                 @close="tabs.close($event)"
-                @new="openCreate"
+                @new="openCreate()"
               />
-              <div v-if="tabs.active" class="work">
-                <section class="editor-col">
-                  <request-editor :tab="tabs.active" />
-                </section>
-                <section class="resp-col">
-                  <response-panel :tab="tabs.active" />
-                </section>
+
+              <div v-if="tabs.active" class="detail">
+                <request-bar :tab="tabs.active" />
+                <div ref="workEl" class="work" :class="settings.responseLayout">
+                  <section class="editor-col">
+                    <request-editor :tab="tabs.active" />
+                  </section>
+
+                  <div
+                    class="splitter"
+                    role="separator"
+                    :title="t('editor.resizeHint')"
+                    :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
+                    @pointerdown="startResize"
+                  >
+                    <div class="capsule" @pointerdown.stop>
+                      <button
+                        class="cap"
+                        :class="{ on: settings.responseLayout === 'right' }"
+                        type="button"
+                        :title="t('editor.layoutHorizontal')"
+                        @click="setLayout('right')"
+                      >
+                        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
+                          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
+                          <line x1="7" y1="0.6" x2="7" y2="11.4" stroke="currentColor" />
+                        </svg>
+                      </button>
+                      <button
+                        class="cap"
+                        :class="{ on: settings.responseLayout === 'bottom' }"
+                        type="button"
+                        :title="t('editor.layoutVertical')"
+                        @click="setLayout('bottom')"
+                      >
+                        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
+                          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
+                          <line x1="0.6" y1="6" x2="13.4" y2="6" stroke="currentColor" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <section class="resp-col" :style="respStyle">
+                    <response-panel :tab="tabs.active" />
+                  </section>
+                </div>
               </div>
-              <div v-else class="placeholder muted">← {{ t('sidebar.empty') }}</div>
+
+              <overview v-else :info="coll.info" @new-request="openCreate()" />
             </main>
           </div>
+
+          <status-bar :requests="requestCount" :envs="coll.info.envs.length" />
         </template>
 
         <welcome v-else :last-dir="lastDir" @open="openCollection" />
@@ -200,6 +357,14 @@ watch(
       <env-manager v-model:show="showEnvManager" @saved="envSaved" />
       <settings-dialog v-model:show="showSettings" />
       <history-dialog v-model:show="showHistory" @open="tabs.openRequest($event)" />
+      <command-palette
+        v-model:show="showPalette"
+        :tree="coll.tree"
+        :envs="coll.info?.envs ?? []"
+        @open-request="tabs.openRequest($event)"
+        @switch-env="pickEnv"
+        @command="onCommand"
+      />
 
       <n-modal v-model:show="showCreate" preset="card" :title="t('prompt.newRequest')" style="width: 440px">
         <n-form label-placement="left" label-width="86">
@@ -223,16 +388,6 @@ watch(
           </div>
         </template>
       </n-modal>
-
-      <n-modal v-model:show="showFolder" preset="card" :title="t('prompt.newFolder')" style="width: 380px">
-        <n-input v-model:value="folderName" :placeholder="t('prompt.newFolder')" @keyup.enter="submitFolder" />
-        <template #footer>
-          <div class="modal-ft">
-            <n-button size="small" @click="showFolder = false">{{ t('common.cancel') }}</n-button>
-            <n-button size="small" type="primary" @click="submitFolder">{{ t('common.create') }}</n-button>
-          </div>
-        </template>
-      </n-modal>
     </div>
   </n-config-provider>
 </template>
@@ -242,57 +397,16 @@ watch(
   height: 100%;
   display: flex;
   flex-direction: column;
+  background: var(--app-bg);
 }
 
-/* n-spin 会自带一层容器，需显式撑满并沿用列布局，否则整页高度塌陷 */
-.app :deep(.n-spin-container),
-.app :deep(.n-spin-content) {
-  height: 100%;
+/* 标题栏常驻后，n-spin 的两层容器需吃掉剩余高度（而非按 100% 高度计算） */
+:deep(.n-spin-container),
+:deep(.n-spin-content) {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--app-border);
-  background: var(--app-panel);
-}
-
-.menu {
-  border: none;
-  background: none;
-  font-size: 15px;
-  color: var(--app-muted);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.menu:hover {
-  background: var(--app-row-hover);
-  color: var(--app-text);
-}
-
-.brand {
-  font-weight: 700;
-  letter-spacing: 1px;
-  font-size: 13px;
-  color: var(--app-text);
-}
-
-.ws {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--app-sidebar);
-  color: var(--app-text);
-}
-
-.sp {
-  flex: 1 1 auto;
 }
 
 .body {
@@ -302,10 +416,10 @@ watch(
 }
 
 .side {
-  width: 264px;
+  width: 260px;
   flex: 0 0 auto;
   border-right: 1px solid var(--app-border);
-  overflow: auto;
+  overflow: hidden;
   background: var(--app-sidebar);
 }
 
@@ -314,36 +428,133 @@ watch(
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: var(--app-panel);
+}
+
+.detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .work {
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
-.editor-col {
+.work.right {
+  flex-direction: row;
+}
+
+.work.bottom {
+  flex-direction: column;
+}
+
+/* 请求区自适应剩余空间；响应区尺寸由内联 flex-basis（拖动得到）决定 */
+.work .editor-col {
   flex: 1 1 auto;
-  min-width: 420px;
+}
+
+/* 保底尺寸要留小：界面缩放的 zoom 作用在 <html> 上，这里的 px 会随之放大
+   （zoom 1.5 时 320px 相当于屏幕上 480px），过大会顶掉拖动得到的比例。 */
+.work.right .editor-col {
+  min-width: 160px;
+}
+
+.work.bottom .editor-col {
+  min-height: 120px;
+}
+
+.work .resp-col {
+  flex-grow: 0;
+  flex-shrink: 0;
+}
+
+.work.right .resp-col {
+  min-width: 160px;
+}
+
+.work.bottom .resp-col {
+  min-height: 100px;
+}
+
+.editor-col,
+.resp-col {
   display: flex;
   flex-direction: column;
   overflow: auto;
   background: var(--app-panel);
+  min-width: 0;
+  min-height: 0;
 }
 
-.resp-col {
-  flex: 0 0 42%;
-  min-width: 340px;
+/* 分隔区（design-spec §2 的 w28）：浅灰底 + 两侧细线，中央浮着布局切换胶囊 */
+.splitter {
+  flex: 0 0 28px;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg);
+  cursor: col-resize;
+}
+
+.work.right .splitter {
   border-left: 1px solid var(--app-border);
+  border-right: 1px solid var(--app-border);
+}
+
+.work.bottom .splitter {
+  cursor: row-resize;
+  border-top: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.splitter:hover {
+  background: #eee;
+}
+
+/* 胶囊按钮：横向布局时竖排（26×52），竖向布局时横排（52×26） */
+.capsule {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
   background: var(--app-panel);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
-.placeholder {
-  padding: 40px;
-  text-align: center;
+.work.bottom .capsule {
+  flex-direction: row;
+}
+
+.cap {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--app-placeholder);
+  cursor: pointer;
+  padding: 0;
+}
+
+.cap:hover {
+  color: var(--app-text-2);
+}
+
+.cap.on {
+  background: var(--app-accent);
+  color: #fff;
 }
 
 .modal-ft {

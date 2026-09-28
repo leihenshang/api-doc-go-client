@@ -42,7 +42,7 @@ func TestOpenCreatesManifestAndGitignore(t *testing.T) {
 
 func TestRequestCRUDAndTree(t *testing.T) {
 	c := openTemp(t)
-	if err := c.CreateFolder("用户"); err != nil {
+	if err := c.CreateFolder("", "用户"); err != nil {
 		t.Fatalf("CreateFolder: %v", err)
 	}
 	r1, err := c.CreateRequest("", "根接口", "GET")
