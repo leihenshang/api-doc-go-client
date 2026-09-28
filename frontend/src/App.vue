@@ -10,6 +10,7 @@ import {
   NModal,
   NSelect,
   NSpin,
+  darkTheme,
   dateEnUS,
   dateZhCN,
   enUS,
@@ -34,6 +35,7 @@ import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
+import { nextTheme, isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import { useTabsStore } from '@/stores/tabs'
@@ -47,35 +49,56 @@ const { t, locale } = useI18n()
 const naiveLocale = computed(() => (locale.value === 'en-US' ? enUS : zhCN))
 const naiveDateLocale = computed(() => (locale.value === 'en-US' ? dateEnUS : dateZhCN))
 
-// 主题令牌取自 design-spec §1：控件圆角 6px、主色 #18a058、信息色 #2080f0、底 #f5f5f5。
-const themeOverrides: GlobalThemeOverrides = {
-  common: {
-    primaryColor: '#18a058',
-    primaryColorHover: '#36ad6a',
-    primaryColorPressed: '#0c7a43',
-    primaryColorSuppl: '#18a058',
-    infoColor: '#2080f0',
-    infoColorHover: '#4098fc',
-    infoColorPressed: '#1060c0',
-    borderColor: '#e3e3e3',
-    bodyColor: '#f5f5f5',
-    cardColor: '#ffffff',
-    textColorBase: '#202124',
-    fontSize: '13px',
-    borderRadius: '6px',
-    borderRadiusSmall: '4px',
-    fontFamily:
-      "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
-  },
+// 主题令牌取自 design-spec §1：控件圆角 6px、主色 #18a058、信息色 #2080f0、底 #f5f5f5；
+// 暗色沿用同一套语义，只把底色/边框换成 base.css 里 --app-* 的深夜配值（主色提亮一档）。
+const commonBase: GlobalThemeOverrides['common'] = {
+  fontSize: '13px',
+  borderRadius: '6px',
+  borderRadiusSmall: '4px',
+  fontFamily:
+    "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+}
+const commonLight: GlobalThemeOverrides['common'] = {
+  ...commonBase,
+  primaryColor: '#18a058',
+  primaryColorHover: '#36ad6a',
+  primaryColorPressed: '#0c7a43',
+  primaryColorSuppl: '#18a058',
+  infoColor: '#2080f0',
+  infoColorHover: '#4098fc',
+  infoColorPressed: '#1060c0',
+  borderColor: '#e3e3e3',
+  bodyColor: '#f5f5f5',
+  cardColor: '#ffffff',
+  textColorBase: '#202124',
+}
+const commonDark: GlobalThemeOverrides['common'] = {
+  ...commonBase,
+  primaryColor: '#36ad6a',
+  primaryColorHover: '#4cc47c',
+  primaryColorPressed: '#2a9a5c',
+  primaryColorSuppl: '#36ad6a',
+  infoColor: '#4098fc',
+  infoColorHover: '#5ea9ff',
+  infoColorPressed: '#2a7fd4',
+  borderColor: '#2b2d31',
+  bodyColor: '#17181a',
+  cardColor: '#1e1f22',
+  textColorBase: '#e6e7e9',
+}
+
+const naiveTheme = computed(() => (isDark.value ? darkTheme : null))
+const themeOverrides = computed<GlobalThemeOverrides>(() => ({
+  common: isDark.value ? commonDark : commonLight,
   Card: {
     paddingMedium: '16px 20px',
     borderRadiusMedium: '10px',
   },
   DataTable: {
-    thColor: '#fafafa',
+    thColor: isDark.value ? '#202124' : '#fafafa',
     thFontWeight: '500',
   },
-}
+}))
 
 const showEnvManager = ref(false)
 const showSettings = ref(false)
@@ -113,6 +136,15 @@ const respStyle = computed(() => ({ flexBasis: `${respSize.value}%` }))
 function setLayout(layout: 'right' | 'bottom'): void {
   if (settings.responseLayout === layout) return
   void settings.save({ ...settings.form, responseLayout: layout })
+}
+
+// 主题切换：界面立即生效并落盘（原生窗口底色由 Go 侧 SaveSettings 同步）
+async function toggleTheme(): Promise<void> {
+  try {
+    await settings.setTheme(nextTheme())
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
 }
 
 function startResize(e: PointerEvent): void {
@@ -177,6 +209,7 @@ function onCommand(key: string): void {
   else if (key === 'new-request') openCreate()
   else if (key === 'reload') void coll.reload()
   else if (key === 'toggle-layout') setLayout(settings.responseLayout === 'right' ? 'bottom' : 'right')
+  else if (key === 'toggle-theme') void toggleTheme()
   else if (key === 'history') showHistory.value = true
   else if (key === 'settings') showSettings.value = true
 }
@@ -254,10 +287,15 @@ watch(
 </script>
 
 <template>
-  <n-config-provider :locale="naiveLocale" :date-locale="naiveDateLocale" :theme-overrides="themeOverrides">
+  <n-config-provider
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
+    :theme="naiveTheme"
+    :theme-overrides="themeOverrides"
+  >
     <div class="app">
-      <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区 -->
-      <title-bar />
+      <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区（主题切换也放这里，未打开集合时也可用） -->
+      <title-bar :dark="settings.isDark" @toggle-theme="toggleTheme" />
 
       <n-spin :show="coll.loading">
         <template v-if="coll.ready && coll.info">
@@ -515,7 +553,7 @@ watch(
 }
 
 .splitter:hover {
-  background: #eee;
+  background: var(--app-row-hover);
 }
 
 /* 胶囊按钮：横向布局时竖排（26×52），竖向布局时横排（52×26） */
@@ -527,7 +565,7 @@ watch(
   border: 1px solid var(--app-border);
   border-radius: 999px;
   background: var(--app-panel);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--app-shadow-sm);
 }
 
 .work.bottom .capsule {
@@ -554,7 +592,7 @@ watch(
 
 .cap.on {
   background: var(--app-accent);
-  color: #fff;
+  color: var(--app-on-accent);
 }
 
 .modal-ft {

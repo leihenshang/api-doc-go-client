@@ -549,13 +549,13 @@ watch(
 }
 
 .act:hover {
-  background: #dfe3e6;
+  background: var(--app-chip-strong);
   color: var(--app-text);
 }
 
 .act.danger:hover {
-  background: #fdecec;
-  color: #d03050;
+  background: var(--app-danger-tint);
+  color: var(--app-danger);
 }
 
 .store {

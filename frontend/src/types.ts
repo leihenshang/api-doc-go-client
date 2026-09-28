@@ -95,6 +95,42 @@ export interface SendResult {
   body: string
 }
 
+/** 保存的响应示例里的请求快照（internal/collection.ExampleRequest）。 */
+export interface ExampleRequest {
+  method: string
+  url: string
+  headers: KV[]
+  body: ReqBody
+}
+
+/** 保存的响应示例里的响应快照（internal/collection.ExampleResponse）。 */
+export interface ExampleResponse {
+  status: number
+  proto: string
+  timeMs: number
+  size: number
+  contentType: string
+  /** true 时 body 为 base64 */
+  binary: boolean
+  headers: KV[]
+  body: string
+}
+
+/** 一个保存的响应示例（internal/collection.ResponseExample，落集合 examples/）。 */
+export interface ResponseExample {
+  uid: string
+  name: string
+  requestUid: string
+  /** 相对集合根的文件路径 */
+  path: string
+  /** 同一请求内的保存序号（新 → 旧排序依据） */
+  seq: number
+  /** Unix 毫秒 */
+  createdAt: number
+  request: ExampleRequest
+  response: ExampleResponse
+}
+
 export interface ResolveResult {
   text: string
   missing: string[]
@@ -114,6 +150,8 @@ export interface Settings {
   responseLayout: 'right' | 'bottom'
   /** 响应区占比（%）：right 为宽度、bottom 为高度，可拖动调整（20–80） */
   responseSize: number
+  /** 主题：light | dark（原生窗口底色也跟随该值） */
+  theme: 'light' | 'dark'
 }
 
 /** 一条发送历史（internal/history.Entry）。 */

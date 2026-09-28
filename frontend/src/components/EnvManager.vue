@@ -148,11 +148,11 @@ function close(): void {
 }
 
 .env:hover {
-  background: #f0f2f4;
+  background: var(--app-surface-3);
 }
 
 .env.on {
-  background: #e8f6ee;
+  background: var(--app-accent-tint);
   color: var(--app-accent);
   font-weight: 600;
 }

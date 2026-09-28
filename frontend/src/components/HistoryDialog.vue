@@ -136,18 +136,18 @@ function statusClass(e: HistoryEntry): string {
 }
 
 .st.ok {
-  background: #e8f6ee;
-  color: #18a058;
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
 }
 
 .st.warn {
-  background: #fff4e0;
-  color: #d08830;
+  background: var(--app-warn-tint);
+  color: var(--app-warn);
 }
 
 .st.err {
-  background: #fdecec;
-  color: #d03050;
+  background: var(--app-danger-tint);
+  color: var(--app-danger);
 }
 
 .meta,
@@ -162,7 +162,7 @@ function statusClass(e: HistoryEntry): string {
 }
 
 .err {
-  color: #d03050;
+  color: var(--app-danger);
   font-size: 12.5px;
   margin: 0;
 }

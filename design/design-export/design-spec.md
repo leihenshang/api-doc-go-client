@@ -23,6 +23,18 @@
 | text-placeholder | `#A0A4AB` | 占位符、图标灰 |
 | code-key | `#0550AE` / code-string `#116329` | JSON 语法高亮 |
 
+#### 暗色主题（派生，实现见 `frontend/src/styles/base.css` 的 `:root[data-theme='dark']`）
+| Token | 暗色值 | 说明 |
+|---|---|---|
+| primary / primary-tint / primary-dark | `#36AD6A` / `#1B2B22` / `#7ED6A5` | 深底上主色提亮一档，保证对比度；`primary-dark` 在暗色下实际是「浅底上的主色文字」 |
+| body-bg / surface / border | `#17181A` / `#1E1F22` / `#2B2D31` | 与浅色同一套语义令牌，仅换值 |
+| text-primary / secondary / tertiary / placeholder | `#E6E7E9` / `#C9CCD1` / `#9AA0A6` / `#6B7075` | 三级文字与占位符 |
+| code-key / string / number / boolean / null | `#79C0FF` / `#7EE787` / `#79C0FF` / `#FFA657` / `#8B949E` | 代码着色的深色配值 |
+| 新增派生令牌 | `surface-2` `#202124`、`surface-3` `#26282C`、`chip` `#26282C`、`danger` `#E88080`、`warn` `#F2C97D`、`dash` `#2B2D31` | 表头/代码底、次级块、灰底小件、错误/警告、细分隔线 |
+| 方法色 | GET `#36AD6A`、POST `#4098FC`、PUT `#F2C97D`、DELETE `#E88080`、PATCH `#B98AFF` | HTTP 方法语义色同样随主题切换 |
+
+> 主题为「浅色 ↔ 深色」两态（不含跟随系统）；根元素 `data-theme` 由前端写入，`color-scheme` 同步切换以带动原生控件与滚动条。
+
 ### 字体
 - UI 中文：Noto Sans SC（Regular 400 / Medium 500 / SemiBold 600 / Bold 700）
 - 代码（URL、参数、JSON）：JetBrains Mono

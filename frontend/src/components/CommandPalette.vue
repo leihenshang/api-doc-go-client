@@ -6,6 +6,7 @@ import type { InputInst } from 'naive-ui'
 import {
   AddOutline,
   FolderOpenOutline,
+  MoonOutline,
   RefreshOutline,
   SearchOutline,
   ServerOutline,
@@ -59,6 +60,7 @@ const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'new-request', labelKey: 'palette.newRequest', icon: AddOutline },
   { key: 'reload', labelKey: 'palette.reload', icon: RefreshOutline },
   { key: 'toggle-layout', labelKey: 'palette.toggleLayout', icon: SwapVerticalOutline },
+  { key: 'toggle-theme', labelKey: 'palette.toggleTheme', icon: MoonOutline },
   { key: 'history', labelKey: 'palette.history', icon: TimeOutline },
   { key: 'settings', labelKey: 'palette.settings', icon: SettingsOutline },
 ]
@@ -269,7 +271,7 @@ kbd {
   font-family: var(--app-mono);
   font-size: 10.5px;
   color: var(--app-muted);
-  background: #fafafa;
+  background: var(--app-surface-2);
   flex: 0 0 auto;
 }
 
@@ -284,7 +286,7 @@ kbd {
   padding: 0 12px;
   border: none;
   border-radius: 999px;
-  background: #f2f2f2;
+  background: var(--app-chip);
   color: var(--app-text-2);
   font-size: 12px;
   font-family: inherit;
@@ -292,12 +294,12 @@ kbd {
 }
 
 .chip:hover {
-  background: #e9e9e9;
+  background: var(--app-chip-hover);
 }
 
 .chip.on {
   background: var(--app-accent);
-  color: #fff;
+  color: var(--app-on-accent);
 }
 
 .list {
@@ -358,7 +360,7 @@ kbd {
 .foot {
   padding: 10px 16px;
   border-top: 1px solid var(--app-border);
-  background: #fafafa;
+  background: var(--app-surface-2);
   font-family: var(--app-mono);
   font-size: 11px;
   color: var(--app-muted);

@@ -71,9 +71,9 @@ func TestFromFileParsesAuthAndSettings(t *testing.T) {
 func TestMarshalKeepsUnknownFields(t *testing.T) {
 	f, r := readSample(t)
 	out := r.toFile()
-	out.mergeExtra(f.extra)
+	out.MergeExtra(f.Extra)
 	for _, key := range []string{"vars", "script", "assert"} {
-		if _, ok := out.extra[key]; !ok {
+		if _, ok := out.Extra[key]; !ok {
 			t.Fatalf("未知顶层字段 %q 丢失", key)
 		}
 	}

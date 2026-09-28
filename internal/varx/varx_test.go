@@ -52,3 +52,13 @@ func TestCollectNames(t *testing.T) {
 		t.Fatalf("names = %v", names)
 	}
 }
+
+// TestBuiltinsMemoized 同一文本里的同名内置变量必须同值（语义归一 D2）：
+// 迁移前每次命中都重新生成，同一个请求里会出现两个不同的 $uuid。
+func TestBuiltinsMemoized(t *testing.T) {
+	got, _ := Resolve("{{$uuid}}|{{$uuid}}|{{$timestamp}}|{{$timestamp}}", nil)
+	parts := strings.Split(got, "|")
+	if parts[0] != parts[1] || parts[2] != parts[3] {
+		t.Fatalf("同名内置变量应取同一个值，got %q", got)
+	}
+}
