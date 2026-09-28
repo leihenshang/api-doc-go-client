@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -150,6 +151,23 @@ func (a *App) DeleteRequest(uid string) error {
 		return err
 	}
 	return c.DeleteRequest(uid)
+}
+
+// ---- 导入（Postman / OpenAPI，共享内核见 share 的 postman / openapi 包）----
+
+// ImportCollection 把 Postman 或 OpenAPI 文本导入到 parent 分组下（format：postman / openapi）。
+func (a *App) ImportCollection(parent, format, text string) (*collection.ImportSummary, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "postman":
+		return c.ImportPostman(parent, []byte(text))
+	case "openapi":
+		return c.ImportOpenAPI(parent, []byte(text))
+	}
+	return nil, fmt.Errorf("不支持的导入格式：%s（仅支持 postman / openapi）", format)
 }
 
 // ---- 保存的响应示例（Bruno 的 Save Response）----

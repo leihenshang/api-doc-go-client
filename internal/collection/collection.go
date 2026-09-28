@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	share "api-doc-go-share/collection"
+	share "github.com/zqstudio/api-doc-go-share/collection"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -434,21 +434,38 @@ func (c *Collection) CreateRequest(folder, name, method string) (*Request, error
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
-	if folder != "" {
-		clean := filepath.Clean(folder)
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-			return nil, fmt.Errorf("非法的分组路径")
-		}
-		if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(clean)), 0o755); err != nil {
-			return nil, err
-		}
-		if _, ok := c.folderUID(clean); !ok {
-			if err := c.ensureFolderYML(clean, filepath.Base(clean)); err != nil {
-				return nil, err
-			}
-		}
+	r := &Request{
+		Method: strings.ToUpper(strings.TrimSpace(method)), URL: "{{host}}/",
+		Params:  []KV{{Enabled: true}},
+		Headers: []KV{{Name: "Content-Type", Value: "application/json", Enabled: true}},
+		Body:    Body{Type: "none"},
 	}
-	// 生成不冲突的文件名
+	return c.saveNewRequest(folder, name, r)
+}
+
+// ensureDir 确保分组目录存在且带 folder.yml（folder 为空表示根目录）。
+func (c *Collection) ensureDir(folder string) error {
+	if folder == "" {
+		return nil
+	}
+	clean := filepath.Clean(folder)
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return fmt.Errorf("非法的分组路径")
+	}
+	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(clean)), 0o755); err != nil {
+		return err
+	}
+	if _, ok := c.folderUID(clean); !ok {
+		return c.ensureFolderYML(clean, filepath.Base(clean))
+	}
+	return nil
+}
+
+// saveNewRequest 落盘一个新请求：文件名冲突时自动加序号，Path / Seq / UID 由本方法决定。
+func (c *Collection) saveNewRequest(folder, name string, r *Request) (*Request, error) {
+	if err := c.ensureDir(folder); err != nil {
+		return nil, err
+	}
 	base := sanitizeFileName(name)
 	rel := joinRel(folder, base+".yml")
 	for i := 2; ; i++ {
@@ -457,14 +474,7 @@ func (c *Collection) CreateRequest(folder, name, method string) (*Request, error
 		}
 		rel = joinRel(folder, fmt.Sprintf("%s-%d.yml", base, i))
 	}
-	seq := c.nextSeq(folder)
-	r := &Request{
-		UID: uuid.NewString(), Name: name, Seq: seq, Path: rel,
-		Method: strings.ToUpper(strings.TrimSpace(method)), URL: "{{host}}/",
-		Params:  []KV{{Enabled: true}},
-		Headers: []KV{{Name: "Content-Type", Value: "application/json", Enabled: true}},
-		Body:    Body{Type: "none"},
-	}
+	r.UID, r.Name, r.Seq, r.Path = uuid.NewString(), name, c.nextSeq(folder), rel
 	if err := c.SaveRequest(r); err != nil {
 		return nil, err
 	}
