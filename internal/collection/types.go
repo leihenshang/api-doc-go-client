@@ -3,10 +3,12 @@ package collection
 import "gopkg.in/yaml.v3"
 
 // KV 请求参数 / 请求头 / 表单的一行。
+// Description 为客户端参数表「说明」列，空值不落盘（omitempty），不影响既有文件与 Bruno 互操作。
 type KV struct {
-	Name    string `yaml:"name" json:"name"`
-	Value   string `yaml:"value" json:"value"`
-	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Name        string `yaml:"name" json:"name"`
+	Value       string `yaml:"value" json:"value"`
+	Enabled     bool   `yaml:"enabled" json:"enabled"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 // Body 请求体：none / json / text / form（urlencoded）/ multipart。

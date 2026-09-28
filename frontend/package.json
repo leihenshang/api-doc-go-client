@@ -11,6 +11,9 @@
     "i18n:check": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/noto-sans-sc": "^5.3.0",
+    "@vicons/ionicons5": "^0.13.0",
+    "md-editor-v3": "^7.0.0",
     "naive-ui": "^2.40.1",
     "pinia": "^2.2.4",
     "vue": "^3.5.12",

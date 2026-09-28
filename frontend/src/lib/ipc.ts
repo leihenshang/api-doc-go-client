@@ -22,6 +22,19 @@ function wailsApp(): WailsMethods | undefined {
   return go?.app?.App ?? go?.main?.App
 }
 
+/** 是否运行在 Wails 桌面壳内：窗口控制等能力仅桌面端可用。 */
+export function hasWailsRuntime(): boolean {
+  return wailsApp() !== undefined
+}
+
+/** 自绘标题栏的窗口控制（无边框模式下替代系统装饰）。 */
+export const windowCtl = {
+  minimise: (): void => void wailsApp()?.WindowMinimise(),
+  toggleMaximise: (): void => void wailsApp()?.WindowToggleMaximise(),
+  quit: (): void => void wailsApp()?.Quit(),
+  isMaximised: async (): Promise<boolean> => (await wailsApp()?.WindowIsMaximised()) === true,
+}
+
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   const fn = wailsApp()?.[method]
   if (fn) {
@@ -82,9 +95,12 @@ export const api = {
   reload: () => call<CollectionInfo>('ReloadCollection').then(normalizeInfo),
   createRequest: (folder: string, name: string, method: string) =>
     call<RequestDoc>('CreateRequest', folder, name, method).then(normalizeRequest),
-  createFolder: (name: string) => call<null>('CreateFolder', name),
+  createFolder: (parent: string, name: string) => call<null>('CreateFolder', parent, name),
+  renameFolder: (uid: string, name: string) => call<null>('RenameFolder', uid, name),
+  deleteFolder: (uid: string) => call<null>('DeleteFolder', uid),
   readRequest: (uid: string) => call<RequestDoc>('ReadRequest', uid).then(normalizeRequest),
   saveRequest: (r: RequestDoc) => call<null>('SaveRequest', r),
+  renameRequest: (uid: string, name: string) => call<null>('RenameRequest', uid, name),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
   deleteEnv: (name: string) => call<null>('DeleteEnv', name),

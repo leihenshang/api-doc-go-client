@@ -92,7 +92,7 @@ func initCmd(dir string) {
 			}
 		}
 	}
-	if err := c.CreateFolder("示例分组"); err != nil {
+	if err := c.CreateFolder("", "示例分组"); err != nil {
 		fatal(err)
 	}
 	r, err := c.CreateRequest("示例分组", "示例-GET", "GET")

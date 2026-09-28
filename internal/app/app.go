@@ -95,12 +95,37 @@ func (a *App) CreateRequest(folder, name, method string) (*collection.Request, e
 	return c.CreateRequest(folder, name, method)
 }
 
-func (a *App) CreateFolder(name string) error {
+// CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
+func (a *App) CreateFolder(parent, name string) error {
 	c, err := a.requireCollection()
 	if err != nil {
 		return err
 	}
-	return c.CreateFolder(name)
+	return c.CreateFolder(parent, name)
+}
+
+func (a *App) RenameFolder(uid, name string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.RenameFolder(uid, name)
+}
+
+func (a *App) DeleteFolder(uid string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.DeleteFolder(uid)
+}
+
+func (a *App) RenameRequest(uid, name string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.RenameRequest(uid, name)
 }
 
 func (a *App) ReadRequest(uid string) (*collection.Request, error) {
@@ -318,4 +343,39 @@ func (a *App) ResolveText(text, envName string) (*ResolveResult, error) {
 	}
 	out, missing := varx.Resolve(text, vars)
 	return &ResolveResult{Text: out, Missing: missing}, nil
+}
+
+// ---- 自绘标题栏的窗口控制（无边框窗口下替代系统装饰）----
+// ctx 为空表示非桌面运行环境（devserver），此时静默忽略，避免 runtime 空指针。
+
+// WindowMinimise 最小化窗口。
+func (a *App) WindowMinimise() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowMinimise(a.ctx)
+}
+
+// WindowToggleMaximise 最大化 / 还原窗口。
+func (a *App) WindowToggleMaximise() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowToggleMaximise(a.ctx)
+}
+
+// WindowIsMaximised 当前是否最大化（标题栏按钮切换图标用）。
+func (a *App) WindowIsMaximised() bool {
+	if a.ctx == nil {
+		return false
+	}
+	return runtime.WindowIsMaximised(a.ctx)
+}
+
+// Quit 退出应用。
+func (a *App) Quit() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.Quit(a.ctx)
 }

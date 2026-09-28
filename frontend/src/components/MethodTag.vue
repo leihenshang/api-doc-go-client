@@ -1,34 +1,40 @@
 <script setup lang="ts">
-// 方法徽标：按方法着色（GET 绿 / POST 蓝 / PUT 橙 / DELETE 红 …）。
-const props = defineProps<{ method: string }>()
+// 方法徽标：默认按设计稿用语义色文字（GET 绿 / POST 蓝…）；filled 变体给命令面板等需要色块的场景。
+import { computed } from 'vue'
+import { methodColor, methodTint } from '@/lib/method'
 
-const colors: Record<string, string> = {
-  GET: '#18a058',
-  POST: '#4098fc',
-  PUT: '#f0a020',
-  DELETE: '#d03050',
-  PATCH: '#8a2be2',
-  HEAD: '#8a9199',
-  OPTIONS: '#8a9199',
-}
-const color = colors[props.method.toUpperCase()] ?? '#909399'
+const props = withDefaults(defineProps<{ method: string; filled?: boolean }>(), { filled: false })
+
+const name = computed(() => props.method.toUpperCase())
+const style = computed(() =>
+  props.filled
+    ? { color: methodColor(name.value), background: methodTint(name.value) }
+    : { color: methodColor(name.value) },
+)
 </script>
 
 <template>
-  <span class="mt" :style="{ background: color }">{{ method.toUpperCase() }}</span>
+  <span class="mt" :class="{ filled }" :style="style">{{ name }}</span>
 </template>
 
 <style scoped>
 .mt {
   display: inline-block;
+  min-width: 34px;
+  font-family: var(--app-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-align: left;
+  line-height: 16px;
+  flex: 0 0 auto;
+}
+
+.mt.filled {
   min-width: 38px;
   padding: 0 5px;
-  border-radius: 3px;
-  color: #fff;
-  font-size: 10px;
-  line-height: 17px;
+  border-radius: 4px;
   text-align: center;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  line-height: 17px;
 }
 </style>

@@ -11,11 +11,13 @@ export function ClearCookies():Promise<void>;
 
 export function ClearHistory():Promise<void>;
 
-export function CreateFolder(arg1:string):Promise<void>;
+export function CreateFolder(arg1:string,arg2:string):Promise<void>;
 
 export function CreateRequest(arg1:string,arg2:string,arg3:string):Promise<collection.Request>;
 
 export function DeleteEnv(arg1:string):Promise<void>;
+
+export function DeleteFolder(arg1:string):Promise<void>;
 
 export function DeleteRequest(arg1:string):Promise<void>;
 
@@ -31,9 +33,15 @@ export function OpenCollection(arg1:string):Promise<collection.CollectionInfo>;
 
 export function PickDirectory():Promise<string>;
 
+export function Quit():Promise<void>;
+
 export function ReadRequest(arg1:string):Promise<collection.Request>;
 
 export function ReloadCollection():Promise<collection.CollectionInfo>;
+
+export function RenameFolder(arg1:string,arg2:string):Promise<void>;
+
+export function RenameRequest(arg1:string,arg2:string):Promise<void>;
 
 export function ResolveText(arg1:string,arg2:string):Promise<app.ResolveResult>;
 
@@ -46,3 +54,9 @@ export function SaveSettings(arg1:config.Settings):Promise<void>;
 export function SendRequest(arg1:collection.Request,arg2:string):Promise<runner.Result>;
 
 export function SetHeadlessDir(arg1:string):Promise<void>;
+
+export function WindowIsMaximised():Promise<boolean>;
+
+export function WindowMinimise():Promise<void>;
+
+export function WindowToggleMaximise():Promise<void>;

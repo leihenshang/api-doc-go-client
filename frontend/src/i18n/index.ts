@@ -4,13 +4,10 @@ import { createI18n } from 'vue-i18n'
 import en from './locales/en-US'
 import zh from './locales/zh-CN'
 
+// 默认中文（产品定位）：仅在用户于设置里显式切换过时才用 localStorage 的选择，
+// 不再跟随浏览器语言，避免英文环境下打开就是英文。
 const saved = localStorage.getItem('client.lang')
-const locale =
-  saved === 'zh-CN' || saved === 'en-US'
-    ? saved
-    : navigator.language.toLowerCase().startsWith('zh')
-      ? 'zh-CN'
-      : 'en-US'
+const locale = saved === 'zh-CN' || saved === 'en-US' ? saved : 'zh-CN'
 
 export const i18n = createI18n({
   legacy: false,
