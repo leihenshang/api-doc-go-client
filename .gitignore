@@ -1,0 +1,10 @@
+# 依赖与构建产物
+node_modules/
+frontend/dist/
+build/bin/
+
+# 本地数据
+*.local.yml
+
+# 临时产物（测试集合/配置/截图等）
+.tmp/

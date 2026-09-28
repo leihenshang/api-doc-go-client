@@ -1,0 +1,25 @@
+{
+  "name": "api-doc-client-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit",
+    "i18n:check": "node scripts/check-i18n.mjs"
+  },
+  "dependencies": {
+    "naive-ui": "^2.40.1",
+    "pinia": "^2.2.4",
+    "vue": "^3.5.12",
+    "vue-i18n": "^10.0.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "vue-tsc": "^2.1.6"
+  }
+}

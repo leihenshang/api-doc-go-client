@@ -1,0 +1,65 @@
+/* 客户端基础样式：Bruno 风格（浅色、细边框、紧凑）。颜色令牌在此集中定义。 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  color: var(--app-text);
+  background: var(--app-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+:root {
+  --app-bg: #f5f5f6;
+  --app-panel: #ffffff;
+  --app-sidebar: #f7f7f8;
+  --app-border: #e4e4e7;
+  --app-border-strong: #d4d4d8;
+  --app-text: #2b2f33;
+  --app-muted: #8a8f98;
+  --app-accent: #18a058;
+  --app-send: #f97316;
+  --app-send-hover: #ea6a0c;
+  --app-row-hover: #ececee;
+  --app-active: #eef7f1;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* n-config-provider 会渲染一层包裹节点，不撑满会让内部 flex 布局高度塌陷 */
+.n-config-provider {
+  height: 100%;
+}
+
+.muted {
+  color: var(--app-muted);
+}
+
+/* 自定义滚动条，贴近桌面端紧凑观感 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b8b8be;
+  background-clip: content-box;
+}
