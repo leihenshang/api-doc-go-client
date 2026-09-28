@@ -19,6 +19,30 @@ export namespace app {
 
 export namespace collection {
 	
+	export class Auth {
+	    type?: string;
+	    username?: string;
+	    password?: string;
+	    token?: string;
+	    key?: string;
+	    value?: string;
+	    in?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Auth(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.token = source["token"];
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.in = source["in"];
+	    }
+	}
 	export class KV {
 	    name: string;
 	    value: string;
@@ -200,6 +224,26 @@ export namespace collection {
 	
 	
 	
+	export class RequestSettings {
+	    timeoutSec?: number;
+	    followRedirects?: boolean;
+	    maxRedirects?: number;
+	    insecureSsl?: boolean;
+	    encodeUrl?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RequestSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timeoutSec = source["timeoutSec"];
+	        this.followRedirects = source["followRedirects"];
+	        this.maxRedirects = source["maxRedirects"];
+	        this.insecureSsl = source["insecureSsl"];
+	        this.encodeUrl = source["encodeUrl"];
+	    }
+	}
 	export class Request {
 	    uid: string;
 	    name: string;
@@ -210,6 +254,8 @@ export namespace collection {
 	    params: KV[];
 	    headers: KV[];
 	    body: Body;
+	    auth?: Auth;
+	    settings?: RequestSettings;
 	    docs: string;
 	    baseRev: number;
 	
@@ -228,6 +274,8 @@ export namespace collection {
 	        this.params = this.convertValues(source["params"], KV);
 	        this.headers = this.convertValues(source["headers"], KV);
 	        this.body = this.convertValues(source["body"], Body);
+	        this.auth = this.convertValues(source["auth"], Auth);
+	        this.settings = this.convertValues(source["settings"], RequestSettings);
 	        this.docs = source["docs"];
 	        this.baseRev = source["baseRev"];
 	    }
@@ -250,6 +298,92 @@ export namespace collection {
 		    return a;
 		}
 	}
+	
+
+}
+
+export namespace config {
+	
+	export class Settings {
+	    insecureSsl: boolean;
+	    timeoutSec: number;
+	    followRedirects: boolean;
+	    maxRedirects: number;
+	    persistCookies: boolean;
+	    historyLimit: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.insecureSsl = source["insecureSsl"];
+	        this.timeoutSec = source["timeoutSec"];
+	        this.followRedirects = source["followRedirects"];
+	        this.maxRedirects = source["maxRedirects"];
+	        this.persistCookies = source["persistCookies"];
+	        this.historyLimit = source["historyLimit"];
+	    }
+	}
+
+}
+
+export namespace cookiejar {
+	
+	export class Info {
+	    name: string;
+	    value: string;
+	    domain: string;
+	    path: string;
+	    expires: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.value = source["value"];
+	        this.domain = source["domain"];
+	        this.path = source["path"];
+	        this.expires = source["expires"];
+	    }
+	}
+
+}
+
+export namespace history {
+	
+	export class Entry {
+	    time: number;
+	    uid: string;
+	    name: string;
+	    method: string;
+	    url: string;
+	    status: number;
+	    timeMs: number;
+	    size: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.time = source["time"];
+	        this.uid = source["uid"];
+	        this.name = source["name"];
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.status = source["status"];
+	        this.timeMs = source["timeMs"];
+	        this.size = source["size"];
+	        this.error = source["error"];
+	    }
+	}
 
 }
 
@@ -261,6 +395,8 @@ export namespace runner {
 	    proto: string;
 	    timeMs: number;
 	    size: number;
+	    contentType: string;
+	    binary: boolean;
 	    headers: collection.KV[];
 	    body: string;
 	
@@ -275,6 +411,8 @@ export namespace runner {
 	        this.proto = source["proto"];
 	        this.timeMs = source["timeMs"];
 	        this.size = source["size"];
+	        this.contentType = source["contentType"];
+	        this.binary = source["binary"];
 	        this.headers = this.convertValues(source["headers"], collection.KV);
 	        this.body = source["body"];
 	    }

@@ -8,3 +8,4 @@ build/bin/
 
 # 临时产物（测试集合/配置/截图等）
 .tmp/
+frontend/package.json.md5
