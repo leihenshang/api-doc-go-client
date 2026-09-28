@@ -152,7 +152,7 @@ function onMenu(key: string | number): void {
 }
 
 .badge.plain {
-  background: #efefef;
+  background: var(--app-chip);
   color: var(--app-muted);
   max-width: 240px;
 }
@@ -192,13 +192,13 @@ function onMenu(key: string | number): void {
 }
 
 kbd {
-  border: 1px solid #cfe0d6;
+  border: 1px solid var(--app-kbd-border);
   border-radius: 4px;
   padding: 0 4px;
   font-family: var(--app-mono);
   font-size: 10px;
   line-height: 15px;
-  background: #fff;
+  background: var(--app-kbd-bg);
   color: var(--app-accent-dark);
 }
 </style>

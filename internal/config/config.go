@@ -31,12 +31,17 @@ type Settings struct {
 	UIScale         float64 `json:"uiScale"`        // 界面缩放倍率（1 = 100%）
 	ResponseLayout  string  `json:"responseLayout"` // 响应区位置：right | bottom
 	ResponseSize    int     `json:"responseSize"`   // 响应区占比（%）：right 时为宽度、bottom 时为高度，可拖动调整
+	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 }
 
 const (
 	// LayoutRight / LayoutBottom 响应区布局取值。
 	LayoutRight  = "right"
 	LayoutBottom = "bottom"
+
+	// ThemeLight / ThemeDark 主题取值。
+	ThemeLight = "light"
+	ThemeDark  = "dark"
 
 	minUIScale = 0.75
 	maxUIScale = 3.0
@@ -57,7 +62,13 @@ func Default() Settings {
 		UIScale:         1,
 		ResponseLayout:  LayoutRight,
 		ResponseSize:    defaultRespSize,
+		Theme:           ThemeLight,
 	}
+}
+
+// IsDark 是否暗色主题（窗口底色等原生侧需要）。
+func (s Settings) IsDark() bool {
+	return s.Theme == ThemeDark
 }
 
 // Normalize 把缺失/非法值补成默认值，保证下游拿到的都可用。
@@ -80,6 +91,10 @@ func (s Settings) Normalize() Settings {
 	}
 	if s.ResponseSize < MinRespSize || s.ResponseSize > MaxRespSize {
 		s.ResponseSize = def.ResponseSize
+	}
+	// 未知主题一律回落浅色（旧版本配置文件里没有该字段也走这里）
+	if s.Theme != ThemeDark {
+		s.Theme = ThemeLight
 	}
 	return s
 }

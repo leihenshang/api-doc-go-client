@@ -21,6 +21,8 @@ export function DeleteFolder(arg1:string):Promise<void>;
 
 export function DeleteRequest(arg1:string):Promise<void>;
 
+export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
+
 export function GetSettings():Promise<config.Settings>;
 
 export function ListCookies():Promise<Array<cookiejar.Info>>;
@@ -28,6 +30,8 @@ export function ListCookies():Promise<Array<cookiejar.Info>>;
 export function ListEnvs():Promise<Array<collection.Env>>;
 
 export function ListHistory(arg1:number):Promise<Array<history.Entry>>;
+
+export function ListResponseExamples(arg1:string):Promise<Array<collection.ResponseExample>>;
 
 export function OpenCollection(arg1:string):Promise<collection.CollectionInfo>;
 
@@ -48,6 +52,8 @@ export function ResolveText(arg1:string,arg2:string):Promise<app.ResolveResult>;
 export function SaveEnv(arg1:collection.Env):Promise<void>;
 
 export function SaveRequest(arg1:collection.Request):Promise<void>;
+
+export function SaveResponseExample(arg1:collection.Request,arg2:string,arg3:runner.Result):Promise<collection.ResponseExample>;
 
 export function SaveSettings(arg1:config.Settings):Promise<void>;
 

@@ -143,7 +143,7 @@ function formatUrl(): void {
   height: 34px;
   border: none;
   background: var(--app-send);
-  color: #fff;
+  color: var(--app-on-accent);
   font-family: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -191,6 +191,6 @@ function formatUrl(): void {
 }
 
 .resolved .val.miss {
-  color: #d08830;
+  color: var(--app-warn);
 }
 </style>

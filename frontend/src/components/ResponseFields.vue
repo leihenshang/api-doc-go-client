@@ -1,85 +1,18 @@
 <script setup lang="ts">
-// 响应字段映射（design-spec 画板四）：把 JSON 响应摊平成「字段 / 类型 / 含义」表。
-// 「含义」是本地标注（按请求 uid 存 localStorage），不写回集合文件，避免污染 round-trip。
+// 「响应字段」页签的表格：字段 / 类型 / 含义。
+// 字段来自用户点击「更新响应字段」后的解析结果（由 ResponsePanel 持有并落 localStorage），
+// 本组件只负责展示与编辑含义，不自行解析响应体。
 import { NInput } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { FieldRow } from '@/lib/responseFields'
 
-const props = defineProps<{ uid: string; text: string }>()
+defineProps<{ rows: FieldRow[] }>()
+const emit = defineEmits<{ meaning: [path: string, value: string] }>()
 const { t } = useI18n()
-
-const MAX_FIELDS = 200
-const MAX_DEPTH = 4
-
-interface Field {
-  path: string
-  type: string
-}
-
-const meanings = ref<Record<string, string>>({})
-
-const storeKey = computed(() => `client.fieldmap.${props.uid}`)
-
-watch(
-  storeKey,
-  (k) => {
-    try {
-      meanings.value = JSON.parse(localStorage.getItem(k) ?? '{}') as Record<string, string>
-    } catch {
-      meanings.value = {}
-    }
-  },
-  { immediate: true },
-)
-
-function persist(): void {
-  localStorage.setItem(storeKey.value, JSON.stringify(meanings.value))
-}
-
-function setMeaning(path: string, value: string): void {
-  meanings.value = { ...meanings.value, [path]: value }
-}
-
-function typeName(v: unknown): string {
-  if (v === null) return 'null'
-  if (Array.isArray(v)) return 'array'
-  return typeof v
-}
-
-function childEntries(v: unknown): [string, unknown][] {
-  if (Array.isArray(v)) return v.map((x, i) => [String(i), x] as [string, unknown])
-  if (v && typeof v === 'object') return Object.entries(v as Record<string, unknown>)
-  return []
-}
-
-const fields = computed<Field[]>(() => {
-  let data: unknown
-  try {
-    data = JSON.parse(props.text)
-  } catch {
-    return []
-  }
-  const out: Field[] = []
-  // 只列叶子字段（容器本身不占行），与设计稿的 data.userId / data.deleted 形态一致
-  const walk = (v: unknown, path: string, depth: number): void => {
-    if (out.length >= MAX_FIELDS) return
-    const kids = depth >= MAX_DEPTH ? [] : childEntries(v)
-    if (kids.length === 0) {
-      out.push({ path, type: typeName(v) })
-      return
-    }
-    for (const [k, child] of kids) walk(child, path ? `${path}.${k}` : k, depth + 1)
-  }
-
-  const root = childEntries(data)
-  if (root.length === 0) return [{ path: '$', type: typeName(data) }]
-  for (const [k, child] of root) walk(child, k, 1)
-  return out
-})
 </script>
 
 <template>
-  <section v-if="fields.length" class="fields">
+  <section v-if="rows.length" class="fields">
     <div class="fh">
       <span class="ft">{{ t('resp.fields') }}</span>
       <span class="fd">{{ t('resp.fieldsHint') }}</span>
@@ -89,32 +22,32 @@ const fields = computed<Field[]>(() => {
       <span>{{ t('resp.type') }}</span>
       <span>{{ t('resp.meaning') }}</span>
     </div>
-    <div v-for="f in fields" :key="f.path" class="tr">
+    <div v-for="f in rows" :key="f.path" class="tr">
       <span class="mono fp" :title="f.path">{{ f.path }}</span>
       <span class="mono ftype">{{ f.type }}</span>
       <n-input
-        :value="meanings[f.path] ?? ''"
+        :value="f.meaning"
         size="small"
         :placeholder="t('common.optional')"
-        @update:value="setMeaning(f.path, $event)"
-        @blur="persist"
+        @update:value="emit('meaning', f.path, $event)"
       />
     </div>
   </section>
+
+  <p v-else class="fields-empty">{{ t('resp.fieldsEmpty') }}</p>
 </template>
 
 <style scoped>
 .fields {
-  margin-top: 14px;
-  border-top: 1px solid var(--app-border);
-  padding-top: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
 }
 
 .fh {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 8px;
+  padding: 8px 10px 6px;
 }
 
 .ft {
@@ -134,21 +67,14 @@ const fields = computed<Field[]>(() => {
   align-items: center;
   gap: 10px;
   padding: 5px 8px;
-  border: 1px solid var(--app-border);
-  border-top: none;
+  border-top: 1px solid var(--app-border);
   font-size: 12px;
 }
 
 .tr.th {
-  border-top: 1px solid var(--app-border);
-  border-radius: 6px 6px 0 0;
-  background: #fafafa;
+  background: var(--app-surface-2);
   color: var(--app-muted);
   font-size: 11.5px;
-}
-
-.tr:last-child {
-  border-radius: 0 0 6px 6px;
 }
 
 .fp {
@@ -160,5 +86,11 @@ const fields = computed<Field[]>(() => {
 
 .ftype {
   color: var(--app-muted);
+}
+
+.fields-empty {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--app-placeholder);
 }
 </style>

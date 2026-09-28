@@ -35,7 +35,10 @@ body.dragging.row * {
   cursor: row-resize !important;
 }
 
+/* 主题令牌集中在 :root（浅色）与 :root[data-theme='dark']；组件只引用变量，不写死颜色。
+   data-theme 由 lib/theme.ts 写在 <html> 上（index.html 有一小段内联脚本防止启动闪白）。 */
 :root {
+  color-scheme: light;
   /* 通用色板（design-spec §1） */
   --app-bg: #f5f5f5;
   --app-panel: #ffffff;
@@ -56,18 +59,112 @@ body.dragging.row * {
   --app-send-hover: #36ad6a;
   --app-row-hover: #ececec;
   --app-active: #e8f5ee;
+  /* 层级底板：surface-2 表头/代码块，surface-3 次级块，hover-soft 极浅悬停 */
+  --app-surface-2: #fafafa;
+  --app-surface-3: #f0f2f4;
+  --app-hover-soft: #fafbfc;
+  --app-code-bg: #f7f9fa;
+  --app-dash: #eef1f2;
+  /* 灰底小件（徽章 / 计数 / 关闭按钮悬停 / kbd） */
+  --app-chip: #efefef;
+  --app-chip-hover: #e0e3e6;
+  --app-chip-strong: #dfe3e6;
+  --app-kbd-bg: #ffffff;
+  --app-kbd-border: #cfe0d6;
+  /* 语义色（错误 / 警告 / 反白文字） */
+  --app-danger: #d03050;
+  --app-danger-tint: #fdecec;
+  --app-warn: #d08830;
+  --app-warn-tint: #fff4e0;
+  --app-on-accent: #ffffff;
+  --app-scrollbar: #d4d4d8;
+  --app-scrollbar-hover: #b8b8be;
   /* 代码着色（design-spec §1 第 24 行） */
   --app-code-key: #0550ae;
   --app-code-string: #116329;
   --app-code-number: #0550ae;
   --app-code-boolean: #b26a00;
   --app-code-null: #8a9199;
+  /* HTTP 方法语义色：文字色 + 浅底（供 inline style 以 var() 引用） */
+  --app-method-get: #18a058;
+  --app-method-get-tint: #e8f5ee;
+  --app-method-post: #2080f0;
+  --app-method-post-tint: #e8f0fe;
+  --app-method-put: #f0a020;
+  --app-method-put-tint: #fff7e6;
+  --app-method-delete: #d03050;
+  --app-method-delete-tint: #fdecec;
+  --app-method-patch: #8a2be2;
+  --app-method-patch-tint: #f5ecfd;
+  --app-method-other: #8a9199;
+  --app-method-other-tint: #f0f1f2;
   --app-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --app-shadow-pop: 0 16px 48px -8px rgba(0, 0, 0, 0.25);
+  --app-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.06);
   /* 外壳固定尺寸（design-spec §2） */
   --app-titlebar-h: 44px;
   --app-toolbar-h: 48px;
   --app-statusbar-h: 28px;
+}
+
+/* 暗色：底 #17181a / 面板 #1e1f22；主色沿用品牌绿，但在深底上提亮一档保证对比度 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --app-bg: #17181a;
+  --app-panel: #1e1f22;
+  --app-sidebar: #17181a;
+  --app-border: #2b2d31;
+  --app-border-strong: #3a3d42;
+  --app-text: #e6e7e9;
+  --app-text-2: #c9ccd1;
+  --app-muted: #9aa0a6;
+  --app-placeholder: #6b7075;
+  --app-accent: #36ad6a;
+  --app-accent-dark: #7ed6a5;
+  --app-accent-tint: #1b2b22;
+  --app-info: #4098fc;
+  --app-info-dark: #7cb8ff;
+  --app-info-tint: #16283d;
+  --app-send: #18a058;
+  --app-send-hover: #36ad6a;
+  --app-row-hover: #26282c;
+  --app-active: #1e2f26;
+  --app-surface-2: #202124;
+  --app-surface-3: #26282c;
+  --app-hover-soft: #232529;
+  --app-code-bg: #1b1c1f;
+  --app-dash: #2b2d31;
+  --app-chip: #26282c;
+  --app-chip-hover: #2f3237;
+  --app-chip-strong: #34373c;
+  --app-kbd-bg: #26282c;
+  --app-kbd-border: #35543f;
+  --app-danger: #e88080;
+  --app-danger-tint: #2a1d20;
+  --app-warn: #f2c97d;
+  --app-warn-tint: #2a2418;
+  --app-on-accent: #ffffff;
+  --app-scrollbar: #3a3d42;
+  --app-scrollbar-hover: #4a4e54;
+  --app-code-key: #79c0ff;
+  --app-code-string: #7ee787;
+  --app-code-number: #79c0ff;
+  --app-code-boolean: #ffa657;
+  --app-code-null: #8b949e;
+  --app-method-get: #36ad6a;
+  --app-method-get-tint: #1b2b22;
+  --app-method-post: #4098fc;
+  --app-method-post-tint: #16283d;
+  --app-method-put: #f2c97d;
+  --app-method-put-tint: #2a2418;
+  --app-method-delete: #e88080;
+  --app-method-delete-tint: #2a1d20;
+  --app-method-patch: #b98aff;
+  --app-method-patch-tint: #241d33;
+  --app-method-other: #9aa0a6;
+  --app-method-other-tint: #26282c;
+  --app-shadow-pop: 0 16px 48px -8px rgba(0, 0, 0, 0.6);
+  --app-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
 body {
@@ -103,13 +200,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d4d4d8;
+  background: var(--app-scrollbar);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #b8b8be;
+  background: var(--app-scrollbar-hover);
   background-clip: content-box;
 }

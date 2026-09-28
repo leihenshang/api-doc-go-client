@@ -55,6 +55,24 @@ func TestNormalizeFillsNumericZeroValues(t *testing.T) {
 	}
 }
 
+// 主题：默认浅色、暗色原样保留、未知值回落浅色；旧配置文件缺 theme 时也应是浅色。
+func TestThemeNormalize(t *testing.T) {
+	if Default().Theme != ThemeLight {
+		t.Fatalf("默认主题应为浅色，实际 %q", Default().Theme)
+	}
+	if got := (Settings{Theme: ThemeDark}).Normalize().Theme; got != ThemeDark {
+		t.Fatalf("Normalize 不应改写合法暗色，实际 %q", got)
+	}
+	for _, bad := range []string{"", "Dark", "system", " light"} {
+		if got := (Settings{Theme: bad}).Normalize().Theme; got != ThemeLight {
+			t.Fatalf("非法主题 %q 应回落浅色，实际 %q", bad, got)
+		}
+	}
+	if !(Settings{Theme: ThemeDark}).IsDark() || (Settings{Theme: ThemeLight}).IsDark() {
+		t.Fatalf("IsDark 判定错误")
+	}
+}
+
 // 缺字段的文件（例如旧版本写的配置）应按默认值补齐，而不是被 false/0 覆盖。
 func TestLoadMergesMissingFieldsWithDefault(t *testing.T) {
 	dir := t.TempDir()

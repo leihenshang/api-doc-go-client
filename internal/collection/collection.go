@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	share "api-doc-go-share/collection"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,7 @@ import (
 var reserved = map[string]bool{
 	".trash": true, ".conflicts": true, "assets": true,
 	"node_modules": true, "environments": true, "docs": true,
+	"examples": true, // 保存的响应示例（example.go），不是集合条目
 }
 
 var errNotFound = errors.New("条目不存在")
@@ -32,16 +34,6 @@ type Collection struct {
 }
 
 // ---------- 集合清单（opencollection.yml） ----------
-
-type manifest struct {
-	OpenCollection string `yaml:"opencollection"`
-	Info           struct {
-		Name string `yaml:"name"`
-	} `yaml:"info"`
-	Meta struct {
-		UID string `yaml:"uid"`
-	} `yaml:"meta"`
-}
 
 const gitignoreContent = "# 客户端自动维护\n" +
 	"environments/*.secrets.yml\n*.local.yml\n.trash/\n.conflicts/\nnode_modules/\n"
@@ -66,8 +58,8 @@ func Open(dir string) (*Collection, error) {
 	c := &Collection{Dir: abs}
 	mPath := filepath.Join(abs, "opencollection.yml")
 	if data, err := os.ReadFile(mPath); err == nil {
-		var m manifest
-		if err := yaml.Unmarshal(data, &m); err != nil {
+		m, err := share.DecodeManifest(data)
+		if err != nil {
 			return nil, fmt.Errorf("opencollection.yml 解析失败: %w", err)
 		}
 		c.UID, c.Name = m.Meta.UID, m.Info.Name
@@ -95,10 +87,13 @@ func Open(dir string) (*Collection, error) {
 	return c, nil
 }
 
+// manifestVersion 集合清单的 opencollection 版本号。
+const manifestVersion = "1.0.0"
+
 func (c *Collection) writeManifest() error {
-	m := manifest{OpenCollection: "1.0.0"}
+	m := &manifest{}
 	m.Info.Name, m.Meta.UID = c.Name, c.UID
-	data, err := yaml.Marshal(&m)
+	data, err := m.Encode(manifestVersion)
 	if err != nil {
 		return err
 	}
@@ -107,99 +102,13 @@ func (c *Collection) writeManifest() error {
 
 // ---------- 内部：文件 ↔ 结构 ----------
 
-// knownTopLevel 已知的顶层字段；其余键视为「未知字段」原样保留（Bruno 兼容）。
-var knownTopLevel = map[string]bool{"info": true, "meta": true, "http": true, "docs": true, "settings": true}
-
-type requestFile struct {
-	Info struct {
-		Name string `yaml:"name"`
-		Type string `yaml:"type"`
-		Seq  int    `yaml:"seq"`
-	} `yaml:"info"`
-	Meta struct {
-		UID     string `yaml:"uid"`
-		BaseRev int64  `yaml:"base_rev"`
-	} `yaml:"meta"`
-	HTTP struct {
-		Method  string `yaml:"method"`
-		URL     string `yaml:"url"`
-		Params  []KV   `yaml:"params"`
-		Headers []KV   `yaml:"headers"`
-		Body    Body   `yaml:"body"`
-		Auth    *Auth  `yaml:"auth,omitempty"`
-	} `yaml:"http"`
-	Settings *RequestSettings `yaml:"settings,omitempty"`
-	Docs     string           `yaml:"docs"`
-	extra    map[string]any
-}
-
-func (f *requestFile) UnmarshalYAML(node *yaml.Node) error {
-	type plain requestFile
-	var tmp plain
-	if err := node.Decode(&tmp); err != nil {
-		return err
-	}
-	*f = requestFile(tmp)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		if knownTopLevel[key] {
-			continue
-		}
-		var v any
-		if err := node.Content[i+1].Decode(&v); err != nil {
-			continue
-		}
-		if f.extra == nil {
-			f.extra = map[string]any{}
-		}
-		f.extra[key] = v
-	}
-	return nil
-}
-
-func (f requestFile) MarshalYAML() (any, error) {
-	type plain requestFile
-	var node yaml.Node
-	if err := node.Encode(plain(f)); err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(f.extra))
-	for k := range f.extra {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		var v yaml.Node
-		if err := v.Encode(f.extra[k]); err != nil {
-			continue
-		}
-		node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: k}, &v)
-	}
-	return &node, nil
-}
-
-func (f *requestFile) mergeExtra(extra map[string]any) {
-	for k, v := range extra {
-		if _, exists := f.extra[k]; exists {
-			continue
-		}
-		if f.extra == nil {
-			f.extra = map[string]any{}
-		}
-		f.extra[k] = v
-	}
-}
-
+// readRequestFile 读取磁盘上的请求文件（未知顶层字段留在 Extra 里，未丢失）。
 func readRequestFile(path string) (*requestFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var f requestFile
-	if err := yaml.Unmarshal(data, &f); err != nil {
-		return nil, err
-	}
-	return &f, nil
+	return share.DecodeRequest(data)
 }
 
 func (r *Request) toFile() *requestFile {
@@ -348,7 +257,7 @@ func (c *Collection) Tree() ([]*Node, error) {
 			dir = ""
 		}
 		n := ensureDir(dir)
-		n.children = append(n.children, &Node{Type: "request", UID: r.UID, Name: r.Name, Path: r.Path, Method: r.Method})
+		n.children = append(n.children, &Node{Type: "request", UID: r.UID, Name: r.Name, Path: r.Path, Method: r.Method, Seq: r.Seq})
 	}
 	// 空分组（只有 folder.yml、暂无请求）也必须出现在树里，否则建完就"消失"
 	for dir := range res.uidByDir {
@@ -359,29 +268,21 @@ func (c *Collection) Tree() ([]*Node, error) {
 	// 组装 + 排序（分组在前；组内 seq 升序、名称次之）
 	var build func(children []*Node) []*Node
 	build = func(children []*Node) []*Node {
-		var folders, reqs []*Node
+		out := make([]*Node, 0, len(children))
 		for _, ch := range children {
-			if ch.Type == "folder" {
-				var dn *dirNode
-				if dn = dirs[ch.Path]; dn == nil {
-					continue
-				}
-				ch.Children = build(dn.children)
-				folders = append(folders, ch)
-			} else {
-				reqs = append(reqs, ch)
+			if ch.Type != "folder" {
+				out = append(out, ch)
+				continue
 			}
+			dn, ok := dirs[ch.Path]
+			if !ok {
+				continue
+			}
+			ch.Children = build(dn.children)
+			out = append(out, ch)
 		}
-		sort.SliceStable(folders, func(i, j int) bool { return folders[i].Name < folders[j].Name })
-		sort.SliceStable(reqs, func(i, j int) bool {
-			ri, rj := res.reqByPath[reqs[i].Path], res.reqByPath[reqs[j].Path]
-			si, sj := ri.Seq, rj.Seq
-			if si != sj {
-				return si < sj
-			}
-			return ri.Name < rj.Name
-		})
-		return append(folders, reqs...)
+		share.SortNodes(out)
+		return out
 	}
 	return build(dirs[""].children), nil
 }
@@ -400,17 +301,6 @@ func (c *Collection) Info() (*CollectionInfo, error) {
 }
 
 // ---------- 环境变量 ----------
-
-type envFile struct {
-	Info struct {
-		Name string `yaml:"name"`
-	} `yaml:"info"`
-	Vars []Var `yaml:"vars"`
-}
-
-type secretsFile struct {
-	Secrets map[string]string `yaml:"secrets"`
-}
 
 func (c *Collection) envPaths(name string) (main, sec string) {
 	base := filepath.Join(c.Dir, "environments", name)
@@ -455,15 +345,14 @@ func (c *Collection) readEnv(name string) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	var f envFile
-	if err := yaml.Unmarshal(data, &f); err != nil {
+	f, err := share.DecodeEnv(data)
+	if err != nil {
 		return nil, fmt.Errorf("环境 %s 解析失败: %w", name, err)
 	}
 	sec := map[string]string{}
 	if sd, err := os.ReadFile(secP); err == nil {
-		var sf secretsFile
-		if yaml.Unmarshal(sd, &sf) == nil && sf.Secrets != nil {
-			sec = sf.Secrets
+		if got, serr := share.DecodeSecrets(sd); serr == nil && got != nil {
+			sec = got
 		}
 	}
 	env := &Env{Name: name}
@@ -499,11 +388,11 @@ func (c *Collection) SaveEnv(env Env) error {
 		}
 		f.Vars = append(f.Vars, v)
 	}
-	mainData, err := yaml.Marshal(&f)
+	mainData, err := f.Encode()
 	if err != nil {
 		return err
 	}
-	secData, err := yaml.Marshal(&sec)
+	secData, err := share.EncodeSecrets(sec.Secrets)
 	if err != nil {
 		return err
 	}
@@ -533,29 +422,16 @@ func (c *Collection) DeleteEnv(name string) error {
 
 // ---------- 请求 CRUD ----------
 
-var namePattern = regexp.MustCompile(`^[^\\/:*?"<>|\x00-\x1f]{1,120}$`)
-
-func validEnvName(s string) bool {
-	return regexp.MustCompile(`^[A-Za-z0-9_-]{1,60}$`).MatchString(s)
-}
-
-// sanitizeFileName 把名称转成安全的文件名（不含扩展名）。
-func sanitizeFileName(name string) string {
-	name = strings.TrimSpace(name)
-	name = regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]`).ReplaceAllString(name, "-")
-	name = strings.Trim(name, ". ")
-	if name == "" {
-		name = "untitled"
-	}
-	if len([]rune(name)) > 100 {
-		name = string([]rune(name)[:100])
-	}
-	return name
-}
+// validEnvName / sanitizeFileName 的磁盘命名规则随共享包走，改名处只需调一次。
+var (
+	validEnvName     = share.ValidEnvName
+	sanitizeFileName = share.SanitizeFileName
+	validEntryName   = share.ValidEntryName
+)
 
 // CreateRequest 在 folder（相对路径，"" = 根目录）下新建请求并落盘。
 func (c *Collection) CreateRequest(folder, name, method string) (*Request, error) {
-	if !namePattern.MatchString(name) {
+	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
 	if folder != "" {
@@ -598,7 +474,7 @@ func (c *Collection) CreateRequest(folder, name, method string) (*Request, error
 // CreateFolder 新建分组（目录 + folder.yml）。
 // CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
 func (c *Collection) CreateFolder(parent, name string) error {
-	if !namePattern.MatchString(name) {
+	if !validEntryName(name) {
 		return fmt.Errorf("名称含非法字符或为空")
 	}
 	base, err := c.resolveFolder(parent)
@@ -614,7 +490,7 @@ func (c *Collection) CreateFolder(parent, name string) error {
 
 // RenameFolder 改分组显示名（目录名与 uid 保持不变，避免路径漂移）。
 func (c *Collection) RenameFolder(uid, name string) error {
-	if !namePattern.MatchString(name) {
+	if !validEntryName(name) {
 		return fmt.Errorf("名称含非法字符或为空")
 	}
 	dir, err := c.findDir(uid)
@@ -663,7 +539,7 @@ func (c *Collection) DeleteFolder(uid string) error {
 
 // RenameRequest 改请求显示名（文件名与 uid 保持不变）。
 func (c *Collection) RenameRequest(uid, name string) error {
-	if !namePattern.MatchString(name) {
+	if !validEntryName(name) {
 		return fmt.Errorf("名称含非法字符或为空")
 	}
 	res, err := c.scan()
@@ -819,7 +695,7 @@ func (c *Collection) SaveRequest(r *Request) error {
 	out := r.toFile()
 	// 磁盘上已有的未知顶层字段必须保留：Bruno 会忽略它们，但我们不能丢（round-trip）
 	if prev, err := readRequestFile(full); err == nil {
-		out.mergeExtra(prev.extra)
+		out.MergeExtra(prev.Extra)
 	}
 	data, err := yaml.Marshal(out)
 	if err != nil {
@@ -848,8 +724,7 @@ func (c *Collection) moveToTrash(full string) error {
 	if err := os.MkdirAll(trash, 0o755); err != nil {
 		return err
 	}
-	stamp := time.Now().Format("20060102-150405")
-	return os.Rename(full, filepath.Join(trash, fmt.Sprintf("%s.%s", stamp, filepath.Base(full))))
+	return os.Rename(full, filepath.Join(trash, share.TrashName(filepath.Base(full), time.Now())))
 }
 
 func joinRel(folder, name string) string {

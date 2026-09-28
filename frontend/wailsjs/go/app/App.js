@@ -30,6 +30,10 @@ export function DeleteRequest(arg1) {
   return window['go']['app']['App']['DeleteRequest'](arg1);
 }
 
+export function DeleteResponseExample(arg1, arg2) {
+  return window['go']['app']['App']['DeleteResponseExample'](arg1, arg2);
+}
+
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
@@ -44,6 +48,10 @@ export function ListEnvs() {
 
 export function ListHistory(arg1) {
   return window['go']['app']['App']['ListHistory'](arg1);
+}
+
+export function ListResponseExamples(arg1) {
+  return window['go']['app']['App']['ListResponseExamples'](arg1);
 }
 
 export function OpenCollection(arg1) {
@@ -84,6 +92,10 @@ export function SaveEnv(arg1) {
 
 export function SaveRequest(arg1) {
   return window['go']['app']['App']['SaveRequest'](arg1);
+}
+
+export function SaveResponseExample(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SaveResponseExample'](arg1, arg2, arg3);
 }
 
 export function SaveSettings(arg1) {

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-// 全局设置：界面（语言/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
+// 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
 import { NButton, NCheckbox, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
+import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useSettingsStore } from '@/stores/settings'
 import type { Settings } from '@/types'
 
@@ -31,6 +32,10 @@ const layoutOptions = computed(() => [
   { label: t('settings.layoutRight'), value: 'right' },
   { label: t('settings.layoutBottom'), value: 'bottom' },
 ])
+const themeOptions = computed(() => [
+  { label: t('settings.themeLight'), value: ThemeLight },
+  { label: t('settings.themeDark'), value: ThemeDark },
+])
 
 watch(
   () => props.show,
@@ -46,6 +51,17 @@ watch(
 function pickLang(v: string): void {
   locale.value = v
   localStorage.setItem('client.lang', v)
+}
+
+// 主题同样即时生效，但需要落盘（原生窗口底色也跟随），因此直接走 store 而不是等「保存」
+async function pickTheme(v: ThemeMode): Promise<void> {
+  form.value.theme = v
+  error.value = ''
+  try {
+    await settings.setTheme(v)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 async function save(): Promise<void> {
@@ -87,6 +103,10 @@ function close(): void {
       <div class="row">
         <span class="lbl">{{ t('settings.language') }}</span>
         <n-select :value="locale" :options="langOptions" size="small" class="num" @update:value="pickLang" />
+      </div>
+      <div class="row">
+        <span class="lbl">{{ t('settings.theme') }}</span>
+        <n-select :value="form.theme" :options="themeOptions" size="small" class="num" @update:value="pickTheme" />
       </div>
       <div class="row">
         <span class="lbl">{{ t('settings.uiScale') }}</span>
@@ -184,7 +204,7 @@ function close(): void {
 }
 
 .err {
-  color: #d03050;
+  color: var(--app-danger);
   font-size: 12.5px;
   margin: 0;
 }

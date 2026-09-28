@@ -152,6 +152,45 @@ func (a *App) DeleteRequest(uid string) error {
 	return c.DeleteRequest(uid)
 }
 
+// ---- 保存的响应示例（Bruno 的 Save Response）----
+
+// ListResponseExamples 某请求已保存的响应示例（新 → 旧）。
+func (a *App) ListResponseExamples(reqUID string) ([]*collection.ResponseExample, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.ListResponseExamples(reqUID)
+}
+
+// SaveResponseExample 把一次真实响应存为示例：请求快照取当前草稿，落集合的 examples/。
+func (a *App) SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error) {
+	if r == nil || res == nil {
+		return nil, errors.New("请求或响应为空")
+	}
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	req := collection.ExampleRequest{
+		Method: strings.ToUpper(r.Method), URL: r.URL, Headers: r.Headers, Body: r.Body,
+	}
+	example := collection.ExampleResponse{
+		Status: res.Status, Proto: res.Proto, TimeMS: res.TimeMS, Size: res.Size,
+		ContentType: res.ContentType, Binary: res.Binary, Headers: res.Headers, Body: res.Body,
+	}
+	return c.SaveResponseExample(r.UID, name, req, example)
+}
+
+// DeleteResponseExample 删除示例（移入 .trash/ 可人工找回）。
+func (a *App) DeleteResponseExample(reqUID, exampleUID string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.DeleteResponseExample(reqUID, exampleUID)
+}
+
 func (a *App) ListEnvs() ([]collection.Env, error) {
 	c, err := a.requireCollection()
 	if err != nil {
@@ -180,23 +219,26 @@ func (a *App) DeleteEnv(name string) error {
 }
 
 // envVars 取指定环境的变量表（含 secret 合并与内置动态变量）。
+// 未选择环境时只给内置动态变量：不再把全部环境混在一起，避免意外命中其它环境的值。
 func (a *App) envVars(envName string) (map[string]string, error) {
-	c, err := a.requireCollection()
-	if err != nil {
-		return nil, err
-	}
-	envs, err := c.ListEnvs()
-	if err != nil {
-		return nil, err
-	}
 	vars := map[string]string{}
-	for _, e := range envs {
-		if envName != "" && e.Name != envName {
-			continue
+	if envName != "" {
+		c, err := a.requireCollection()
+		if err != nil {
+			return nil, err
 		}
-		for _, v := range e.Vars {
-			if v.Enabled && v.Name != "" {
-				vars[v.Name] = v.Value
+		envs, err := c.ListEnvs()
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range envs {
+			if e.Name != envName {
+				continue
+			}
+			for _, v := range e.Vars {
+				if v.Enabled && v.Name != "" {
+					vars[v.Name] = v.Value
+				}
 			}
 		}
 	}
@@ -277,7 +319,7 @@ func (a *App) GetSettings() (*config.Settings, error) {
 	return &s, nil
 }
 
-// SaveSettings 保存全局设置；Cookie 持久化开关变化时重建 Cookie 罐。
+// SaveSettings 保存全局设置；Cookie 持久化开关变化时重建 Cookie 罐，主题变化时同步窗口底色。
 func (a *App) SaveSettings(s *config.Settings) error {
 	if s == nil {
 		return errors.New("设置为空")
@@ -288,11 +330,15 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	}
 	a.mu.Lock()
 	jarChanged := a.settings.PersistCookies != norm.PersistCookies
+	themeChanged := a.settings.Theme != norm.Theme
 	a.settings = norm
 	if jarChanged {
 		a.jar = nil
 	}
 	a.mu.Unlock()
+	if themeChanged {
+		a.applyWindowTheme(norm.Theme)
+	}
 	return nil
 }
 

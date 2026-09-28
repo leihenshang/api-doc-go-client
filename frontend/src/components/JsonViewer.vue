@@ -163,7 +163,7 @@ defineExpose({ collapseAll, expandAll })
 }
 
 .jr:hover {
-  background: #f7f9fa;
+  background: var(--app-code-bg);
 }
 
 .indent {

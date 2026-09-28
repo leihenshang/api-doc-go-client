@@ -157,7 +157,7 @@ function toggle(): void {
   padding: 6px 8px;
   border: 1px solid var(--app-border);
   border-radius: 6px 6px 0 0;
-  background: #fafafa;
+  background: var(--app-surface-2);
   font-size: 11.5px;
   color: var(--app-muted);
 }
@@ -173,7 +173,7 @@ function toggle(): void {
 }
 
 .row:hover {
-  background: #fafbfc;
+  background: var(--app-hover-soft);
 }
 
 .ck,
@@ -193,7 +193,7 @@ function toggle(): void {
 }
 
 .act:hover {
-  color: #d03050;
+  color: var(--app-danger);
 }
 
 .add {
@@ -205,7 +205,7 @@ function toggle(): void {
   border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 10px 12px 12px;
-  background: #fafafa;
+  background: var(--app-surface-2);
 }
 
 .bulk-hint {

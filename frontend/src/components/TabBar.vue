@@ -139,8 +139,8 @@ const { t } = useI18n()
 }
 
 .st.err {
-  background: #fdecec;
-  color: #d03050;
+  background: var(--app-danger-tint);
+  color: var(--app-danger);
 }
 
 .x {
@@ -151,8 +151,8 @@ const { t } = useI18n()
 }
 
 .x:hover {
-  background: #e0e3e6;
-  color: #d03050;
+  background: var(--app-chip-hover);
+  color: var(--app-danger);
 }
 
 .add {

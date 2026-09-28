@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>api-doc-go</title>
+    <script>
+      // 首帧前定色：暗色主题下避免白底闪一下（与 lib/theme.ts 的缓存键保持一致）
+      try {
+        if (localStorage.getItem('client.theme') === 'dark') document.documentElement.dataset.theme = 'dark'
+      } catch (e) {
+        /* 本地存储不可用时按浅色渲染 */
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

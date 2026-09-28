@@ -9,6 +9,7 @@ import type {
   HistoryEntry,
   RequestDoc,
   ResolveResult,
+  ResponseExample,
   SendResult,
   Settings,
 } from '@/types'
@@ -89,6 +90,18 @@ function normalizeResolve(res: ResolveResult): ResolveResult {
   return { ...res, missing: res.missing ?? [] }
 }
 
+function normalizeExample(ex: ResponseExample): ResponseExample {
+  return {
+    ...ex,
+    request: {
+      ...ex.request,
+      headers: ex.request?.headers ?? [],
+      body: { type: ex.request?.body?.type ?? 'none', raw: ex.request?.body?.raw ?? '', form: ex.request?.body?.form ?? [] },
+    },
+    response: { ...ex.response, headers: ex.response?.headers ?? [] },
+  }
+}
+
 export const api = {
   pickDirectory: () => call<string>('PickDirectory'),
   openCollection: (dir: string) => call<CollectionInfo>('OpenCollection', dir).then(normalizeInfo),
@@ -105,6 +118,12 @@ export const api = {
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
   deleteEnv: (name: string) => call<null>('DeleteEnv', name),
   send: (r: RequestDoc, envName: string) => call<SendResult>('SendRequest', r, envName).then(normalizeSend),
+  listResponseExamples: (reqUid: string) =>
+    call<ResponseExample[] | null>('ListResponseExamples', reqUid).then((v) => (v ?? []).map(normalizeExample)),
+  saveResponseExample: (r: RequestDoc, name: string, res: SendResult) =>
+    call<ResponseExample>('SaveResponseExample', r, name, res).then(normalizeExample),
+  deleteResponseExample: (reqUid: string, exampleUid: string) =>
+    call<null>('DeleteResponseExample', reqUid, exampleUid),
   resolveText: (text: string, envName: string) =>
     call<ResolveResult>('ResolveText', text, envName).then(normalizeResolve),
   getSettings: () => call<Settings>('GetSettings'),

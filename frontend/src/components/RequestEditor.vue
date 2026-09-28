@@ -8,6 +8,7 @@ import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
 import KeyValueTable from '@/components/KeyValueTable.vue'
+import { isDark } from '@/lib/theme'
 import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
 import type { Auth } from '@/types'
@@ -58,6 +59,9 @@ const docs = computed({
 })
 
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
+// md-editor 自带明暗两套配色；暗色下用 github 预览主题（默认主题在深底上对比度不足）
+const mdTheme = computed(() => (isDark.value ? 'dark' : 'light'))
+const mdPreviewTheme = computed(() => (isDark.value ? 'github' : 'default'))
 
 // 页签角标：该段有内容时显示小圆点（仿 Bruno）
 const hasParams = computed(() => props.tab.request.params.some((p) => p.name.trim()))
@@ -209,7 +213,8 @@ watch(
         v-else
         v-model="docs"
         :language="mdLanguage"
-        preview-theme="default"
+        :theme="mdTheme"
+        :preview-theme="mdPreviewTheme"
         class="md-edit"
       />
     </div>
