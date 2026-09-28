@@ -1,5 +1,5 @@
 // Package varx 变量替换：把文本中的 {{name}} 渲染为环境变量值。
-// 占位符语法、优先级、内置动态变量与掩码规则统一由共享包 api-doc-go-share/varx 实现，
+// 占位符语法、优先级、内置动态变量与掩码规则统一由共享包 github.com/zqstudio/api-doc-go-share/varx 实现，
 // 本包只保留既有的导出签名（成熟后调用方可直接换成共享包）。
 package varx
 
@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
-	share "api-doc-go-share/varx"
+	share "github.com/zqstudio/api-doc-go-share/varx"
 )
 
 // Resolve 渲染文本；返回渲染结果与「引用了但未定义」的变量名（去重、按出现顺序）。
