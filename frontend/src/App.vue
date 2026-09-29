@@ -436,6 +436,12 @@ watch(
   display: flex;
   flex-direction: column;
   background: var(--app-bg);
+  /* 窗口外框圆角：外壳铺满窗口，靠 overflow 把子元素的直角裁掉；
+     圆角外透出桌面（窗口透明由 main.go 的 WindowIsTranslucent 开启），
+     描边让圆角在浅色桌面上也有清晰边界。 */
+  border-radius: var(--app-radius-window);
+  border: 1px solid var(--app-border);
+  overflow: hidden;
 }
 
 /* 标题栏常驻后，n-spin 的两层容器需吃掉剩余高度（而非按 100% 高度计算） */

@@ -8,6 +8,9 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  /* 窗口圆角：页面自身必须全透明，圆角外的那圈像素才透得出桌面；
+     底色由外壳 .app 负责（它按 --app-radius-window 裁切）。 */
+  background: transparent;
 }
 
 /* 弹窗打开时整页布局被挤扁的根因：
@@ -105,6 +108,8 @@ body.dragging.row * {
   --app-titlebar-h: 44px;
   --app-toolbar-h: 48px;
   --app-statusbar-h: 28px;
+  /* 窗口外框圆角（轻微）：外壳按此裁切，圆角外透出桌面背景 */
+  --app-radius-window: 10px;
 }
 
 /* 暗色：底 #17181a / 面板 #1e1f22；主色沿用品牌绿，但在深底上提亮一档保证对比度 */
@@ -173,7 +178,6 @@ body {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
   color: var(--app-text);
-  background: var(--app-bg);
   /* 禁止合成粗体/斜体：中文缺粗体字面时不再把笔画硬撑粗 */
   font-synthesis: none;
   /* WebKitGTK 上灰度渲染比次像素更干净，避免文字边缘发毛 */
@@ -187,6 +191,13 @@ body {
 /* n-config-provider 会渲染一层包裹节点，不撑满会让内部 flex 布局高度塌陷 */
 .n-config-provider {
   height: 100%;
+}
+
+/* 弹窗遮罩由 naive-ui teleport 到 body（在外壳之外，不受外壳 overflow 裁切），
+   若不跟着窗口一起做圆角，弹窗一开四角会冒出方角。 */
+.n-modal-mask,
+.n-drawer-mask {
+  border-radius: var(--app-radius-window);
 }
 
 .muted {

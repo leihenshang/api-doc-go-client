@@ -308,6 +308,22 @@ export namespace collection {
 		    return a;
 		}
 	}
+	export class ImportSummary {
+	    imported: number;
+	    skipped: number;
+	    failures?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.imported = source["imported"];
+	        this.skipped = source["skipped"];
+	        this.failures = source["failures"];
+	    }
+	}
 	
 	
 	export class RequestSettings {

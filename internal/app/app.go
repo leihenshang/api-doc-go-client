@@ -337,7 +337,7 @@ func (a *App) GetSettings() (*config.Settings, error) {
 	return &s, nil
 }
 
-// SaveSettings 保存全局设置；Cookie 持久化开关变化时重建 Cookie 罐，主题变化时同步窗口底色。
+// SaveSettings 保存全局设置；Cookie 持久化开关变化时重建 Cookie 罐。
 func (a *App) SaveSettings(s *config.Settings) error {
 	if s == nil {
 		return errors.New("设置为空")
@@ -348,15 +348,11 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	}
 	a.mu.Lock()
 	jarChanged := a.settings.PersistCookies != norm.PersistCookies
-	themeChanged := a.settings.Theme != norm.Theme
 	a.settings = norm
 	if jarChanged {
 		a.jar = nil
 	}
 	a.mu.Unlock()
-	if themeChanged {
-		a.applyWindowTheme(norm.Theme)
-	}
 	return nil
 }
 
