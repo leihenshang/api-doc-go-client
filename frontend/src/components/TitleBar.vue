@@ -40,18 +40,25 @@ onMounted(async () => {
     <span class="brand">{{ t('app.brand') }}</span>
     <span class="sp" />
 
-    <button class="theme" type="button" :title="themeHint" :aria-label="themeHint" @click="emit('toggle-theme')">
+    <button
+      class="theme"
+      type="button"
+      data-testid="titlebar.theme"
+      :title="themeHint"
+      :aria-label="themeHint"
+      @click="emit('toggle-theme')"
+    >
       <n-icon :component="dark ? SunnyOutline : MoonOutline" :size="15" />
     </button>
 
     <div v-if="customChrome" class="win">
-      <button class="wc" type="button" :title="t('app.minimise')" @click="windowCtl.minimise()">
+      <button class="wc" type="button" data-testid="titlebar.min" :title="t('app.minimise')" @click="windowCtl.minimise()">
         <n-icon :component="RemoveOutline" :size="15" />
       </button>
-      <button class="wc" type="button" :title="t('app.maximise')" @click="toggleMax">
+      <button class="wc" type="button" data-testid="titlebar.max" :title="t('app.maximise')" @click="toggleMax">
         <n-icon :component="maximised ? CopyOutline : SquareOutline" :size="12" />
       </button>
-      <button class="wc danger" type="button" :title="t('app.close')" @click="windowCtl.quit()">
+      <button class="wc danger" type="button" data-testid="titlebar.close" :title="t('app.close')" @click="windowCtl.quit()">
         <n-icon :component="CloseOutline" :size="15" />
       </button>
     </div>

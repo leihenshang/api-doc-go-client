@@ -51,7 +51,7 @@ function onMenu(key: string | number): void {
 <template>
   <div class="toolbar">
     <n-dropdown trigger="click" :options="menu" @select="onMenu">
-      <button class="coll" type="button" :title="t('toolbar.switchCollection')">
+      <button class="coll" type="button" data-testid="toolbar.collection" :title="t('toolbar.switchCollection')">
         <n-icon :component="LayersOutline" :size="15" class="ci" />
         <span class="nm">{{ name }}</span>
         <n-icon :component="ChevronDownOutline" :size="12" class="ar" />
@@ -73,7 +73,7 @@ function onMenu(key: string | number): void {
       @manage="emit('manage-env')"
     />
 
-    <button class="search" type="button" :title="t('toolbar.search')" @click="emit('palette')">
+    <button class="search" type="button" data-testid="toolbar.palette" :title="t('toolbar.search')" @click="emit('palette')">
       <n-icon :component="SearchOutline" :size="14" />
       <span class="sl">{{ t('toolbar.search') }}</span>
       <kbd>Ctrl</kbd><kbd>K</kbd>

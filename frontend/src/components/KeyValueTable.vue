@@ -63,11 +63,11 @@ function toggle(): void {
 </script>
 
 <template>
-  <div class="kvt">
+  <div class="kvt" data-testid="kv">
     <div class="sec">
       <span class="sec-lb">{{ label }}</span>
       <span class="sp" />
-      <button class="link" type="button" @click="toggle">
+      <button class="link" type="button" data-testid="kv.bulk" @click="toggle">
         {{ bulk ? t('common.tableEdit') : t('common.bulkEdit') }}
       </button>
     </div>
@@ -78,21 +78,22 @@ function toggle(): void {
         <span v-for="c in columns" :key="c">{{ c }}</span>
         <span class="op" />
       </div>
-      <div v-for="(row, i) in rows" :key="i" class="row">
+      <div v-for="(row, i) in rows" :key="i" class="row" data-testid="kv.row">
         <n-checkbox v-model:checked="row.enabled" size="small" @update:checked="emit('change')" />
-        <n-input v-model:value="row.name" size="small" placeholder="name" @input="emit('change')" />
-        <n-input v-model:value="row.value" size="small" placeholder="value" @input="emit('change')" />
+        <n-input v-model:value="row.name" data-testid="kv.name" size="small" placeholder="name" @input="emit('change')" />
+        <n-input v-model:value="row.value" data-testid="kv.value" size="small" placeholder="value" @input="emit('change')" />
         <n-input
           v-model:value="row.description"
+          data-testid="kv.desc"
           size="small"
           :placeholder="t('common.optional')"
           @input="emit('change')"
         />
-        <button class="act" type="button" :title="t('common.delete')" @click="del(i)">
+        <button class="act" type="button" data-testid="kv.remove" :title="t('common.delete')" @click="del(i)">
           <n-icon :component="CloseOutline" :size="13" />
         </button>
       </div>
-      <n-button text size="tiny" type="primary" class="add" @click="add">{{ t('editor.addRow') }}</n-button>
+      <n-button text size="tiny" type="primary" class="add" data-testid="kv.add" @click="add">{{ t('editor.addRow') }}</n-button>
     </template>
 
     <div v-else class="bulk">
@@ -102,6 +103,7 @@ function toggle(): void {
         type="textarea"
         :rows="Math.min(14, Math.max(4, rows.length + 1))"
         class="mono bulk-text"
+        data-testid="kv.bulkText"
         @blur="apply"
       />
     </div>

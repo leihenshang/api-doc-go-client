@@ -111,6 +111,8 @@ watch(
         class="seg-tab"
         :class="{ on: seg === s.key }"
         type="button"
+        data-testid="req.tab"
+        :data-seg="s.key"
         @click="seg = s.key"
       >
         {{ s.label }}<span v-if="s.dot" class="badge" />

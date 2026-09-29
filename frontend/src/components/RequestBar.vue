@@ -56,13 +56,19 @@ function formatUrl(): void {
         :options="methods"
         :render-label="renderMethod"
         class="method"
+        data-testid="req.method"
         @update:value="touch"
       />
-      <var-input v-model="tab.request.url" :placeholder="t('editor.urlPlaceholder')" @update:model-value="touch" />
-      <button class="icon-btn" type="button" :title="t('editor.formatUrl')" @click="formatUrl">
+      <var-input
+        v-model="tab.request.url"
+        data-testid="req.url"
+        :placeholder="t('editor.urlPlaceholder')"
+        @update:model-value="touch"
+      />
+      <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
         <n-icon :component="OptionsOutline" :size="16" />
       </button>
-      <button class="send" type="button" :disabled="tab.sending" @click="send">
+      <button class="send" type="button" data-testid="req.send" :disabled="tab.sending" @click="send">
         <n-icon :component="tab.sending ? SyncOutline : SendOutline" :size="15" :class="{ spin: tab.sending }" />
         <span>{{ tab.sending ? t('editor.sending') : t('editor.send') }}</span>
       </button>

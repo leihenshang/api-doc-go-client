@@ -73,7 +73,7 @@ function statusClass(e: HistoryEntry): string {
       <p v-if="error" class="err">{{ error }}</p>
       <div v-if="!items.length" class="empty muted">{{ t('history.empty') }}</div>
 
-      <div v-for="(e, i) in items" :key="i" class="row" :class="{ clickable: !!e.uid }" @click="pick(e)">
+      <div v-for="(e, i) in items" :key="i" class="row" data-testid="history.row" :class="{ clickable: !!e.uid }" @click="pick(e)">
         <method-tag :method="e.method || 'GET'" />
         <span class="url mono" :title="e.url">{{ e.url }}</span>
         <span class="st" :class="statusClass(e)">{{ e.error ? t('history.failed') : e.status }}</span>

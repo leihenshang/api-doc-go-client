@@ -22,12 +22,13 @@ const { t } = useI18n()
       <span>{{ t('resp.type') }}</span>
       <span>{{ t('resp.meaning') }}</span>
     </div>
-    <div v-for="f in rows" :key="f.path" class="tr">
-      <span class="mono fp" :title="f.path">{{ f.path }}</span>
+    <div v-for="f in rows" :key="f.path" class="tr" data-testid="resp.fields.row" :data-path="f.path">
+      <span class="mono fp" data-testid="resp.fields.path" :title="f.path">{{ f.path }}</span>
       <span class="mono ftype">{{ f.type }}</span>
       <n-input
         :value="f.meaning"
         size="small"
+        data-testid="resp.fields.meaning"
         :placeholder="t('common.optional')"
         @update:value="emit('meaning', f.path, $event)"
       />
