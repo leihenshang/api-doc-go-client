@@ -1,0 +1,15 @@
+info:
+    name: dev
+vars:
+    - name: host
+      value: __FIXTURE__
+      enabled: true
+      secret: false
+    - name: tlsHost
+      value: __TLS__
+      enabled: true
+      secret: false
+    - name: token
+      value: e2e-token
+      enabled: true
+      secret: false

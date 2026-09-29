@@ -1,0 +1,22 @@
+info:
+    name: ping
+    type: http
+    seq: 1
+meta:
+    uid: 33333333-3333-4333-8333-333333333333
+    base_rev: 0
+http:
+    method: GET
+    url: '{{host}}/json/flat'
+    params:
+        - name: ""
+          value: ""
+          enabled: true
+    headers:
+        - name: Content-Type
+          value: application/json
+          enabled: true
+    body:
+        type: none
+    auth: none
+docs: ""

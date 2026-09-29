@@ -1,0 +1,6 @@
+# 客户端自动维护
+environments/*.secrets.yml
+*.local.yml
+.trash/
+.conflicts/
+node_modules/
