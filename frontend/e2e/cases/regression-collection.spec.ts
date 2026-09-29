@@ -105,6 +105,27 @@ test.describe('集合文件层与会话', () => {
     // 地址栏：{{变量}} 显示主色底纹
     await expect(page.locator('.req-line .hl .var').first()).toHaveText('{{host}}')
 
+    // 高亮层与真实 input 必须同字体：两层文本宽度不一致时，光标（由 input 自己的排版决定）
+    // 会落在高亮文字的字形上 —— 历史问题「URL 输入框的文字与光标重叠」
+    const bar = await page.evaluate(() => {
+      const input = document.querySelector('.req-line input') as HTMLInputElement
+      const hl = document.querySelector('.req-line .hl') as HTMLElement
+      const sample = '{{host}}/json/nested?probe=abcdefgh'
+      const width = (el: Element): number => {
+        const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D
+        ctx.font = getComputedStyle(el).font
+        return ctx.measureText(sample).width
+      }
+      return {
+        inputFont: getComputedStyle(input).font,
+        hlFont: getComputedStyle(hl).font,
+        inputWidth: width(input),
+        hlWidth: width(hl),
+      }
+    })
+    expect(bar.inputFont).toBe(bar.hlFont)
+    expect(Math.abs(bar.inputWidth - bar.hlWidth)).toBeLessThan(0.5)
+
     // 方法选择器底色随方法变化（GET → POST）
     const tintOf = (sel: string) =>
       page.locator(sel).evaluate((el) => getComputedStyle(el).getPropertyValue('--m-tint').trim())

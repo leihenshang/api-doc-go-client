@@ -87,6 +87,12 @@ function focus(): void {
   inset: 0;
   padding: 0 10px;
   font-size: 13px;
+  /* 两层必须用同一套字体：文字宽度决定光标位置，宽度不一致时光标会落在高亮文字的字形上
+     （表现为「URL 输入框的文字与光标重叠」）。此处显式声明，不再依赖 .mono 类 ——
+     组件内 `.in { font-family: inherit }` 的选择器优先级高于全局 `.mono`，曾导致
+     input 用正文比例字体（Noto Sans SC）、高亮层用等宽字体（JetBrains Mono），
+     同一串文本宽度差 48px（225 vs 273）。 */
+  font-family: var(--app-mono);
   line-height: calc(var(--vi-h, 28px) - 2px);
   white-space: pre;
   overflow: hidden;
@@ -113,7 +119,6 @@ function focus(): void {
   background: transparent;
   color: transparent;
   caret-color: var(--app-text);
-  font-family: inherit;
   width: 100%;
 }
 </style>
