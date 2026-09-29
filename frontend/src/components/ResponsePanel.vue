@@ -3,7 +3,7 @@
 // 页签（响应体 / 响应头 N / 响应字段 N）。响应体可切换「美化(JSON 树) / 原始」。
 // 字段映射不再是响应体下方的一段，而是独立页签：点「更新响应字段」才解析，且重复更新只追加新字段。
 // 保存响应（Bruno 的 Save Response）：把本次响应与请求快照写入集合 examples/，可从下拉回看与删除。
-import { NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
+import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
 import {
   BookmarkOutline,
   ContractOutline,
