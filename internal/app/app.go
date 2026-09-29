@@ -393,16 +393,19 @@ func (a *App) ClearCookies() error {
 type ResolveResult struct {
 	Text    string   `json:"text"`
 	Missing []string `json:"missing"`
+	// Values 文本里引用到的、已定义变量的取值（名字 → 值）：地址栏悬停变量时展示。
+	// 未定义的变量不出现（见 Missing），敏感变量在此为明文，展示掩码由前端按环境里的 secret 标记决定。
+	Values map[string]string `json:"values"`
 }
 
-// ResolveText 把文本按当前环境渲染（用于 URL 预览与缺失变量告警）。
+// ResolveText 把文本按当前环境渲染（用于地址栏变量悬停提示与缺失变量告警）。
 func (a *App) ResolveText(text, envName string) (*ResolveResult, error) {
 	vars, err := a.envVars(envName)
 	if err != nil {
 		return nil, err
 	}
 	out, missing := varx.Resolve(text, vars)
-	return &ResolveResult{Text: out, Missing: missing}, nil
+	return &ResolveResult{Text: out, Missing: missing, Values: varx.CollectValues(text, vars)}, nil
 }
 
 // ---- 自绘标题栏的窗口控制（无边框窗口下替代系统装饰）----

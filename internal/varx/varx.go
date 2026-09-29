@@ -20,6 +20,25 @@ func CollectNames(text string) []string {
 	return share.Names(text)
 }
 
+// CollectValues 收集文本中引用到、且已在 vars 中定义的变量取值（名字 → 值），
+// 供前端在悬停变量时展示「会被替换成什么」。未定义的变量不出现（缺失名单由 Resolve 的 missing 给出）；
+// 内置动态变量不参与（每次发送都会重新生成）。没有命中时返回 nil。
+func CollectValues(text string, vars map[string]string) map[string]string {
+	if text == "" || len(vars) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, name := range CollectNames(text) {
+		if v, ok := vars[name]; ok {
+			out[name] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // Builtins 内置动态变量的当前取值。
 func Builtins() map[string]string {
 	return share.DefaultBuiltins().Values()

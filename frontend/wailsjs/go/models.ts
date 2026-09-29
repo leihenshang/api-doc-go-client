@@ -3,6 +3,7 @@ export namespace app {
 	export class ResolveResult {
 	    text: string;
 	    missing: string[];
+	    values: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new ResolveResult(source);
@@ -12,6 +13,7 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
 	        this.missing = source["missing"];
+	        this.values = source["values"];
 	    }
 	}
 

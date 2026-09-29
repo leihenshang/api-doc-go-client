@@ -134,6 +134,8 @@ export interface ResponseExample {
 export interface ResolveResult {
   text: string
   missing: string[]
+  /** 文本里引用到、且已定义的变量取值（名字 → 值）；未定义的不出现 */
+  values: Record<string, string>
 }
 
 /** 全局设置（internal/config.Settings）。 */
