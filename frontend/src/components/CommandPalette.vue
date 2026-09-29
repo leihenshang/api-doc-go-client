@@ -186,12 +186,13 @@ function setInput(el: unknown): void {
 
 <template>
   <n-modal :show="show" :auto-focus="false" style="width: 640px" @update:show="emit('update:show', $event)">
-    <div class="palette" @keydown.esc="close">
+    <div class="palette" data-testid="palette" @keydown.esc="close">
       <div class="search">
         <n-icon :component="SearchOutline" :size="16" class="si" />
         <n-input
           :ref="setInput"
           v-model:value="keyword"
+          data-testid="palette.input"
           :bordered="false"
           size="large"
           :placeholder="t('palette.placeholder')"
@@ -206,6 +207,7 @@ function setInput(el: unknown): void {
           class="chip"
           :class="{ on: scope === s.key }"
           type="button"
+          data-testid="palette.chip"
           @click="scope = s.key"
         >
           {{ s.label }}
@@ -219,6 +221,7 @@ function setInput(el: unknown): void {
           class="item"
           :class="{ on: i === cursor }"
           type="button"
+          data-testid="palette.item"
           :data-idx="i"
           @mouseenter="cursor = i"
           @click="activate(it)"

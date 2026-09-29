@@ -19,7 +19,7 @@ const { t } = useI18n()
 
 <template>
   <div class="tabbar">
-    <button class="tab coll" :class="{ active: !activeKey }" type="button" @click="emit('select-overview')">
+    <button class="tab coll" :class="{ active: !activeKey }" type="button" data-testid="tab.overview" @click="emit('select-overview')">
       <n-icon :component="LayersOutline" :size="13" />
       <span class="tt">{{ t('tab.collection') }}</span>
     </button>
@@ -31,6 +31,9 @@ const { t } = useI18n()
         class="tab"
         :class="{ active: tab.key === activeKey }"
         type="button"
+        data-testid="tab.item"
+        :data-tab-key="tab.key"
+        :data-tab-title="tab.title"
         :title="tab.request.path"
         @click="emit('select', tab.key)"
       >
@@ -40,13 +43,13 @@ const { t } = useI18n()
         <span v-if="tab.response" class="st" :class="tab.response.status < 400 ? 'ok' : 'err'">
           {{ tab.response.status }}
         </span>
-        <span class="x" :title="t('tab.closeHint')" @click.stop="emit('close', tab.key)">
+        <span class="x" data-testid="tab.close" :title="t('tab.closeHint')" @click.stop="emit('close', tab.key)">
           <n-icon :component="CloseOutline" :size="13" />
         </span>
       </button>
     </div>
 
-    <button class="add" type="button" :title="t('tab.newHint')" @click="emit('new')">
+    <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
       <n-icon :component="AddOutline" :size="16" />
     </button>
   </div>

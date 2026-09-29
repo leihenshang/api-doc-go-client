@@ -25,7 +25,7 @@ const right = computed(() =>
 
 <template>
   <footer class="statusbar">
-    <span class="txt">{{ left }}</span>
+    <span class="txt" data-testid="statusbar.counts">{{ left }}</span>
     <span class="sp" />
     <span class="txt">{{ right }}</span>
   </footer>

@@ -298,6 +298,8 @@ watch(
           class="row"
           :class="{ folder: row.node.type === 'folder', on: row.node.uid === props.activeUid }"
           :data-uid="row.node.uid"
+          :data-kind="row.node.type"
+          data-testid="tree.row"
           :aria-current="row.node.uid === props.activeUid ? 'true' : undefined"
           :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
         >
@@ -317,20 +319,20 @@ watch(
               @blur="submitRename"
               @keyup.esc="editing = null"
             />
-            <span v-else class="fname">{{ row.node.name }}</span>
+            <span v-else class="fname" data-testid="tree.row.name">{{ row.node.name }}</span>
             <span class="actions">
               <n-dropdown trigger="click" placement="bottom-start" :options="folderMenu" @select="onFolderMenu(row.node, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
-                <button class="act" type="button" :title="t('tree.new')">
+                <button class="act" type="button" data-testid="tree.row.plus" :title="t('tree.new')">
                   <n-icon :component="AddOutline" :size="13" />
                 </button>
               </n-dropdown>
-              <button class="act" type="button" :title="t('tree.rename')" @click.stop="startRename(row.node)">
+              <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
                 <n-icon :component="CreateOutline" :size="13" />
               </button>
               <n-popconfirm @positive-click="removeFolder(row.node)">
                 <template #trigger>
-                  <button class="act danger" type="button" :title="t('tree.delDir')" @click.stop>
+                  <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')" @click.stop>
                     <n-icon :component="TrashOutline" :size="13" />
                   </button>
                 </template>
@@ -350,16 +352,16 @@ watch(
               @blur="submitRename"
               @keyup.esc="editing = null"
             />
-            <button v-else class="rname" :title="row.node.name" @click="emit('open', row.node.uid)">
+            <button v-else class="rname" data-testid="tree.row.name" :title="row.node.name" @click="emit('open', row.node.uid)">
               {{ row.node.name }}
             </button>
             <span class="actions">
-              <button class="act" type="button" :title="t('tree.rename')" @click.stop="startRename(row.node)">
+              <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
                 <n-icon :component="CreateOutline" :size="13" />
               </button>
               <n-popconfirm @positive-click="removeRequest(row.node)">
                 <template #trigger>
-                  <button class="act danger" type="button" :title="t('tree.delApi')" @click.stop>
+                  <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')" @click.stop>
                     <n-icon :component="TrashOutline" :size="13" />
                   </button>
                 </template>

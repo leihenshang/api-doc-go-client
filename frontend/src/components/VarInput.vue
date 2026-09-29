@@ -6,6 +6,9 @@ import { computed, ref } from 'vue'
 const props = defineProps<{ modelValue: string; placeholder?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string] }>()
 
+// 透传属性（如 data-testid）要落在真实 input 上，而不是高亮层的外层 div
+defineOptions({ inheritAttrs: false })
+
 interface Part {
   text: string
   cls: string
@@ -51,6 +54,7 @@ function focus(): void {
     </div>
     <input
       ref="el"
+      v-bind="$attrs"
       class="in mono"
       :value="modelValue"
       spellcheck="false"

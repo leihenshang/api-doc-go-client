@@ -190,7 +190,14 @@ async function copyBody(): Promise<void> {
     <template v-else-if="display">
       <div class="head">
         <span class="ttl">{{ t('resp.title') }}</span>
-        <n-tag :type="statusType" size="small" :bordered="false" class="badge" :title="display.proto">
+        <n-tag
+          :type="statusType"
+          size="small"
+          :bordered="false"
+          class="badge"
+          data-testid="resp.status"
+          :title="display.proto"
+        >
           {{ statusLabel }}
         </n-tag>
         <span class="meta mono">{{ meta }}</span>
@@ -199,6 +206,7 @@ async function copyBody(): Promise<void> {
           v-if="isJson && (seg === 'body' || seg === 'fields')"
           class="toggle"
           type="button"
+          data-testid="resp.updateFields"
           :title="t('resp.updateFieldsHint')"
           @click="updateFields"
         >
@@ -206,16 +214,31 @@ async function copyBody(): Promise<void> {
           {{ t('resp.updateFields') }}
         </button>
         <template v-if="seg === 'body'">
-          <button v-if="isJson" class="toggle" :class="{ on: view === 'pretty' }" type="button" @click="view = 'pretty'">
+          <button
+            v-if="isJson"
+            class="toggle"
+            :class="{ on: view === 'pretty' }"
+            type="button"
+            data-testid="resp.pretty"
+            @click="view = 'pretty'"
+          >
             {{ t('resp.pretty') }}
           </button>
-          <button v-if="isJson" class="toggle" :class="{ on: view === 'raw' }" type="button" @click="view = 'raw'">
+          <button
+            v-if="isJson"
+            class="toggle"
+            :class="{ on: view === 'raw' }"
+            type="button"
+            data-testid="resp.raw"
+            @click="view = 'raw'"
+          >
             {{ t('resp.raw') }}
           </button>
           <button
             v-if="isJson && view === 'pretty'"
             class="toggle"
             type="button"
+            data-testid="resp.expandAll"
             :title="t('json.expandAll')"
             @click="jv?.expandAll()"
           >
@@ -225,13 +248,21 @@ async function copyBody(): Promise<void> {
             v-if="isJson && view === 'pretty'"
             class="toggle"
             type="button"
+            data-testid="resp.collapseAll"
             :title="t('json.collapseAll')"
             @click="jv?.collapseAll()"
           >
             <n-icon :component="ContractOutline" :size="14" />
           </button>
         </template>
-        <button v-if="!example" class="toggle" type="button" :title="t('resp.saveHint')" @click="openSave">
+        <button
+          v-if="!example"
+          class="toggle"
+          type="button"
+          data-testid="resp.save"
+          :title="t('resp.saveHint')"
+          @click="openSave"
+        >
           <n-icon :component="SaveOutline" :size="13" />
           {{ t('resp.save') }}
         </button>
@@ -241,47 +272,71 @@ async function copyBody(): Promise<void> {
           :options="exampleOptions"
           size="tiny"
           class="expick"
+          data-testid="resp.examples"
           :title="t('resp.examples')"
           @update:value="viewingUid = $event"
         />
         <n-popconfirm v-if="example" @positive-click="removeExample">
           <template #trigger>
-            <button class="toggle danger" type="button" :title="t('resp.deleteExample')">
+            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
               <n-icon :component="TrashOutline" :size="13" />
             </button>
           </template>
           {{ t('resp.deleteConfirm', { name: example.name }) }}
         </n-popconfirm>
-        <button class="toggle" type="button" @click="copyBody">
+        <button class="toggle" type="button" data-testid="resp.copyBody" @click="copyBody">
           <n-icon :component="CopyOutline" :size="13" />
           {{ copied ? t('common.copied') : t('resp.copyBody') }}
         </button>
       </div>
 
-      <div v-if="example" class="exnote">
+      <div v-if="example" class="exnote" data-testid="resp.exnote">
         <n-icon :component="BookmarkOutline" :size="13" />
         <span>{{ t('resp.viewingExample', { name: example.name }) }}</span>
-        <button class="link" type="button" @click="viewingUid = ''">{{ t('resp.backToLive') }}</button>
+        <button class="link" type="button" data-testid="resp.backToLive" @click="viewingUid = ''">
+          {{ t('resp.backToLive') }}
+        </button>
       </div>
 
       <div class="seg">
-        <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" @click="seg = 'body'">
+        <button
+          class="seg-tab"
+          :class="{ on: seg === 'body' }"
+          type="button"
+          data-testid="resp.tab"
+          data-seg="body"
+          @click="seg = 'body'"
+        >
           {{ t('resp.body') }}
         </button>
-        <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" @click="seg = 'headers'">
+        <button
+          class="seg-tab"
+          :class="{ on: seg === 'headers' }"
+          type="button"
+          data-testid="resp.tab"
+          data-seg="headers"
+          @click="seg = 'headers'"
+        >
           {{ t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
         </button>
-        <button class="seg-tab" :class="{ on: seg === 'fields' }" type="button" @click="seg = 'fields'">
+        <button
+          class="seg-tab"
+          :class="{ on: seg === 'fields' }"
+          type="button"
+          data-testid="resp.tab"
+          data-seg="fields"
+          @click="seg = 'fields'"
+        >
           {{ t('resp.fieldsTab') }}<span v-if="fields.length" class="num">{{ fields.length }}</span>
         </button>
-        <span class="url mono" :title="display.url">{{ display.url }}</span>
+        <span class="url mono" data-testid="resp.url" :title="display.url">{{ display.url }}</span>
       </div>
 
       <div class="pane">
         <template v-if="seg === 'body'">
           <div v-if="display.binary" class="binhint">{{ t('resp.binary') }}</div>
           <json-viewer v-if="isJson && view === 'pretty'" ref="jv" :text="display.body" />
-          <pre v-else class="raw mono">{{ rawText }}</pre>
+          <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
         </template>
         <div v-else-if="seg === 'headers'" class="hlist">
           <div v-for="h in display.headers" :key="h.name" class="hrow mono">

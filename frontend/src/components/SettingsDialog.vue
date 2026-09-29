@@ -102,32 +102,63 @@ function close(): void {
       <div class="sec">{{ t('settings.appearance') }}</div>
       <div class="row">
         <span class="lbl">{{ t('settings.language') }}</span>
-        <n-select :value="locale" :options="langOptions" size="small" class="num" @update:value="pickLang" />
+        <n-select
+          :value="locale"
+          :options="langOptions"
+          size="small"
+          class="num"
+          data-testid="settings.lang"
+          @update:value="pickLang"
+        />
       </div>
       <div class="row">
         <span class="lbl">{{ t('settings.theme') }}</span>
-        <n-select :value="form.theme" :options="themeOptions" size="small" class="num" @update:value="pickTheme" />
+        <n-select
+          :value="form.theme"
+          :options="themeOptions"
+          size="small"
+          class="num"
+          data-testid="settings.theme"
+          @update:value="pickTheme"
+        />
       </div>
       <div class="row">
         <span class="lbl">{{ t('settings.uiScale') }}</span>
-        <n-select v-model:value="form.uiScale" :options="scaleOptions" size="small" class="num" />
+        <n-select v-model:value="form.uiScale" :options="scaleOptions" size="small" class="num" data-testid="settings.scale" />
       </div>
       <div class="row">
         <span class="lbl">{{ t('settings.responseLayout') }}</span>
-        <n-select v-model:value="form.responseLayout" :options="layoutOptions" size="small" class="num" />
+        <n-select
+          v-model:value="form.responseLayout"
+          :options="layoutOptions"
+          size="small"
+          class="num"
+          data-testid="settings.layout"
+        />
       </div>
 
       <div class="sec">{{ t('settings.network') }}</div>
       <div class="row">
-        <n-checkbox v-model:checked="form.insecureSsl">{{ t('settings.insecureSsl') }}</n-checkbox>
+        <n-checkbox v-model:checked="form.insecureSsl" data-testid="settings.insecureSsl">
+          {{ t('settings.insecureSsl') }}
+        </n-checkbox>
       </div>
       <p class="hint muted">{{ t('settings.insecureSslHint') }}</p>
       <div class="row">
         <span class="lbl">{{ t('settings.timeout') }}</span>
-        <n-input-number v-model:value="form.timeoutSec" size="small" :min="1" :max="600" class="num" />
+        <n-input-number
+          v-model:value="form.timeoutSec"
+          size="small"
+          :min="1"
+          :max="600"
+          class="num"
+          data-testid="settings.timeout"
+        />
       </div>
       <div class="row">
-        <n-checkbox v-model:checked="form.followRedirects">{{ t('settings.followRedirects') }}</n-checkbox>
+        <n-checkbox v-model:checked="form.followRedirects" data-testid="settings.followRedirects">
+          {{ t('settings.followRedirects') }}
+        </n-checkbox>
       </div>
       <div class="row">
         <span class="lbl">{{ t('settings.maxRedirects') }}</span>
@@ -138,12 +169,15 @@ function close(): void {
           :max="50"
           :disabled="!form.followRedirects"
           class="num"
+          data-testid="settings.maxRedirects"
         />
       </div>
 
       <div class="sec">{{ t('settings.local') }}</div>
       <div class="row">
-        <n-checkbox v-model:checked="form.persistCookies">{{ t('settings.persistCookies') }}</n-checkbox>
+        <n-checkbox v-model:checked="form.persistCookies" data-testid="settings.persistCookies">
+          {{ t('settings.persistCookies') }}
+        </n-checkbox>
         <span class="sp" />
         <n-popconfirm @positive-click="clearCookies">
           <template #trigger>
