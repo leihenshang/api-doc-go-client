@@ -1,17 +1,19 @@
 <script setup lang="ts">
 // 请求栏（design-spec §2 地址栏）：方法选择器（语义色）+ URL（{{变量}} 高亮）+ 格式化 + Send。
-import { NIcon, NSelect, NTag } from 'naive-ui'
+import { NIcon, NSelect } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { computed, h, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { OptionsOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
 import VarInput from '@/components/VarInput.vue'
 import { methodColor, methodTint } from '@/lib/method'
+import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
 
 const props = defineProps<{ tab: Tab }>()
 const tabs = useTabsStore()
+const coll = useCollectionStore()
 const { t } = useI18n()
 
 const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].map((m) => ({ label: m, value: m }))
@@ -20,8 +22,12 @@ const controlStyle = computed(
   () => `--vi-h:34px;--m-color:${methodColor(props.tab.request.method)};--m-tint:${methodTint(props.tab.request.method)}`,
 )
 
-// 仅当 URL 含变量（或变量缺失）时才占一行展示解析预览，保持地址栏与设计稿一致的单行观感
-const showResolved = computed(() => props.tab.request.url.includes('{{') || !!props.tab.resolve?.missing.length)
+// 地址栏不再单独占一行展示「替换后」文本：值只在悬停变量时给出（见 VarInput）。
+// 敏感变量在提示里只显示掩码，取当前环境的 secret 标记。
+const secretNames = computed(() => {
+  const env = coll.info?.envs.find((e) => e.name === coll.currentEnv)
+  return env?.vars.filter((v) => v.secret).map((v) => v.name) ?? []
+})
 
 // 下拉与已选值均按方法着色
 function renderMethod(option: SelectOption): VNode {
@@ -63,6 +69,9 @@ function formatUrl(): void {
         v-model="tab.request.url"
         data-testid="req.url"
         :placeholder="t('editor.urlPlaceholder')"
+        :vars="tab.resolve?.values ?? {}"
+        :missing="tab.resolve?.missing ?? []"
+        :secrets="secretNames"
         @update:model-value="touch"
       />
       <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
@@ -72,14 +81,6 @@ function formatUrl(): void {
         <n-icon :component="tab.sending ? SyncOutline : SendOutline" :size="15" :class="{ spin: tab.sending }" />
         <span>{{ tab.sending ? t('editor.sending') : t('editor.send') }}</span>
       </button>
-    </div>
-
-    <div v-if="showResolved" class="resolved mono">
-      <span class="lbl">{{ t('editor.resolvedUrl') }}</span>
-      <span class="val" :class="{ miss: tab.resolve?.missing.length }">{{ tab.resolve?.text ?? '' }}</span>
-      <n-tag v-if="tab.resolve?.missing.length" type="warning" size="small" :bordered="false">
-        {{ t('editor.missingVars') }}: {{ tab.resolve.missing.join(', ') }}
-      </n-tag>
     </div>
   </div>
 </template>
@@ -177,26 +178,4 @@ function formatUrl(): void {
   }
 }
 
-.resolved {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  overflow: hidden;
-}
-
-.resolved .lbl {
-  color: var(--app-muted);
-  flex: 0 0 auto;
-}
-
-.resolved .val {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resolved .val.miss {
-  color: var(--app-warn);
-}
 </style>

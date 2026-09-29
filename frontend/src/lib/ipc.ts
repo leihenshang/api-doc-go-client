@@ -87,7 +87,7 @@ function normalizeSend(res: SendResult): SendResult {
 }
 
 function normalizeResolve(res: ResolveResult): ResolveResult {
-  return { ...res, missing: res.missing ?? [] }
+  return { ...res, missing: res.missing ?? [], values: res.values ?? {} }
 }
 
 function normalizeExample(ex: ResponseExample): ResponseExample {

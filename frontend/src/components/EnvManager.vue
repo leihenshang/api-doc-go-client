@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // 环境变量管理：新建/删除环境，编辑变量（敏感值明文只落 *.secrets.yml，由 Go 层拆分存储）。
 import { NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm } from 'naive-ui'
-import { CloseOutline } from '@vicons/ionicons5'
+import { AddOutline, CloseOutline } from '@vicons/ionicons5'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import type { Env } from '@/types'
 
@@ -42,20 +43,40 @@ function delVar(i: number): void {
 
 async function save(): Promise<void> {
   working.value.vars = working.value.vars.filter((v) => v.name.trim() !== '')
-  await coll.saveEnv({ ...working.value, vars: [...working.value.vars] })
+  try {
+    await coll.saveEnv({ ...working.value, vars: [...working.value.vars] })
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
   selected.value = working.value.name
+  // 变量值变了要重算地址栏解析，否则「替换后 / 变量提示」仍是旧值，看起来像没保存成功
+  emit('saved')
+  message.success(t('env.saved', { name: working.value.name }))
 }
 
 async function addEnv(): Promise<void> {
   const name = `env-${coll.envNames.length + 1}`
-  await coll.saveEnv({ name, vars: [] })
+  try {
+    await coll.saveEnv({ name, vars: [] })
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
   select(name)
+  emit('saved')
 }
 
 async function delEnv(): Promise<void> {
   if (!selected.value) return
-  await coll.deleteEnv(selected.value)
+  try {
+    await coll.deleteEnv(selected.value)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
   select(coll.envNames[0] ?? '')
+  emit('saved')
 }
 
 function close(): void {
@@ -64,7 +85,7 @@ function close(): void {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="t('env.title')" style="width: 660px" @update:show="close">
+  <n-modal :show="show" preset="card" :title="t('env.title')" style="width: 720px" @update:show="close">
     <div class="wrap">
       <div class="list">
         <button
@@ -76,13 +97,20 @@ function close(): void {
         >
           {{ e }}
         </button>
-        <n-button text type="primary" size="small" @click="addEnv">{{ t('env.add') }}</n-button>
+        <!-- 新建环境：与上方环境项同一左内边距对齐，虚线实心按钮 + 图标，避免看起来像一段说明文字 -->
+        <n-button class="new-env" size="small" dashed block data-testid="env.add" @click="addEnv">
+          <template #icon>
+            <n-icon :component="AddOutline" :size="14" />
+          </template>
+          {{ t('env.add') }}
+        </n-button>
       </div>
       <div class="detail">
         <template v-if="selected">
           <div class="hd">
-            <span class="lbl">{{ t('env.name') }}</span>
+            <span class="lb">{{ t('env.name') }}</span>
             <n-input v-model:value="working.name" size="small" class="nm" />
+            <span class="sp" />
             <n-popconfirm @positive-click="delEnv">
               <template #trigger>
                 <n-button size="tiny" type="error" tertiary>{{ t('env.deleteEnv') }}</n-button>
@@ -90,26 +118,42 @@ function close(): void {
               {{ t('common.confirm') }}？
             </n-popconfirm>
           </div>
-          <div v-for="(v, i) in working.vars" :key="i" class="vrow">
-            <n-checkbox v-model:checked="v.enabled" size="small" />
-            <n-input v-model:value="v.name" size="small" placeholder="name" class="vn" />
-            <n-input
-              v-model:value="v.value"
-              size="small"
-              placeholder="value"
-              class="vv"
-              :type="v.secret ? 'password' : 'text'"
-            />
-            <n-checkbox v-model:checked="v.secret" size="small">{{ t('env.secret') }}</n-checkbox>
-            <n-button text size="tiny" @click="delVar(i)">
-              <n-icon :component="CloseOutline" :size="13" />
-            </n-button>
+
+          <div class="vt">
+            <div class="th">
+              <span class="ctr">{{ t('env.enabled') }}</span>
+              <span>{{ t('env.varName') }}</span>
+              <span>{{ t('env.varValue') }}</span>
+              <span class="ctr">{{ t('env.secret') }}</span>
+              <span />
+            </div>
+            <div v-for="(v, i) in working.vars" :key="i" class="row">
+              <n-checkbox v-model:checked="v.enabled" size="small" class="ctr" />
+              <n-input v-model:value="v.name" size="small" placeholder="name" />
+              <n-input
+                v-model:value="v.value"
+                size="small"
+                placeholder="value"
+                :type="v.secret ? 'password' : 'text'"
+              />
+              <n-checkbox
+                v-model:checked="v.secret"
+                size="small"
+                class="ctr"
+                :title="t('env.secret')"
+                :aria-label="t('env.secret')"
+              />
+              <button class="act" type="button" :title="t('common.delete')" @click="delVar(i)">
+                <n-icon :component="CloseOutline" :size="13" />
+              </button>
+            </div>
           </div>
-          <n-button text size="tiny" type="primary" @click="addVar">{{ t('env.addVar') }}</n-button>
+          <n-button text size="tiny" type="primary" class="add" @click="addVar">{{ t('env.addVar') }}</n-button>
+
           <p class="hint muted">{{ t('env.saveHint') }}</p>
           <div class="ft">
             <n-button size="small" @click="close">{{ t('common.cancel') }}</n-button>
-            <n-button size="small" type="primary" :disabled="!canSave" @click="save">
+            <n-button size="small" type="primary" :disabled="!canSave" data-testid="env.save" @click="save">
               {{ t('common.save') }}
             </n-button>
           </div>
@@ -145,10 +189,25 @@ function close(): void {
   border-radius: 5px;
   cursor: pointer;
   font-size: 13px;
+  font-family: inherit;
+  color: var(--app-text);
 }
 
 .env:hover {
   background: var(--app-surface-3);
+}
+
+/* 新建环境：撑满左栏并与环境项左边缘对齐（环境项內边距 8px，按钮去掉多余内边距后图标落在同一条竖线上） */
+.new-env {
+  width: 100%;
+  margin-top: 6px;
+  justify-content: flex-start;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.new-env :deep(.n-button__content) {
+  justify-content: flex-start;
 }
 
 .env.on {
@@ -159,34 +218,103 @@ function close(): void {
 
 .detail {
   flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* 环境名一行：标签 + 输入 + 右侧「删除环境」（放最右，避免被当成输入框的标签） */
 .hd {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.nm {
-  width: 180px;
+.lb {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-2);
 }
 
-.vrow {
+.nm {
+  width: 200px;
+  flex: 0 0 auto;
+}
+
+.sp {
+  flex: 1 1 auto;
+}
+
+/* 变量表：与「参数/请求头」表同一套列宽约定，敏感值单独成列（不再是行内长 label） */
+.vt {
   display: flex;
+  flex-direction: column;
+}
+
+.th,
+.row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1.1fr) minmax(0, 1.4fr) 58px 24px;
   align-items: center;
   gap: 8px;
 }
 
-.vn {
-  width: 180px;
-  flex: 0 0 auto;
+.th {
+  padding: 6px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px 6px 0 0;
+  background: var(--app-surface-2);
+  font-size: 11.5px;
+  color: var(--app-muted);
+  white-space: nowrap;
 }
 
-.vv {
-  flex: 1 1 auto;
+/* 没有变量时表头是唯一一行，自己收口 */
+.th:last-child {
+  border-radius: 6px;
+}
+
+.row {
+  padding: 5px 8px;
+  border: 1px solid var(--app-border);
+  border-top: none;
+}
+
+.row:last-of-type {
+  border-radius: 0 0 6px 6px;
+}
+
+.row:hover {
+  background: var(--app-hover-soft);
+}
+
+.ctr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--app-placeholder);
+  cursor: pointer;
+}
+
+.act:hover {
+  color: var(--app-danger);
+}
+
+.add {
+  align-self: flex-start;
+  margin-top: 8px;
 }
 
 .hint {
@@ -197,10 +325,6 @@ function close(): void {
 .none {
   padding: 30px;
   text-align: center;
-}
-
-.sp {
-  flex: 1 1 auto;
 }
 
 .ft {

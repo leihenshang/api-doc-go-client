@@ -53,6 +53,26 @@ func TestCollectNames(t *testing.T) {
 	}
 }
 
+func TestCollectValues(t *testing.T) {
+	vars := map[string]string{"a": "1", "b": ""}
+	got := CollectValues("{{a}}/{{b}}/{{c}}/{{$uuid}}", vars)
+	if len(got) != 2 || got["a"] != "1" {
+		t.Fatalf("values = %v", got)
+	}
+	if v, ok := got["b"]; !ok || v != "" {
+		t.Fatalf("空值变量也算已定义，应出现在 values 里: %v", got)
+	}
+	if _, ok := got["c"]; ok {
+		t.Fatalf("未定义变量不应出现: %v", got)
+	}
+	if _, ok := got["$uuid"]; ok {
+		t.Fatalf("内置变量不应出现: %v", got)
+	}
+	if CollectValues("{{c}}", vars) != nil || CollectValues("", vars) != nil {
+		t.Fatalf("没有命中时应返回 nil")
+	}
+}
+
 // TestBuiltinsMemoized 同一文本里的同名内置变量必须同值（语义归一 D2）：
 // 迁移前每次命中都重新生成，同一个请求里会出现两个不同的 $uuid。
 func TestBuiltinsMemoized(t *testing.T) {
