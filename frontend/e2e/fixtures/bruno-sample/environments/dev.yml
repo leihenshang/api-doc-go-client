@@ -1,0 +1,15 @@
+info:
+    name: dev
+vars:
+    - name: host
+      value: __FIXTURE__
+      enabled: true
+      secret: false
+    - name: userName
+      value: ada
+      enabled: true
+      secret: false
+    - name: token
+      value: bruno-token
+      enabled: true
+      secret: false
