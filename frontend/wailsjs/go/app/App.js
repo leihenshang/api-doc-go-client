@@ -38,6 +38,10 @@ export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
 
+export function ImportCollection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ImportCollection'](arg1, arg2, arg3);
+}
+
 export function ListCookies() {
   return window['go']['app']['App']['ListCookies']();
 }

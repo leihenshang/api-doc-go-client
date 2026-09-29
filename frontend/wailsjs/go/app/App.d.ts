@@ -25,6 +25,8 @@ export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
 
 export function GetSettings():Promise<config.Settings>;
 
+export function ImportCollection(arg1:string,arg2:string,arg3:string):Promise<collection.ImportSummary>;
+
 export function ListCookies():Promise<Array<cookiejar.Info>>;
 
 export function ListEnvs():Promise<Array<collection.Env>>;
