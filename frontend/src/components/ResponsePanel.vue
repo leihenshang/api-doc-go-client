@@ -128,14 +128,17 @@ async function reloadExamples(): Promise<void> {
   }
 }
 
-/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段，不删除已有字段与含义）。 */
+/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段，不删除已有字段与含义）。
+ *  解析后停留在当前页签（响应体），避免切到字段页签让"响应消失"的错觉。 */
 function updateFields(): void {
   const { rows, added } = mergeFields(fields.value, body.value)
   fields.value = rows
   saveFields(props.tab.uid, rows)
-  seg.value = 'fields'
-  if (added > 0) message.success(t('resp.fieldsAdded', { n: added }))
-  else message.info(t('resp.fieldsNoChange'))
+  if (added > 0) {
+    message.success(t('resp.fieldsAdded', { n: added }))
+  } else {
+    message.info(t('resp.fieldsNoChange'))
+  }
 }
 
 function setMeaning(path: string, value: string): void {
