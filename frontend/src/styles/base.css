@@ -88,6 +88,10 @@ body.dragging.row * {
   --app-code-number: #0550ae;
   --app-code-boolean: #b26a00;
   --app-code-null: #8a9199;
+  /* 响应 JSON 树专用（response-panel design-spec §2）：key 绿 / 字符串橙 / 数组索引蓝 */
+  --app-json-key: #18a058;
+  --app-json-str: #d46b08;
+  --app-json-idx: #2080f0;
   /* HTTP 方法语义色：文字色 + 浅底（供 inline style 以 var() 引用） */
   --app-method-get: #18a058;
   --app-method-get-tint: #e8f5ee;
@@ -156,6 +160,10 @@ body.dragging.row * {
   --app-code-number: #79c0ff;
   --app-code-boolean: #ffa657;
   --app-code-null: #8b949e;
+  /* 响应 JSON 树专用：暗色下主绿/橙/蓝各提亮一档 */
+  --app-json-key: #36ad6a;
+  --app-json-str: #e0913f;
+  --app-json-idx: #4098fc;
   --app-method-get: #36ad6a;
   --app-method-get-tint: #1b2b22;
   --app-method-post: #4098fc;

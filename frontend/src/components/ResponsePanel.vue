@@ -1,26 +1,19 @@
 <script setup lang="ts">
-// 响应面板（design-spec §2）：响应头行「响应 · 200 OK · 12 ms · 1.2 KB」+
-// 页签（响应体 / 响应头 N / 响应字段 N）。响应体可切换「美化(JSON 树) / 原始」。
-// 字段映射不再是响应体下方的一段，而是独立页签：点「更新响应字段」才解析，且重复更新只追加新字段。
-// 保存响应（Bruno 的 Save Response）：把本次响应与请求快照写入集合 examples/，可从下拉回看与删除。
+// 响应面板（response-panel design-spec §3）：状态栏 → 标签栏 → 操作工具条 → 内容区。
+// 保存▾ 菜单（§4）：保存响应体为文件 / 保存全部字段为变量 / 保存选中值为变量（+ 保存响应示例，见有意差异），
+// 底部「作用域」chips（集合/环境/全局）决定变量落点（映射见 lib/saveVars.ts）。
 import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
-import {
-  BookmarkOutline,
-  ContractOutline,
-  CopyOutline,
-  ExpandOutline,
-  RefreshOutline,
-  SaveOutline,
-  TrashOutline,
-} from '@vicons/ionicons5'
-import { computed, ref, watch } from 'vue'
+import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import JsonViewer from '@/components/JsonViewer.vue'
+import JsonTree from '@/components/JsonTree.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
+import ResponseToolbar from '@/components/ResponseToolbar.vue'
 import { formatBytes, httpStatusText } from '@/lib/format'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
+import { extractFields, loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
+import { deriveVarName, removeVar, saveVars, scopeVarNames, VAR_NAME_RE, type VarEntry, type VarScope } from '@/lib/saveVars'
 import type { Tab } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
 
@@ -28,8 +21,11 @@ const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
 
 const view = ref<'pretty' | 'raw'>('pretty')
+const wrap = ref(true)
 const seg = ref<'body' | 'headers' | 'fields'>('body')
-const jv = ref<InstanceType<typeof JsonViewer> | null>(null)
+const scope = ref<VarScope>('env')
+const jv = ref<InstanceType<typeof JsonTree> | null>(null)
+const inlineFieldsEl = ref<HTMLElement | null>(null)
 
 const fields = ref<FieldRow[]>([])
 const examples = ref<ResponseExample[]>([])
@@ -37,25 +33,35 @@ const viewingUid = ref('') // 非空 = 正在回看已保存的示例
 const showSave = ref(false)
 const saveName = ref('')
 const copied = ref(false)
+const showVar = ref(false) // 保存选中值为变量弹窗
+const varName = ref('')
+const varValue = ref('')
 
-const example = computed(() => examples.value.find((e) => e.uid === viewingUid.value) ?? null)
+// 仅在选中了具体示例时才算"在看示例"：uid 为空/缺失一律视为本次响应，防止下拉与提示条状态错位
+const example = computed(() =>
+  viewingUid.value ? (examples.value.find((e) => e.uid === viewingUid.value) ?? null) : null,
+)
 
-/** 面板展示的响应：回看示例时用示例快照，否则用本次响应；两侧字段与布局保持一致。 */
+/** 面板展示的响应：回看示例时用示例快照，否则用本次响应。
+ *  headers/body 允许缺失（YAML omitempty、二进制等），必须归一成空值——
+ *  否则渲染期读 `.length` 会抛错，整个面板（页签内容 + 下拉）都会卡死。 */
 const display = computed<SendResult | null>(() => {
   const ex = example.value
-  if (!ex) return props.tab.response
+  if (!ex) {
+    const r = props.tab.response
+    return r ? { ...r, headers: r.headers ?? [], body: r.body ?? '' } : null
+  }
   return {
-    url: ex.request.url,
-    status: ex.response.status,
+    url: ex.request.url ?? '',
+    status: ex.response.status ?? 0,
     proto: ex.response.proto,
-    timeMs: ex.response.timeMs,
-    size: ex.response.size,
+    timeMs: ex.response.timeMs ?? 0,
+    size: ex.response.size ?? 0,
     contentType: ex.response.contentType,
     binary: ex.response.binary,
-    headers: ex.response.headers,
-    body: ex.response.body,
-    // 无脚本产物：example 快照未存 script
-    script: null,
+    headers: ex.response.headers ?? [],
+    body: ex.response.body ?? '',
+    script: null, // example 快照未存脚本产物
   }
 })
 
@@ -76,7 +82,7 @@ const rawText = computed(() => {
   }
 })
 
-const headerCount = computed(() => display.value?.headers.length ?? 0)
+const headerCount = computed(() => display.value?.headers?.length ?? 0)
 
 const statusType = computed<'success' | 'warning' | 'error'>(() => {
   const s = display.value?.status ?? 0
@@ -98,25 +104,39 @@ const meta = computed(() => {
 
 const exampleOptions = computed(() => [
   { label: t('resp.liveResponse'), value: '' },
-  ...examples.value.map((e) => ({ label: e.name, value: e.uid })),
+  ...examples.value.filter((e) => !!e.uid).map((e) => ({ label: e.name, value: e.uid })),
 ])
 
-// 切换请求：换用该请求的字段存档与示例列表
+const scopeLabel = computed(
+  () =>
+    ({ collection: t('resp.scopeCollection'), env: t('resp.scopeEnv'), global: t('resp.scopeGlobal') })[scope.value],
+)
+
+/** 当前作用域下已保存为变量的变量名（书签判定依据）。 */
+const scopeNames = computed(() => scopeVarNames(scope.value, props.tab))
+/** 已书签的字段路径集合（供字段表点亮）。 */
+const bookmarks = computed(
+  () => new Set(fields.value.filter((f) => scopeNames.value.has(deriveVarName(f.path))).map((f) => f.path)),
+)
+
+// 切换请求：换用该请求的字段存档与示例列表，页签回到「响应体」
 watch(
   () => props.tab.uid,
   (uid) => {
     fields.value = loadFields(uid)
     viewingUid.value = ''
+    seg.value = 'body'
     void reloadExamples()
   },
   { immediate: true },
 )
 
-// 重新发送后回到本次响应，不停留在旧示例上
+// 重新发送后回到本次响应并复位页签，避免新响应体"消失"
 watch(
   () => props.tab.response,
   () => {
     viewingUid.value = ''
+    seg.value = 'body'
   },
 )
 
@@ -128,16 +148,23 @@ async function reloadExamples(): Promise<void> {
   }
 }
 
-/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段，不删除已有字段与含义）。
- *  解析后停留在当前页签（响应体），避免切到字段页签让"响应消失"的错觉。 */
+/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段与含义），停留在当前页签。
+ *  任何失败只提示，不允许抛错中断渲染（否则面板内容与下拉会整体卡死）。 */
 function updateFields(): void {
-  const { rows, added } = mergeFields(fields.value, body.value)
-  fields.value = rows
-  saveFields(props.tab.uid, rows)
-  if (added > 0) {
-    message.success(t('resp.fieldsAdded', { n: added }))
-  } else {
-    message.info(t('resp.fieldsNoChange'))
+  try {
+    const { rows, added } = mergeFields(fields.value, body.value)
+    fields.value = rows
+    saveFields(props.tab.uid, rows)
+    if (added > 0) {
+      message.success(t('resp.fieldsAdded', { n: added }))
+    } else {
+      message.info(t('resp.fieldsNoChange'))
+    }
+    if (seg.value === 'body') {
+      void nextTick(() => inlineFieldsEl.value?.scrollIntoView({ block: 'nearest' }))
+    }
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -167,7 +194,7 @@ function openSave(): void {
   showSave.value = true
 }
 
-/** 保存响应：请求快照取当前草稿，响应取本次结果（回看示例时不重复保存）。 */
+/** 保存响应示例：请求快照取当前草稿，响应取本次结果（回看示例时不重复保存）。 */
 async function submitSave(): Promise<void> {
   const name = saveName.value.trim()
   const res = props.tab.response
@@ -203,17 +230,84 @@ async function copyBody(): Promise<void> {
   setTimeout(() => (copied.value = false), 1200)
 }
 
-/** E21：把响应体保存到本地（二进制自动 base64 解码）。 */
+/** 保存响应体为文件（JSON → .json，二进制 base64 解码 → .bin）。 */
 async function saveBody(): Promise<void> {
   const d = display.value
   if (!d) return
-  const ext = d.binary ? 'bin' : 'txt'
+  const ext = d.binary ? 'bin' : isJson.value ? 'json' : 'txt'
   const name = `response-${d.status || 'body'}.${ext}`
   try {
     const path = await api.saveResponseBody(name, d.binary, d.body)
     if (path) message.success(t('resp.savedFile', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** 统一变量写入 + 提示；无环境等前置条件不满足时给引导。 */
+async function applyVars(entries: VarEntry[]): Promise<void> {
+  if (!entries.length) {
+    message.info(t('resp.varNoFields'))
+    return
+  }
+  try {
+    await saveVars(scope.value, props.tab, entries)
+    message.success(t('resp.varsSaved', { n: entries.length, scope: scopeLabel.value }))
+  } catch (e) {
+    if (e instanceof Error && e.message === 'no-env') message.warning(t('resp.varNoEnv'))
+    else message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** 保存全部字段为变量：对当前响应体的叶子字段按路径派生变量名。 */
+async function saveAllVars(): Promise<void> {
+  const rows = extractFields(body.value).filter((r) => r.type !== 'array' && r.type !== 'object')
+  await applyVars(rows.map((r) => ({ name: deriveVarName(r.path), value: r.value })))
+}
+
+/** 保存选中值为变量：取面板内当前文本选区，弹窗确认变量名。 */
+function openVarModal(): void {
+  const sel = window.getSelection()?.toString() ?? ''
+  if (!sel.trim()) {
+    message.info(t('resp.selectFirst'))
+    return
+  }
+  varValue.value = sel
+  const token = sel.trim()
+  varName.value = VAR_NAME_RE.test(token) && token.length <= 60 ? token : ''
+  showVar.value = true
+}
+
+async function submitVar(): Promise<void> {
+  const name = varName.value.trim()
+  if (!VAR_NAME_RE.test(name)) {
+    message.warning(t('resp.varNameInvalid'))
+    return
+  }
+  showVar.value = false
+  await applyVars([{ name, value: varValue.value }])
+}
+
+/** 字段行「变量书签」：已书签 → 删变量；未书签 → 按当前作用域保存字段值。 */
+async function toggleBookmark(path: string): Promise<void> {
+  const name = deriveVarName(path)
+  try {
+    if (scopeNames.value.has(name)) {
+      await removeVar(scope.value, props.tab, name)
+      message.success(t('resp.varRemoved', { name }))
+      return
+    }
+    const row = fields.value.find((r) => r.path === path)
+    if (!row) return
+    if (row.type === 'array' || row.type === 'object') {
+      message.info(t('resp.varBookmarkLeaf'))
+      return
+    }
+    await saveVars(scope.value, props.tab, [{ name, value: row.value }])
+    message.success(t('resp.varSaved', { name, scope: scopeLabel.value }))
+  } catch (e) {
+    if (e instanceof Error && e.message === 'no-env') message.warning(t('resp.varNoEnv'))
+    else message.error(e instanceof Error ? e.message : String(e))
   }
 }
 </script>
@@ -223,88 +317,68 @@ async function saveBody(): Promise<void> {
     <n-alert v-if="tab.error" type="error" :bordered="false" class="err">{{ tab.error }}</n-alert>
 
     <template v-else-if="display">
-      <!-- 第 1 排：状态信息 + 示例选择 -->
-      <div class="head">
-        <div class="info">
-          <span class="ttl">{{ t('resp.title') }}</span>
-          <n-tag
-            :type="statusType"
-            size="small"
-            :bordered="false"
-            class="badge"
-            data-testid="resp.status"
-            :title="display.proto"
-          >
-            {{ statusLabel }}
-          </n-tag>
-          <span class="meta mono">{{ meta }}</span>
-        </div>
-        <span class="sp" />
-        <!-- 响应切换下拉：始终显示，方便随时回看历史示例 -->
-        <n-select
-          :value="viewingUid"
-          :options="exampleOptions"
-          size="tiny"
-          class="expick"
-          data-testid="resp.examples"
-          :title="t('resp.examples')"
-          @update:value="viewingUid = $event"
-        />
-        <n-popconfirm v-if="example" @positive-click="removeExample">
-          <template #trigger>
-            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
-              <n-icon :component="TrashOutline" :size="13" />
-            </button>
-          </template>
-          {{ t('resp.deleteConfirm', { name: example.name }) }}
-        </n-popconfirm>
+      <!-- 状态栏：响应 · 200 OK · 12 ms · 1.2 KB -->
+      <div class="status-bar">
+        <span class="ttl">{{ t('resp.title') }}</span>
+        <n-tag :type="statusType" size="small" :bordered="false" class="badge" data-testid="resp.status" :title="display.proto">
+          {{ statusLabel }}
+        </n-tag>
+        <span class="meta mono">{{ meta }}</span>
       </div>
 
-      <!-- 第 2 排：视图 + 字段 + 保存/复制（放不下自动换行到第 3 排） -->
-      <div class="head ops-row">
-        <div class="ops">
-          <template v-if="seg === 'body' && isJson">
-            <button class="toggle" :class="{ on: view === 'pretty' }" type="button" data-testid="resp.pretty" @click="view = 'pretty'">
-              {{ t('resp.pretty') }}
-            </button>
-            <button class="toggle" :class="{ on: view === 'raw' }" type="button" data-testid="resp.raw" @click="view = 'raw'">
-              {{ t('resp.raw') }}
-            </button>
-            <span class="div" />
-            <button v-if="view === 'pretty'" class="toggle" type="button" data-testid="resp.expandAll" :title="t('json.expandAll')" @click="jv?.expandAll()">
-              <n-icon :component="ExpandOutline" :size="14" />
-            </button>
-            <button v-if="view === 'pretty'" class="toggle" type="button" data-testid="resp.collapseAll" :title="t('json.collapseAll')" @click="jv?.collapseAll()">
-              <n-icon :component="ContractOutline" :size="14" />
-            </button>
-          </template>
-          <span v-if="seg === 'body' && isJson" class="div" />
-          <button
-            v-if="isJson && (seg === 'body' || seg === 'fields')"
-            class="toggle"
-            type="button"
-            data-testid="resp.updateFields"
-            :title="t('resp.updateFieldsHint')"
-            @click="updateFields"
-          >
-            <n-icon :component="RefreshOutline" :size="13" />
-            {{ t('resp.updateFields') }}
-          </button>
-          <span class="div" />
-          <button v-if="!example" class="toggle" type="button" data-testid="resp.save" :title="t('resp.saveHint')" @click="openSave">
-            <n-icon :component="SaveOutline" :size="13" />
-            {{ t('resp.save') }}
-          </button>
-          <button class="toggle" type="button" data-testid="resp.copyBody" @click="copyBody">
-            <n-icon :component="CopyOutline" :size="13" />
-            {{ copied ? t('common.copied') : t('resp.copyBody') }}
-          </button>
-          <button v-if="!example" class="toggle" type="button" data-testid="resp.saveBody" :title="t('resp.saveBody')" @click="saveBody">
-            <n-icon :component="SaveOutline" :size="13" />
-            {{ t('resp.saveBody') }}
-          </button>
-        </div>
+      <!-- 标签栏：响应体 / 响应头 N / 响应字段 N + 请求 URL -->
+      <div class="seg">
+        <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body" @click="seg = 'body'">
+          {{ t('resp.body') }}
+        </button>
+        <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab" data-seg="headers" @click="seg = 'headers'">
+          {{ t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
+        </button>
+        <button class="seg-tab" :class="{ on: seg === 'fields' }" type="button" data-testid="resp.tab" data-seg="fields" @click="seg = 'fields'">
+          {{ t('resp.fieldsTab') }}<span v-if="fields.length" class="num">{{ fields.length }}</span>
+        </button>
+        <span class="url mono" data-testid="resp.url" :title="display.url">{{ display.url }}</span>
       </div>
+
+      <response-toolbar
+        v-model:view="view"
+        v-model:wrap="wrap"
+        :is-json="isJson"
+        :copied="copied"
+        :scope="scope"
+        :can-save-example="!example && !!tab.response"
+        @expand-all="jv?.expandAll()"
+        @collapse-all="jv?.collapseAll()"
+        @update-fields="updateFields"
+        @copy-body="copyBody"
+        @update:scope="scope = $event"
+        @save-file="saveBody"
+        @save-all-vars="saveAllVars"
+        @save-selected-var="openVarModal"
+        @save-example="openSave"
+      >
+        <!-- 响应下拉 + 删除：排在「更新响应字段 / 复制响应体」这一组的最前面（从状态栏移入） -->
+        <template #leading>
+          <n-select
+            :value="viewingUid"
+            :options="exampleOptions"
+            size="tiny"
+            class="expick"
+            data-testid="resp.examples"
+            :title="t('resp.examples')"
+            @update:value="viewingUid = String($event ?? '')"
+          />
+          <n-popconfirm v-if="example" @positive-click="removeExample">
+            <template #trigger>
+              <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
+                <n-icon :component="TrashOutline" :size="13" />
+                <span>{{ t('common.delete') }}</span>
+              </button>
+            </template>
+            {{ t('resp.deleteConfirm', { name: example.name }) }}
+          </n-popconfirm>
+        </template>
+      </response-toolbar>
 
       <div v-if="example" class="exnote" data-testid="resp.exnote">
         <n-icon :component="BookmarkOutline" :size="13" />
@@ -314,53 +388,13 @@ async function saveBody(): Promise<void> {
         </button>
       </div>
 
-      <div class="seg">
-        <button
-          class="seg-tab"
-          :class="{ on: seg === 'body' }"
-          type="button"
-          data-testid="resp.tab"
-          data-seg="body"
-          @click="seg = 'body'"
-        >
-          {{ t('resp.body') }}
-        </button>
-        <button
-          class="seg-tab"
-          :class="{ on: seg === 'headers' }"
-          type="button"
-          data-testid="resp.tab"
-          data-seg="headers"
-          @click="seg = 'headers'"
-        >
-          {{ t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
-        </button>
-        <button
-          class="seg-tab"
-          :class="{ on: seg === 'fields' }"
-          type="button"
-          data-testid="resp.tab"
-          data-seg="fields"
-          @click="seg = 'fields'"
-        >
-          {{ t('resp.fieldsTab') }}<span v-if="fields.length" class="num">{{ fields.length }}</span>
-        </button>
-        <span class="url mono" data-testid="resp.url" :title="display.url">{{ display.url }}</span>
-      </div>
-
       <div class="pane">
         <template v-if="seg === 'body'">
           <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
             {{ display.script.scriptError }}
           </div>
           <div v-if="display.script?.asserts?.length" class="asserts" data-testid="resp.asserts">
-            <div
-              v-for="(a, i) in display.script.asserts"
-              :key="i"
-              class="arow"
-              :class="a.passed ? 'ok' : 'fail'"
-              data-testid="resp.assert"
-            >
+            <div v-for="(a, i) in display.script.asserts" :key="i" class="arow" :class="a.passed ? 'ok' : 'fail'" data-testid="resp.assert">
               <span class="astate">{{ a.passed ? '✓' : '✗' }}</span>
               <span class="aname">{{ a.name || a.expr }}</span>
               <span class="aexpr mono">{{ a.expr }}</span>
@@ -368,11 +402,23 @@ async function saveBody(): Promise<void> {
             </div>
           </div>
           <div v-if="display.binary" class="binhint">{{ t('resp.binary') }}</div>
-          <json-viewer v-if="isJson && view === 'pretty'" ref="jv" :text="display.body" />
-          <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
+          <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
+          <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
+          <!-- 字段表就地展示在响应体下方：点「更新响应字段」后响应体不消失、字段紧跟其后 -->
+          <div v-if="fields.length" ref="inlineFieldsEl" class="inline-fields">
+            <response-fields
+              :rows="fields"
+              :bookmarks="bookmarks"
+              @meaning="setMeaning"
+              @bookmark="toggleBookmark"
+              @remove="removeField"
+              @remove-many="removeMany"
+              @clear="clearFields"
+            />
+          </div>
         </template>
         <div v-else-if="seg === 'headers'" class="hlist">
-          <div v-for="h in display.headers" :key="h.name" class="hrow mono">
+          <div v-for="h in display.headers" :key="h.name" class="hrow mono" data-testid="resp.headerRow">
             <span class="hn">{{ h.name }}</span>
             <span class="hv">{{ h.value }}</span>
           </div>
@@ -380,7 +426,9 @@ async function saveBody(): Promise<void> {
         <response-fields
           v-else
           :rows="fields"
+          :bookmarks="bookmarks"
           @meaning="setMeaning"
+          @bookmark="toggleBookmark"
           @remove="removeField"
           @remove-many="removeMany"
           @clear="clearFields"
@@ -402,13 +450,7 @@ async function saveBody(): Promise<void> {
         <li><kbd>Ctrl</kbd> + <kbd>S</kbd><span>{{ t('resp.saveNowHint') }}</span></li>
       </ul>
       <div v-if="examples.length" class="empty-ex">
-        <n-select
-          :value="viewingUid"
-          :options="exampleOptions"
-          size="small"
-          style="width: 220px"
-          @update:value="viewingUid = $event"
-        />
+        <n-select :value="viewingUid" :options="exampleOptions" size="small" style="width: 220px" @update:value="viewingUid = $event" />
       </div>
     </div>
 
@@ -418,6 +460,7 @@ async function saveBody(): Promise<void> {
         <n-input
           v-model:value="saveName"
           size="small"
+          data-testid="resp.exampleNameInput"
           :placeholder="t('resp.exampleNamePlaceholder')"
           @keyup.enter="submitSave"
         />
@@ -426,7 +469,30 @@ async function saveBody(): Promise<void> {
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" @click="showSave = false">{{ t('common.cancel') }}</n-button>
-          <n-button size="small" type="primary" :disabled="!saveName.trim()" @click="submitSave">
+          <n-button size="small" type="primary" :disabled="!saveName.trim()" @click="submitSave">{{ t('common.save') }}</n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- 保存选中值为变量：变量名 + 值预览 + 当前作用域 -->
+    <n-modal v-model:show="showVar" preset="card" :title="t('resp.saveSelectedVar')" style="width: 440px">
+      <div class="save-form">
+        <span class="flabel">{{ t('resp.varName') }}</span>
+        <n-input
+          v-model:value="varName"
+          size="small"
+          data-testid="resp.varNameInput"
+          :placeholder="t('resp.varNamePlaceholder')"
+          @keyup.enter="submitVar"
+        />
+        <span class="flabel">{{ t('resp.value') }}</span>
+        <pre class="var-preview mono" data-testid="resp.varValue">{{ varValue }}</pre>
+        <p class="fhint">{{ t('resp.scope') }}：{{ scopeLabel }}</p>
+      </div>
+      <template #footer>
+        <div class="modal-ft">
+          <n-button size="small" @click="showVar = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" type="primary" :disabled="!VAR_NAME_RE.test(varName.trim())" @click="submitVar">
             {{ t('common.save') }}
           </n-button>
         </div>
@@ -442,53 +508,20 @@ async function saveBody(): Promise<void> {
   height: 100%;
   min-height: 0;
   padding: 8px 10px 8px;
-  gap: 0;
 }
 
 .err {
   margin-bottom: 8px;
 }
 
-.head {
+.status-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-  row-gap: 4px;
   flex: 0 0 auto;
   min-width: 0;
-  padding-bottom: 2px;
-}
-
-/* 第 2 排：操作按钮，允许换到第 3 排 */
-.ops-row {
-  overflow: visible;
-  padding-bottom: 6px;
+  height: 44px;
   border-bottom: 1px solid var(--app-border);
-}
-
-.info {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.ops {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.ops .div {
-  width: 1px;
-  height: 13px;
-  background: var(--app-border);
-  margin: 0 2px;
 }
 
 .ttl {
@@ -536,12 +569,6 @@ async function saveBody(): Promise<void> {
   color: var(--app-accent);
 }
 
-.toggle.on {
-  border-color: var(--app-accent);
-  color: var(--app-accent);
-  background: var(--app-accent-tint);
-}
-
 .toggle.danger:hover {
   border-color: var(--app-danger);
   color: var(--app-danger);
@@ -580,8 +607,7 @@ async function saveBody(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-top: 0;
-  padding-top: 6px;
+  height: 40px;
   border-bottom: 1px solid var(--app-border);
   flex: 0 0 auto;
   overflow-x: auto;
@@ -649,6 +675,10 @@ async function saveBody(): Promise<void> {
   margin-bottom: 6px;
 }
 
+.binhint.warn {
+  color: var(--app-danger);
+}
+
 .asserts {
   display: flex;
   flex-direction: column;
@@ -671,7 +701,7 @@ async function saveBody(): Promise<void> {
 }
 
 .asserts .arow.fail {
-  border-color: var(--app-danger, #d03050);
+  border-color: var(--app-danger);
 }
 
 .asserts .astate {
@@ -691,7 +721,7 @@ async function saveBody(): Promise<void> {
 }
 
 .asserts .aerr {
-  color: var(--app-danger, #d03050);
+  color: var(--app-danger);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -708,6 +738,15 @@ async function saveBody(): Promise<void> {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.raw.nowrap {
+  white-space: pre;
+  word-break: normal;
+}
+
+.inline-fields {
+  margin-top: 10px;
 }
 
 .hlist {
@@ -799,6 +838,19 @@ async function saveBody(): Promise<void> {
   margin: 0;
   font-size: 11.5px;
   color: var(--app-muted);
+}
+
+.var-preview {
+  margin: 0;
+  max-height: 120px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .modal-ft {

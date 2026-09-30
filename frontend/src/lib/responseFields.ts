@@ -4,6 +4,8 @@
 export interface FieldRow {
   path: string
   type: string
+  /** 字段取值（叶子为原始值文本，容器为空串）；用于「值」列与保存为变量 */
+  value: string
   /** 本地标注的含义，不写回集合文件 */
   meaning: string
 }
@@ -36,10 +38,10 @@ export function extractFields(text: string): FieldRow[] {
   const out: FieldRow[] = []
   const seen = new Set<string>()
 
-  const push = (path: string, type: string): void => {
+  const push = (path: string, type: string, value = ''): void => {
     if (seen.has(path)) return
     seen.add(path)
-    out.push({ path, type, meaning: '' })
+    out.push({ path, type, value, meaning: '' })
   }
 
   const walk = (v: unknown, path: string, depth: number): void => {
@@ -73,7 +75,7 @@ export function extractFields(text: string): FieldRow[] {
     }
 
     // 叶子
-    if (path) push(path, typeName(v))
+    if (path) push(path, typeName(v), String(v))
   }
 
   walk(data, '', 0)
@@ -89,6 +91,7 @@ export function mergeFields(rows: FieldRow[], text: string): { rows: FieldRow[];
     const exist = index.get(field.path)
     if (exist) {
       exist.type = field.type
+      exist.value = field.value
       continue
     }
     index.set(field.path, field)
@@ -110,13 +113,19 @@ export function loadFields(uid: string): FieldRow[] {
   if (Array.isArray(raw)) {
     return raw
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-      .map((x) => ({ path: String(x.path ?? ''), type: String(x.type ?? ''), meaning: String(x.meaning ?? '') }))
+      .map((x) => ({
+        path: String(x.path ?? ''),
+        type: String(x.type ?? ''),
+        value: String(x.value ?? ''),
+        meaning: String(x.meaning ?? ''),
+      }))
       .filter((x) => x.path !== '')
   }
   if (raw && typeof raw === 'object') {
     return Object.entries(raw as Record<string, unknown>).map(([path, meaning]) => ({
       path,
       type: '',
+      value: '',
       meaning: String(meaning ?? ''),
     }))
   }

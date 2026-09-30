@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// JSON 查看器：序列化展示（缩进 + 类型着色 + 节点折叠），非 JSON 时由调用方回退纯文本。
-// 大响应加行数上限，避免一次渲染上万行卡住界面。
+// JSON 树（response-panel design-spec §3/§4）：行高 24、每级缩进 20px、hover 行圆角 4；
+// key 绿 / 字符串橙 / 数组索引蓝 / 折叠箭头灰 10×10。非 JSON 由调用方回退纯文本。
+// 大响应保留行数上限，避免一次渲染上万行卡住界面。
 import { NIcon } from 'naive-ui'
 import { ChevronDownOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 import { computed, ref } from 'vue'
@@ -8,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 
 const MAX_ROWS = 2000
 
-const props = defineProps<{ text: string }>()
+const props = defineProps<{ text: string; wrap: boolean }>()
 const { t } = useI18n()
 
 const collapsed = ref(new Set<string>())
@@ -17,6 +18,8 @@ interface Row {
   depth: number
   path: string
   key: string
+  /** 数组下标：着索引蓝 */
+  isIndex: boolean
   /** 折叠节点显示 {…} / […] 与子项数量 */
   value: string
   type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
@@ -70,7 +73,7 @@ const rows = computed<Row[]>(() => {
   if (!parsed.value.ok) return out
   const data = parsed.value.value
 
-  const walk = (v: unknown, key: string, depth: number, path: string, last: boolean): void => {
+  const walk = (v: unknown, key: string, depth: number, path: string, last: boolean, isIndex: boolean): void => {
     if (out.length >= MAX_ROWS) return
     const type = typeOf(v)
     const expandable = type === 'object' || type === 'array'
@@ -79,6 +82,7 @@ const rows = computed<Row[]>(() => {
       depth,
       path,
       key,
+      isIndex,
       type,
       expandable,
       open: isOpen,
@@ -86,19 +90,19 @@ const rows = computed<Row[]>(() => {
       tail: last ? '' : ',',
     })
     if (!expandable || !isOpen) return
-    const entries: [string, unknown][] = Array.isArray(v)
-      ? v.map((x, i) => [String(i), x] as [string, unknown])
-      : Object.entries(v as Record<string, unknown>)
-    entries.forEach(([k, child], i) => {
-      walk(child, k, depth + 1, `${path}/${k}`, i === entries.length - 1)
+    const entries: [string, unknown, boolean][] = Array.isArray(v)
+      ? v.map((x, i) => [String(i), x, true] as [string, unknown, boolean])
+      : Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, x, false] as [string, unknown, boolean])
+    entries.forEach(([k, child, idx], i) => {
+      walk(child, k, depth + 1, `${path}/${k}`, i === entries.length - 1, idx)
     })
   }
 
   const rootType = typeOf(data)
   if (rootType === 'object' || rootType === 'array') {
-    walk(data, '', 0, '$', true)
+    walk(data, '', 0, '$', true, false)
   } else {
-    out.push({ depth: 0, path: '$', key: '', type: rootType, expandable: false, open: false, value: display(data), tail: '' })
+    out.push({ depth: 0, path: '$', key: '', isIndex: false, type: rootType, expandable: false, open: false, value: display(data), tail: '' })
   }
   return out
 })
@@ -127,19 +131,19 @@ defineExpose({ collapseAll, expandAll })
 </script>
 
 <template>
-  <div class="jv mono">
+  <div class="jt mono" :class="{ wrap }" data-testid="resp.json">
     <div v-if="!parsed.ok" class="muted hint">{{ t('json.invalid') }}</div>
     <template v-else>
       <div v-for="(row, i) in rows" :key="i" class="jr" :title="row.path">
-        <span class="indent" :style="{ width: row.depth * 14 + 'px' }" />
+        <span class="indent" :style="{ width: row.depth * 20 + 'px' }" />
         <span class="caret" :class="{ dim: !row.expandable }" @click="toggle(row)">
           <n-icon
             v-if="row.expandable"
             :component="row.open ? ChevronDownOutline : ChevronForwardOutline"
-            :size="12"
+            :size="10"
           />
         </span>
-        <span v-if="row.key !== ''" class="k">{{ row.key }}</span>
+        <span v-if="row.key !== ''" class="k" :class="{ idx: row.isIndex }">{{ row.key }}</span>
         <span v-if="row.key !== ''" class="colon">:</span>
         <span class="v" :class="row.type">{{ row.value }}</span>
         <span class="tail">{{ row.tail }}</span>
@@ -150,16 +154,26 @@ defineExpose({ collapseAll, expandAll })
 </template>
 
 <style scoped>
-.jv {
+.jt {
   font-size: 12px;
-  line-height: 1.55;
-  padding: 8px 10px;
+  line-height: 24px;
+  padding: 12px 16px;
 }
 
 .jr {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  height: 24px;
   white-space: pre;
+  border-radius: 4px;
+}
+
+/* 换行开关：打开后长值折行，行高放开 */
+.jt.wrap .jr {
+  height: auto;
+  min-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .jr:hover {
@@ -172,20 +186,27 @@ defineExpose({ collapseAll, expandAll })
 
 .caret {
   width: 12px;
+  height: 10px;
   flex: 0 0 auto;
   color: var(--app-muted);
   cursor: pointer;
   font-size: 10px;
   text-align: center;
+  display: inline-flex;
+  align-items: center;
 }
 
 .caret.dim {
   cursor: default;
 }
 
-/* 代码着色对齐 design-spec §1（code-key / code-string） */
+/* 着色对齐 response-panel design-spec §2：key 绿 / 字符串橙 / 数组索引蓝 */
 .k {
-  color: var(--app-code-key);
+  color: var(--app-json-key);
+}
+
+.k.idx {
+  color: var(--app-json-idx);
 }
 
 .colon {
@@ -194,7 +215,7 @@ defineExpose({ collapseAll, expandAll })
 }
 
 .v.string {
-  color: var(--app-code-string);
+  color: var(--app-json-str);
 }
 
 .v.number {

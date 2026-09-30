@@ -12,6 +12,12 @@ const PING_UID = '33333333-3333-4333-8333-333333333333'
 const exampleModal = (page: Page) =>
   page.locator('.n-modal').filter({ has: page.getByPlaceholder(t('resp.exampleNamePlaceholder')) })
 
+// 响应示例保存入口收进「保存 ▾」菜单（response-panel 设计稿）：点触发器再点菜单项
+async function openSaveExample(page: Page) {
+  await page.getByTestId('resp.save').click()
+  await page.getByTestId('resp.saveExample').click()
+}
+
 async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url: string) {
   const { patchRequest } = await import('../helpers/api')
   await patchRequest(app, PING_UID, { url })
@@ -29,6 +35,8 @@ test.describe('响应区：字段映射与响应示例', () => {
     await sendUrl(page, app, '{{host}}/json/withArray')
     await page.getByTestId('resp.updateFields').click()
     const rows = page.getByTestId('resp.fields.row')
+    await expect(rows.first()).toBeVisible() // 字段就地出现在响应体下方
+    await expect(page.getByTestId('resp.json')).toBeVisible() // 回归：更新字段不切页签，响应体不消失
     const count = await rows.count()
     expect(count).toBeGreaterThan(0) // 叶子字段：items.0.id / items.0.name / items.1.id / items.1.name / total
     await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsAdded', { n: count }))
@@ -57,7 +65,7 @@ test.describe('响应区：字段映射与响应示例', () => {
     await expect(page.getByTestId('resp.status')).toContainText('200')
 
     const name = '成功示例'
-    await page.getByTestId('resp.save').click()
+    await openSaveExample(page)
     await exampleModal(page).locator('input').first().fill(name)
     await exampleModal(page).getByRole('button', { name: t('common.save'), exact: true }).click()
 
@@ -68,7 +76,7 @@ test.describe('响应区：字段映射与响应示例', () => {
 
     // 同名再存一次 → 自动加序号
     await page.getByTestId('resp.backToLive').click()
-    await page.getByTestId('resp.save').click()
+    await openSaveExample(page)
     await exampleModal(page).locator('input').first().fill(name)
     await exampleModal(page).getByRole('button', { name: t('common.save'), exact: true }).click()
     await expect.poll(() => existsSync(path.join(dir, `examples/api/ping/${name} (1).yml`))).toBe(true)
@@ -89,5 +97,26 @@ test.describe('响应区：字段映射与响应示例', () => {
 
     await expect.poll(() => existsSync(path.join(dir, exampleFile))).toBe(false)
     expect(readdirSync(path.join(dir, '.trash')).some((f) => f.includes(name))).toBe(true)
+  })
+
+  // 回归：回看示例（快照可能缺 headers/body 字段）时点「更新响应字段」，
+  // 曾把整个面板渲染打断——三个页签内容全空白、响应下拉卡住不收
+  test('[E23] 回看示例时更新响应字段，响应体/响应头/响应字段都可见', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await sendUrl(page, app, '{{host}}/json/flat')
+
+    await openSaveExample(page)
+    await exampleModal(page).locator('input').first().fill('回看快照')
+    await exampleModal(page).getByRole('button', { name: t('common.save'), exact: true }).click()
+    await expect(page.getByTestId('resp.exnote')).toBeVisible()
+
+    await page.getByTestId('resp.updateFields').click()
+    await expect(page.getByTestId('resp.json')).toBeVisible() // 响应体
+    await openRespTab(page, 'headers')
+    await expect(page.getByTestId('resp.headerRow').first()).toBeVisible() // 响应头
+    await openRespTab(page, 'fields')
+    await expect(page.getByTestId('resp.fields.row').first()).toBeVisible() // 响应字段
   })
 })
