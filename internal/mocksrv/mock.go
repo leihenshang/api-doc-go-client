@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"api-doc-go-client/internal/collection"
-	"github.com/zqstudio/api-doc-go-share/mock"
+	"github.com/leihenshang/api-doc-go-share/mock"
 )
 
 // Server 本地 Mock HTTP 服务。

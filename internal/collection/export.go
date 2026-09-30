@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	share "github.com/zqstudio/api-doc-go-share/collection"
+	share "github.com/leihenshang/api-doc-go-share/collection"
 )
 
 // ListAllRequests 列出全部请求（供本地 Mock 匹配用）。

@@ -115,8 +115,8 @@ function formatUrl(): void {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: 4px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--app-border);
   background: var(--app-panel);
 }
@@ -124,11 +124,11 @@ function formatUrl(): void {
 .req-line {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .method {
-  width: 118px;
+  width: 110px;
   flex: 0 0 auto;
 }
 

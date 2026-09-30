@@ -438,7 +438,8 @@ async function saveBody(): Promise<void> {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 10px 12px 10px;
+  padding: 8px 10px 8px;
+  gap: 0;
 }
 
 .err {
@@ -448,22 +449,25 @@ async function saveBody(): Promise<void> {
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  row-gap: 6px;
+  row-gap: 4px;
   flex: 0 0 auto;
   min-width: 0;
+  padding-bottom: 2px;
 }
 
 /* 第 2 排：操作按钮，允许换到第 3 排 */
 .ops-row {
   overflow: visible;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .info {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -472,20 +476,20 @@ async function saveBody(): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex: 1 1 auto;
   min-width: 0;
 }
 
 .ops .div {
   width: 1px;
-  height: 14px;
+  height: 13px;
   background: var(--app-border);
   margin: 0 2px;
 }
 
 .ttl {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--app-text);
   flex: 0 0 auto;
@@ -498,7 +502,7 @@ async function saveBody(): Promise<void> {
 }
 
 .meta {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--app-muted);
   white-space: nowrap;
   flex: 0 0 auto;
@@ -511,13 +515,13 @@ async function saveBody(): Promise<void> {
 .toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid var(--app-border);
   background: var(--app-panel);
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-family: inherit;
-  padding: 2px 9px;
+  padding: 2px 7px;
   cursor: pointer;
   color: var(--app-text-2);
   white-space: nowrap;
@@ -572,23 +576,37 @@ async function saveBody(): Promise<void> {
 .seg {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 2px;
+  margin-top: 0;
+  padding-top: 6px;
   border-bottom: 1px solid var(--app-border);
   flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  height: 0;
 }
 
 .seg-tab {
+  position: relative;
   border: none;
   background: none;
   padding: 7px 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.seg-tab:hover {
+  color: var(--app-text);
+  background: var(--app-row-hover);
 }
 
 .seg-tab.on {
@@ -606,19 +624,20 @@ async function saveBody(): Promise<void> {
 .url {
   flex: 1 1 auto;
   margin-left: 8px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
+  min-width: 0;
 }
 
 .pane {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .binhint {

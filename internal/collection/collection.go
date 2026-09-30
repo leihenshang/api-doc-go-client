@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	share "github.com/zqstudio/api-doc-go-share/collection"
+	share "github.com/leihenshang/api-doc-go-share/collection"
 
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/index"
