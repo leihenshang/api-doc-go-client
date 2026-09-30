@@ -5,14 +5,17 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import { api } from '@/lib/ipc'
+import { message } from '@/lib/notice'
+import { useCollectionStore } from '@/stores/collection'
 import type { HistoryEntry } from '@/types'
 
 const props = defineProps<{ show: boolean }>()
-const emit = defineEmits<{ 'update:show': [v: boolean]; open: [uid: string] }>()
+const emit = defineEmits<{ 'update:show': [v: boolean]; open: [uid: string]; replayed: [] }>()
 const { t } = useI18n()
 
 const items = ref<HistoryEntry[]>([])
 const error = ref('')
+const replaying = ref(-1)
 
 watch(
   () => props.show,
@@ -43,6 +46,23 @@ function pick(e: HistoryEntry): void {
   if (!e.uid) return
   emit('open', e.uid)
   emit('update:show', false)
+}
+
+/** E22：用历史快照原样重发（index 与 items 一致）。 */
+async function replay(i: number): Promise<void> {
+  replaying.value = i
+  error.value = ''
+  try {
+    const coll = useCollectionStore()
+    await api.replayHistory(i, coll.currentEnv)
+    message.success(t('history.replayed'))
+    emit('replayed')
+    emit('update:show', false)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    replaying.value = -1
+  }
 }
 
 function clock(ms: number): string {
@@ -80,6 +100,17 @@ function statusClass(e: HistoryEntry): string {
         <span class="meta">{{ e.timeMs }} ms</span>
         <span class="meta">{{ e.size }} B</span>
         <span class="time muted">{{ clock(e.time) }}</span>
+        <button
+          v-if="e.request"
+          class="rp"
+          type="button"
+          data-testid="history.replay"
+          :title="t('history.replay')"
+          :disabled="replaying === i"
+          @click.stop="replay(i)"
+        >
+          {{ replaying === i ? t('editor.sending') : t('history.replay') }}
+        </button>
       </div>
     </div>
   </n-modal>
@@ -111,6 +142,27 @@ function statusClass(e: HistoryEntry): string {
   padding: 5px 6px;
   border-radius: 5px;
   font-size: 12.5px;
+}
+
+.rp {
+  border: 1px solid var(--app-border);
+  background: var(--app-panel);
+  color: var(--app-text-2);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.rp:hover:not(:disabled) {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.rp:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .row.clickable {

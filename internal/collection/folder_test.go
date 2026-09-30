@@ -70,6 +70,51 @@ func TestRenameFolderKeepsDirAndUID(t *testing.T) {
 	}
 }
 
+func TestMoveRequestAndFolder(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "A"); err != nil {
+		t.Fatalf("建 A: %v", err)
+	}
+	if err := c.CreateFolder("", "B"); err != nil {
+		t.Fatalf("建 B: %v", err)
+	}
+	if err := c.CreateFolder("A", "子"); err != nil {
+		t.Fatalf("建子: %v", err)
+	}
+	r, err := c.CreateRequest("A", "ping", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+
+	// 移动请求到 B：uid 不变、路径变
+	if err := c.MoveRequest(r.UID, "B"); err != nil {
+		t.Fatalf("移动请求: %v", err)
+	}
+	got, err := c.ReadRequest(r.UID)
+	if err != nil {
+		t.Fatalf("读请求: %v", err)
+	}
+	if got.UID != r.UID {
+		t.Fatalf("uid 不应变化: %s → %s", r.UID, got.UID)
+	}
+	if !strings.HasPrefix(got.Path, "B/") {
+		t.Fatalf("路径未更新: %s", got.Path)
+	}
+
+	// 移动分组 A 到 B 下
+	aUID, _ := c.folderUID("A")
+	if err := c.MoveFolder(aUID, "B"); err != nil {
+		t.Fatalf("移动分组: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "B", "A", "子", "folder.yml")); err != nil {
+		t.Fatalf("分组未移动: %v", err)
+	}
+	// 不能移入自己/后代
+	if err := c.MoveFolder(aUID, "B/A/子"); err == nil {
+		t.Fatalf("移入后代应被拒绝")
+	}
+}
+
 func TestDeleteFolderRefusesNonEmpty(t *testing.T) {
 	c := newTestCollection(t)
 	if err := c.CreateFolder("", "空组"); err != nil {

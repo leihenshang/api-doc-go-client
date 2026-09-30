@@ -17,10 +17,15 @@ import {
   zhCN,
 } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
-import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CommandPalette from '@/components/CommandPalette.vue'
+import CodeGenDialog from '@/components/CodeGenDialog.vue'
+import CookieDialog from '@/components/CookieDialog.vue'
 import EnvManager from '@/components/EnvManager.vue'
+import ImportDialog from '@/components/ImportDialog.vue'
+import MockDialog from '@/components/MockDialog.vue'
+import SyncDialog from '@/components/SyncDialog.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import Overview from '@/components/Overview.vue'
 import RequestBar from '@/components/RequestBar.vue'
@@ -33,13 +38,13 @@ import TabBar from '@/components/TabBar.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
-import { api } from '@/lib/ipc'
+import { api, onAppEvent } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { nextTheme, isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import { useTabsStore } from '@/stores/tabs'
-import type { TreeNode } from '@/types'
+import type { SyncStatus, TreeNode } from '@/types'
 
 const coll = useCollectionStore()
 const tabs = useTabsStore()
@@ -103,7 +108,14 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
 const showEnvManager = ref(false)
 const showSettings = ref(false)
 const showHistory = ref(false)
+const showCookies = ref(false)
 const showPalette = ref(false)
+const showImport = ref(false)
+const showCodegen = ref(false)
+const showMock = ref(false)
+const showSync = ref(false)
+const syncStatus = ref<SyncStatus | null>(null)
+let syncTimer: ReturnType<typeof setInterval> | null = null
 const lastDir = localStorage.getItem('client.lastDir') ?? ''
 
 // 界面缩放：作用在根元素上，弹层（teleport 到 body）也会一起缩放
@@ -119,6 +131,8 @@ const requestCount = computed(() => {
 
 // ---- 请求区 / 响应区分栏 ----
 const workEl = ref<HTMLElement | null>(null)
+const editorEl = ref<HTMLElement | null>(null)
+const respEl = ref<HTMLElement | null>(null)
 const respSize = ref(settings.responseSize)
 // 拖动中不覆盖本地值，避免落盘往返把拖动位置"回跳"
 let resizing = false
@@ -193,6 +207,8 @@ async function openCollection(dir: string): Promise<void> {
   tabs.reset()
   try {
     await coll.open(dir)
+    // 恢复上次的 tab 现场（uid 仍在集合内才打开）
+    await tabs.restoreSession()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
@@ -212,6 +228,30 @@ function onCommand(key: string): void {
   else if (key === 'toggle-theme') void toggleTheme()
   else if (key === 'history') showHistory.value = true
   else if (key === 'settings') showSettings.value = true
+  else if (key === 'import') showImport.value = true
+  else if (key === 'export-md') void exportDoc('markdown')
+  else if (key === 'export-html') void exportDoc('html')
+}
+
+// ---- 导出文档（H10）----
+async function exportDoc(format: 'markdown' | 'html'): Promise<void> {
+  try {
+    const path = await api.exportDoc(format, coll.name + (format === 'html' ? '.html' : '.md'))
+    if (path) message.success(t('export.saved', { path }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function imported(): Promise<void> {
+  await coll.reload()
+  tabs.refreshResolve()
+}
+
+async function onSynced(): Promise<void> {
+  await coll.reload()
+  tabs.refreshResolve()
+  await refreshSyncStatus()
 }
 
 function onHotkey(e: KeyboardEvent): void {
@@ -231,14 +271,78 @@ function onHotkey(e: KeyboardEvent): void {
   } else if (key === 'e') {
     e.preventDefault()
     showEnvManager.value = true
+  } else if (key === 'w') {
+    // Ctrl+W 关闭当前 tab（无 tab 时不拦截，避免吞掉浏览器关闭窗口）
+    if (!tabs.active) return
+    e.preventDefault()
+    void tabs.close(tabs.active.key)
+  } else if (key === 's') {
+    e.preventDefault()
+    if (tabs.active) void tabs.flush(tabs.active.key)
+  } else if (key === 'z') {
+    // Ctrl+Z 撤销 / Ctrl+Shift+Z（或 Ctrl+Y）重做：请求级编辑历史
+    if (!tabs.active) return
+    e.preventDefault()
+    if (e.shiftKey) tabs.redo(tabs.active.key)
+    else tabs.undo(tabs.active.key)
+  } else if (key === 'y') {
+    if (!tabs.active) return
+    e.preventDefault()
+    tabs.redo(tabs.active.key)
   }
 }
 
 onMounted(() => {
   void settings.load()
   window.addEventListener('keydown', onHotkey)
+  // 关窗前 flush 未保存草稿（防抖未触发的最后编辑）
+  window.addEventListener('beforeunload', () => {
+    void tabs.flushAll()
+  })
+  // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户
+  onAppEvent('collection:changed', () => onExternalChange())
+  // 同步状态轮询（状态栏）
+  syncTimer = setInterval(() => {
+    void refreshSyncStatus()
+  }, 5000)
   if (lastDir) void openCollection(lastDir)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onHotkey)
+  if (syncTimer) clearInterval(syncTimer)
+})
+
+// ---- 同步状态（状态栏）----
+async function refreshSyncStatus(): Promise<void> {
+  if (!coll.ready) return
+  try {
+    syncStatus.value = await api.getSyncStatus()
+    const s = syncStatus.value
+    // 只有明确「已关联 + mirror」才进只读；本地/未关联/其他模式一律可编辑
+    if (s?.linked && s.mode === 'mirror') {
+      coll.syncMode = 'mirror'
+    } else {
+      coll.syncMode = ''
+    }
+    if (s?.linked) {
+      void api.startAutoSync(120)
+    }
+  } catch {
+    syncStatus.value = null
+    coll.syncMode = ''
+  }
+}
+
+function onExternalChange(): void {
+  const dirty = tabs.tabs.filter((t) => t.dirty)
+  if (dirty.length === 0) {
+    void coll.reload().then(() => tabs.refreshResolve())
+    return
+  }
+  // G10：有未保存编辑时绝不静默覆盖
+  message.warning(t('tree.externalChange', { n: dirty.length }), { duration: 6000 })
+}
 
 onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
 
@@ -284,6 +388,36 @@ watch(
   () => coll.uid,
   () => tabs.refreshResolve(),
 )
+
+// ---- G8 滚动位置记忆 ----
+function saveScrolls(): void {
+  const key = tabs.active?.key
+  if (!key) return
+  if (editorEl.value) tabs.saveScroll(key, 'editor', editorEl.value.scrollTop)
+  if (respEl.value) tabs.saveScroll(key, 'resp', respEl.value.scrollTop)
+}
+
+function restoreScrolls(): void {
+  const key = tabs.active?.key
+  if (!key) return
+  const pos = tabs.getScroll(key)
+  if (editorEl.value) editorEl.value.scrollTop = pos.editor
+  if (respEl.value) respEl.value.scrollTop = pos.resp
+}
+
+watch(
+  () => tabs.activeKey,
+  (next, prev) => {
+    if (prev) {
+      // 切走前先记下旧 tab 的位置（activeKey 已变，用 prev 找不到 DOM，故依赖 onScroll 里已存的值）
+      void prev
+    }
+    if (next) {
+      // DOM 更新后再恢复
+      void nextTick(() => restoreScrolls())
+    }
+  },
+)
 </script>
 
 <template>
@@ -307,9 +441,14 @@ watch(
             @open-other="openCollection('')"
             @reload="coll.reload()"
             @history="showHistory = true"
+            @cookies="showCookies = true"
             @settings="showSettings = true"
             @palette="showPalette = true"
             @manage-env="showEnvManager = true"
+            @import="showImport = true"
+            @export="exportDoc($event)"
+            @mock="showMock = true"
+            @sync="showSync = true"
             @update:currentEnv="pickEnv"
           />
 
@@ -332,12 +471,13 @@ watch(
                 @select-overview="tabs.setActive('')"
                 @close="tabs.close($event)"
                 @new="openCreate()"
+                @reorder="(from: number, to: number) => tabs.reorder(from, to)"
               />
 
               <div v-if="tabs.active" class="detail">
-                <request-bar :tab="tabs.active" />
+                <request-bar :tab="tabs.active" @codegen="showCodegen = true" />
                 <div ref="workEl" class="work" :class="settings.responseLayout">
-                  <section class="editor-col">
+                  <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
                     <request-editor :tab="tabs.active" />
                   </section>
 
@@ -376,7 +516,7 @@ watch(
                     </div>
                   </div>
 
-                  <section class="resp-col" :style="respStyle">
+                  <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
                     <response-panel :tab="tabs.active" />
                   </section>
                 </div>
@@ -386,7 +526,12 @@ watch(
             </main>
           </div>
 
-          <status-bar :requests="requestCount" :envs="coll.info.envs.length" />
+          <status-bar
+            :requests="requestCount"
+            :envs="coll.info.envs.length"
+            :sync="syncStatus"
+            @open-sync="showSync = true"
+          />
         </template>
 
         <welcome v-else :last-dir="lastDir" @open="openCollection" />
@@ -395,6 +540,11 @@ watch(
       <env-manager v-model:show="showEnvManager" @saved="envSaved" />
       <settings-dialog v-model:show="showSettings" />
       <history-dialog v-model:show="showHistory" @open="tabs.openRequest($event)" />
+      <cookie-dialog v-model:show="showCookies" />
+      <import-dialog v-model:show="showImport" @imported="imported" />
+      <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
+      <mock-dialog v-model:show="showMock" />
+      <sync-dialog v-model:show="showSync" @synced="onSynced" />
       <command-palette
         v-model:show="showPalette"
         :tree="coll.tree"

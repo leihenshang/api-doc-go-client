@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // 请求标签栏（design-spec §2）：首个固定为 Collection 概览页，其后是各请求 tab。
 // dot 表示有未落盘编辑，method 前置按语义色着色，响应状态码跟随 tab 展示。
+// G7：请求 tab 可拖拽排序（HTML5 DnD）。
 import { NIcon } from 'naive-ui'
 import { AddOutline, CloseOutline, LayersOutline } from '@vicons/ionicons5'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
@@ -13,8 +15,31 @@ const emit = defineEmits<{
   'select-overview': []
   close: [key: string]
   new: []
+  reorder: [from: number, to: number]
 }>()
 const { t } = useI18n()
+
+const dragFrom = ref(-1)
+
+function onDragStart(i: number, e: DragEvent): void {
+  dragFrom.value = i
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(i))
+  }
+}
+
+function onDragOver(e: DragEvent): void {
+  if (dragFrom.value >= 0 && e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(i: number, e: DragEvent): void {
+  e.preventDefault()
+  const from = dragFrom.value
+  dragFrom.value = -1
+  if (from < 0 || from === i) return
+  emit('reorder', from, i)
+}
 </script>
 
 <template>
@@ -26,16 +51,21 @@ const { t } = useI18n()
 
     <div class="tabs">
       <button
-        v-for="tab in tabs"
+        v-for="(tab, i) in tabs"
         :key="tab.key"
         class="tab"
-        :class="{ active: tab.key === activeKey }"
+        :class="{ active: tab.key === activeKey, dragging: i === dragFrom }"
         type="button"
         data-testid="tab.item"
         :data-tab-key="tab.key"
         :data-tab-title="tab.title"
+        :draggable="true"
         :title="tab.request.path"
         @click="emit('select', tab.key)"
+        @dragstart="onDragStart(i, $event)"
+        @dragover.prevent="onDragOver($event)"
+        @drop="onDrop(i, $event)"
+        @dragend="dragFrom = -1"
       >
         <method-tag :method="tab.request.method" />
         <span v-if="tab.dirty" class="dot" :title="t('tab.unsaved')" />
@@ -97,6 +127,10 @@ const { t } = useI18n()
 
 .tab:hover {
   background: var(--app-row-hover);
+}
+
+.tab.dragging {
+  opacity: 0.5;
 }
 
 .tab.active {

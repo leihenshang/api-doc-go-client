@@ -34,6 +34,29 @@ type Request struct {
 	Settings *RequestSettings `json:"settings,omitempty"`
 	Docs     string           `json:"docs"`
 	BaseRev  int64            `json:"baseRev"` // 预留：同步基线（条目版本号）
+	// 脚本与断言（Bruno 超集；磁盘上落在顶层 vars/script/assert，经 Extra 往返）
+	VarsPreRequest []ScriptVar    `json:"varsPreRequest,omitempty"`
+	Script         *ScriptBlock   `json:"script,omitempty"`
+	Asserts        []ScriptAssert `json:"asserts,omitempty"`
+}
+
+// ScriptVar vars.pre-request 的一行。
+type ScriptVar struct {
+	Name    string `json:"name"`
+	Value   string `json:"value"`
+	Enabled bool   `json:"enabled"`
+}
+
+// ScriptBlock script 段（pre-request / post-response 源码）。
+type ScriptBlock struct {
+	PreRequest   string `json:"preRequest,omitempty"`
+	PostResponse string `json:"postResponse,omitempty"`
+}
+
+// ScriptAssert assert 段的一条。
+type ScriptAssert struct {
+	Name string `json:"name,omitempty"`
+	Expr string `json:"expr"`
 }
 
 // Env 环境：文件名（不含扩展名）即环境名。

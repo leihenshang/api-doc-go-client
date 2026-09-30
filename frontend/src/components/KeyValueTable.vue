@@ -1,29 +1,53 @@
 <script setup lang="ts">
 // 键值表（参数 / 请求头 / 表单体通用）：表格式编辑 + 批量编辑（每行 key: value）。
 // 批量模式按「名称」回填原有启用态与说明，避免来回切换丢字段。
-import { NButton, NCheckbox, NIcon, NInput } from 'naive-ui'
-import { CloseOutline } from '@vicons/ionicons5'
+// showType 时增加「类型」列（multipart 的 text / file，file 的 value 是文件路径）。
+import { NButton, NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
+import { CloseOutline, FolderOpenOutline } from '@vicons/ionicons5'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { api } from '@/lib/ipc'
 import type { KV } from '@/types'
 
-const props = defineProps<{ rows: KV[]; label: string }>()
+const props = defineProps<{ rows: KV[]; label: string; showType?: boolean }>()
 const emit = defineEmits<{ change: [] }>()
 const { t } = useI18n()
 
 const bulk = ref(false)
 const bulkText = ref('')
 
-const columns = computed(() => [t('editor.colName'), t('editor.colValue'), t('editor.colDesc')])
+const columns = computed(() => {
+  const cols = [t('editor.colName'), t('editor.colValue')]
+  if (props.showType) cols.push(t('editor.colType'))
+  cols.push(t('editor.colDesc'))
+  return cols
+})
+
+const typeOptions = computed(() => [
+  { label: t('editor.partText'), value: 'text' },
+  { label: t('editor.partFile'), value: 'file' },
+])
 
 function add(): void {
-  props.rows.push({ name: '', value: '', enabled: true })
+  props.rows.push({ name: '', value: '', enabled: true, type: props.showType ? 'text' : undefined })
   emit('change')
 }
 
 function del(i: number): void {
   props.rows.splice(i, 1)
   emit('change')
+}
+
+async function pickFile(i: number): Promise<void> {
+  try {
+    const path = await api.pickFile()
+    if (path) {
+      props.rows[i].value = path
+      emit('change')
+    }
+  } catch {
+    // 用户取消或非桌面环境：忽略
+  }
 }
 
 function toText(): string {
@@ -33,7 +57,7 @@ function toText(): string {
     .join('\n')
 }
 
-// 提交批量文本；空行与 # 注释忽略，同名的旧行沿用 enabled / description
+// 提交批量文本；空行与 # 注释忽略，同名的旧行沿用 enabled / description / type
 function apply(): void {
   const prev = new Map(props.rows.map((r) => [r.name, r]))
   const next: KV[] = []
@@ -49,6 +73,7 @@ function apply(): void {
       value: sep < 0 ? '' : line.slice(sep + 1).trim(),
       enabled: old?.enabled ?? true,
       description: old?.description,
+      type: old?.type,
     })
   }
   props.rows.splice(0, props.rows.length, ...next)
@@ -73,15 +98,41 @@ function toggle(): void {
     </div>
 
     <template v-if="!bulk">
-      <div class="th">
+      <div class="th" :class="{ typed: showType }">
         <span class="ck" />
         <span v-for="c in columns" :key="c">{{ c }}</span>
+        <span v-if="showType" class="op" />
         <span class="op" />
       </div>
-      <div v-for="(row, i) in rows" :key="i" class="row" data-testid="kv.row">
+      <div
+        v-for="(row, i) in rows"
+        :key="i"
+        class="row"
+        :class="{ typed: showType, 'no-pick': showType && row.type !== 'file' }"
+        data-testid="kv.row"
+      >
         <n-checkbox v-model:checked="row.enabled" size="small" @update:checked="emit('change')" />
         <n-input v-model:value="row.name" data-testid="kv.name" size="small" placeholder="name" @input="emit('change')" />
         <n-input v-model:value="row.value" data-testid="kv.value" size="small" placeholder="value" @input="emit('change')" />
+        <n-select
+          v-if="showType"
+          v-model:value="row.type"
+          data-testid="kv.type"
+          size="small"
+          class="type"
+          :options="typeOptions"
+          @update:value="emit('change')"
+        />
+        <button
+          v-if="showType && row.type === 'file'"
+          class="act pick"
+          type="button"
+          data-testid="kv.pickFile"
+          :title="t('editor.pickFile')"
+          @click="pickFile(i)"
+        >
+          <n-icon :component="FolderOpenOutline" :size="13" />
+        </button>
         <n-input
           v-model:value="row.description"
           data-testid="kv.desc"
@@ -153,6 +204,16 @@ function toggle(): void {
   grid-template-columns: 24px minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 1.4fr) 24px;
   align-items: center;
   gap: 8px;
+}
+
+/* multipart：多一列类型 + 文件选择按钮 */
+.th.typed,
+.row.typed {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1.2fr) 88px 24px minmax(0, 1fr) 24px;
+}
+
+.row.typed.no-pick {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1.2fr) 88px minmax(0, 1fr) 24px;
 }
 
 .th {

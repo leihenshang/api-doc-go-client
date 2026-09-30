@@ -172,6 +172,16 @@ function close(): void {
           data-testid="settings.maxRedirects"
         />
       </div>
+      <div class="row">
+        <span class="lbl">{{ t('settings.proxy') }}</span>
+        <n-input
+          v-model:value="form.proxyUrl"
+          size="small"
+          class="num"
+          data-testid="settings.proxy"
+          :placeholder="t('settings.proxyPlaceholder')"
+        />
+      </div>
 
       <div class="sec">{{ t('settings.local') }}</div>
       <div class="row">

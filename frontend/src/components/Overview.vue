@@ -32,6 +32,12 @@ const stats = computed(() => [
 const shortcuts = computed(() => [
   { keys: ['Ctrl', 'K'], label: t('overview.paletteHint') },
   { keys: ['Ctrl', 'Enter'], label: t('overview.send') },
+  { keys: ['Ctrl', 'N'], label: t('overview.newRequest') },
+  { keys: ['Ctrl', 'E'], label: t('overview.envHint') },
+  { keys: ['Ctrl', 'W'], label: t('overview.closeTab') },
+  { keys: ['Ctrl', 'S'], label: t('overview.save') },
+  { keys: ['Ctrl', 'Z'], label: t('overview.undo') },
+  { keys: ['Ctrl', 'Shift', 'Z'], label: t('overview.redo') },
 ])
 </script>
 

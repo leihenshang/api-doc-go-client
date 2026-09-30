@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -30,7 +31,7 @@ func sendOptions() runner.Options {
 	if j, err := cookiejar.New(s.PersistCookies); err == nil {
 		jar = j
 	}
-	return runner.NewOptions(s.InsecureSSL, s.TimeoutSec, s.FollowRedirects, s.MaxRedirects, jar)
+	return runner.NewOptions(s.InsecureSSL, s.TimeoutSec, s.FollowRedirects, s.MaxRedirects, jar, s.ProxyURL)
 }
 
 func fatal(err error) {
@@ -158,7 +159,7 @@ func sendCmd(dir, uid, envName string) {
 	for k, v := range varx.Builtins() {
 		vars[k] = v
 	}
-	res, err := runner.Send(*r, vars, sendOptions())
+	res, err := runner.Send(context.Background(), *r, vars, sendOptions())
 	if err != nil {
 		fatal(err)
 	}

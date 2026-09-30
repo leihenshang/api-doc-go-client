@@ -40,7 +40,7 @@ const copied = ref(false)
 
 const example = computed(() => examples.value.find((e) => e.uid === viewingUid.value) ?? null)
 
-/** 面板展示的响应：回看示例时用示例快照，否则用本次响应。 */
+/** 面板展示的响应：回看示例时用示例快照，否则用本次响应；两侧字段与布局保持一致。 */
 const display = computed<SendResult | null>(() => {
   const ex = example.value
   if (!ex) return props.tab.response
@@ -54,6 +54,8 @@ const display = computed<SendResult | null>(() => {
     binary: ex.response.binary,
     headers: ex.response.headers,
     body: ex.response.body,
+    // 无脚本产物：example 快照未存 script
+    script: null,
   }
 })
 
@@ -141,6 +143,22 @@ function setMeaning(path: string, value: string): void {
   saveFields(props.tab.uid, fields.value)
 }
 
+function removeField(path: string): void {
+  fields.value = fields.value.filter((r) => r.path !== path)
+  saveFields(props.tab.uid, fields.value)
+}
+
+function removeMany(paths: string[]): void {
+  const set = new Set(paths)
+  fields.value = fields.value.filter((r) => !set.has(r.path))
+  saveFields(props.tab.uid, fields.value)
+}
+
+function clearFields(): void {
+  fields.value = []
+  saveFields(props.tab.uid, [])
+}
+
 function openSave(): void {
   saveName.value = t('resp.exampleDefault')
   showSave.value = true
@@ -181,6 +199,20 @@ async function copyBody(): Promise<void> {
   copied.value = true
   setTimeout(() => (copied.value = false), 1200)
 }
+
+/** E21：把响应体保存到本地（二进制自动 base64 解码）。 */
+async function saveBody(): Promise<void> {
+  const d = display.value
+  if (!d) return
+  const ext = d.binary ? 'bin' : 'txt'
+  const name = `response-${d.status || 'body'}.${ext}`
+  try {
+    const path = await api.saveResponseBody(name, d.binary, d.body)
+    if (path) message.success(t('resp.savedFile', { path }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
 </script>
 
 <template>
@@ -188,84 +220,23 @@ async function copyBody(): Promise<void> {
     <n-alert v-if="tab.error" type="error" :bordered="false" class="err">{{ tab.error }}</n-alert>
 
     <template v-else-if="display">
+      <!-- 第 1 排：状态信息 + 示例选择 -->
       <div class="head">
-        <span class="ttl">{{ t('resp.title') }}</span>
-        <n-tag
-          :type="statusType"
-          size="small"
-          :bordered="false"
-          class="badge"
-          data-testid="resp.status"
-          :title="display.proto"
-        >
-          {{ statusLabel }}
-        </n-tag>
-        <span class="meta mono">{{ meta }}</span>
+        <div class="info">
+          <span class="ttl">{{ t('resp.title') }}</span>
+          <n-tag
+            :type="statusType"
+            size="small"
+            :bordered="false"
+            class="badge"
+            data-testid="resp.status"
+            :title="display.proto"
+          >
+            {{ statusLabel }}
+          </n-tag>
+          <span class="meta mono">{{ meta }}</span>
+        </div>
         <span class="sp" />
-        <button
-          v-if="isJson && (seg === 'body' || seg === 'fields')"
-          class="toggle"
-          type="button"
-          data-testid="resp.updateFields"
-          :title="t('resp.updateFieldsHint')"
-          @click="updateFields"
-        >
-          <n-icon :component="RefreshOutline" :size="13" />
-          {{ t('resp.updateFields') }}
-        </button>
-        <template v-if="seg === 'body'">
-          <button
-            v-if="isJson"
-            class="toggle"
-            :class="{ on: view === 'pretty' }"
-            type="button"
-            data-testid="resp.pretty"
-            @click="view = 'pretty'"
-          >
-            {{ t('resp.pretty') }}
-          </button>
-          <button
-            v-if="isJson"
-            class="toggle"
-            :class="{ on: view === 'raw' }"
-            type="button"
-            data-testid="resp.raw"
-            @click="view = 'raw'"
-          >
-            {{ t('resp.raw') }}
-          </button>
-          <button
-            v-if="isJson && view === 'pretty'"
-            class="toggle"
-            type="button"
-            data-testid="resp.expandAll"
-            :title="t('json.expandAll')"
-            @click="jv?.expandAll()"
-          >
-            <n-icon :component="ExpandOutline" :size="14" />
-          </button>
-          <button
-            v-if="isJson && view === 'pretty'"
-            class="toggle"
-            type="button"
-            data-testid="resp.collapseAll"
-            :title="t('json.collapseAll')"
-            @click="jv?.collapseAll()"
-          >
-            <n-icon :component="ContractOutline" :size="14" />
-          </button>
-        </template>
-        <button
-          v-if="!example"
-          class="toggle"
-          type="button"
-          data-testid="resp.save"
-          :title="t('resp.saveHint')"
-          @click="openSave"
-        >
-          <n-icon :component="SaveOutline" :size="13" />
-          {{ t('resp.save') }}
-        </button>
         <n-select
           v-if="examples.length"
           :value="viewingUid"
@@ -284,10 +255,52 @@ async function copyBody(): Promise<void> {
           </template>
           {{ t('resp.deleteConfirm', { name: example.name }) }}
         </n-popconfirm>
-        <button class="toggle" type="button" data-testid="resp.copyBody" @click="copyBody">
-          <n-icon :component="CopyOutline" :size="13" />
-          {{ copied ? t('common.copied') : t('resp.copyBody') }}
-        </button>
+      </div>
+
+      <!-- 第 2 排：视图 + 字段 + 保存/复制（放不下自动换行到第 3 排） -->
+      <div class="head ops-row">
+        <div class="ops">
+          <template v-if="seg === 'body' && isJson">
+            <button class="toggle" :class="{ on: view === 'pretty' }" type="button" data-testid="resp.pretty" @click="view = 'pretty'">
+              {{ t('resp.pretty') }}
+            </button>
+            <button class="toggle" :class="{ on: view === 'raw' }" type="button" data-testid="resp.raw" @click="view = 'raw'">
+              {{ t('resp.raw') }}
+            </button>
+            <span class="div" />
+            <button v-if="view === 'pretty'" class="toggle" type="button" data-testid="resp.expandAll" :title="t('json.expandAll')" @click="jv?.expandAll()">
+              <n-icon :component="ExpandOutline" :size="14" />
+            </button>
+            <button v-if="view === 'pretty'" class="toggle" type="button" data-testid="resp.collapseAll" :title="t('json.collapseAll')" @click="jv?.collapseAll()">
+              <n-icon :component="ContractOutline" :size="14" />
+            </button>
+          </template>
+          <span v-if="seg === 'body' && isJson" class="div" />
+          <button
+            v-if="isJson && (seg === 'body' || seg === 'fields')"
+            class="toggle"
+            type="button"
+            data-testid="resp.updateFields"
+            :title="t('resp.updateFieldsHint')"
+            @click="updateFields"
+          >
+            <n-icon :component="RefreshOutline" :size="13" />
+            {{ t('resp.updateFields') }}
+          </button>
+          <span class="div" />
+          <button v-if="!example" class="toggle" type="button" data-testid="resp.save" :title="t('resp.saveHint')" @click="openSave">
+            <n-icon :component="SaveOutline" :size="13" />
+            {{ t('resp.save') }}
+          </button>
+          <button class="toggle" type="button" data-testid="resp.copyBody" @click="copyBody">
+            <n-icon :component="CopyOutline" :size="13" />
+            {{ copied ? t('common.copied') : t('resp.copyBody') }}
+          </button>
+          <button v-if="!example" class="toggle" type="button" data-testid="resp.saveBody" :title="t('resp.saveBody')" @click="saveBody">
+            <n-icon :component="SaveOutline" :size="13" />
+            {{ t('resp.saveBody') }}
+          </button>
+        </div>
       </div>
 
       <div v-if="example" class="exnote" data-testid="resp.exnote">
@@ -334,6 +347,23 @@ async function copyBody(): Promise<void> {
 
       <div class="pane">
         <template v-if="seg === 'body'">
+          <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
+            {{ display.script.scriptError }}
+          </div>
+          <div v-if="display.script?.asserts?.length" class="asserts" data-testid="resp.asserts">
+            <div
+              v-for="(a, i) in display.script.asserts"
+              :key="i"
+              class="arow"
+              :class="a.passed ? 'ok' : 'fail'"
+              data-testid="resp.assert"
+            >
+              <span class="astate">{{ a.passed ? '✓' : '✗' }}</span>
+              <span class="aname">{{ a.name || a.expr }}</span>
+              <span class="aexpr mono">{{ a.expr }}</span>
+              <span v-if="a.error" class="aerr">{{ a.error }}</span>
+            </div>
+          </div>
           <div v-if="display.binary" class="binhint">{{ t('resp.binary') }}</div>
           <json-viewer v-if="isJson && view === 'pretty'" ref="jv" :text="display.body" />
           <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
@@ -344,7 +374,14 @@ async function copyBody(): Promise<void> {
             <span class="hv">{{ h.value }}</span>
           </div>
         </div>
-        <response-fields v-else :rows="fields" @meaning="setMeaning" />
+        <response-fields
+          v-else
+          :rows="fields"
+          @meaning="setMeaning"
+          @remove="removeField"
+          @remove-many="removeMany"
+          @clear="clearFields"
+        />
       </div>
     </template>
 
@@ -358,6 +395,8 @@ async function copyBody(): Promise<void> {
         <li><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>{{ t('resp.sendHint') }}</span></li>
         <li><kbd>Ctrl</kbd> + <kbd>N</kbd><span>{{ t('resp.newHint') }}</span></li>
         <li><kbd>Ctrl</kbd> + <kbd>E</kbd><span>{{ t('resp.envHint') }}</span></li>
+        <li><kbd>Ctrl</kbd> + <kbd>W</kbd><span>{{ t('resp.closeHint') }}</span></li>
+        <li><kbd>Ctrl</kbd> + <kbd>S</kbd><span>{{ t('resp.saveNowHint') }}</span></li>
       </ul>
       <div v-if="examples.length" class="empty-ex">
         <n-select
@@ -412,8 +451,37 @@ async function copyBody(): Promise<void> {
   gap: 8px;
   flex-wrap: wrap;
   row-gap: 6px;
-  overflow: hidden;
   flex: 0 0 auto;
+  min-width: 0;
+}
+
+/* 第 2 排：操作按钮，允许换到第 3 排 */
+.ops-row {
+  overflow: visible;
+}
+
+.info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ops .div {
+  width: 1px;
+  height: 14px;
+  background: var(--app-border);
+  margin: 0 2px;
 }
 
 .ttl {
@@ -557,6 +625,55 @@ async function copyBody(): Promise<void> {
   font-size: 12px;
   color: var(--app-warn);
   margin-bottom: 6px;
+}
+
+.asserts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.asserts .arow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--app-border);
+}
+
+.asserts .arow.ok {
+  border-color: var(--app-accent);
+}
+
+.asserts .arow.fail {
+  border-color: var(--app-danger, #d03050);
+}
+
+.asserts .astate {
+  font-weight: 700;
+}
+
+.asserts .aname {
+  font-weight: 500;
+}
+
+.asserts .aexpr {
+  color: var(--app-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asserts .aerr {
+  color: var(--app-danger, #d03050);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .raw {

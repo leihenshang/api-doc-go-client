@@ -3,13 +3,17 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +36,7 @@ type Options struct {
 	FollowRedirects bool
 	MaxRedirects    int
 	Jar             http.CookieJar
+	ProxyURL        string // HTTP(S) 代理；空 = 直连
 }
 
 // DefaultOptions 全局设置未就绪时的兜底策略。
@@ -41,11 +46,12 @@ func DefaultOptions() Options {
 
 // NewOptions 由设置值合成策略（集中默认值，避免各调用点重复搬运字段）；
 // timeoutSec / maxRedirects <= 0 时取默认值。
-func NewOptions(insecureSSL bool, timeoutSec int, followRedirects bool, maxRedirects int, jar http.CookieJar) Options {
+func NewOptions(insecureSSL bool, timeoutSec int, followRedirects bool, maxRedirects int, jar http.CookieJar, proxyURL string) Options {
 	o := DefaultOptions()
 	o.InsecureSSL = insecureSSL
 	o.FollowRedirects = followRedirects
 	o.Jar = jar
+	o.ProxyURL = proxyURL
 	if timeoutSec > 0 {
 		o.Timeout = time.Duration(timeoutSec) * time.Second
 	}
@@ -56,6 +62,7 @@ func NewOptions(insecureSSL bool, timeoutSec int, followRedirects bool, maxRedir
 }
 
 // Result 一次真实请求的结果；Binary 为真时 Body 是 base64 编码。
+// Script 为脚本/断言阶段产物（无脚本时为 nil）。
 type Result struct {
 	URL         string          `json:"url"`
 	Status      int             `json:"status"`
@@ -66,26 +73,46 @@ type Result struct {
 	Binary      bool            `json:"binary"`
 	Headers     []collection.KV `json:"headers"`
 	Body        string          `json:"body"`
+	Script      any             `json:"script,omitempty"`
 }
 
 // Send 渲染并发送请求。vars 为已选环境的变量（已合并 secret 与内置变量）。
-func Send(r collection.Request, vars map[string]string, opts Options) (*Result, error) {
+// ctx 用于取消（UI 取消发送）与超时；nil 时按 Background 处理，仅受 Options.Timeout 约束。
+func Send(ctx context.Context, r collection.Request, vars map[string]string, opts Options) (*Result, error) {
 	opts = mergeOptions(opts, r.Settings)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+
 	target, err := buildURL(r, vars)
 	if err != nil {
 		return nil, err
 	}
-	req, err := buildRequest(r, vars, target)
+	req, err := buildRequest(ctx, r, vars, target)
 	if err != nil {
 		return nil, err
 	}
 	start := time.Now()
 	resp, err := newClient(opts).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("发送请求: %w", err)
+		return nil, sendError(ctx, err)
 	}
 	defer resp.Body.Close()
 	return readResult(resp, target.String(), time.Since(start))
+}
+
+// sendError 把 context 取消/超时译成用户可读文案，其余原样包装。
+func sendError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
+		return errors.New("请求已取消")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("请求超时: %w", err)
+	default:
+		return fmt.Errorf("发送请求: %w", err)
+	}
 }
 
 // mergeOptions 补齐零值并用请求级 settings 覆盖。
@@ -131,7 +158,7 @@ func buildURL(r collection.Request, vars map[string]string) (*url.URL, error) {
 	return u, nil
 }
 
-func buildRequest(r collection.Request, vars map[string]string, u *url.URL) (*http.Request, error) {
+func buildRequest(ctx context.Context, r collection.Request, vars map[string]string, u *url.URL) (*http.Request, error) {
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if method == "" {
 		method = http.MethodGet
@@ -144,7 +171,7 @@ func buildRequest(r collection.Request, vars map[string]string, u *url.URL) (*ht
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, u.String(), reader)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
 	if err != nil {
 		return nil, fmt.Errorf("构造请求: %w", err)
 	}
@@ -183,6 +210,25 @@ func multipartBody(items []collection.KV, vars map[string]string) ([]byte, strin
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for _, kv := range resolveKV(items, vars) {
+		if strings.EqualFold(kv.Type, "file") {
+			// 文件 part：value 是路径（支持 {{变量}}），读盘后按 CreateFormFile 写入
+			path := strings.TrimSpace(kv.Value)
+			if path == "" {
+				return nil, "", fmt.Errorf("multipart 文件字段 %q 缺少路径", kv.Name)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, "", fmt.Errorf("读取上传文件 %q: %w", path, err)
+			}
+			part, err := w.CreateFormFile(kv.Name, filepath.Base(path))
+			if err != nil {
+				return nil, "", fmt.Errorf("创建文件字段 %q: %w", kv.Name, err)
+			}
+			if _, err := part.Write(data); err != nil {
+				return nil, "", fmt.Errorf("写入文件字段 %q: %w", kv.Name, err)
+			}
+			continue
+		}
 		if err := w.WriteField(kv.Name, kv.Value); err != nil {
 			return nil, "", fmt.Errorf("写入 multipart 字段: %w", err)
 		}
@@ -202,7 +248,7 @@ func resolveKV(items []collection.KV, vars map[string]string) []collection.KV {
 		}
 		name, _ := varx.Resolve(kv.Name, vars)
 		val, _ := varx.Resolve(kv.Value, vars)
-		out = append(out, collection.KV{Name: name, Value: val, Enabled: true})
+		out = append(out, collection.KV{Name: name, Value: val, Enabled: true, Type: kv.Type})
 	}
 	return out
 }
@@ -239,10 +285,17 @@ func applyAuth(req *http.Request, a *collection.Auth, vars map[string]string) {
 
 func newClient(o Options) *http.Client {
 	client := &http.Client{Timeout: o.Timeout, Jar: o.Jar}
+	tr := &http.Transport{}
 	if o.InsecureSSL {
 		// 用户显式开启：跳过证书校验（自签/内网证书场景）
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402
 	}
+	if strings.TrimSpace(o.ProxyURL) != "" {
+		if u, err := url.Parse(strings.TrimSpace(o.ProxyURL)); err == nil {
+			tr.Proxy = http.ProxyURL(u)
+		}
+	}
+	client.Transport = tr
 	client.CheckRedirect = func(_ *http.Request, via []*http.Request) error {
 		if !o.FollowRedirects {
 			return http.ErrUseLastResponse
