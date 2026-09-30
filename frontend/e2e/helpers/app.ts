@@ -58,6 +58,11 @@ async function waitReady(url: string, init: RequestInit, timeoutMs = 30_000): Pr
   throw new Error(`服务未在 ${timeoutMs}ms 内就绪: ${url}`)
 }
 
+/** Windows 下可执行文件需要 .exe 后缀（go build -o 与 spawn 都按字面名处理，缺后缀会 ENOENT）。 */
+function binName(name: string): string {
+  return process.platform === 'win32' ? `${name}.exe` : name
+}
+
 function spawnServer(bin: string, args: string[], env: NodeJS.ProcessEnv, tag: string): ChildProcess {
   const child = spawn(bin, args, { cwd: repoDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[${tag}] ${d}`))
@@ -91,8 +96,8 @@ export const test = base.extend<{ app: AppFixture }>({
       const configDir = path.join(runDir, 'config')
       mkdirSync(configDir, { recursive: true })
 
-      execFileSync('go', ['build', '-o', path.join(runDir, 'devserver'), './cmd/devserver'], { cwd: repoDir, stdio: 'inherit' })
-      execFileSync('go', ['build', '-o', path.join(runDir, 'testfixtures'), './cmd/testfixtures'], { cwd: repoDir, stdio: 'inherit' })
+      execFileSync('go', ['build', '-o', binName(path.join(runDir, 'devserver')), './cmd/devserver'], { cwd: repoDir, stdio: 'inherit' })
+      execFileSync('go', ['build', '-o', binName(path.join(runDir, 'testfixtures')), './cmd/testfixtures'], { cwd: repoDir, stdio: 'inherit' })
 
       const [apiPort, fxPort, tlsPort] = [await freePort(), await freePort(), await freePort()]
       const url = `http://127.0.0.1:${apiPort}`
@@ -100,9 +105,9 @@ export const test = base.extend<{ app: AppFixture }>({
       const tlsUrl = `https://127.0.0.1:${tlsPort}`
       const env = { ...process.env, XDG_CONFIG_HOME: configDir }
 
-      const fixtures = spawnServer(path.join(runDir, 'testfixtures'), ['-addr', `127.0.0.1:${fxPort}`], env, 'fixtures')
+      const fixtures = spawnServer(binName(path.join(runDir, 'testfixtures')), ['-addr', `127.0.0.1:${fxPort}`], env, 'fixtures')
       const dev = spawnServer(
-        path.join(runDir, 'devserver'),
+        binName(path.join(runDir, 'devserver')),
         ['-dir', path.join(runDir, 'headless'), '-addr', `127.0.0.1:${apiPort}`, '-web', path.join(frontendDir, 'dist'), '-tls-echo', `127.0.0.1:${tlsPort}`],
         env,
         'devserver',
