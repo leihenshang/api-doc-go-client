@@ -6,7 +6,6 @@
 
 - Wails v2（Go 内核 + webview）
 - 前端：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Naive UI + axios
-- 端到端测试：Playwright（无头运行，无需桌面环境）
 - 共享规则：[api-doc-go-share](https://github.com/leihenshang/api-doc-go-share)（`require v0.3.0`）
 
 ## 目录结构
@@ -49,13 +48,8 @@ wails build          # 产出 bin/api-doc-client
 ## 门禁（本地与 CI 共用）
 
 ```bash
-bash scripts/check.sh            # 默认 --fast：gofmt + build + vet + go test + vue-tsc + i18n（秒级）
-bash scripts/check.sh --smoke    # + e2e @smoke（约 1min，按需）
-bash scripts/check.sh --full     # 全量 24 条 e2e 回归（约 3min，按需）
-cd frontend && npm run test:e2e  # 有头 / headless 调试用例
+bash scripts/check.sh   # gofmt + build + vet + go test + vue-tsc + i18n（秒级）
 ```
-
-约定：日常只跑 `--fast`；e2e 等耗时检查仅在明确要求时执行。
 
 ## 配置
 
