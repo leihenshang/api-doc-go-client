@@ -50,18 +50,20 @@ function onDrop(i: number, e: DragEvent): void {
     </button>
 
     <div class="tabs">
-      <button
+      <div
         v-for="(tab, i) in tabs"
         :key="tab.key"
         class="tab"
         :class="{ active: tab.key === activeKey, dragging: i === dragFrom }"
-        type="button"
+        role="button"
+        :tabindex="0"
         data-testid="tab.item"
         :data-tab-key="tab.key"
         :data-tab-title="tab.title"
         :draggable="true"
         :title="tab.request.path"
         @click="emit('select', tab.key)"
+        @keydown.enter="emit('select', tab.key)"
         @dragstart="onDragStart(i, $event)"
         @dragover.prevent="onDragOver($event)"
         @drop="onDrop(i, $event)"
@@ -73,10 +75,10 @@ function onDrop(i: number, e: DragEvent): void {
         <span v-if="tab.response" class="st" :class="tab.response.status < 400 ? 'ok' : 'err'">
           {{ tab.response.status }}
         </span>
-        <span class="x" data-testid="tab.close" :title="t('tab.closeHint')" @click.stop="emit('close', tab.key)">
+        <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')" @click.stop="emit('close', tab.key)">
           <n-icon :component="CloseOutline" :size="13" />
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
 
     <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
@@ -181,10 +183,17 @@ function onDrop(i: number, e: DragEvent): void {
 }
 
 .x {
+  border: none;
+  background: transparent;
   color: var(--app-placeholder);
   border-radius: 3px;
-  padding: 0 2px;
-  line-height: 14px;
+  padding: 2px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .x:hover {

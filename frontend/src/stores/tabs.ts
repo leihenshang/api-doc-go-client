@@ -229,7 +229,12 @@ export const useTabsStore = defineStore('tabs', {
       clearTimeout(historyTimers.get(key))
       const idx = this.tabs.findIndex((t) => t.key === key)
       if (idx < 0) return
-      await this.flush(key)
+      // flush 失败不阻止关闭：本地已自动保存，关闭不应卡住
+      try {
+        await this.flush(key)
+      } catch {
+        // 忽略保存错误，仍继续关闭
+      }
       this.tabs.splice(idx, 1)
       if (this.activeKey === key) {
         const next = this.tabs[Math.min(idx, this.tabs.length - 1)]
