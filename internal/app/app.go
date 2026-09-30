@@ -28,8 +28,8 @@ import (
 	"api-doc-go-client/internal/syncengine"
 	"api-doc-go-client/internal/varx"
 
+	"github.com/leihenshang/api-doc-go-share/codegen"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/zqstudio/api-doc-go-share/codegen"
 )
 
 // App 暴露给前端的全部方法（Wails Bind；devserver 亦通过反射调用同一实现）。

@@ -396,35 +396,45 @@ watch(
 
 <style scoped>
 .editor {
-  padding: 0 14px;
+  padding: 0 12px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
 }
 
+/* 段页签：与响应区统一风格，底部细线 */
 .seg {
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--app-border);
   flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  height: 0;
 }
 
 .seg-tab {
   position: relative;
   border: none;
   background: none;
-  padding: 9px 12px;
-  font-size: 12.5px;
+  padding: 8px 11px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .seg-tab:hover {
   color: var(--app-text);
+  background: var(--app-row-hover);
 }
 
 .seg-tab.on {
@@ -435,8 +445,8 @@ watch(
 
 .badge {
   position: absolute;
-  top: 7px;
-  right: 5px;
+  top: 6px;
+  right: 4px;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -444,7 +454,7 @@ watch(
 }
 
 .seg-body {
-  padding: 12px 0;
+  padding: 10px 0;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;

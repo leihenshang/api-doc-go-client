@@ -1,8 +1,8 @@
 package collection
 
-import share "github.com/zqstudio/api-doc-go-share/collection"
+import share "github.com/leihenshang/api-doc-go-share/collection"
 
-// 集合文件的格式定义、命名规则与排序规则来自共享包 github.com/zqstudio/api-doc-go-share/collection：
+// 集合文件的格式定义、命名规则与排序规则来自共享包 github.com/leihenshang/api-doc-go-share/collection：
 // 这些是「两端必须一致」的定义与算法，直接引用；本包只保留客户端自己的内存模型与 IO。
 type (
 	KV              = share.KV

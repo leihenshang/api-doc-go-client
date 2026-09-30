@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	shopenapi "github.com/zqstudio/api-doc-go-share/openapi"
-	shpostman "github.com/zqstudio/api-doc-go-share/postman"
+	shopenapi "github.com/leihenshang/api-doc-go-share/openapi"
+	shpostman "github.com/leihenshang/api-doc-go-share/postman"
 )
 
 // hostVar 导入 OpenAPI（路径为相对路径）时补的宿主变量前缀。
