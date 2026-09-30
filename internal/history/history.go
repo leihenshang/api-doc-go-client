@@ -14,6 +14,7 @@ import (
 const fileName = "history.jsonl"
 
 // Entry 一次发送记录（失败时 Error 非空，Status 为 0）。
+// Request 为发送时的请求快照，供「原样重放」（E22）。
 type Entry struct {
 	Time   int64  `json:"time"` // Unix 毫秒
 	UID    string `json:"uid"`
@@ -24,6 +25,8 @@ type Entry struct {
 	TimeMS int64  `json:"timeMs"`
 	Size   int    `json:"size"`
 	Error  string `json:"error,omitempty"`
+	// Request 发送时的草稿快照（JSON 的 collection.Request）；旧记录可为空
+	Request json.RawMessage `json:"request,omitempty"`
 }
 
 func path() (string, error) {

@@ -11,6 +11,10 @@ export const useCollectionStore = defineStore('collection', {
     loading: false,
     currentEnv: '',
     lastError: '',
+    /** H5：收藏的请求 uid 集合（localStorage: client.fav.<集合uid>） */
+    favorites: [] as string[],
+    /** 同步模式：''（未关联）| auto | manual | mirror */
+    syncMode: '',
   }),
   getters: {
     uid: (s) => s.info?.uid ?? '',
@@ -18,6 +22,9 @@ export const useCollectionStore = defineStore('collection', {
     dir: (s) => s.info?.dir ?? '',
     tree: (s) => s.info?.tree ?? [],
     envNames: (s) => s.info?.envs.map((e) => e.name) ?? [],
+    favSet: (s) => new Set(s.favorites),
+    /** mirror 模式只读：仅当已关联且 mode=mirror 时才禁编辑。 */
+    isReadOnly: (s) => s.syncMode === 'mirror',
   },
   actions: {
     async open(dir: string): Promise<void> {
@@ -28,6 +35,7 @@ export const useCollectionStore = defineStore('collection', {
         this.ready = true
         localStorage.setItem('client.lastDir', dir)
         this.restoreEnv()
+        this.loadFavs()
       } catch (e) {
         this.lastError = e instanceof Error ? e.message : String(e)
         throw e
@@ -64,6 +72,14 @@ export const useCollectionStore = defineStore('collection', {
       await api.renameRequest(uid, name)
       await this.reload()
     },
+    async moveRequest(uid: string, destFolder: string): Promise<void> {
+      await api.moveRequest(uid, destFolder)
+      await this.reload()
+    },
+    async moveFolder(uid: string, destParent: string): Promise<void> {
+      await api.moveFolder(uid, destParent)
+      await this.reload()
+    },
     restoreEnv(): void {
       const saved = localStorage.getItem(`client.env.${this.uid}`)
       this.currentEnv = saved && this.envNames.includes(saved) ? saved : (this.envNames[0] ?? '')
@@ -71,6 +87,31 @@ export const useCollectionStore = defineStore('collection', {
     setEnv(name: string): void {
       this.currentEnv = name
       localStorage.setItem(`client.env.${this.uid}`, name)
+    },
+    // ---- H5 收藏 / 置顶 ----
+    loadFavs(): void {
+      try {
+        const raw = localStorage.getItem(`client.fav.${this.uid}`)
+        this.favorites = raw ? (JSON.parse(raw) as string[]) : []
+      } catch {
+        this.favorites = []
+      }
+    },
+    saveFavs(): void {
+      try {
+        localStorage.setItem(`client.fav.${this.uid}`, JSON.stringify(this.favorites))
+      } catch {
+        // 忽略
+      }
+    },
+    toggleFav(uid: string): void {
+      const i = this.favorites.indexOf(uid)
+      if (i >= 0) this.favorites.splice(i, 1)
+      else this.favorites.unshift(uid) // 新收藏排最前
+      this.saveFavs()
+    },
+    isFav(uid: string): boolean {
+      return this.favorites.includes(uid)
     },
     /** 保存环境并保持当前选择（供环境管理弹窗使用）。 */
     async saveEnv(env: Env): Promise<void> {

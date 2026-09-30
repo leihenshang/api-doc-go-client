@@ -9,17 +9,136 @@ import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
 import KeyValueTable from '@/components/KeyValueTable.vue'
 import { isDark } from '@/lib/theme'
+import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
 import type { Auth } from '@/types'
 
 const props = defineProps<{ tab: Tab }>()
 const tabs = useTabsStore()
+const coll = useCollectionStore()
 const { t, locale } = useI18n()
 
-type Seg = 'params' | 'body' | 'headers' | 'auth' | 'docs'
+// mirror 模式只读（mode 限制，T38）
+const readonly = computed(() => coll.isReadOnly)
+
+// ---- Params ↔ URL 双向联动（syncingFrom 防循环） ----
+const syncingFrom = ref<'url' | 'params' | null>(null)
+
+/** 从 URL 的 query 段回填 params（URL 编辑时调用）。 */
+function syncParamsFromUrl(): void {
+  syncingFrom.value = 'url'
+  try {
+    const raw = props.tab.request.url
+    const idx = raw.indexOf('?')
+    const queryStr = idx >= 0 ? raw.slice(idx + 1) : ''
+    const existing = new Map(props.tab.request.params.map((p) => [p.name, p]))
+    const next: typeof props.tab.request.params = []
+    if (queryStr) {
+      for (const pair of queryStr.split('&')) {
+        if (!pair) continue
+        const eq = pair.indexOf('=')
+        const name = decodeURIComponent(eq < 0 ? pair : pair.slice(0, eq))
+        const value = eq < 0 ? '' : decodeURIComponent(pair.slice(eq + 1))
+        if (!name) continue
+        const old = existing.get(name)
+        next.push({ name, value, enabled: old?.enabled ?? true, description: old?.description })
+      }
+    }
+    // 保留表格里手动加的、URL 里没有的未启用行
+    for (const p of props.tab.request.params) {
+      if (p.name && !queryStr.includes(encodeURIComponent(p.name))) {
+        next.push(p)
+      }
+    }
+    props.tab.request.params.splice(0, props.tab.request.params.length, ...next)
+  } finally {
+    setTimeout(() => (syncingFrom.value = null), 0)
+  }
+}
+
+/** 从 params 重拼 URL 的 query 段（参数表编辑时调用）。 */
+function syncUrlFromParams(): void {
+  syncingFrom.value = 'params'
+  try {
+    const raw = props.tab.request.url
+    const idx = raw.indexOf('?')
+    const base = idx >= 0 ? raw.slice(0, idx) : raw
+    const parts: string[] = []
+    for (const p of props.tab.request.params) {
+      if (!p.enabled || !p.name.trim()) continue
+      const k = encodeURIComponent(p.name.trim())
+      const v = encodeURIComponent(p.value ?? '')
+      parts.push(`${k}=${v}`)
+    }
+    props.tab.request.url = parts.length ? `${base}?${parts.join('&')}` : base
+  } finally {
+    setTimeout(() => (syncingFrom.value = null), 0)
+  }
+}
+
+// URL 改了 → 回填 params
+watch(
+  () => props.tab.request.url,
+  () => {
+    if (readonly.value || syncingFrom.value === 'params') return
+    syncParamsFromUrl()
+    touch()
+  },
+)
+
+function onParamsChange(): void {
+  if (readonly.value || syncingFrom.value === 'url') return
+  syncUrlFromParams()
+  touch()
+}
+
+type Seg = 'params' | 'body' | 'headers' | 'auth' | 'vars' | 'script' | 'tests' | 'docs'
 
 const seg = ref<Seg>('params')
+
+// 脚本/断言/前置变量（E15–E17）
+const varsPre = computed({
+  get: () => props.tab.request.varsPreRequest ?? [],
+  set: (v) => {
+    props.tab.request.varsPreRequest = v
+    touch()
+  },
+})
+const scriptPre = computed({
+  get: () => props.tab.request.script?.preRequest ?? '',
+  set: (v: string) => {
+    if (!props.tab.request.script) props.tab.request.script = {}
+    props.tab.request.script.preRequest = v
+    touch()
+  },
+})
+const scriptPost = computed({
+  get: () => props.tab.request.script?.postResponse ?? '',
+  set: (v: string) => {
+    if (!props.tab.request.script) props.tab.request.script = {}
+    props.tab.request.script.postResponse = v
+    touch()
+  },
+})
+const asserts = computed({
+  get: () => props.tab.request.asserts ?? [],
+  set: (v) => {
+    props.tab.request.asserts = v
+    touch()
+  },
+})
+
+function addVar(): void {
+  varsPre.value = [...varsPre.value, { name: '', value: '', enabled: true }]
+}
+function addAssert(): void {
+  asserts.value = [...asserts.value, { name: '', expr: '' }]
+}
+function removeAt(list: 'vars' | 'asserts', i: number): void {
+  if (list === 'vars') varsPre.value = varsPre.value.filter((_, j) => j !== i)
+  else asserts.value = asserts.value.filter((_, j) => j !== i)
+}
 
 const auth = computed<Auth>(() => props.tab.request.auth ?? { type: 'none' })
 const authType = computed({
@@ -72,16 +191,25 @@ const hasBody = computed(
     (props.tab.request.body.raw.trim() !== '' || props.tab.request.body.form.some((f) => f.name.trim())),
 )
 const hasDocs = computed(() => props.tab.request.docs.trim() !== '')
+const hasVars = computed(() => (props.tab.request.varsPreRequest ?? []).some((v) => v.name.trim()))
+const hasScript = computed(
+  () => !!(props.tab.request.script?.preRequest?.trim() || props.tab.request.script?.postResponse?.trim()),
+)
+const hasAsserts = computed(() => (props.tab.request.asserts ?? []).some((a) => a.expr.trim()))
 
 const segments = computed<{ key: Seg; label: string; dot: boolean }[]>(() => [
   { key: 'params', label: t('editor.params'), dot: hasParams.value },
   { key: 'body', label: t('editor.body'), dot: hasBody.value },
   { key: 'headers', label: t('editor.headers'), dot: hasHeaders.value },
   { key: 'auth', label: t('editor.auth'), dot: hasAuth.value },
+  { key: 'vars', label: t('editor.vars'), dot: hasVars.value },
+  { key: 'script', label: t('editor.script'), dot: hasScript.value },
+  { key: 'tests', label: t('editor.tests'), dot: hasAsserts.value },
   { key: 'docs', label: t('editor.docs'), dot: hasDocs.value },
 ])
 
 function touch(): void {
+  if (readonly.value) return
   tabs.touch(props.tab.key)
 }
 
@@ -124,7 +252,7 @@ watch(
         v-if="seg === 'params'"
         :rows="tab.request.params"
         :label="t('editor.query')"
-        @change="touch"
+        @change="onParamsChange"
       />
       <key-value-table
         v-else-if="seg === 'headers'"
@@ -207,10 +335,53 @@ watch(
             v-else-if="bodyType === 'form' || bodyType === 'multipart'"
             :rows="tab.request.body.form"
             :label="bodyType === 'form' ? t('editor.bodyForm') : t('editor.bodyMultipart')"
+            :show-type="bodyType === 'multipart'"
             @change="touch"
           />
         </div>
       </template>
+      <div v-else-if="seg === 'vars'" class="script-pane">
+        <p class="hint">{{ t('editor.varsHint') }}</p>
+        <div v-for="(v, i) in varsPre" :key="i" class="srow" data-testid="vars.row">
+          <n-checkbox v-model:checked="v.enabled" size="small" @update:checked="touch" />
+          <n-input v-model:value="v.name" size="small" :placeholder="t('editor.colName')" data-testid="vars.name" @input="touch" />
+          <n-input v-model:value="v.value" size="small" :placeholder="t('editor.colValue')" data-testid="vars.value" @input="touch" />
+          <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('vars', i)">×</button>
+        </div>
+        <button class="link" type="button" data-testid="vars.add" @click="addVar">{{ t('editor.addRow') }}</button>
+      </div>
+      <div v-else-if="seg === 'script'" class="script-pane">
+        <p class="hint">{{ t('editor.scriptHint') }}</p>
+        <div class="slb">{{ t('editor.scriptPre') }}</div>
+        <n-input
+          :value="scriptPre"
+          type="textarea"
+          :rows="6"
+          class="mono raw"
+          data-testid="script.pre"
+          :placeholder="t('editor.scriptPrePlaceholder')"
+          @update:value="(v: string) => (scriptPre = v)"
+        />
+        <div class="slb">{{ t('editor.scriptPost') }}</div>
+        <n-input
+          :value="scriptPost"
+          type="textarea"
+          :rows="6"
+          class="mono raw"
+          data-testid="script.post"
+          :placeholder="t('editor.scriptPostPlaceholder')"
+          @update:value="(v: string) => (scriptPost = v)"
+        />
+      </div>
+      <div v-else-if="seg === 'tests'" class="script-pane">
+        <p class="hint">{{ t('editor.testsHint') }}</p>
+        <div v-for="(a, i) in asserts" :key="i" class="srow" data-testid="assert.row">
+          <n-input v-model:value="a.name" size="small" :placeholder="t('editor.colDesc')" class="aname" data-testid="assert.name" @input="touch" />
+          <n-input v-model:value="a.expr" size="small" class="mono" :placeholder="t('editor.assertExpr')" data-testid="assert.expr" @input="touch" />
+          <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('asserts', i)">×</button>
+        </div>
+        <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
+      </div>
       <md-editor
         v-else
         v-model="docs"
@@ -343,5 +514,58 @@ watch(
 .md-edit {
   flex: 1 1 auto;
   min-height: 340px;
+}
+
+.script-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.script-pane .hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.script-pane .slb {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-2);
+  margin-top: 4px;
+}
+
+.script-pane .srow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.script-pane .aname {
+  flex: 0 0 160px;
+}
+
+.script-pane .rm {
+  border: none;
+  background: none;
+  color: var(--app-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.script-pane .rm:hover {
+  color: var(--app-danger, #d03050);
+}
+
+.script-pane .link {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--app-accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
 }
 </style>

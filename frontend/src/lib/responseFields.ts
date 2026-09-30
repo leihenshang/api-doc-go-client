@@ -19,13 +19,13 @@ function typeName(v: unknown): string {
   return typeof v
 }
 
-function childEntries(v: unknown): [string, unknown][] {
-  if (Array.isArray(v)) return v.map((x, i) => [String(i), x] as [string, unknown])
-  if (v && typeof v === 'object') return Object.entries(v as Record<string, unknown>)
-  return []
-}
-
-/** 把 JSON 文本摊平成叶子字段（容器不占行）；非法 JSON 返回空数组。 */
+/**
+ * 把 JSON 文本摊平成字段说明（按结构，不按数组元素数量）：
+ * - 对象展开子字段
+ * - 数组用 `[]` 占位，只展开**首个元素**的字段作为结构描述
+ * - 叶子占一行
+ * 非法 JSON 返回空数组。
+ */
 export function extractFields(text: string): FieldRow[] {
   let data: unknown
   try {
@@ -34,18 +34,49 @@ export function extractFields(text: string): FieldRow[] {
     return []
   }
   const out: FieldRow[] = []
+  const seen = new Set<string>()
+
+  const push = (path: string, type: string): void => {
+    if (seen.has(path)) return
+    seen.add(path)
+    out.push({ path, type, meaning: '' })
+  }
+
   const walk = (v: unknown, path: string, depth: number): void => {
-    if (out.length >= MAX_FIELDS) return
-    const kids = depth >= MAX_DEPTH ? [] : childEntries(v)
-    if (kids.length === 0) {
-      out.push({ path, type: typeName(v), meaning: '' })
+    if (out.length >= MAX_FIELDS || depth > MAX_DEPTH) return
+
+    // 数组：按结构描述，不逐元素展开
+    if (Array.isArray(v)) {
+      if (v.length === 0) {
+        push(path, 'array')
+        return
+      }
+      push(path, 'array')
+      const elemPath = `${path}[]`
+      // 首元素作为结构样例（或数组里第一个非空对象的键集）
+      const sample = v.find((x) => x !== null && x !== undefined)
+      walk(sample, elemPath, depth + 1)
       return
     }
-    for (const [k, child] of kids) walk(child, path ? `${path}.${k}` : k, depth + 1)
+
+    // 对象：展开子字段
+    if (v !== null && typeof v === 'object') {
+      const entries = Object.entries(v as Record<string, unknown>)
+      if (entries.length === 0) {
+        if (path) push(path, 'object')
+        return
+      }
+      for (const [k, child] of entries) {
+        walk(child, path ? `${path}.${k}` : k, depth + 1)
+      }
+      return
+    }
+
+    // 叶子
+    if (path) push(path, typeName(v))
   }
-  const root = childEntries(data)
-  if (root.length === 0) return [{ path: '$', type: typeName(data), meaning: '' }]
-  for (const [k, child] of root) walk(child, k, 1)
+
+  walk(data, '', 0)
   return out
 }
 

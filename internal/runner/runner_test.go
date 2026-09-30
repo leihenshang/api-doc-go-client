@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -60,7 +63,7 @@ func TestSendGetWithSubstitution(t *testing.T) {
 		},
 	}
 	vars := map[string]string{"host": srv.URL, "user": "alice", "token": "t-123"}
-	res, err := Send(r, vars, DefaultOptions())
+	res, err := Send(context.Background(), r, vars, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -95,7 +98,7 @@ func TestSendJSONBodyAndHeaderCase(t *testing.T) {
 		Headers: []collection.KV{{Name: "content-type", Value: "application/json", Enabled: true}},
 		Body:    collection.Body{Type: "json", Raw: `{"name":"{{user}}","ts":{{$timestamp}}}`},
 	}
-	res, err := Send(r, map[string]string{"user": "bob", "$timestamp": "1727400000"}, DefaultOptions())
+	res, err := Send(context.Background(), r, map[string]string{"user": "bob", "$timestamp": "1727400000"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -122,7 +125,7 @@ func TestSendForm(t *testing.T) {
 			{Name: "user", Value: "carol", Enabled: true}, {Name: "pwd", Value: "p", Enabled: true},
 		}},
 	}
-	res, err := Send(r, nil, DefaultOptions())
+	res, err := Send(context.Background(), r, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -141,7 +144,7 @@ func TestMissingVarKeptAndReported(t *testing.T) {
 	srv := echoServer(t)
 	defer srv.Close()
 	r := collection.Request{UID: "u4", Method: "GET", URL: srv.URL + "/x?missing={{notdefined}}"}
-	res, err := Send(r, map[string]string{}, DefaultOptions())
+	res, err := Send(context.Background(), r, map[string]string{}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -159,12 +162,12 @@ func TestInsecureSSLPolicy(t *testing.T) {
 	defer srv.Close()
 	r := collection.Request{UID: "u5", Method: "GET", URL: srv.URL + "/x"}
 
-	if _, err := Send(r, nil, DefaultOptions()); err == nil {
+	if _, err := Send(context.Background(), r, nil, DefaultOptions()); err == nil {
 		t.Fatalf("未开启忽略证书时应因证书校验失败")
 	}
 	opt := DefaultOptions()
 	opt.InsecureSSL = true
-	res, err := Send(r, nil, opt)
+	res, err := Send(context.Background(), r, nil, opt)
 	if err != nil {
 		t.Fatalf("开启忽略证书后仍失败: %v", err)
 	}
@@ -180,7 +183,7 @@ func TestFollowRedirects(t *testing.T) {
 
 	opt := DefaultOptions()
 	opt.InsecureSSL = true
-	res, err := Send(r, nil, opt)
+	res, err := Send(context.Background(), r, nil, opt)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -190,7 +193,7 @@ func TestFollowRedirects(t *testing.T) {
 
 	stop := DefaultOptions()
 	stop.FollowRedirects = false
-	res, err = Send(r, nil, stop)
+	res, err = Send(context.Background(), r, nil, stop)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -204,7 +207,7 @@ func TestMaxRedirects(t *testing.T) {
 	defer srv.Close()
 	opt := DefaultOptions()
 	opt.MaxRedirects = 1
-	_, err := Send(collection.Request{UID: "u7", Method: "GET", URL: srv.URL + "/r1"}, nil, opt)
+	_, err := Send(context.Background(), collection.Request{UID: "u7", Method: "GET", URL: srv.URL + "/r1"}, nil, opt)
 	if err == nil {
 		t.Fatalf("超过最大重定向次数应报错")
 	}
@@ -218,8 +221,32 @@ func TestTimeout(t *testing.T) {
 	defer srv.Close()
 	opt := DefaultOptions()
 	opt.Timeout = 50 * time.Millisecond
-	if _, err := Send(collection.Request{UID: "u8", Method: "GET", URL: srv.URL}, nil, opt); err == nil {
+	if _, err := Send(context.Background(), collection.Request{UID: "u8", Method: "GET", URL: srv.URL}, nil, opt); err == nil {
 		t.Fatalf("超时应报错")
+	}
+}
+
+// 取消：ctx 取消后 Send 应立刻返回「请求已取消」。
+func TestCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second)
+		_, _ = w.Write([]byte("late"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+	opt := DefaultOptions()
+	opt.Timeout = 5 * time.Second
+	_, err := Send(ctx, collection.Request{UID: "u-cancel", Method: "GET", URL: srv.URL}, nil, opt)
+	if err == nil {
+		t.Fatalf("取消后应报错")
+	}
+	if !strings.Contains(err.Error(), "取消") {
+		t.Fatalf("取消错误文案不符: %v", err)
 	}
 }
 
@@ -228,7 +255,7 @@ func TestAuth(t *testing.T) {
 	defer srv.Close()
 
 	basic := collection.Request{UID: "u9", Method: "GET", URL: srv.URL, Auth: &collection.Auth{Type: "basic", Username: "u", Password: "p"}}
-	res, err := Send(basic, nil, DefaultOptions())
+	res, err := Send(context.Background(), basic, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("basic: %v", err)
 	}
@@ -237,7 +264,7 @@ func TestAuth(t *testing.T) {
 	}
 
 	bearer := collection.Request{UID: "u10", Method: "GET", URL: srv.URL, Auth: &collection.Auth{Type: "bearer", Token: "{{tok}}"}}
-	res, err = Send(bearer, map[string]string{"tok": "abc"}, DefaultOptions())
+	res, err = Send(context.Background(), bearer, map[string]string{"tok": "abc"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("bearer: %v", err)
 	}
@@ -246,7 +273,7 @@ func TestAuth(t *testing.T) {
 	}
 
 	apiKey := collection.Request{UID: "u11", Method: "GET", URL: srv.URL, Auth: &collection.Auth{Type: "apikey", Key: "X-Api-Key", Value: "k1", In: "query"}}
-	res, err = Send(apiKey, nil, DefaultOptions())
+	res, err = Send(context.Background(), apiKey, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("apikey: %v", err)
 	}
@@ -262,7 +289,7 @@ func TestMultipartBody(t *testing.T) {
 		UID: "u12", Method: "POST", URL: srv.URL + "/upload",
 		Body: collection.Body{Type: "multipart", Form: []collection.KV{{Name: "field", Value: "v1", Enabled: true}}},
 	}
-	res, err := Send(r, nil, DefaultOptions())
+	res, err := Send(context.Background(), r, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -277,6 +304,37 @@ func TestMultipartBody(t *testing.T) {
 	}
 }
 
+// multipart 文件 part：type=file 时 value 为路径，读盘后按文件字段上传。
+func TestMultipartFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(path, []byte("file-content"), 0o644); err != nil {
+		t.Fatalf("写临时文件: %v", err)
+	}
+	srv := echoServer(t)
+	defer srv.Close()
+	r := collection.Request{
+		UID: "u12f", Method: "POST", URL: srv.URL + "/upload",
+		Body: collection.Body{Type: "multipart", Form: []collection.KV{
+			{Name: "file", Value: path, Enabled: true, Type: "file"},
+			{Name: "note", Value: "hi", Enabled: true, Type: "text"},
+		}},
+	}
+	res, err := Send(context.Background(), r, nil, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if !strings.Contains(res.Body, "hello.txt") {
+		t.Fatalf("文件名缺失: %q", res.Body)
+	}
+	if !strings.Contains(res.Body, "file-content") {
+		t.Fatalf("文件内容缺失: %q", res.Body)
+	}
+	if !strings.Contains(res.Body, "name=\\\"note\\\"") {
+		t.Fatalf("文本字段缺失: %q", res.Body)
+	}
+}
+
 func TestBinaryResponse(t *testing.T) {
 	raw := []byte{0x89, 'P', 'N', 'G', 0x00, 0x1a, 0xff}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -284,7 +342,7 @@ func TestBinaryResponse(t *testing.T) {
 		_, _ = w.Write(raw)
 	}))
 	defer srv.Close()
-	res, err := Send(collection.Request{UID: "u13", Method: "GET", URL: srv.URL}, nil, DefaultOptions())
+	res, err := Send(context.Background(), collection.Request{UID: "u13", Method: "GET", URL: srv.URL}, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -309,7 +367,7 @@ func TestRequestSettingsOverride(t *testing.T) {
 		UID: "u14", Method: "GET", URL: srv.URL + "/r1",
 		Settings: &collection.RequestSettings{FollowRedirects: &no},
 	}
-	res, err := Send(r, nil, DefaultOptions())
+	res, err := Send(context.Background(), r, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -327,7 +385,7 @@ func TestRequestSettingsOverride(t *testing.T) {
 		UID: "u15", Method: "GET", URL: tlsSrv.URL,
 		Settings: &collection.RequestSettings{InsecureSSL: &yes},
 	}
-	if _, err := Send(insecure, nil, DefaultOptions()); err != nil {
+	if _, err := Send(context.Background(), insecure, nil, DefaultOptions()); err != nil {
 		t.Fatalf("请求级 insecureSsl 未生效: %v", err)
 	}
 }
@@ -340,7 +398,7 @@ func TestPlainHTTPSStillWorks(t *testing.T) {
 	defer srv.Close()
 	opt := DefaultOptions()
 	opt.InsecureSSL = true // 即使开启，也应能正常访问 http
-	res, err := Send(collection.Request{UID: "u16", Method: "GET", URL: srv.URL}, nil, opt)
+	res, err := Send(context.Background(), collection.Request{UID: "u16", Method: "GET", URL: srv.URL}, nil, opt)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}

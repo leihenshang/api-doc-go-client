@@ -17,6 +17,7 @@ const DEFAULTS: Settings = {
   responseLayout: 'right',
   responseSize: 44,
   theme: ThemeLight,
+  proxyUrl: '',
 }
 
 export const useSettingsStore = defineStore('settings', {

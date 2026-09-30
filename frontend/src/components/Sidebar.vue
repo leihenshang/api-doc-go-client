@@ -2,7 +2,7 @@
 // 集合树：根行（集合名 + 本地徽章）→ 分组 / 请求；底部为「本地存储」说明卡（design-spec §2）。
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
-import { NButton, NDropdown, NIcon, NInput, NPopconfirm } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NInput, NModal, NPopconfirm, NSelect } from 'naive-ui'
 import type { InputInst } from 'naive-ui'
 import {
   AddOutline,
@@ -10,9 +10,11 @@ import {
   ChevronForwardOutline,
   ContractOutline,
   CreateOutline,
-  DocumentTextOutline,
   ExpandOutline,
   FolderOpenOutline,
+  MoveOutline,
+  Star,
+  StarOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 import { computed, h, nextTick, ref, watch } from 'vue'
@@ -70,6 +72,9 @@ function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
 const rows = computed<Row[]>(() => {
   const src = searching.value ? filterTree(props.tree, keyword.value.trim().toLowerCase()) : props.tree
   const out: Row[] = []
+  // H5：收藏的请求置顶展示（不改变磁盘顺序）
+  const favUids = coll.favSet
+  const favRows: Row[] = []
   const walk = (nodes: TreeNode[], depth: number): void => {
     for (const n of nodes) {
       out.push({ node: n, depth })
@@ -77,6 +82,17 @@ const rows = computed<Row[]>(() => {
     }
   }
   walk(src, 0)
+  if (!searching.value && favUids.size) {
+    for (const r of out) {
+      if (r.node.type === 'request' && favUids.has(r.node.uid)) {
+        favRows.push({ node: r.node, depth: 0 })
+      }
+    }
+    if (favRows.length) {
+      // 收置顶区：在最前插入
+      return [...favRows, ...out]
+    }
+  }
   return out
 })
 
@@ -138,6 +154,7 @@ async function submitRename(): Promise<void> {
   if (!cur) return
   const name = cur.value.trim()
   editing.value = null
+  // 空名 / 未改动 = 取消，不触发保存
   if (!name) return
   const node = findNode(props.tree, cur.uid)
   if (!node || node.name === name) return
@@ -172,8 +189,10 @@ async function submitAdd(): Promise<void> {
   const cur = adding.value
   if (!cur) return
   const name = addValue.value.trim()
+  // 空名 = 取消，隐藏输入框
   if (!name) {
     adding.value = null
+    addValue.value = ''
     return
   }
   adding.value = null
@@ -206,6 +225,43 @@ async function removeRequest(node: TreeNode): Promise<void> {
 function onFolderMenu(node: TreeNode, key: string | number): void {
   if (key === 'request') emit('new-request', node.path)
   else void startAdd(node.path)
+}
+
+// ---- 移动到目标分组 ----
+const moving = ref<{ node: TreeNode; dest: string } | null>(null)
+
+function startMove(node: TreeNode): void {
+  // 默认目标：根（空串）；分组不能移入自己或后代（后端也会拒）
+  moving.value = { node, dest: '' }
+}
+
+const destOptions = computed(() => {
+  const out: { label: string; value: string }[] = [{ label: t('tree.moveRoot'), value: '' }]
+  const walk = (nodes: TreeNode[]): void => {
+    for (const n of nodes) {
+      if (n.type !== 'folder') continue
+      // 分组移动时排除自己与后代
+      if (moving.value?.node.type === 'folder' && (n.uid === moving.value.node.uid || n.path.startsWith(moving.value.node.path + '/'))) {
+        continue
+      }
+      out.push({ label: n.name, value: n.path })
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(props.tree)
+  return out
+})
+
+async function submitMove(): Promise<void> {
+  const cur = moving.value
+  if (!cur) return
+  moving.value = null
+  try {
+    if (cur.node.type === 'folder') await coll.moveFolder(cur.node.uid, cur.dest)
+    else await coll.moveRequest(cur.node.uid, cur.dest)
+  } catch (e) {
+    fail(e)
+  }
 }
 
 function findNode(nodes: TreeNode[], uid: string): TreeNode | null {
@@ -274,7 +330,6 @@ watch(
 
     <div ref="treeEl" class="tree">
       <div class="row root" :style="{ paddingLeft: '8px' }">
-        <n-icon :component="FolderOpenOutline" :size="14" class="ric" />
         <span class="rname coll-name" :title="name">{{ name }}</span>
         <span class="badge">{{ t('local.badge') }}</span>
       </div>
@@ -296,12 +351,13 @@ watch(
       <template v-for="row in rows" :key="row.node.type + row.node.path">
         <div
           class="row"
-          :class="{ folder: row.node.type === 'folder', on: row.node.uid === props.activeUid }"
+          :class="{ folder: row.node.type === 'folder', on: row.node.uid === props.activeUid, clickable: row.node.type === 'request' }"
           :data-uid="row.node.uid"
           :data-kind="row.node.type"
           data-testid="tree.row"
           :aria-current="row.node.uid === props.activeUid ? 'true' : undefined"
           :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
+          @click="row.node.type === 'request' && !editing ? emit('open', row.node.uid) : undefined"
         >
           <template v-if="row.node.type === 'folder'">
             <button class="caret" :title="t('tree.expandAll')" @click="toggle(row.node.path)">
@@ -330,6 +386,9 @@ watch(
               <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
                 <n-icon :component="CreateOutline" :size="13" />
               </button>
+              <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.node)">
+                <n-icon :component="MoveOutline" :size="13" />
+              </button>
               <n-popconfirm @positive-click="removeFolder(row.node)">
                 <template #trigger>
                   <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')" @click.stop>
@@ -352,12 +411,24 @@ watch(
               @blur="submitRename"
               @keyup.esc="editing = null"
             />
-            <button v-else class="rname" data-testid="tree.row.name" :title="row.node.name" @click="emit('open', row.node.uid)">
+            <button v-else class="rname" data-testid="tree.row.name" :title="row.node.name">
               {{ row.node.name }}
             </button>
             <span class="actions">
+              <button
+                class="act"
+                type="button"
+                data-testid="tree.row.fav"
+                :title="coll.isFav(row.node.uid) ? t('tree.unfav') : t('tree.fav')"
+                @click.stop="coll.toggleFav(row.node.uid)"
+              >
+                <n-icon :component="coll.isFav(row.node.uid) ? Star : StarOutline" :size="13" />
+              </button>
               <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
                 <n-icon :component="CreateOutline" :size="13" />
+              </button>
+              <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.node)">
+                <n-icon :component="MoveOutline" :size="13" />
               </button>
               <n-popconfirm @positive-click="removeRequest(row.node)">
                 <template #trigger>
@@ -389,15 +460,53 @@ watch(
       </template>
     </div>
 
-    <div class="store">
-      <div class="sh">
-        <n-icon :component="DocumentTextOutline" :size="13" />
-        <span>{{ t('local.storage') }}</span>
+    <n-modal
+      :show="!!moving"
+      preset="card"
+      :title="t('tree.moveTitle')"
+      style="width: 420px"
+      @update:show="(v: boolean) => { if (!v) moving = null }"
+    >
+      <div v-if="moving" class="move-body">
+        <p class="move-hint">{{ t('tree.moveHint', { name: moving.node.name }) }}</p>
+        <n-select
+          v-model:value="moving.dest"
+          :options="destOptions"
+          size="small"
+          data-testid="tree.move.dest"
+        />
       </div>
-      <p class="sd">{{ t('local.storageHint') }}</p>
-    </div>
+      <template #footer>
+        <div class="move-ft">
+          <n-button size="small" @click="moving = null">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" type="primary" data-testid="tree.move.ok" @click="submitMove">
+            {{ t('tree.moveOk') }}
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
+
+<style scoped>
+.move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.move-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.move-ft {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+</style>
 
 <style scoped>
 .sidebar {
@@ -436,18 +545,33 @@ watch(
 .row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   min-height: 26px;
   padding-right: 6px;
   cursor: pointer;
+  user-select: none;
 }
 
 .row:hover {
   background: var(--app-row-hover);
 }
 
-.row.root {
-  cursor: default;
+/* 请求行整行可点（打开详情） */
+.row.clickable {
+  cursor: pointer;
+}
+
+/* 请求行方法与文字水平对齐、紧凑间距 */
+.row > .mt,
+.row > .rname {
+  display: inline-flex;
+  align-items: center;
+  line-height: 26px;
+}
+
+/* 方法与名称之间再收窄 */
+.row > .mt + .rname {
+  margin-left: -2px;
 }
 
 /* 选中请求行：design-spec §6.6 的 info-tint 浅蓝底 */
@@ -467,13 +591,14 @@ watch(
 }
 
 .coll-name {
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--app-text);
 }
 
 .badge {
-  font-size: 9.5px;
+  font-size: 10px;
+  font-weight: 700;
   line-height: 15px;
   padding: 0 6px;
   border-radius: 999px;
@@ -558,30 +683,5 @@ watch(
 .act.danger:hover {
   background: var(--app-danger-tint);
   color: var(--app-danger);
-}
-
-.store {
-  flex: 0 0 auto;
-  margin: 8px 10px 10px;
-  padding: 9px 11px 10px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  background: var(--app-panel);
-}
-
-.sh {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--app-text-2);
-}
-
-.sd {
-  margin: 5px 0 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--app-muted);
 }
 </style>

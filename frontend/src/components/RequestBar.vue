@@ -4,7 +4,7 @@ import { NIcon, NSelect } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { computed, h, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { OptionsOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
+import { OptionsOutline, CodeOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
 import VarInput from '@/components/VarInput.vue'
 import { methodColor, methodTint } from '@/lib/method'
 import { useCollectionStore } from '@/stores/collection'
@@ -12,6 +12,7 @@ import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
 
 const props = defineProps<{ tab: Tab }>()
+const emit = defineEmits<{ codegen: [] }>()
 const tabs = useTabsStore()
 const coll = useCollectionStore()
 const { t } = useI18n()
@@ -47,6 +48,10 @@ function send(): void {
   void tabs.send(props.tab.key)
 }
 
+function cancel(): void {
+  tabs.cancelSend(props.tab.key)
+}
+
 // 规范化：去首尾空白，并把 {{ var }} 收成 {{var}}（不改变 URL 语义）
 function formatUrl(): void {
   props.tab.request.url = props.tab.request.url.trim().replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '{{$1}}')
@@ -77,9 +82,29 @@ function formatUrl(): void {
       <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
         <n-icon :component="OptionsOutline" :size="16" />
       </button>
-      <button class="send" type="button" data-testid="req.send" :disabled="tab.sending" @click="send">
+      <button class="icon-btn" type="button" data-testid="req.codegen" :title="t('codegen.title')" @click="emit('codegen')">
+        <n-icon :component="CodeOutline" :size="16" />
+      </button>
+      <button
+        class="send"
+        type="button"
+        data-testid="req.send"
+        :disabled="tab.sending || coll.isReadOnly"
+        :title="coll.isReadOnly ? t('sync.mirrorReadonly') : ''"
+        @click="send"
+      >
         <n-icon :component="tab.sending ? SyncOutline : SendOutline" :size="15" :class="{ spin: tab.sending }" />
         <span>{{ tab.sending ? t('editor.sending') : t('editor.send') }}</span>
+      </button>
+      <button
+        v-if="tab.sending"
+        class="cancel"
+        type="button"
+        data-testid="req.cancel"
+        :title="t('editor.cancelSend')"
+        @click="cancel"
+      >
+        {{ t('editor.cancelSend') }}
       </button>
     </div>
   </div>
@@ -107,15 +132,23 @@ function formatUrl(): void {
   flex: 0 0 auto;
 }
 
+/* 方法选择器整块统一底色，避免 arrow 区块与 label 区块色差分半 */
 .method :deep(.n-base-selection) {
-  background: var(--m-tint);
+  background: var(--m-tint) !important;
   border-radius: 6px;
+  --n-color: var(--m-tint) !important;
 }
 
 .method :deep(.n-base-selection .n-base-selection-label) {
   color: var(--m-color);
   font-family: var(--app-mono);
   font-weight: 600;
+}
+
+.method :deep(.n-base-selection-suffix),
+.method :deep(.n-base-selection-arrow) {
+  background: transparent;
+  color: var(--m-color);
 }
 
 /* 让方法选择器的输入区铺满整个高度，避免文字偏上 */
@@ -166,6 +199,24 @@ function formatUrl(): void {
 .send:disabled {
   opacity: 0.75;
   cursor: default;
+}
+
+.cancel {
+  flex: 0 0 auto;
+  height: 34px;
+  border: 1px solid var(--app-border);
+  background: var(--app-panel);
+  color: var(--app-danger, #d03050);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  padding:0 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cancel:hover {
+  border-color: var(--app-danger, #d03050);
 }
 
 .spin {

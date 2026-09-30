@@ -63,6 +63,9 @@ const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'toggle-theme', labelKey: 'palette.toggleTheme', icon: MoonOutline },
   { key: 'history', labelKey: 'palette.history', icon: TimeOutline },
   { key: 'settings', labelKey: 'palette.settings', icon: SettingsOutline },
+  { key: 'import', labelKey: 'import.title', icon: FolderOpenOutline },
+  { key: 'export-md', labelKey: 'export.markdown', icon: FolderOpenOutline },
+  { key: 'export-html', labelKey: 'export.html', icon: FolderOpenOutline },
 ]
 
 function collectRequests(nodes: TreeNode[], trail: string[], out: Item[]): void {

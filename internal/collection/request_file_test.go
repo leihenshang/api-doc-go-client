@@ -89,7 +89,8 @@ func TestMarshalKeepsUnknownFields(t *testing.T) {
 	}
 }
 
-// 保存路径不应丢失磁盘上已有的未知字段（前端不了解这些字段）。
+// 保存路径不应丢失磁盘上已有的未知字段（前端不了解这些字段）；
+// vars/script/assert 已升为一等字段，经 Request 往返，不走 Extra 合并。
 func TestSaveRequestMergesUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	c := &Collection{Dir: dir}
@@ -97,7 +98,14 @@ func TestSaveRequestMergesUnknownFields(t *testing.T) {
 	if err := os.WriteFile(path, []byte(brunoSample), 0o644); err != nil {
 		t.Fatalf("写入样例: %v", err)
 	}
-	r := &Request{UID: "u-1", Name: "用户-列表", Path: "req.yml", Method: "POST", URL: "{{host}}/x"}
+	// 模拟前端：读入 → 改方法 → 保存
+	f, err := readRequestFile(path)
+	if err != nil {
+		t.Fatalf("读入: %v", err)
+	}
+	r := fromFile("req.yml", f)
+	r.Method = "POST"
+	r.URL = "{{host}}/x"
 	if err := c.SaveRequest(r); err != nil {
 		t.Fatalf("保存: %v", err)
 	}
@@ -110,7 +118,38 @@ func TestSaveRequestMergesUnknownFields(t *testing.T) {
 		t.Fatalf("新值未写入:\n%s", text)
 	}
 	if !strings.Contains(text, "traceId") || !strings.Contains(text, "bru.setVar") {
-		t.Fatalf("未知字段被丢弃:\n%s", text)
+		t.Fatalf("脚本/变量字段被丢弃:\n%s", text)
+	}
+}
+
+// 清空脚本/断言后保存，磁盘上的字段应被移除（而不是从旧 Extra 合并回来）。
+func TestSaveRequestClearsScriptFields(t *testing.T) {
+	dir := t.TempDir()
+	c := &Collection{Dir: dir}
+	path := filepath.Join(dir, "req.yml")
+	if err := os.WriteFile(path, []byte(brunoSample), 0o644); err != nil {
+		t.Fatalf("写入样例: %v", err)
+	}
+	f, err := readRequestFile(path)
+	if err != nil {
+		t.Fatalf("读入: %v", err)
+	}
+	r := fromFile("req.yml", f)
+	if r.Script == nil || len(r.Asserts) == 0 {
+		t.Fatalf("样例脚本字段未解析: %+v", r)
+	}
+	r.VarsPreRequest = nil
+	r.Script = nil
+	r.Asserts = nil
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	text := string(data)
+	for _, wantGone := range []string{"traceId", "bru.setVar", "状态码为 200"} {
+		if strings.Contains(text, wantGone) {
+			t.Fatalf("清空后仍残留 %q:\n%s", wantGone, text)
+		}
 	}
 }
 

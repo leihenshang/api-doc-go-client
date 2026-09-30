@@ -135,6 +135,16 @@ func (j *Jar) dropExpired() {
 	j.items = kept
 }
 
+// Delete 删除单条 Cookie（按 domain + name + path 定位）。
+func (j *Jar) Delete(domain, name, path string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	host := strings.ToLower(strings.TrimPrefix(domain, "."))
+	j.remove(host, name, path)
+	j.flush()
+	return nil
+}
+
 // List 列出全部 Cookie（新值优先，供 UI 展示）。
 func (j *Jar) List() []Info {
 	j.mu.Lock()

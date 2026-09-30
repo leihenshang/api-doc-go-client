@@ -3,9 +3,12 @@
 import { NIcon, NDropdown } from 'naive-ui'
 import {
   ChevronDownOutline,
-  DocumentTextOutline,
+  CloudDownloadOutline,
+  CloudUploadOutline,
   FolderOpenOutline,
   LayersOutline,
+  LockClosedOutline,
+  PlayOutline,
   RefreshOutline,
   SearchOutline,
   SettingsOutline,
@@ -16,14 +19,19 @@ import { useI18n } from 'vue-i18n'
 import EnvPicker from '@/components/EnvPicker.vue'
 import type { Env } from '@/types'
 
-const props = defineProps<{ name: string; dir: string; envs: Env[]; currentEnv: string }>()
+const { name, envs, currentEnv } = defineProps<{ name: string; dir: string; envs: Env[]; currentEnv: string }>()
 const emit = defineEmits<{
   'open-other': []
   reload: []
   history: []
+  cookies: []
   settings: []
   palette: []
   'manage-env': []
+  import: []
+  export: [format: 'markdown' | 'html']
+  mock: []
+  sync: []
   'update:currentEnv': [v: string]
 }>()
 
@@ -33,18 +41,28 @@ const menu = computed(() => [
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
   { key: 'reload', label: t('toolbar.reload'), icon: () => h(NIcon, { component: RefreshOutline }) },
   { key: 'd1', type: 'divider' },
+  { key: 'sync', label: t('sync.title'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
+  { key: 'import', label: t('import.title'), icon: () => h(NIcon, { component: CloudDownloadOutline }) },
+  { key: 'export-md', label: t('export.markdown'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
+  { key: 'export-html', label: t('export.html'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
+  { key: 'mock', label: t('mock.title'), icon: () => h(NIcon, { component: PlayOutline }) },
+  { key: 'd2', type: 'divider' },
   { key: 'history', label: t('history.title'), icon: () => h(NIcon, { component: TimeOutline }) },
+  { key: 'cookies', label: t('cookies.title'), icon: () => h(NIcon, { component: LockClosedOutline }) },
   { key: 'settings', label: t('settings.title'), icon: () => h(NIcon, { component: SettingsOutline }) },
 ])
-
-// 目录名（不带路径）作为「本地」徽章文案
-const folder = computed(() => props.dir.split(/[\\/]/).filter(Boolean).pop() ?? props.dir)
 
 function onMenu(key: string | number): void {
   if (key === 'open') emit('open-other')
   else if (key === 'reload') emit('reload')
   else if (key === 'history') emit('history')
+  else if (key === 'cookies') emit('cookies')
   else if (key === 'settings') emit('settings')
+  else if (key === 'import') emit('import')
+  else if (key === 'export-md') emit('export', 'markdown')
+  else if (key === 'export-html') emit('export', 'html')
+  else if (key === 'mock') emit('mock')
+  else if (key === 'sync') emit('sync')
 }
 </script>
 
@@ -57,12 +75,6 @@ function onMenu(key: string | number): void {
         <n-icon :component="ChevronDownOutline" :size="12" class="ar" />
       </button>
     </n-dropdown>
-
-    <span class="badge ok"><span class="dot" />{{ t('local.offline') }}</span>
-    <span class="badge plain" :title="dir">
-      <n-icon :component="DocumentTextOutline" :size="12" />
-      <span class="bn">{{ folder }}</span>
-    </span>
 
     <span class="sp" />
 
@@ -126,42 +138,6 @@ function onMenu(key: string | number): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.badge.ok {
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
-}
-
-.badge .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--app-accent);
-}
-
-.badge.plain {
-  background: var(--app-chip);
-  color: var(--app-muted);
-  max-width: 240px;
-}
-
-.bn {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--app-mono);
 }
 
 .sp {

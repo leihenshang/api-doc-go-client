@@ -6,6 +6,8 @@ export interface KV {
   enabled: boolean
   /** 参数说明（对齐设计稿参数表 Description 列；Go 侧同名字段保证落盘 round-trip） */
   description?: string
+  /** multipart 表单行类型：text（默认）| file（value 为文件路径） */
+  type?: string
 }
 
 export type BodyType = 'none' | 'json' | 'text' | 'form' | 'multipart'
@@ -51,6 +53,46 @@ export interface RequestDoc {
   settings?: RequestSettings | null
   docs: string
   baseRev: number
+  /** vars.pre-request（发送前赋值，value 支持 {{变量}}） */
+  varsPreRequest?: ScriptVar[] | null
+  /** script.pre-request / post-response（goja） */
+  script?: ScriptBlock | null
+  /** assert 列表（post-response 后求值） */
+  asserts?: ScriptAssert[] | null
+}
+
+/** vars.pre-request 的一行。 */
+export interface ScriptVar {
+  name: string
+  value: string
+  enabled: boolean
+}
+
+/** script 段。 */
+export interface ScriptBlock {
+  preRequest?: string
+  postResponse?: string
+}
+
+/** assert 的一条。 */
+export interface ScriptAssert {
+  name?: string
+  expr: string
+}
+
+/** 脚本/断言阶段产物（runner.Result.script）。 */
+export interface ScriptResult {
+  vars?: Record<string, string>
+  asserts?: AssertResult[]
+  scriptError?: string
+}
+
+/** 一条断言结果。 */
+export interface AssertResult {
+  name: string
+  expr: string
+  passed: boolean
+  error?: string
 }
 
 export interface TreeNode {
@@ -93,6 +135,8 @@ export interface SendResult {
   binary: boolean
   headers: KV[]
   body: string
+  /** 脚本/断言产物（无脚本时缺省） */
+  script?: ScriptResult | null
 }
 
 /** 保存的响应示例里的请求快照（internal/collection.ExampleRequest）。 */
@@ -154,6 +198,8 @@ export interface Settings {
   responseSize: number
   /** 主题：light | dark（原生窗口底色也跟随该值） */
   theme: 'light' | 'dark'
+  /** HTTP(S) 代理；空 = 直连 */
+  proxyUrl: string
 }
 
 /** 一条发送历史（internal/history.Entry）。 */
@@ -167,6 +213,8 @@ export interface HistoryEntry {
   timeMs: number
   size: number
   error?: string
+  /** 发送时请求快照（原样重放用；旧记录可缺） */
+  request?: RequestDoc | null
 }
 
 /** Cookie 罐条目（internal/cookiejar.Info）。 */
@@ -177,4 +225,82 @@ export interface CookieInfo {
   path: string
   /** Unix 毫秒；0 表示会话 Cookie */
   expires: number
+}
+
+/** 本地索引节点（internal/index.Node）。 */
+export interface IndexNode {
+  uid: string
+  type: 'folder' | 'request'
+  path: string
+  title: string
+  method?: string
+  url?: string
+  mtime: number
+  hash?: string
+}
+
+/** 一次导入的结果（collection.ImportSummary）。 */
+export interface ImportSummary {
+  imported: number
+  skipped: number
+  failures?: string[]
+}
+
+/** 本地 Mock 运行状态（mocksrv.Status）。 */
+export interface MockStatus {
+  running: boolean
+  port: number
+  url: string
+  hits: number
+}
+
+/** 同步绑定（.sync.json，不含 PAT）。 */
+export interface SyncBindInfo {
+  linked: boolean
+  serverUrl: string
+  projectId: number
+  mode: string
+  cursor: number
+}
+
+/** 一轮同步摘要。 */
+export interface SyncReport {
+  pulled: number
+  pushed: number
+  conflicts: number
+  rejected: number
+  errors?: string[]
+  cursor: number
+  gap: boolean
+}
+
+/** 一份冲突副本。 */
+export interface ConflictItem {
+  file: string
+  ofUid: string
+  name: string
+  serverRev: number
+  createdAt: number
+}
+
+/** 文档条目（B13）。 */
+export interface DocEntry {
+  uid: string
+  name: string
+  path: string
+  content: string
+  icon?: string
+}
+
+/** 状态栏同步状态。 */
+export interface SyncStatus {
+  linked: boolean
+  mode: string
+  running: boolean
+  lastSyncAt: number
+  lastError: string
+  dirtyCount: number
+  conflicts: number
+  cursor: number
+  lastReport?: SyncReport | null
 }

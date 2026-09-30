@@ -32,6 +32,7 @@ type Settings struct {
 	ResponseLayout  string  `json:"responseLayout"` // 响应区位置：right | bottom
 	ResponseSize    int     `json:"responseSize"`   // 响应区占比（%）：right 时为宽度、bottom 时为高度，可拖动调整
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
+	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 }
 
 const (
