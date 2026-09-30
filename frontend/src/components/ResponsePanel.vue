@@ -237,8 +237,8 @@ async function saveBody(): Promise<void> {
           <span class="meta mono">{{ meta }}</span>
         </div>
         <span class="sp" />
+        <!-- 响应切换下拉：始终显示，方便随时回看历史示例 -->
         <n-select
-          v-if="examples.length"
           :value="viewingUid"
           :options="exampleOptions"
           size="tiny"
