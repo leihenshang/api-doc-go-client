@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
-import { NButton, NCheckbox, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'

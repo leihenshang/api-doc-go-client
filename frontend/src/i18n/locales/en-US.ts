@@ -171,6 +171,8 @@ export default {
     headers: 'Headers',
     body: 'Body',
     copyBody: 'Copy body',
+    copyEmpty: 'Nothing to copy in the current response',
+    copyFailed: 'Copy failed: check clipboard permission and retry',
     saveBody: 'Save to file',
     savedFile: 'Saved to {path}',
     pretty: 'Pretty',

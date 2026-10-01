@@ -49,16 +49,29 @@ const display = computed<SendResult | null>(() => {
   const ex = example.value
   if (!ex) {
     const r = props.tab.response
-    return r ? { ...r, headers: r.headers ?? [], body: r.body ?? '' } : null
+    if (!r) return null
+    // 全字段归一：Go 侧有 omitempty，缺字段时渲染期读属性/取值会得到 undefined（空值展示或 NaN）
+    return {
+      url: r.url ?? '',
+      status: r.status ?? 0,
+      proto: r.proto ?? '',
+      timeMs: r.timeMs ?? 0,
+      size: r.size ?? 0,
+      contentType: r.contentType ?? '',
+      binary: !!r.binary,
+      headers: r.headers ?? [],
+      body: r.body ?? '',
+      script: r.script ?? null,
+    }
   }
   return {
     url: ex.request.url ?? '',
     status: ex.response.status ?? 0,
-    proto: ex.response.proto,
+    proto: ex.response.proto ?? '',
     timeMs: ex.response.timeMs ?? 0,
     size: ex.response.size ?? 0,
-    contentType: ex.response.contentType,
-    binary: ex.response.binary,
+    contentType: ex.response.contentType ?? '',
+    binary: !!ex.response.binary,
     headers: ex.response.headers ?? [],
     body: ex.response.body ?? '',
     script: null, // example 快照未存脚本产物
@@ -87,7 +100,7 @@ const headerCount = computed(() => display.value?.headers?.length ?? 0)
 const statusType = computed<'success' | 'warning' | 'error'>(() => {
   const s = display.value?.status ?? 0
   if (s >= 200 && s < 300) return 'success'
-  if (s >= 400 && s < 500) return 'warning'
+  if (s >= 300 && s < 500) return 'warning'
   return 'error'
 })
 
@@ -222,11 +235,45 @@ async function removeExample(): Promise<void> {
   }
 }
 
+/** 写剪贴板：优先异步 Clipboard API（桌面壳/安全上下文），不可用或拒绝时降级 execCommand。
+ *  失败必须给出提示 —— 否则点「复制响应体」看起来毫无反应。 */
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // 权限被拒 / 非安全上下文：走下面的兜底
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch {
+    return false
+  }
+}
+
 async function copyBody(): Promise<void> {
   const text = display.value?.body
-  if (!text) return
-  await navigator.clipboard.writeText(text)
-  copied.value = true
+  if (!text) {
+    message.info(t('resp.copyEmpty'))
+    return
+  }
+  if (!(await writeClipboard(text))) {
+    message.error(t('resp.copyFailed'))
+    return
+  }
+  copied.value = true // 按钮文案切到「已复制」作为反馈
   setTimeout(() => (copied.value = false), 1200)
 }
 
@@ -317,13 +364,32 @@ async function toggleBookmark(path: string): Promise<void> {
     <n-alert v-if="tab.error" type="error" :bordered="false" class="err">{{ tab.error }}</n-alert>
 
     <template v-else-if="display">
-      <!-- 状态栏：响应 · 200 OK · 12 ms · 1.2 KB -->
+      <!-- 状态栏：响应 · 200 OK · 12 ms · 1.2 KB；右侧「本次响应 ▾」切换历史响应 -->
       <div class="status-bar">
         <span class="ttl">{{ t('resp.title') }}</span>
         <n-tag :type="statusType" size="small" :bordered="false" class="badge" data-testid="resp.status" :title="display.proto">
           {{ statusLabel }}
         </n-tag>
         <span class="meta mono">{{ meta }}</span>
+        <span class="sp" />
+        <n-popconfirm v-if="example" @positive-click="removeExample">
+          <template #trigger>
+            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
+              <n-icon :component="TrashOutline" :size="13" />
+              <span>{{ t('common.delete') }}</span>
+            </button>
+          </template>
+          <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
+        </n-popconfirm>
+        <n-select
+          :value="viewingUid"
+          :options="exampleOptions"
+          size="small"
+          class="expick"
+          data-testid="resp.examples"
+          :title="t('resp.examples')"
+          @update:value="viewingUid = String($event ?? '')"
+        />
       </div>
 
       <!-- 标签栏：响应体 / 响应头 N / 响应字段 N + 请求 URL -->
@@ -340,6 +406,8 @@ async function toggleBookmark(path: string): Promise<void> {
         <span class="url mono" data-testid="resp.url" :title="display.url">{{ display.url }}</span>
       </div>
 
+      <!-- 操作工具条（design-spec §3 第 3 排）：左侧视图/显示，右侧解析/输出；
+           「本次响应 ▾」按设计稿回到状态栏，工具条不再挂行首插槽 -->
       <response-toolbar
         v-model:view="view"
         v-model:wrap="wrap"
@@ -356,29 +424,7 @@ async function toggleBookmark(path: string): Promise<void> {
         @save-all-vars="saveAllVars"
         @save-selected-var="openVarModal"
         @save-example="openSave"
-      >
-        <!-- 响应下拉 + 删除：排在「更新响应字段 / 复制响应体」这一组的最前面（从状态栏移入） -->
-        <template #leading>
-          <n-select
-            :value="viewingUid"
-            :options="exampleOptions"
-            size="tiny"
-            class="expick"
-            data-testid="resp.examples"
-            :title="t('resp.examples')"
-            @update:value="viewingUid = String($event ?? '')"
-          />
-          <n-popconfirm v-if="example" @positive-click="removeExample">
-            <template #trigger>
-              <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
-                <n-icon :component="TrashOutline" :size="13" />
-                <span>{{ t('common.delete') }}</span>
-              </button>
-            </template>
-            {{ t('resp.deleteConfirm', { name: example.name }) }}
-          </n-popconfirm>
-        </template>
-      </response-toolbar>
+      />
 
       <div v-if="example" class="exnote" data-testid="resp.exnote">
         <n-icon :component="BookmarkOutline" :size="13" />
@@ -514,10 +560,11 @@ async function toggleBookmark(path: string): Promise<void> {
   margin-bottom: 8px;
 }
 
+/* 状态栏（design-spec §3 第 1 排，h44）：响应 · 200 OK 徽章 · 12 ms · 145 KB，右侧「本次响应 ▾」 */
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
   height: 44px;
@@ -525,7 +572,7 @@ async function toggleBookmark(path: string): Promise<void> {
 }
 
 .ttl {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--app-text);
   flex: 0 0 auto;
@@ -538,10 +585,13 @@ async function toggleBookmark(path: string): Promise<void> {
 }
 
 .meta {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--app-muted);
   white-space: nowrap;
-  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .sp {
@@ -551,13 +601,13 @@ async function toggleBookmark(path: string): Promise<void> {
 .toggle {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border: 1px solid var(--app-border);
   background: var(--app-panel);
-  border-radius: 5px;
-  font-size: 10.5px;
+  border-radius: 6px;
+  font-size: 11.5px;
   font-family: inherit;
-  padding: 2px 7px;
+  padding: 4px 9px;
   cursor: pointer;
   color: var(--app-text-2);
   white-space: nowrap;
@@ -574,8 +624,9 @@ async function toggleBookmark(path: string): Promise<void> {
   color: var(--app-danger);
 }
 
+/* 状态栏右侧「本次响应 ▾」：描边胶囊，切换历史响应 */
 .expick {
-  width: 140px;
+  width: 132px;
   flex: 0 0 auto;
 }
 
@@ -603,10 +654,11 @@ async function toggleBookmark(path: string): Promise<void> {
   cursor: pointer;
 }
 
+/* 标签栏（design-spec §3 第 2 排，h40）：页签间距 20，右侧请求 URL */
 .seg {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 20px;
   height: 40px;
   border-bottom: 1px solid var(--app-border);
   flex: 0 0 auto;
@@ -622,13 +674,14 @@ async function toggleBookmark(path: string): Promise<void> {
   position: relative;
   border: none;
   background: none;
-  padding: 7px 10px;
+  padding: 7px 2px;
   font-size: 12px;
   font-family: inherit;
   color: var(--app-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  border-radius: 4px 4px 0 0;
   white-space: nowrap;
   flex: 0 0 auto;
 }
@@ -638,16 +691,27 @@ async function toggleBookmark(path: string): Promise<void> {
   background: var(--app-row-hover);
 }
 
+/* 激活页签：绿字 + 2px 绿色下划线 */
 .seg-tab.on {
   color: var(--app-accent);
   font-weight: 600;
   border-bottom-color: var(--app-accent);
 }
 
+/* 计数徽标（灰底胶囊，design-spec §3 第 2 排） */
 .num {
-  margin-left: 4px;
+  display: inline-block;
+  margin-left: 5px;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--app-chip);
   font-size: 10.5px;
-  color: var(--app-placeholder);
+  font-weight: 500;
+  line-height: 15px;
+  color: var(--app-muted);
+  text-align: center;
+  vertical-align: 1px;
 }
 
 .url {

@@ -171,6 +171,8 @@ export default {
     headers: '响应头',
     body: '响应体',
     copyBody: '复制响应体',
+    copyEmpty: '当前响应没有内容可复制',
+    copyFailed: '复制失败：请检查剪贴板权限后重试',
     saveBody: '保存到文件',
     savedFile: '已保存到 {path}',
     pretty: '美化',

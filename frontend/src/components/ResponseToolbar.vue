@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // 响应操作工具条（response-panel design-spec §3 第 3 排）：
-// 左「视图→显示」：美化/原始 分段控件、展开/折叠全部、换行开关态胶囊；
+// 左「视图→显示」：美化/原始 分段控件、展开全部、换行开关态胶囊；
 // 右「解析→输出」：更新响应字段、竖分隔线、复制响应体（幽灵）、保存▾（唯一主按钮）。
 import { NIcon } from 'naive-ui'
-import { ChevronDownOutline, ChevronUpOutline, CopyOutline, RefreshOutline } from '@vicons/ionicons5'
+import { ChevronDownOutline, CopyOutline, RefreshOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import SaveDropdown from '@/components/SaveDropdown.vue'
 import type { VarScope } from '@/lib/saveVars'
@@ -56,16 +56,19 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
           {{ t('resp.raw') }}
         </button>
       </div>
-      <template v-if="showTreeOps()">
-        <button class="chip-btn" type="button" data-testid="resp.expandAll" :title="t('json.expandAll')" @click="emit('expand-all')">
-          <n-icon :component="ChevronDownOutline" :size="13" />
-          {{ t('json.expandAll') }}
-        </button>
-        <button class="chip-btn" type="button" data-testid="resp.collapseAll" :title="t('json.collapseAll')" @click="emit('collapse-all')">
-          <n-icon :component="ChevronUpOutline" :size="13" />
-          {{ t('json.collapseAll') }}
-        </button>
-      </template>
+      <!-- ② 展开全部：灰底圆角 6 的图标+文字 chip（design-spec §3 只有这一个树操作按钮，
+           留位给右侧输出组，工具条才能在同一排 44px 内放下；节点折叠仍可点 JSON 树箭头） -->
+      <button
+        v-if="showTreeOps()"
+        class="chip-btn"
+        type="button"
+        data-testid="resp.expandAll"
+        :title="t('json.expandAll')"
+        @click="emit('expand-all')"
+      >
+        <n-icon :component="ChevronDownOutline" :size="13" />
+        {{ t('json.expandAll') }}
+      </button>
       <button
         class="chip-btn wrap-btn"
         :class="{ on: wrap }"
@@ -77,10 +80,8 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
         {{ t('resp.wrap') }}
       </button>
     </div>
-    <!-- 输出组：更新响应字段 / 复制响应体 / 保存▾；行首插槽（示例下拉 + 删除）由 ResponsePanel 提供，
-         固定排在本组最前面，即「复制响应体」这一排的开头；整条放不下时本组整体换到下一排 -->
+    <!-- 输出组（design-spec §3 第 3 排右侧）：更新响应字段 / 竖分隔线 / 复制响应体 / 保存▾ -->
     <div class="grp acts">
-      <slot name="leading" />
       <button
         v-if="isJson"
         class="outline-btn"
@@ -111,15 +112,15 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
 </template>
 
 <style scoped>
-/* 工具条宽度不足时整体换行（何况行首还有示例下拉），所以高度只能给 min-height：
+/* 工具条（design-spec §3 第 3 排）：h44、两端对齐；宽度不足时整体换行，所以高度只能给 min-height：
    写死 height 会把换到第二排的按钮挤出可视区，压到边框和内容区上（视图错位）。 */
 .bar {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 8px 10px;
   min-height: 44px;
-  padding: 5px 0;
+  padding: 0;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--app-border);
   flex-wrap: wrap;
@@ -152,8 +153,8 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
   border: 1px solid transparent;
   background: none;
   border-radius: 4px;
-  padding: 2px 12px;
-  font-size: 11px;
+  padding: 3px 12px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-muted);
   cursor: pointer;
@@ -171,12 +172,12 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
 .chip-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border: none;
   background: var(--app-chip);
   border-radius: 6px;
-  padding: 4px 9px;
-  font-size: 11px;
+  padding: 5px 10px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-text-2);
   cursor: pointer;
@@ -200,12 +201,12 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
 .outline-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border: 1px solid var(--app-border);
   background: var(--app-panel);
   border-radius: 6px;
-  padding: 4px 9px;
-  font-size: 11px;
+  padding: 5px 10px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-text-2);
   cursor: pointer;
@@ -230,12 +231,12 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
 .ghost-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border: none;
   background: none;
   border-radius: 6px;
-  padding: 4px 7px;
-  font-size: 11px;
+  padding: 5px 8px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--app-text-2);
   cursor: pointer;
