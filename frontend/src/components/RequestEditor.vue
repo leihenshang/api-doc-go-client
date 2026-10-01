@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 请求设置区（design-spec §2 请求面板）：Params / Body / Headers / Auth / Docs。
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
-import { NInput, NSelect } from 'naive-ui'
+import { NCheckbox, NInput, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MdEditor } from 'md-editor-v3'

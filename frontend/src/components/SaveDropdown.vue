@@ -2,8 +2,8 @@
 // 「保存 ▾」下拉（response-panel design-spec §4）：
 // 三个保存菜单项 + 分隔线后「作用域」chips（集合/环境/全局，单选）。
 // 第 4 项「保存响应示例」为既有功能（E23）保留项，见 doc 的「有意差异」。
-import { NIcon } from 'naive-ui'
-import { BookmarkOutline, CaretDownOutline, CopyOutline, SaveOutline, ServerOutline } from '@vicons/ionicons5'
+import { NIcon, NPopover } from 'naive-ui'
+import { CaretDownOutline } from '@vicons/ionicons5'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { VarScope } from '@/lib/saveVars'
@@ -19,6 +19,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const open = ref(false)
+
+/** 浮层规格对齐 response-panel design-spec §4：240 宽、圆角 8、边框 + 投影（颜色走主题令牌，暗色同样适配）。 */
+const menuStyle = {
+  width: '240px',
+  padding: '8px 0',
+  borderRadius: '8px',
+  border: '1px solid var(--app-border)',
+  boxShadow: 'var(--app-shadow-pop)',
+}
 
 const scopes: { key: VarScope; label: string }[] = [
   { key: 'collection', label: t('resp.scopeCollection') },
@@ -40,12 +49,13 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
 </script>
 
 <template>
+  <!-- trigger 与 default 槽都必须恰好一个子节点：naive 的 getFirstSlotVNode 会抛错并中断渲染 -->
   <n-popover
     v-model:show="open"
     trigger="click"
     placement="bottom-end"
     :show-arrow="false"
-    :content-style="{ padding: '8px 0', borderRadius: '8px', width: '240px' }"
+    :content-style="menuStyle"
   >
     <template #trigger>
       <button class="save-btn" type="button" data-testid="resp.save">
@@ -55,19 +65,15 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
     </template>
     <div class="menu">
       <button class="mi" type="button" data-testid="resp.saveFile" @click="run('save-file')">
-        <n-icon :component="SaveOutline" :size="14" />
         {{ t('resp.saveFile') }}
       </button>
       <button class="mi" type="button" data-testid="resp.saveAllVars" @click="run('save-all-vars')">
-        <n-icon :component="ServerOutline" :size="14" />
         {{ t('resp.saveAllVars') }}
       </button>
       <button class="mi" type="button" data-testid="resp.saveSelectedVar" @click="run('save-selected-var')">
-        <n-icon :component="CopyOutline" :size="14" />
         {{ t('resp.saveSelectedVar') }}
       </button>
       <button v-if="props.canSaveExample" class="mi" type="button" data-testid="resp.saveExample" @click="run('save-example')">
-        <n-icon :component="BookmarkOutline" :size="14" />
         {{ t('resp.saveExample') }}
       </button>
       <div class="sep" />
@@ -91,37 +97,36 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
 </template>
 
 <style scoped>
+/* ⑦ 保存▾：工具条上唯一的主按钮（实底白字圆角 6） */
 .save-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border: none;
   background: var(--app-accent);
-  color: #fff;
+  color: var(--app-on-accent);
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 5px 10px;
   cursor: pointer;
   white-space: nowrap;
   flex: 0 0 auto;
 }
 
 .save-btn:hover {
-  background: var(--app-accent-dark);
+  background: var(--app-send-hover);
 }
 
 .menu {
   display: flex;
   flex-direction: column;
-  width: 240px;
 }
 
 .mi {
   display: flex;
   align-items: center;
-  gap: 8px;
   height: 34px;
   padding: 0 12px;
   border: none;

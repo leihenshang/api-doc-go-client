@@ -47,25 +47,21 @@ function removeChecked(): void {
       <span class="ft">{{ t('resp.fields') }}<span class="num">{{ rows.length }}</span></span>
       <span class="fd">{{ t('resp.fieldsHint') }}</span>
       <span class="sp" />
-      <n-popconfirm @positive-click="removeChecked">
+      <!-- popconfirm 的 trigger / default 槽必须恰好一个子节点，否则 naive 的 getFirstSlotVNode
+           会抛错并中断面板渲染（症状：点了没反应）。故把条件放在 popconfirm 自身而非槽内容上。 -->
+      <n-popconfirm v-if="checked.size" @positive-click="removeChecked">
         <template #trigger>
-          <n-button
-            v-if="checked.size"
-            size="tiny"
-            type="error"
-            tertiary
-            data-testid="resp.fields.removeChecked"
-          >
+          <n-button size="tiny" type="error" tertiary data-testid="resp.fields.removeChecked">
             {{ t('resp.fieldsRemoveChecked', { n: checked.size }) }}
           </n-button>
         </template>
-        {{ t('resp.fieldsRemoveConfirm', { n: checked.size }) }}
+        <span>{{ t('resp.fieldsRemoveConfirm', { n: checked.size }) }}</span>
       </n-popconfirm>
       <n-popconfirm @positive-click="emit('clear')">
         <template #trigger>
           <n-button size="tiny" quaternary data-testid="resp.fields.clear">{{ t('resp.fieldsClear') }}</n-button>
         </template>
-        {{ t('resp.fieldsClearConfirm') }}
+        <span>{{ t('resp.fieldsClearConfirm') }}</span>
       </n-popconfirm>
     </div>
     <div class="tr th">
