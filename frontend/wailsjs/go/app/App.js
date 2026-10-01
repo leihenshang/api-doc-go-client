@@ -26,6 +26,10 @@ export function CreateRequest(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateRequest'](arg1, arg2, arg3);
 }
 
+export function CreateRequestFromDraft(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateRequestFromDraft'](arg1, arg2, arg3);
+}
+
 export function DeleteCookie(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteCookie'](arg1, arg2, arg3);
 }
@@ -116,6 +120,10 @@ export function MoveRequest(arg1, arg2) {
 
 export function OpenCollection(arg1) {
   return window['go']['app']['App']['OpenCollection'](arg1);
+}
+
+export function ParseCurl(arg1) {
+  return window['go']['app']['App']['ParseCurl'](arg1);
 }
 
 export function PickDirectory() {

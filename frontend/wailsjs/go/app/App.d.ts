@@ -22,6 +22,8 @@ export function CreateFolder(arg1:string,arg2:string):Promise<void>;
 
 export function CreateRequest(arg1:string,arg2:string,arg3:string):Promise<collection.Request>;
 
+export function CreateRequestFromDraft(arg1:string,arg2:string,arg3:collection.Request):Promise<collection.Request>;
+
 export function DeleteCookie(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteDoc(arg1:string):Promise<void>;
@@ -67,6 +69,8 @@ export function MoveFolder(arg1:string,arg2:string):Promise<void>;
 export function MoveRequest(arg1:string,arg2:string):Promise<void>;
 
 export function OpenCollection(arg1:string):Promise<collection.CollectionInfo>;
+
+export function ParseCurl(arg1:string):Promise<collection.Request>;
 
 export function PickDirectory():Promise<string>;
 

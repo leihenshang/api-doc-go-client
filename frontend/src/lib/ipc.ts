@@ -132,6 +132,11 @@ export const api = {
   reload: () => call<CollectionInfo>('ReloadCollection').then(normalizeInfo),
   createRequest: (folder: string, name: string, method: string) =>
     call<RequestDoc>('CreateRequest', folder, name, method).then(normalizeRequest),
+  /** 新建流程：把内存草稿落盘成新请求（uid/路径/序号由集合层分配）。 */
+  createRequestFromDraft: (folder: string, name: string, doc: RequestDoc) =>
+    call<RequestDoc>('CreateRequestFromDraft', folder, name, doc).then(normalizeRequest),
+  /** 导入 cURL：把 curl 命令解析成请求草稿（不落盘）。 */
+  parseCurl: (text: string) => call<RequestDoc>('ParseCurl', text).then(normalizeRequest),
   createFolder: (parent: string, name: string) => call<null>('CreateFolder', parent, name),
   renameFolder: (uid: string, name: string) => call<null>('RenameFolder', uid, name),
   deleteFolder: (uid: string) => call<null>('DeleteFolder', uid),

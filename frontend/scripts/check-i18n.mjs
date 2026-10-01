@@ -24,10 +24,14 @@ function collect(f) {
   lines.forEach((line, idx) => {
     const sec = line.match(/^  ([A-Za-z0-9_]+):\s*\{/)
     if (sec) section = sec[1]
-    const m = line.match(/^\s{4}([A-Za-z0-9_]+):\s*'((?:[^'\\]|\\.)*)'/)
+    // 单引号与双引号两种写法都要扫：双引号里常放含引号的示例（如 curl 命令），
+    // 曾经只扫单引号 => `-d '{"name":"a"}'` 这种非法插值漏检，直到弹窗渲染才抛 SyntaxError。
+    const m =
+      line.match(/^\s{4}([A-Za-z0-9_]+):\s*'((?:[^'\\]|\\.)*)'/) ??
+      line.match(/^\s{4}([A-Za-z0-9_]+):\s*"((?:[^"\\]|\\.)*)"/)
     if (!m) return
     keys.add(`${section}.${m[1]}`)
-    const msg = m[2].replace(/\\'/g, "'")
+    const msg = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"')
     let err = null
     baseCompile(msg, { onError: (e) => { err = err ?? e } })
     if (err) {
