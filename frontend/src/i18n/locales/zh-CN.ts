@@ -50,6 +50,19 @@ export default {
     privacy: '离线优先',
     privacyHint: '数据 100% 存于本机',
   },
+  curl: {
+    title: '导入 cURL',
+    hint: '粘贴「Copy as cURL」的内容（bash / cmd 两种写法都支持），确认后开成新请求。',
+    // 注意：vue-i18n 把「{」当插值起点，示例里不能出现 JSON 花括号（写成表单体或改写插值）
+    placeholder: "curl 'https://api.example.com/users?page=1' -H 'accept: application/json' -d 'name=alice&qty=2'",
+    url: '地址',
+    detail: '明细',
+    import: '导入',
+    headers: '请求头 {n}',
+    params: '参数 {n}',
+    body: '请求体 {type}',
+    auth: '认证 {type}',
+  },
   status: {
     requests: '{n} 个请求',
     envs: '{n} 个环境',
@@ -71,9 +84,11 @@ export default {
     newHint: '新建请求',
     unsaved: '有未保存改动',
     collection: 'Collection',
+    newDraft: '新请求',
   },
   editor: {
-    urlPlaceholder: 'https://api.example.com/users 或 {\'{host}\'}/users',
+    // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
+    urlPlaceholder: 'https://api.example.com/users',
     send: 'Send',
     sending: 'Sending',
     cancelSend: '取消',
@@ -106,6 +121,7 @@ export default {
     bodyMultipart: 'multipart 表单',
     formatJson: '格式化',
     formatUrl: '格式化 URL',
+    curlPasted: '已按 cURL 填充请求：{method} {url}',
     rawPlaceholder: '请求体内容（支持 {\'{变量}\'}）',
     query: 'Query 参数',
     colName: '名称',
@@ -423,5 +439,9 @@ export default {
     reqName: '请求名称',
     folder: '所属分组（留空 = 根目录）',
     method: '方法',
+    saveDraftTitle: '保存请求',
+    saveDraftHint: '这是新建但还没有保存的请求：填好名称、选好分组再保存，或者直接丢弃。',
+    draftSaved: '已保存请求「{name}」',
+    discard: '不保存',
   },
 }

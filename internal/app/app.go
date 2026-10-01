@@ -583,6 +583,21 @@ func (a *App) CreateRequest(folder, name, method string) (*collection.Request, e
 	return c.CreateRequest(folder, name, method)
 }
 
+// CreateRequestFromDraft 把前端内存草稿（新建 tab 里编辑的内容）落盘成新请求。
+// uid / 文件名 / seq / path 由集合层重新分配，前端只负责内容与目标分组。
+func (a *App) CreateRequestFromDraft(folder, name string, r *collection.Request) (*collection.Request, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateRequestFromDraft(folder, name, r)
+}
+
+// ParseCurl 把一段 curl 命令解析成请求草稿（不落盘），供「导入 cURL」预览与新建 tab 预填。
+func (a *App) ParseCurl(text string) (*collection.Request, error) {
+	return collection.ParseCurl(text)
+}
+
 // CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
 func (a *App) CreateFolder(parent, name string) error {
 	c, err := a.requireCollection()

@@ -15,6 +15,7 @@ import {
   MoveOutline,
   Star,
   StarOutline,
+  TerminalOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 import { computed, h, nextTick, ref, watch } from 'vue'
@@ -26,7 +27,11 @@ import { useTabsStore } from '@/stores/tabs'
 import type { TreeNode } from '@/types'
 
 const props = defineProps<{ tree: TreeNode[]; activeUid?: string; name: string }>()
-const emit = defineEmits<{ open: [uid: string]; 'new-request': [folder: string] }>()
+const emit = defineEmits<{
+  open: [uid: string]
+  'new-request': [folder: string]
+  'import-curl': [folder: string]
+}>()
 const { t } = useI18n()
 const coll = useCollectionStore()
 const tabs = useTabsStore()
@@ -48,6 +53,7 @@ const INDENT = 13
 
 const folderMenu = computed(() => [
   { key: 'request', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
+  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
   { key: 'folder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
 ])
 
@@ -224,6 +230,7 @@ async function removeRequest(node: TreeNode): Promise<void> {
 
 function onFolderMenu(node: TreeNode, key: string | number): void {
   if (key === 'request') emit('new-request', node.path)
+  else if (key === 'curl') emit('import-curl', node.path)
   else void startAdd(node.path)
 }
 
@@ -319,8 +326,11 @@ watch(
       <n-button quaternary size="tiny" :title="t('tree.newFolder')" @click="startAdd('')">
         <template #icon><n-icon :component="FolderOpenOutline" /></template>
       </n-button>
-      <n-button quaternary size="tiny" :title="t('tree.newRequest')" @click="emit('new-request', '')">
+      <n-button quaternary size="tiny" :title="t('tree.newRequest')" data-testid="tree.new" @click="emit('new-request', '')">
         <template #icon><n-icon :component="AddOutline" /></template>
+      </n-button>
+      <n-button quaternary size="tiny" :title="t('curl.title')" data-testid="tree.importCurl" @click="emit('import-curl', '')">
+        <template #icon><n-icon :component="TerminalOutline" /></template>
       </n-button>
     </div>
 

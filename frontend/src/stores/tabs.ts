@@ -2,8 +2,10 @@
 // 规则（设计文档 §5.3 会话模型）：
 //   - Send 用当前草稿，绝不因"未保存"阻塞；
 //   - 自动保存（防抖 800ms，关闭 tab / 失焦 / 发送前 flush）；
-//   - URL 预览与变量告警独立防抖（300ms）。
+//   - URL 预览与变量告警独立防抖（300ms）；
+//   - 新建请求先开「未落盘草稿」tab（draft=true）：不写盘、不自动保存，关闭时由 UI 提示保存 + 选分组。
 import { defineStore } from 'pinia'
+import { i18n } from '@/i18n'
 import { api } from '@/lib/ipc'
 import { useCollectionStore } from '@/stores/collection'
 import type { RequestDoc, ResolveResult, SendResult } from '@/types'
@@ -18,23 +20,52 @@ export interface Tab {
   response: SendResult | null
   error: string
   resolve: ResolveResult | null
+  /** 新建但尚未落盘（不自动保存；关闭时提示保存 + 选分组） */
+  draft: boolean
+  /** 草稿的默认分组（保存对话框预选） */
+  draftFolder: string
 }
 
 let seq = 0
 const nextKey = (): string => `tab-${++seq}`
+
+/** 草稿 tab 的临时 uid：不落盘、不与磁盘 uid 冲突，仅用于取消发送等按 uid 定位的场景。 */
+let draftSeq = 0
+const nextDraftUid = (): string => `draft-${++draftSeq}-${Date.now().toString(36)}`
 
 const SAVE_DEBOUNCE = 800
 const RESOLVE_DEBOUNCE = 300
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const resolveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let draftsTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 会话现场按集合 uid 记忆（与 client.env.<uid> 同一套 localStorage）。 */
 const sessionKey = (collUid: string): string => `client.tabs.${collUid}`
+/** 未保存草稿单独存一份：应用重启/切换集合后仍能找回（新建流程不写盘）。 */
+const draftsKey = (collUid: string): string => `client.drafts.${collUid}`
 
 interface TabSession {
   uids: string[]
   activeUid: string
+}
+
+/** 新建草稿的空请求模板：与 Go 侧 CreateRequest 的默认值一致（URL 留空，不预填 {{host}}）。 */
+function blankRequest(): RequestDoc {
+  return {
+    uid: '',
+    name: '',
+    seq: 0,
+    path: '',
+    method: 'GET',
+    url: '',
+    params: [{ name: '', value: '', enabled: true }],
+    headers: [{ name: 'Content-Type', value: 'application/json', enabled: true }],
+    body: { type: 'none', raw: '', form: [] },
+    auth: { type: 'none' },
+    docs: '',
+    baseRev: 0,
+  }
 }
 
 // ---- 请求级撤销/重做（G9）：编辑停顿后把「上一状态」压栈，Ctrl+Z / Ctrl+Shift+Z 取出 ----
@@ -76,10 +107,56 @@ export const useTabsStore = defineStore('tabs', {
     openDoc(r: RequestDoc): void {
       this.pushTab(r)
     },
+    /**
+     * 新建请求的主路径：开一个**未落盘**的草稿 tab（不写盘、不弹窗）。
+     * doc 为「导入 cURL」等预填内容；folder 是保存对话框的默认分组。
+     */
+    openDraft(doc: RequestDoc | null, folder = ''): string {
+      const r = doc ?? blankRequest()
+      const tab: Tab = {
+        key: nextKey(), uid: nextDraftUid(), title: r.name || i18n.global.t('tab.newDraft'), request: r,
+        dirty: true, sending: false, response: null, error: '', resolve: null,
+        draft: true, draftFolder: folder,
+      }
+      this.tabs.push(tab)
+      this.setActive(tab.key)
+      const current = this.tabs.find((t) => t.key === tab.key)
+      if (current) {
+        void this.doResolve(current)
+        lastSnap.set(tab.key, snap(current.request))
+      }
+      this.saveSession()
+      this.saveDrafts()
+      return tab.key
+    },
+    /** 把草稿落盘成真实请求：uid / 文件名 / 序号由集合层分配，成功后 tab 转正（不再是草稿）。 */
+    async saveDraft(key: string, folder: string, name: string): Promise<RequestDoc> {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab) throw new Error('tab 不存在')
+      const created = await api.createRequestFromDraft(folder, name, { ...tab.request, name })
+      tab.uid = created.uid
+      tab.request = created
+      tab.title = created.name
+      tab.draft = false
+      tab.draftFolder = ''
+      tab.dirty = false
+      lastSnap.set(key, snap(created))
+      undoStacks.delete(key)
+      redoStacks.delete(key)
+      await useCollectionStore().reload()
+      this.saveSession()
+      this.saveDrafts()
+      return created
+    },
+    /** 丢弃草稿（关闭 tab，不落盘）。 */
+    async discardDraft(key: string): Promise<void> {
+      await this.close(key)
+    },
     pushTab(r: RequestDoc): void {
       const tab: Tab = {
         key: nextKey(), uid: r.uid, title: r.name, request: r,
         dirty: false, sending: false, response: null, error: '', resolve: null,
+        draft: false, draftFolder: '',
       }
       this.tabs.push(tab)
       this.setActive(tab.key)
@@ -118,9 +195,10 @@ export const useTabsStore = defineStore('tabs', {
       if (!tab) return
       tab.title = tab.request.name || tab.title
       tab.dirty = true
-      // 自动保存
+      // 自动保存；草稿不写盘，改为把内容落到 localStorage（重启不丢）
       clearTimeout(saveTimers.get(key))
-      saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
+      if (tab.draft) this.scheduleDrafts()
+      else saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
       // 解析预览
       clearTimeout(resolveTimers.get(key))
       resolveTimers.set(key, setTimeout(() => void this.doResolve(tab), RESOLVE_DEBOUNCE))
@@ -176,11 +254,11 @@ export const useTabsStore = defineStore('tabs', {
       clearTimeout(saveTimers.get(key))
       saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
     },
-    /** 立即保存（幂等；无脏改动时跳过）。 */
+    /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。 */
     async flush(key: string): Promise<void> {
       clearTimeout(saveTimers.get(key))
       const tab = this.tabs.find((t) => t.key === key)
-      if (!tab || !tab.dirty || !tab.uid) return
+      if (!tab || tab.draft || !tab.dirty || !tab.uid) return
       await api.saveRequest(tab.request)
       tab.dirty = false
     },
@@ -190,6 +268,10 @@ export const useTabsStore = defineStore('tabs', {
     async doResolve(tab: Tab): Promise<void> {
       const coll = useCollectionStore()
       if (!coll.ready) return
+      if (!tab.request.url.trim()) {
+        tab.resolve = null // 空 URL（刚新建的草稿）无需解析
+        return
+      }
       try {
         tab.resolve = await api.resolveText(tab.request.url, coll.currentEnv)
       } catch {
@@ -246,13 +328,14 @@ export const useTabsStore = defineStore('tabs', {
       scrollPos.delete(key)
       this.saveSession()
     },
-    /** 关闭集合（切换集合）时清空内存会话（文件已自动保存；现场已单独落 localStorage）。 */
+    /** 关闭集合（切换集合）时清空内存会话（文件已自动保存；现场与草稿已单独落 localStorage）。 */
     reset(): void {
       for (const t of this.tabs) {
         clearTimeout(saveTimers.get(t.key))
         clearTimeout(resolveTimers.get(t.key))
         clearTimeout(historyTimers.get(t.key))
       }
+      if (draftsTimer) clearTimeout(draftsTimer)
       this.tabs = []
       this.activeKey = ''
       undoStacks.clear()
@@ -265,19 +348,61 @@ export const useTabsStore = defineStore('tabs', {
       const tab = this.tabs.find((t) => t.uid === uid)
       if (tab) await this.close(tab.key)
     },
-    /** 落盘 tab 现场（uid 列表 + 激活项）；草稿本身走自动保存，不在此重复。 */
+    /** 草稿编辑防抖落 localStorage（草稿没有磁盘副本，重启后靠它找回）。 */
+    scheduleDrafts(): void {
+      if (draftsTimer) clearTimeout(draftsTimer)
+      draftsTimer = setTimeout(() => this.saveDrafts(), SAVE_DEBOUNCE)
+    },
+    /** 把所有未保存草稿写进 localStorage（没有草稿时清掉旧键）。 */
+    saveDrafts(): void {
+      const coll = useCollectionStore()
+      if (!coll.uid) return
+      const drafts = this.tabs
+        .filter((t) => t.draft)
+        .map((t) => ({ request: t.request, folder: t.draftFolder }))
+      try {
+        if (drafts.length) localStorage.setItem(draftsKey(coll.uid), JSON.stringify(drafts))
+        else localStorage.removeItem(draftsKey(coll.uid))
+      } catch {
+        // localStorage 满/隐私模式：忽略
+      }
+    },
+    /** 打开集合后恢复上次未保存的草稿（放最后，保持「草稿是最近打开的」直觉）。 */
+    restoreDrafts(): void {
+      const coll = useCollectionStore()
+      if (!coll.uid) return
+      let raw = ''
+      try {
+        raw = localStorage.getItem(draftsKey(coll.uid)) ?? ''
+      } catch {
+        return
+      }
+      if (!raw) return
+      let list: { request: RequestDoc; folder?: string }[]
+      try {
+        list = JSON.parse(raw) as { request: RequestDoc; folder?: string }[]
+      } catch {
+        return
+      }
+      for (const d of list ?? []) {
+        if (d?.request) this.openDraft(d.request, d.folder ?? '')
+      }
+    },
+    /** 落盘 tab 现场（uid 列表 + 激活项）；草稿走 saveDrafts，不在这里重复。 */
     saveSession(): void {
       const coll = useCollectionStore()
       if (!coll.uid) return
+      const active = this.tabs.find((t) => t.key === this.activeKey)
       const data: TabSession = {
-        uids: this.tabs.map((t) => t.uid),
-        activeUid: this.tabs.find((t) => t.key === this.activeKey)?.uid ?? '',
+        uids: this.tabs.filter((t) => !t.draft).map((t) => t.uid),
+        activeUid: active && !active.draft ? active.uid : '',
       }
       try {
         localStorage.setItem(sessionKey(coll.uid), JSON.stringify(data))
       } catch {
         // localStorage 满/隐私模式：忽略，不影响使用
       }
+      this.saveDrafts() // 会话与草稿同进同出，避免关闭草稿后 localStorage 里残留
     },
     /** 打开集合后恢复上次的 tab 现场；已删除的 uid 自动跳过。 */
     async restoreSession(): Promise<void> {
@@ -304,6 +429,7 @@ export const useTabsStore = defineStore('tabs', {
           // 请求已被删除：跳过，不阻断恢复
         }
       }
+      this.restoreDrafts()
       if (data.activeUid) {
         const tab = this.tabs.find((t) => t.uid === data.activeUid)
         if (tab) this.setActive(tab.key)

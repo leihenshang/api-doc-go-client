@@ -22,6 +22,7 @@ import { useI18n } from 'vue-i18n'
 import CommandPalette from '@/components/CommandPalette.vue'
 import CodeGenDialog from '@/components/CodeGenDialog.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
+import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import EnvManager from '@/components/EnvManager.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
 import MockDialog from '@/components/MockDialog.vue'
@@ -44,7 +45,8 @@ import { nextTheme, isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import { useTabsStore } from '@/stores/tabs'
-import type { SyncStatus, TreeNode } from '@/types'
+import type { Tab } from '@/stores/tabs'
+import type { RequestDoc, SyncStatus, TreeNode } from '@/types'
 
 const coll = useCollectionStore()
 const tabs = useTabsStore()
@@ -222,7 +224,7 @@ function pickEnv(name: string): void {
 // ---- 命令面板动作 ----
 function onCommand(key: string): void {
   if (key === 'open-dir') void openCollection('')
-  else if (key === 'new-request') openCreate()
+  else if (key === 'new-request') newDraft()
   else if (key === 'reload') void coll.reload()
   else if (key === 'toggle-layout') setLayout(settings.responseLayout === 'right' ? 'bottom' : 'right')
   else if (key === 'toggle-theme') void toggleTheme()
@@ -267,7 +269,7 @@ function onHotkey(e: KeyboardEvent): void {
     if (tabs.active) void tabs.send(tabs.active.key)
   } else if (key === 'n') {
     e.preventDefault()
-    openCreate()
+    newDraft()
   } else if (key === 'e') {
     e.preventDefault()
     showEnvManager.value = true
@@ -275,7 +277,7 @@ function onHotkey(e: KeyboardEvent): void {
     // Ctrl+W 关闭当前 tab（无 tab 时不拦截，避免吞掉浏览器关闭窗口）
     if (!tabs.active) return
     e.preventDefault()
-    void tabs.close(tabs.active.key)
+    requestClose(tabs.active.key)
   } else if (key === 's') {
     e.preventDefault()
     if (tabs.active) void tabs.flush(tabs.active.key)
@@ -295,9 +297,10 @@ function onHotkey(e: KeyboardEvent): void {
 onMounted(() => {
   void settings.load()
   window.addEventListener('keydown', onHotkey)
-  // 关窗前 flush 未保存草稿（防抖未触发的最后编辑）
+  // 关窗前 flush 未保存改动（防抖未触发的最后编辑）；新建草稿没有磁盘副本，同步补一份到 localStorage
   window.addEventListener('beforeunload', () => {
     void tabs.flushAll()
+    tabs.saveDrafts()
   })
   // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户
   onAppEvent('collection:changed', () => onExternalChange())
@@ -346,9 +349,7 @@ function onExternalChange(): void {
 
 onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
 
-// ---- 新建请求弹窗（folder 由侧栏传入） ----
-const showCreate = ref(false)
-const createForm = ref({ name: '', folder: '', method: 'GET' })
+// ---- 新建请求：直接开一个未落盘的空 tab；名称与分组在**关闭时**才问 ----
 const folderOptions = computed(() => {
   const out: { label: string; value: string }[] = [{ label: t('prompt.folder'), value: '' }]
   const walk = (nodes: TreeNode[]): void => {
@@ -363,20 +364,65 @@ const folderOptions = computed(() => {
   return out
 })
 
-function openCreate(folder = ''): void {
-  createForm.value = { name: '', folder, method: 'GET' }
-  showCreate.value = true
+/** 新建请求（folder 为保存时的默认分组）；doc 为「导入 cURL」等预填内容。 */
+function newDraft(folder = '', doc: RequestDoc | null = null): void {
+  tabs.openDraft(doc, folder)
 }
 
-async function submitCreate(): Promise<void> {
-  if (!createForm.value.name.trim()) return
+// ---- 导入 cURL（侧栏工具栏 / 分组菜单入口） ----
+const showCurl = ref(false)
+const curlFolder = ref('')
+
+function openCurl(folder = ''): void {
+  curlFolder.value = folder
+  showCurl.value = true
+}
+
+/** 解析结果直接开成草稿 tab：与「新建」走同一条保存路径（关闭时才落盘）。 */
+function onCurlImported(doc: RequestDoc, folder: string): void {
+  tabs.openDraft(doc, folder)
+}
+
+// ---- 关闭标签：草稿先问「保存（名称 + 分组） / 不保存 / 取消」 ----
+const closingTab = ref<Tab | null>(null)
+const draftForm = ref({ name: '', folder: '' })
+const savingDraft = ref(false)
+
+/** 统一关闭入口：草稿弹保存框，其余（已落盘）直接关。 */
+function requestClose(key: string): void {
+  const tab = tabs.tabs.find((x) => x.key === key)
+  if (!tab) return
+  if (!tab.draft) {
+    void tabs.close(key)
+    return
+  }
+  closingTab.value = tab
+  draftForm.value = { name: tab.request.name || tab.title, folder: tab.draftFolder }
+}
+
+/** 保存草稿（落盘到所选分组）→ 关闭 tab。 */
+async function confirmSaveDraft(): Promise<void> {
+  const tab = closingTab.value
+  const name = draftForm.value.name.trim()
+  if (!tab || !name) return
+  savingDraft.value = true
   try {
-    const r = await coll.createRequest(createForm.value.folder, createForm.value.name.trim(), createForm.value.method)
-    showCreate.value = false
-    tabs.openDoc(r)
+    await tabs.saveDraft(tab.key, draftForm.value.folder, name)
+    closingTab.value = null
+    await tabs.close(tab.key)
+    message.success(t('prompt.draftSaved', { name }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    savingDraft.value = false
   }
+}
+
+/** 不保存：丢弃草稿并关闭。 */
+async function discardDraft(): Promise<void> {
+  const tab = closingTab.value
+  closingTab.value = null
+  if (tab) await tabs.discardDraft(tab.key)
 }
 
 function envSaved(): void {
@@ -459,7 +505,8 @@ watch(
                 :name="coll.name"
                 :active-uid="tabs.active?.uid ?? ''"
                 @open="tabs.openRequest($event)"
-                @new-request="openCreate"
+                @new-request="newDraft"
+                @import-curl="openCurl"
               />
             </aside>
 
@@ -469,8 +516,8 @@ watch(
                 :active-key="tabs.activeKey"
                 @select="tabs.setActive($event)"
                 @select-overview="tabs.setActive('')"
-                @close="tabs.close($event)"
-                @new="openCreate()"
+                @close="requestClose($event)"
+                @new="newDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)"
               />
 
@@ -522,7 +569,7 @@ watch(
                 </div>
               </div>
 
-              <overview v-else :info="coll.info" @new-request="openCreate()" />
+              <overview v-else :info="coll.info" @new-request="newDraft()" />
             </main>
           </div>
 
@@ -554,25 +601,40 @@ watch(
         @command="onCommand"
       />
 
-      <n-modal v-model:show="showCreate" preset="card" :title="t('prompt.newRequest')" style="width: 440px">
+      <!-- 导入 cURL：粘贴命令 → 解析预览 → 开成未落盘草稿 tab -->
+      <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
+
+      <!-- 关闭未保存的新建请求：这里才问名称与分组（新建时不打扰） -->
+      <n-modal
+        :show="closingTab !== null"
+        preset="card"
+        :title="t('prompt.saveDraftTitle')"
+        style="width: 460px"
+        @update:show="(v: boolean) => (v ? undefined : (closingTab = null))"
+      >
+        <p class="draft-hint">{{ t('prompt.saveDraftHint') }}</p>
         <n-form label-placement="left" label-width="86">
           <n-form-item :label="t('prompt.reqName')">
-            <n-input v-model:value="createForm.name" @keyup.enter="submitCreate" />
-          </n-form-item>
-          <n-form-item :label="t('prompt.method')">
-            <n-select
-              v-model:value="createForm.method"
-              :options="['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map((m) => ({ label: m, value: m }))"
-            />
+            <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
-            <n-select v-model:value="createForm.folder" :options="folderOptions" tag filterable />
+            <n-select v-model:value="draftForm.folder" :options="folderOptions" tag filterable data-testid="draft.folder" />
           </n-form-item>
         </n-form>
         <template #footer>
           <div class="modal-ft">
-            <n-button size="small" @click="showCreate = false">{{ t('common.cancel') }}</n-button>
-            <n-button size="small" type="primary" @click="submitCreate">{{ t('common.create') }}</n-button>
+            <n-button size="small" data-testid="draft.cancel" @click="closingTab = null">{{ t('common.cancel') }}</n-button>
+            <n-button size="small" data-testid="draft.discard" @click="discardDraft">{{ t('prompt.discard') }}</n-button>
+            <n-button
+              size="small"
+              type="primary"
+              :disabled="!draftForm.name.trim()"
+              :loading="savingDraft"
+              data-testid="draft.save"
+              @click="confirmSaveDraft"
+            >
+              {{ t('common.save') }}
+            </n-button>
           </div>
         </template>
       </n-modal>
@@ -755,5 +817,13 @@ watch(
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 关闭未保存的新建请求时的说明行 */
+.draft-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--app-muted);
+  line-height: 1.6;
 }
 </style>

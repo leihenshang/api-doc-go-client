@@ -61,7 +61,7 @@ function onDrop(i: number, e: DragEvent): void {
         :data-tab-key="tab.key"
         :data-tab-title="tab.title"
         :draggable="true"
-        :title="tab.request.path"
+        :title="tab.draft ? t('prompt.saveDraftHint') : tab.request.path"
         @click="emit('select', tab.key)"
         @keydown.enter="emit('select', tab.key)"
         @dragstart="onDragStart(i, $event)"
@@ -70,7 +70,7 @@ function onDrop(i: number, e: DragEvent): void {
         @dragend="dragFrom = -1"
       >
         <method-tag :method="tab.request.method" />
-        <span v-if="tab.dirty" class="dot" :title="t('tab.unsaved')" />
+        <span v-if="tab.dirty || tab.draft" class="dot" :title="t('tab.unsaved')" />
         <span class="tt">{{ tab.title }}</span>
         <span v-if="tab.response" class="st" :class="tab.response.status < 400 ? 'ok' : 'err'">
           {{ tab.response.status }}

@@ -730,15 +730,48 @@ var (
 )
 
 // CreateRequest 在 folder（相对路径，"" = 根目录）下新建请求并落盘。
+// URL 留空：新建时不再预填 {{host}} 占位，让用户（或「导入 cURL」）决定真实地址。
 func (c *Collection) CreateRequest(folder, name, method string) (*Request, error) {
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
 	r := &Request{
-		Method: strings.ToUpper(strings.TrimSpace(method)), URL: "{{host}}/",
+		Method:  strings.ToUpper(strings.TrimSpace(method)),
 		Params:  []KV{{Enabled: true}},
 		Headers: []KV{{Name: "Content-Type", Value: "application/json", Enabled: true}},
 		Body:    Body{Type: "none"},
+	}
+	return c.saveNewRequest(folder, name, r)
+}
+
+// CreateRequestFromDraft 把内存草稿落盘成新请求（新建流程：先开空 tab 编辑，关闭时才落盘）。
+// uid / 文件名 / seq / path 一律由集合层重新分配（草稿里可能带临时 uid），其余内容原样采用。
+func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (*Request, error) {
+	if !validEntryName(name) {
+		return nil, fmt.Errorf("名称含非法字符或为空")
+	}
+	if src == nil {
+		return nil, fmt.Errorf("请求内容为空")
+	}
+	method := strings.ToUpper(strings.TrimSpace(src.Method))
+	if method == "" {
+		method = "GET"
+	}
+	r := &Request{
+		Method:         method,
+		URL:            strings.TrimSpace(src.URL),
+		Params:         src.Params,
+		Headers:        src.Headers,
+		Body:           src.Body,
+		Auth:           src.Auth,
+		Settings:       src.Settings,
+		Docs:           src.Docs,
+		VarsPreRequest: src.VarsPreRequest,
+		Script:         src.Script,
+		Asserts:        src.Asserts,
+	}
+	if len(r.Params) == 0 {
+		r.Params = []KV{{Enabled: true}}
 	}
 	return c.saveNewRequest(folder, name, r)
 }

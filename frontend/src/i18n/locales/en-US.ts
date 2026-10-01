@@ -50,6 +50,19 @@ export default {
     privacy: 'Offline-first',
     privacyHint: '100% of data stays on this machine',
   },
+  curl: {
+    title: 'Import cURL',
+    hint: 'Paste a “Copy as cURL” command (bash and cmd forms are supported), then confirm to open it as a new request.',
+    // 注意：vue-i18n 把「{」当插值起点，示例里不能出现 JSON 花括号（写成表单体或改写插值）
+    placeholder: "curl 'https://api.example.com/users?page=1' -H 'accept: application/json' -d 'name=alice&qty=2'",
+    url: 'URL',
+    detail: 'Details',
+    import: 'Import',
+    headers: '{n} headers',
+    params: '{n} params',
+    body: 'Body {type}',
+    auth: 'Auth {type}',
+  },
   status: {
     requests: '{n} requests',
     envs: '{n} environments',
@@ -71,9 +84,11 @@ export default {
     newHint: 'New request',
     unsaved: 'Unsaved changes',
     collection: 'Collection',
+    newDraft: 'New request',
   },
   editor: {
-    urlPlaceholder: 'https://api.example.com/users or {\'{host}\'}/users',
+    // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
+    urlPlaceholder: 'https://api.example.com/users',
     send: 'Send',
     sending: 'Sending',
     cancelSend: 'Cancel',
@@ -106,6 +121,7 @@ export default {
     bodyMultipart: 'Multipart form',
     formatJson: 'Format',
     formatUrl: 'Format URL',
+    curlPasted: 'Request filled from cURL: {method} {url}',
     rawPlaceholder: 'Request body (supports {\'{variables}\'})',
     query: 'Query params',
     colName: 'Name',
@@ -423,5 +439,9 @@ export default {
     reqName: 'Request name',
     folder: 'Folder (empty = root)',
     method: 'Method',
+    saveDraftTitle: 'Save request',
+    saveDraftHint: 'This request is new and not saved yet: give it a name, pick a folder and save, or discard it.',
+    draftSaved: 'Saved request “{name}”',
+    discard: 'Discard',
   },
 }

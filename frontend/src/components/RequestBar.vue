@@ -6,10 +6,13 @@ import { computed, h, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { OptionsOutline, CodeOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
 import VarInput from '@/components/VarInput.vue'
+import { api } from '@/lib/ipc'
 import { methodColor, methodTint } from '@/lib/method'
+import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
+import type { RequestDoc } from '@/types'
 
 const props = defineProps<{ tab: Tab }>()
 const emit = defineEmits<{ codegen: [] }>()
@@ -57,6 +60,33 @@ function formatUrl(): void {
   props.tab.request.url = props.tab.request.url.trim().replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '{{$1}}')
   touch()
 }
+
+/** 把 curl 解析结果写回当前请求；草稿且尚无名字时用解析出的名字（保存对话框会预填）。 */
+function applyCurl(doc: RequestDoc): void {
+  const r = props.tab.request
+  r.method = doc.method
+  r.url = doc.url
+  r.params = doc.params
+  r.headers = doc.headers
+  r.body = doc.body
+  r.auth = doc.auth ?? { type: 'none' }
+  if (props.tab.draft && !r.name.trim() && doc.name) r.name = doc.name
+  touch()
+}
+
+/** 地址栏直接粘贴 curl 命令：解析后覆盖整个请求（新建草稿时最顺手的一条路径）。 */
+async function onUrlPaste(e: ClipboardEvent): Promise<void> {
+  const text = e.clipboardData?.getData('text') ?? ''
+  if (!/^\s*curl(\.exe)?\s/i.test(text)) return
+  e.preventDefault()
+  try {
+    const doc = await api.parseCurl(text)
+    applyCurl(doc)
+    message.success(t('editor.curlPasted', { method: doc.method, url: doc.url }))
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
+}
 </script>
 
 <template>
@@ -78,6 +108,7 @@ function formatUrl(): void {
         :missing="tab.resolve?.missing ?? []"
         :secrets="secretNames"
         @update:model-value="touch"
+        @paste="onUrlPaste"
       />
       <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
         <n-icon :component="OptionsOutline" :size="16" />
