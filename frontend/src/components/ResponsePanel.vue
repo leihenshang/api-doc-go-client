@@ -377,35 +377,48 @@ async function toggleBookmark(path: string): Promise<void> {
   <div class="resp">
     <n-alert v-if="tab.error" type="error" :bordered="false" class="err">{{ tab.error }}</n-alert>
 
-    <template v-else-if="display">
-      <!-- 状态栏：响应 · 200 OK · 12 ms · 1.2 KB；右侧「本次响应 ▾」切换历史响应 -->
-      <div class="status-bar">
-        <span class="ttl">{{ t('resp.title') }}</span>
-        <n-tag :type="statusType" size="small" :bordered="false" class="badge" data-testid="resp.status" :title="display.proto">
-          {{ statusLabel }}
-        </n-tag>
-        <span class="meta mono">{{ meta }}</span>
-        <span class="sp" />
-        <n-popconfirm v-if="example" @positive-click="removeExample">
-          <template #trigger>
-            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
-              <n-icon :component="TrashOutline" :size="13" />
-              <span>{{ t('common.delete') }}</span>
-            </button>
-          </template>
-          <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
-        </n-popconfirm>
-        <n-select
-          :value="viewingUid"
-          :options="exampleOptions"
-          size="small"
-          class="expick"
-          data-testid="resp.examples"
-          :title="t('resp.examples')"
-          @update:value="viewingUid = String($event ?? '')"
-        />
-      </div>
+    <!-- 状态栏（design-spec §3 第 1 排，h44）在「尚未发送」时也占位：
+         标题与右上角「已保存的响应示例 ▾」的样式、位置与发送后完全一致，
+         没有响应时只是不渲染状态码徽章与耗时/体积（display 为空时这些信息不存在） -->
+    <div v-if="!tab.error" class="status-bar" data-testid="resp.statusbar">
+      <span class="ttl">{{ t('resp.title') }}</span>
+      <n-tag
+        v-if="display"
+        :type="statusType"
+        size="small"
+        :bordered="false"
+        class="badge"
+        data-testid="resp.status"
+        :title="display.proto"
+      >
+        {{ statusLabel }}
+      </n-tag>
+      <span v-if="display" class="meta mono" data-testid="resp.meta">{{ meta }}</span>
+      <span class="sp" />
+      <!-- 删除示例 + 「本次响应 ▾」：发送前后共用这一处，切换时下拉不会跳位置 -->
+      <n-popconfirm v-if="example" @positive-click="removeExample">
+        <template #trigger>
+          <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
+            <n-icon :component="TrashOutline" :size="13" />
+            <span>{{ t('common.delete') }}</span>
+          </button>
+        </template>
+        <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
+      </n-popconfirm>
+      <!-- 无响应又没有已保存示例时不摆下拉（只剩「本次响应」一项没有意义） -->
+      <n-select
+        v-if="display || examples.length"
+        :value="viewingUid"
+        :options="exampleOptions"
+        size="small"
+        class="expick"
+        data-testid="resp.examples"
+        :title="t('resp.examples')"
+        @update:value="viewingUid = String($event ?? '')"
+      />
+    </div>
 
+    <template v-else-if="display">
       <!-- 标签栏：响应体 / 响应头 N / 响应字段 N + 请求 URL -->
       <div class="seg">
         <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body" @click="seg = 'body'">
@@ -527,9 +540,6 @@ async function toggleBookmark(path: string): Promise<void> {
         <li><kbd>Ctrl</kbd> + <kbd>W</kbd><span>{{ t('resp.closeHint') }}</span></li>
         <li><kbd>Ctrl</kbd> + <kbd>S</kbd><span>{{ t('resp.saveNowHint') }}</span></li>
       </ul>
-      <div v-if="examples.length" class="empty-ex">
-        <n-select :value="viewingUid" :options="exampleOptions" size="small" style="width: 220px" @update:value="viewingUid = $event" />
-      </div>
     </div>
 
     <n-modal v-model:show="showSave" preset="card" :title="t('resp.saveResponse')" style="width: 440px">
@@ -913,10 +923,6 @@ async function toggleBookmark(path: string): Promise<void> {
 
 .shortcuts span {
   margin-left: 6px;
-}
-
-.empty-ex {
-  margin-top: 12px;
 }
 
 .save-form {

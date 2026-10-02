@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openRespTab, send } from '../helpers/ui'
+import { openCollection, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -118,5 +118,45 @@ test.describe('响应区：字段映射与响应示例', () => {
     await expect(page.getByTestId('resp.headerRow').first()).toBeVisible() // 响应头
     await openRespTab(page, 'fields')
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible() // 响应字段
+  })
+
+  // 首次打开请求（尚未发送）时，响应区状态栏与「已保存的响应示例」下拉必须与发送后同一位置/样式，
+  // 只是隐藏状态码徽章与耗时/体积 —— 此前下拉挂在空态提示下方（居中、220px），位置与样式都对不上
+  test('[E23] 未发送时响应区：状态栏占位 + 示例下拉就地切换', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await openSaveExample(page)
+    await exampleModal(page).locator('input').first().fill('成功示例')
+    await exampleModal(page).getByRole('button', { name: t('common.save'), exact: true }).click()
+    await expect(page.getByTestId('resp.exnote')).toBeVisible()
+
+    // 刷新重开：会话只记 uid、响应不落 localStorage → 回到「尚未发送」的状态
+    await page.reload()
+    await reopenApp(page)
+    await openRequest(page, 'ping')
+    await expect(page.getByText(t('resp.empty'), { exact: true })).toBeVisible()
+
+    const bar = page.getByTestId('resp.statusbar')
+    await expect(bar).toContainText(t('resp.title'))
+    await expect(page.getByTestId('resp.status')).toHaveCount(0) // 无响应：不出现状态码徽章
+    await expect(page.getByTestId('resp.meta')).toHaveCount(0) // 也不出现耗时/体积
+    await expect(bar.getByTestId('resp.examples')).toHaveCount(1) // 下拉就在状态栏里（与发送后同位置）
+
+    // 直接切到已保存示例：面板换成快照，徽章与耗时在同一个状态栏里出现
+    await bar.getByTestId('resp.examples').click()
+    await page.locator('.n-base-select-option').filter({ hasText: '成功示例' }).click()
+    await expect(page.getByTestId('resp.exnote')).toContainText(t('resp.viewingExample', { name: '成功示例' }))
+    await expect(page.getByTestId('resp.status')).toContainText('200')
+    await expect(page.getByTestId('resp.statusbar')).toHaveCount(1) // 没有换成第二个状态栏
+    await expect(page.getByTestId('resp.meta')).toHaveCount(1)
+
+    // 回到本次响应 = 回到空态：状态栏与下拉留在原位
+    await page.getByTestId('resp.backToLive').click()
+    await expect(page.getByText(t('resp.empty'))).toBeVisible()
+    await expect(page.getByTestId('resp.status')).toHaveCount(0)
+    await expect(page.getByTestId('resp.statusbar').getByTestId('resp.examples')).toHaveCount(1)
   })
 })
