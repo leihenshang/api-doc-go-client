@@ -883,12 +883,17 @@ async function toggleBookmark(path: string): Promise<void> {
   word-break: break-all;
 }
 
+/* 尚未发送的提示区：飞机图标 + 快捷键提示常驻。
+   状态栏现在也占一行，面板被拖矮时（竖向布局 20%）内容可能放不下：
+   overflow 兜住滚动，safe center 让内容超出时改为顶部对齐，避免居中把图标/提示裁掉。 */
 .empty {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 6px;
   color: var(--app-muted);
 }

@@ -279,8 +279,9 @@ function onHotkey(e: KeyboardEvent): void {
     e.preventDefault()
     requestClose(tabs.active.key)
   } else if (key === 's') {
+    // Ctrl+S：已落盘请求立即写盘；新建但未保存的草稿没有磁盘副本，走「保存请求」对话框
     e.preventDefault()
-    if (tabs.active) void tabs.flush(tabs.active.key)
+    saveActiveNow()
   } else if (key === 'z') {
     // Ctrl+Z 撤销 / Ctrl+Shift+Z（或 Ctrl+Y）重做：请求级编辑历史
     if (!tabs.active) return
@@ -388,10 +389,25 @@ function onCurlImported(doc: RequestDoc, folder: string): void {
   tabs.openDraft(doc, folder)
 }
 
-// ---- 关闭标签：草稿先问「保存（名称 + 分组） / 不保存 / 取消」 ----
-const closingTab = ref<Tab | null>(null)
+// ---- 草稿保存框：关闭标签时问「保存（名称 + 分组） / 不保存 / 取消」；Ctrl+S 只保存、不关标签 ----
+const draftTab = ref<Tab | null>(null)
+/** true = 由 Ctrl+S 打开：保存后留在原地，「不保存」按钮不出现 */
+const draftSaveOnly = ref(false)
 const draftForm = ref({ name: '', folder: '' })
 const savingDraft = ref(false)
+
+/** 打开草稿保存框（saveOnly = 保存后不关页签）。 */
+function openDraftDialog(tab: Tab, saveOnly: boolean): void {
+  draftSaveOnly.value = saveOnly
+  draftTab.value = tab
+  draftForm.value = { name: draftName(tab), folder: tab.draftFolder }
+}
+
+/** 关掉草稿保存框并复位模式。 */
+function closeDraftDialog(): void {
+  draftTab.value = null
+  draftSaveOnly.value = false
+}
 
 /** 统一关闭入口：草稿弹保存框，其余（已落盘）直接关。 */
 function requestClose(key: string): void {
@@ -401,8 +417,20 @@ function requestClose(key: string): void {
     void tabs.close(key)
     return
   }
-  closingTab.value = tab
-  draftForm.value = { name: draftName(tab), folder: tab.draftFolder }
+  openDraftDialog(tab, false)
+}
+
+/** Ctrl+S：已落盘请求立即写盘（flush 会清掉待触发的防抖保存）；新建草稿开保存框，保存后留在原地。 */
+function saveActiveNow(): void {
+  // 保存框已经开着时不再重复打开（否则会把已填的名称/分组重置）
+  if (draftTab.value) return
+  const tab = tabs.active
+  if (!tab) return
+  if (!tab.draft) {
+    void tabs.flush(tab.key)
+    return
+  }
+  openDraftDialog(tab, true)
 }
 
 /** 保存对话框的名称预填：已有名字优先，gRPC 用「方法 / 服务」名，最后退回页签标题。 */
@@ -414,16 +442,17 @@ function draftName(tab: Tab): string {
   return tab.title
 }
 
-/** 保存草稿（落盘到所选分组）→ 关闭 tab。 */
+/** 保存草稿（落盘到所选分组）：关闭流程顺带关页签，Ctrl+S 流程保存后留在原地继续编辑。 */
 async function confirmSaveDraft(): Promise<void> {
-  const tab = closingTab.value
+  const tab = draftTab.value
   const name = draftForm.value.name.trim()
   if (!tab || !name) return
   savingDraft.value = true
   try {
     await tabs.saveDraft(tab.key, draftForm.value.folder, name)
-    closingTab.value = null
-    await tabs.close(tab.key)
+    const keepOpen = draftSaveOnly.value
+    closeDraftDialog()
+    if (!keepOpen) await tabs.close(tab.key)
     message.success(t('prompt.draftSaved', { name }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -432,10 +461,10 @@ async function confirmSaveDraft(): Promise<void> {
   }
 }
 
-/** 不保存：丢弃草稿并关闭。 */
+/** 不保存：丢弃草稿并关闭（只在关闭流程出现）。 */
 async function discardDraft(): Promise<void> {
-  const tab = closingTab.value
-  closingTab.value = null
+  const tab = draftTab.value
+  closeDraftDialog()
   if (tab) await tabs.discardDraft(tab.key)
 }
 
@@ -600,15 +629,15 @@ watch(
       <!-- 导入 cURL：粘贴命令 → 解析预览 → 开成未落盘草稿 tab -->
       <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
 
-      <!-- 关闭未保存的新建请求：这里才问名称与分组（新建时不打扰） -->
+      <!-- 未保存的新建请求：关闭时（可丢弃）或 Ctrl+S 时（只保存）在这里问名称与分组 -->
       <n-modal
-        :show="closingTab !== null"
+        :show="draftTab !== null"
         preset="card"
         :title="t('prompt.saveDraftTitle')"
         style="width: 460px"
-        @update:show="(v: boolean) => (v ? undefined : (closingTab = null))"
+        @update:show="(v: boolean) => (v ? undefined : closeDraftDialog())"
       >
-        <p class="draft-hint">{{ t('prompt.saveDraftHint') }}</p>
+        <p class="draft-hint">{{ t(draftSaveOnly ? 'prompt.saveOnlyHint' : 'prompt.saveDraftHint') }}</p>
         <n-form label-placement="left" label-width="86">
           <n-form-item :label="t('prompt.reqName')">
             <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
@@ -619,8 +648,8 @@ watch(
         </n-form>
         <template #footer>
           <div class="modal-ft">
-            <n-button size="small" data-testid="draft.cancel" @click="closingTab = null">{{ t('common.cancel') }}</n-button>
-            <n-button size="small" data-testid="draft.discard" @click="discardDraft">{{ t('prompt.discard') }}</n-button>
+            <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel') }}</n-button>
+            <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{ t('prompt.discard') }}</n-button>
             <n-button
               size="small"
               type="primary"
@@ -743,9 +772,11 @@ watch(
   min-height: 0;
 }
 
-/* 分隔区（design-spec §2 的 w28）：浅灰底 + 两侧细线；中央不再放布局切换（已移到标题栏） */
+/* 分隔区：浅灰底 + 两侧细线；中央不再放布局切换（已移到标题栏）。
+   宽度取 8px（design-spec 的 w28 偏宽，视觉上把编辑器与响应区推得太开；两侧 1px 描边后实际 10px），
+   光标与悬停底色沿用，拖拽热区仍覆盖整条。 */
 .splitter {
-  flex: 0 0 28px;
+  flex: 0 0 8px;
   position: relative;
   z-index: 1;
   display: flex;

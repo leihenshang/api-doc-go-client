@@ -3,6 +3,7 @@
 // 弹窗不挤布局（含缩放）/ 分栏拖动与布局切换 / 命令面板。
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
+import { listCollectionFiles } from '../helpers/fs'
 import { t } from '../helpers/i18n'
 import { openCollection, openRequest, openSettings, reopenApp, saveSettings, treeRow, treeRowByUid } from '../helpers/ui'
 
@@ -139,8 +140,8 @@ test.describe('外壳、布局与命令面板', () => {
 
     const splitter = page.locator('.splitter')
     const splitterWidth = await splitter.evaluate((el) => Math.round(el.getBoundingClientRect().width))
-    expect(splitterWidth).toBeGreaterThanOrEqual(28) // design-spec 的 w28（含 1px 描边）
-    expect(splitterWidth).toBeLessThanOrEqual(30)
+    expect(splitterWidth).toBeGreaterThanOrEqual(8) // 8px + 两侧 1px 描边（曾按 design-spec 的 w28）
+    expect(splitterWidth).toBeLessThanOrEqual(10)
     const box = (await splitter.boundingBox())!
     // 布局切换已从分隔区挪到标题栏（TitleBar 的 .layouts）：中缝没有任何按钮热区，整条都可拖动
     await expect(splitter.locator('button')).toHaveCount(0)
@@ -205,5 +206,28 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(palette).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(palette).toHaveCount(0)
+  })
+
+  // 未保存的新建请求（草稿）没有磁盘副本：Ctrl+S 应该直接开「保存请求」框落盘，且保存后页签留在原地
+  test('[G11] Ctrl+S 保存未落盘的草稿请求', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+
+    await page.keyboard.press('Control+n') // 新建（不打扰：不弹框）
+    await expect(page.getByTestId('draft.name')).toHaveCount(0)
+
+    // Ctrl+S：这次是「只保存」模式，所以没有「不保存」按钮
+    await page.keyboard.press('Control+s')
+    await expect(page.getByTestId('draft.name')).toBeVisible()
+    await expect(page.getByTestId('draft.discard')).toHaveCount(0)
+
+    await page.getByTestId('draft.name').locator('input').fill('ctrl-s-request')
+    await page.getByTestId('draft.save').click()
+
+    // 落盘为集合内请求文件；对话框关闭、页签转正并留在原地（侧栏出现该请求）
+    await expect.poll(() => listCollectionFiles(dir).some((p) => p.endsWith('ctrl-s-request.yml'))).toBe(true)
+    await expect(page.getByTestId('draft.name')).toHaveCount(0)
+    await expect(treeRow(page, 'ctrl-s-request')).toHaveCount(1)
+    await expect(page.getByTestId('tab.item').filter({ hasText: 'ctrl-s-request' })).toBeVisible()
   })
 })

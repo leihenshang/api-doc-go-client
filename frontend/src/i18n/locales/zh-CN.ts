@@ -533,6 +533,7 @@ export default {
     method: '方法',
     saveDraftTitle: '保存请求',
     saveDraftHint: '这是新建但还没有保存的请求：填好名称、选好分组再保存，或者直接丢弃。',
+    saveOnlyHint: '填好名称、选好分组即可保存（Ctrl+S）：保存后页签留在原地，可继续编辑。',
     draftSaved: '已保存请求「{name}」',
     discard: '不保存',
   },
