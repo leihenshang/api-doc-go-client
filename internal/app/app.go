@@ -23,6 +23,7 @@ import (
 	"api-doc-go-client/internal/history"
 	"api-doc-go-client/internal/index"
 	"api-doc-go-client/internal/mocksrv"
+	"api-doc-go-client/internal/proto"
 	"api-doc-go-client/internal/runner"
 	"api-doc-go-client/internal/script"
 	"api-doc-go-client/internal/syncengine"
@@ -51,6 +52,8 @@ type App struct {
 	syncStatus SyncStatus
 	// syncStop 定时同步停止信号
 	syncStop chan struct{}
+	// protoCache gRPC 定义编译缓存：显式失效（用户导入/更新定义时 Invalidate），不做文件监听
+	protoCache *proto.Cache
 }
 
 // inflightSend 一次在途发送的取消句柄。
@@ -59,16 +62,66 @@ type inflightSend struct {
 }
 
 func NewApp() *App {
-	a := &App{settings: config.Default()}
+	a := &App{settings: config.Default(), protoCache: proto.NewCache()}
 	if s, err := config.Load(); err == nil {
 		a.settings = s
 	}
 	return a
 }
 
+// 初始窗口几何（逻辑像素；Wails 的 Width/Height 与 ScreenGetAll 都是逻辑像素）。
+const (
+	preferredWindowWidth  = 1600
+	preferredWindowHeight = 1000
+	// 首选尺寸四周留白下限：避免窗口贴着屏幕边缘
+	windowFitMargin = 24
+	// 任务栏 / Dock 的保守预留：ScreenGetAll 只给显示器矩形，不含工作区
+	windowVerticalReserve = 64
+)
+
 // startup Wails 生命周期。
 // Startup Wails 生命周期钩子（必须导出：OnStartup 引用跨包方法）。
 func (a *App) Startup(ctx context.Context) { a.ctx = ctx }
+
+// DomReady Wails 生命周期钩子：窗口与 WebView 就绪、首帧渲染前，把初始几何收敛到屏幕内再显示窗口。
+//
+// 为什么需要：Wails 的 Width/Height 是**逻辑像素**，高分屏（如 125% 缩放）下逻辑屏可能只有
+// 1536×960，而首选 1600×1000 放不下 —— 系统会把它按工作区居中，于是顶部/底部被推出屏幕
+// （实测：逻辑屏 1536×960 时窗口矩形 T=-33、B=945）。ScreenGetAll 返回的 Size 恰好是逻辑像素，
+// 用它判断：放得下就保持首选尺寸并居中，放不下就直接最大化（Windows 侧 Wails 已按工作区裁剪客户区，
+// 任务栏自动让开）。窗口先隐藏（main.go 的 StartHidden），自适应完再 Show，避免启动闪一下再跳。
+func (a *App) DomReady(ctx context.Context) {
+	a.ctx = ctx
+	a.fitInitialWindow(ctx)
+	runtime.WindowShow(ctx)
+}
+
+// fitInitialWindow 按主屏可用范围决定初始尺寸：放得下 = 首选尺寸居中，放不下 = 最大化。
+func (a *App) fitInitialWindow(ctx context.Context) {
+	screens, err := runtime.ScreenGetAll(ctx)
+	if err != nil || len(screens) == 0 {
+		return // 拿不到屏幕信息：保持 main.go 里的安全下限尺寸，交给系统摆放
+	}
+	screen := screens[0]
+	for _, s := range screens {
+		if s.IsPrimary {
+			screen = s
+			break
+		}
+	}
+	if windowFitsScreen(screen.Size.Width, screen.Size.Height) {
+		runtime.WindowSetSize(ctx, preferredWindowWidth, preferredWindowHeight)
+		runtime.WindowCenter(ctx)
+		return
+	}
+	runtime.WindowMaximise(ctx)
+}
+
+// windowFitsScreen 首选尺寸能否完整放进该屏幕（含任务栏预留与四周留白）。
+func windowFitsScreen(screenW, screenH int) bool {
+	return screenW >= preferredWindowWidth+windowFitMargin &&
+		screenH >= preferredWindowHeight+windowVerticalReserve
+}
 
 // SetHeadlessDir 供 devserver（无对话框环境）使用。
 func (a *App) SetHeadlessDir(dir string) { a.headlessDir = dir }
@@ -101,6 +154,20 @@ func (a *App) PickFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择上传文件"})
 }
 
+// PickGrpcProtoFiles 选择 .proto 定义（可多选，带 .proto 过滤）：gRPC 请求的「导入 / 更新定义」用。
+//
+// 必须支持多选：一个服务的定义常拆在多个文件（service 与 message 分文件 + 同目录互相 import），
+// 分开导入会因「import 依赖还没进集合」而解析失败（设计文档 D2/G2.2）。
+func (a *App) PickGrpcProtoFiles() ([]string, error) {
+	if a.ctx == nil {
+		return nil, errors.New("应用未就绪")
+	}
+	return runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "选择 .proto 定义",
+		Filters: []runtime.FileFilter{{DisplayName: "Proto 定义 (*.proto)", Pattern: "*.proto"}},
+	})
+}
+
 // OpenCollection 打开（不存在则初始化）集合并返回概要（树 + 环境）。
 func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	if strings.TrimSpace(dir) == "" {
@@ -118,6 +185,8 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	a.mu.Lock()
 	a.coll = c
 	a.mu.Unlock()
+	// 换集合即丢弃编译缓存：缓存按绝对路径存结果，跨集合复用没有意义（也避免同路径陈旧结果）
+	a.protoCache.Invalidate()
 	go a.watchLoop(c)
 	return c.Info()
 }
@@ -590,6 +659,9 @@ func (a *App) CreateRequestFromDraft(folder, name string, r *collection.Request)
 	if err != nil {
 		return nil, err
 	}
+	if err := a.checkGrpcSavable(r); err != nil {
+		return nil, err
+	}
 	return c.CreateRequestFromDraft(folder, name, r)
 }
 
@@ -662,7 +734,29 @@ func (a *App) SaveRequest(r *collection.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := a.checkGrpcSavable(r); err != nil {
+		return err
+	}
 	return c.SaveRequest(r)
+}
+
+// checkGrpcSavable gRPC 请求的保存前置校验（D4 / G3.5）：写了定义但解析不了就不允许写盘。
+//
+// 「还没导入 .proto」是允许保存的状态（空定义，§5 状态机），只有 proto 有值却编译失败才拒绝；
+// 这样用户不会把一份打不开的请求存进集合，同时保留「先存草稿、稍后补定义」的自由。
+// 导入是原子的（失败不落盘），所以解析失败只可能来自「定义被外部删除 / 改了内容」。
+func (a *App) checkGrpcSavable(r *collection.Request) error {
+	if r == nil || r.GRPC == nil || strings.TrimSpace(r.GRPC.Proto) == "" {
+		return nil
+	}
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	if _, err := a.compileResolved(c, r.GRPC.Proto, r.GRPC.Imports); err != nil {
+		return fmt.Errorf("定义解析失败，无法保存：请先在 Schema 分段重新导入（%v）", err)
+	}
+	return nil
 }
 
 func (a *App) DeleteRequest(uid string) error {
@@ -844,6 +938,26 @@ func (a *App) envVars(envName string) (map[string]string, error) {
 	return vars, nil
 }
 
+// kvMap 把 KV 行摊成脚本可用的对象（同名后者覆盖前者）。
+func kvMap(rows []collection.KV) map[string]string {
+	if len(rows) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		out[row.Name] = row.Value
+	}
+	return out
+}
+
+// grpcCodeOf gRPC 响应的状态码（HTTP 响应返回 0，脚本里用 res.isGrpc 区分）。
+func grpcCodeOf(res *runner.Result) int {
+	if res != nil && res.Proto == "gRPC" {
+		return res.Status
+	}
+	return 0
+}
+
 // ScriptResult 脚本与断言阶段的产物（随响应返回前端）。
 type ScriptResult struct {
 	Vars        map[string]string     `json:"vars,omitempty"`
@@ -904,22 +1018,22 @@ func (a *App) SendRequest(r *collection.Request, envName string) (*runner.Result
 		}
 	}
 
-	res, sendErr := runner.Send(ctx, *r, sendVars, a.sendOptions())
+	res, sendErr := a.executeRequest(ctx, r, sendVars)
 
 	// 后置：post-response 脚本 + 断言
 	var scriptOut *script.RunResult
 	if res != nil && sendErr == nil {
-		headers := map[string]string{}
-		for _, h := range res.Headers {
-			headers[h.Name] = h.Value
-		}
 		scriptOut = sess.RunPostResponse(&script.Response{
 			Status:       res.Status,
-			Headers:      headers,
+			Headers:      kvMap(res.Headers),
 			Body:         script.ParseBody(res.Body),
 			BodyText:     res.Body,
 			ResponseTime: res.TimeMS,
 			ContentType:  res.ContentType,
+			// gRPC 语义（G10.2）：res.status = gRPC code、res.grpcCode 同值、res.trailers 为尾元数据
+			IsGRPC:   res.Proto == "gRPC",
+			GRPCCode: grpcCodeOf(res),
+			Trailers: kvMap(res.Trailers),
 		}, toScriptAsserts(r.Asserts))
 	} else if pre.ScriptError != "" || len(pre.Vars) > 0 {
 		scriptOut = pre
@@ -950,6 +1064,14 @@ func toScriptAsserts(list []collection.ScriptAssert) []script.Assert {
 		out = append(out, script.Assert{Name: a.Name, Expr: a.Expr})
 	}
 	return out
+}
+
+// executeRequest 按协议分派：HTTP 走 runner.Send，gRPC 走 runner.SendGRPC（见 grpc.go）。
+func (a *App) executeRequest(ctx context.Context, r *collection.Request, vars map[string]string) (*runner.Result, error) {
+	if r.IsGRPC() {
+		return a.sendGRPC(ctx, r, vars)
+	}
+	return runner.Send(ctx, *r, vars, a.sendOptions())
 }
 
 // CancelSend 取消按 uid 标识的在途发送；无在途发送时为空操作。
@@ -1121,11 +1243,14 @@ func (a *App) ResolveText(text, envName string) (*ResolveResult, error) {
 
 // ---- 代码生成（H6）----
 
-// GenerateCode 生成请求代码片段（curl / fetch / axios / go / python）。
-// 变量按当前环境渲染；body 按类型序列化为字符串。
+// GenerateCode 生成请求代码片段：HTTP 支持 curl / fetch / axios / go / python，
+// gRPC 只支持 grpcurl（G11.5）。变量按当前环境渲染；body / 消息按类型序列化为字符串。
 func (a *App) GenerateCode(lang, envName string, r *collection.Request) (string, error) {
 	if r == nil {
 		return "", errors.New("请求为空")
+	}
+	if r.IsGRPC() {
+		return a.generateGrpcCode(lang, envName, r)
 	}
 	l, ok := codegen.ParseLang(lang)
 	if !ok {

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package fixture;
+
+// 回显服务（测试用）：服务端用 grpc.UnknownServiceHandler 动态收发，不需要生成 stub。
+//   text = "boom" -> 返回 NOT_FOUND（状态码用例）
+//   text = "slow" -> 延迟 400ms 后返回（超时用例）
+//   其余 -> 原样回显（Ping 的入参/出参是同一消息类型）
+service Echo {
+  rpc Ping(EchoMsg) returns (EchoMsg);
+  rpc Boom(EchoMsg) returns (EchoMsg);
+  rpc Slow(EchoMsg) returns (EchoMsg);
+  rpc Watch(EchoMsg) returns (stream EchoMsg);
+}
+
+message EchoMsg {
+  string text = 1;
+  int64 n = 2;
+  repeated string tags = 3;
+}

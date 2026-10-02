@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package demo;
+
+import "google/protobuf/timestamp.proto";
+
+// 打招呼服务（fixture：覆盖 4 种方法形态与注释抓取）
+service Greeter {
+  // 一元：打招呼
+  rpc SayHello(HelloRequest) returns (HelloReply);
+  // 服务端流：逐条回
+  rpc ListHellos(HelloRequest) returns (stream HelloReply);
+  // 客户端流：攒一批再回
+  rpc CollectHellos(stream HelloRequest) returns (HelloReply);
+  // 双向流
+  rpc Chat(stream HelloRequest) returns (stream HelloReply);
+}
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  RED = 1;
+}
+
+message HelloRequest {
+  string name = 1;
+  int32 age = 2;
+  bool vip = 3;
+  repeated string tags = 4;
+  map<string, string> attrs = 5;
+  google.protobuf.Timestamp at = 6;
+  oneof who {
+    string user = 7;
+    string anon = 8;
+  }
+  Nested nested = 9;
+  Color color = 10;
+  HelloRequest child = 11; // 自引用：样例生成必须限深
+
+  message Nested {
+    string note = 1;
+  }
+}
+
+message HelloReply {
+  string message = 1;
+  int32 code = 2;
+}

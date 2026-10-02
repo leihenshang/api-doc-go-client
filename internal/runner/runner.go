@@ -64,22 +64,27 @@ func NewOptions(insecureSSL bool, timeoutSec int, followRedirects bool, maxRedir
 // Result 一次真实请求的结果；Binary 为真时 Body 是 base64 编码。
 // Script 为脚本/断言阶段产物（无脚本时为 nil）。
 type Result struct {
-	URL         string          `json:"url"`
-	Status      int             `json:"status"`
-	Proto       string          `json:"proto"`
-	TimeMS      int64           `json:"timeMs"`
-	Size        int             `json:"size"`
+	URL    string `json:"url"`
+	Status int    `json:"status"`
+	Proto  string `json:"proto"`
+	TimeMS int64  `json:"timeMs"`
+	// Size 响应体字节数
+	Size int `json:"size"`
+	// SentSize 发送的请求体字节数（gRPC 为序列化后的消息大小；HTTP 暂未采集，为 0 时不展示）
+	SentSize    int             `json:"sentSize,omitempty"`
 	ContentType string          `json:"contentType"`
 	Binary      bool            `json:"binary"`
 	Headers     []collection.KV `json:"headers"`
-	Body        string          `json:"body"`
-	Script      any             `json:"script,omitempty"`
+	// Trailers gRPC 尾元数据（HTTP 请求为 nil）
+	Trailers []collection.KV `json:"trailers,omitempty"`
+	Body     string          `json:"body"`
+	Script   any             `json:"script,omitempty"`
 }
 
 // Send 渲染并发送请求。vars 为已选环境的变量（已合并 secret 与内置变量）。
 // ctx 用于取消（UI 取消发送）与超时；nil 时按 Background 处理，仅受 Options.Timeout 约束。
 func Send(ctx context.Context, r collection.Request, vars map[string]string, opts Options) (*Result, error) {
-	opts = mergeOptions(opts, r.Settings)
+	opts = MergeOptions(opts, r.Settings)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -115,8 +120,8 @@ func sendError(ctx context.Context, err error) error {
 	}
 }
 
-// mergeOptions 补齐零值并用请求级 settings 覆盖。
-func mergeOptions(o Options, s *collection.RequestSettings) Options {
+// MergeOptions 补齐零值并用请求级 settings 覆盖（HTTP 与 gRPC 共用同一套规则）。
+func MergeOptions(o Options, s *collection.RequestSettings) Options {
 	if o.Timeout <= 0 {
 		o.Timeout = defaultTimeout
 	}

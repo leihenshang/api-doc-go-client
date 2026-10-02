@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package demo;
+
+// 故意写错：缺少字段编号与结尾分号（语法错误用例）
+message Broken {
+  string name =
+}

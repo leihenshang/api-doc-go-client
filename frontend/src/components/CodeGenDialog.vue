@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 代码生成（H6）：按当前草稿 + 环境渲染变量，生成 curl / fetch / axios / go / python 片段。
+// 代码生成（H6 / G11.5）：按当前草稿 + 环境渲染变量。
+// HTTP 生成 curl / fetch / axios / go / python；gRPC 只生成 grpcurl（别的模板对 gRPC 没有意义）。
 import { NButton, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,13 +19,20 @@ const code = ref('')
 const error = ref('')
 const loading = ref(false)
 
-const langOptions = computed(() => [
-  { label: 'cURL', value: 'curl' },
-  { label: 'fetch', value: 'fetch' },
-  { label: 'axios', value: 'axios' },
-  { label: 'Go', value: 'go' },
-  { label: 'Python', value: 'python' },
-])
+/** gRPC 请求（grpc 段存在）：语言列表只剩 grpcurl。 */
+const isGrpc = computed(() => !!props.request?.grpc)
+
+const langOptions = computed(() =>
+  isGrpc.value
+    ? [{ label: 'grpcurl', value: 'grpcurl' }]
+    : [
+        { label: 'cURL', value: 'curl' },
+        { label: 'fetch', value: 'fetch' },
+        { label: 'axios', value: 'axios' },
+        { label: 'Go', value: 'go' },
+        { label: 'Python', value: 'python' },
+      ],
+)
 
 async function gen(): Promise<void> {
   if (!props.request) return
@@ -43,7 +51,17 @@ async function gen(): Promise<void> {
 watch(
   () => [props.show, lang.value] as const,
   ([show]) => {
-    if (show) void gen()
+    if (!show) return
+    // 协议与语言不匹配时先切到该协议的默认语言（会再次触发本 watch 完成生成）
+    if (isGrpc.value && lang.value !== 'grpcurl') {
+      lang.value = 'grpcurl'
+      return
+    }
+    if (!isGrpc.value && lang.value === 'grpcurl') {
+      lang.value = 'curl'
+      return
+    }
+    void gen()
   },
 )
 

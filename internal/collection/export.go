@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"os"
@@ -177,6 +178,32 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			}
 			r, ok := res.reqs[n.UID]
 			if !ok {
+				continue
+			}
+			// gRPC 请求按协议分节（G11.6）：无 query / 请求头 / 请求体，改展示目标与方法信息
+			if g := r.GRPC; g != nil {
+				fmt.Fprintf(&b, "%s %s `GRPC`\n\n", pad, r.Name)
+				fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
+				fmt.Fprintf(&b, "**服务方法**：`%s/%s`（%s）\n\n", g.Service, g.Method, grpcStreamLabel(g.Stream))
+				if strings.TrimSpace(g.Proto) != "" {
+					fmt.Fprintf(&b, "**定义**：`%s`\n\n", g.Proto)
+				}
+				if mode := grpcTLSMode(g.TLS); mode != "" && mode != "none" && mode != "plaintext" {
+					fmt.Fprintf(&b, "**连接**：%s\n\n", mode)
+				}
+				writeMDSection(&b, "Metadata", g.Metadata)
+				if strings.TrimSpace(g.Message) != "" {
+					body := strings.TrimSpace(g.Message)
+					if json.Valid([]byte(body)) {
+						fmt.Fprintf(&b, "**请求消息**\n\n```json\n%s\n```\n\n", body)
+					} else {
+						fmt.Fprintf(&b, "**请求消息**\n\n```\n%s\n```\n\n", body)
+					}
+				}
+				if strings.TrimSpace(r.Docs) != "" {
+					fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(r.Docs))
+				}
+				fmt.Fprintf(&b, "---\n\n")
 				continue
 			}
 			fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
@@ -433,4 +460,29 @@ func inlineMD(s string) string {
 		out = out[:i] + "<strong>" + out[i+1:i+1+j] + "</strong>" + out[i+1+j+1:]
 	}
 	return out
+}
+
+// grpcStreamLabel 流式形态的中文标注（导出文档用）。
+func grpcStreamLabel(stream string) string {
+	switch strings.ToLower(strings.TrimSpace(stream)) {
+	case "server":
+		return "server（服务端流）"
+	case "client":
+		return "client（客户端流）"
+	case "bidi":
+		return "bidi（双向流）"
+	default:
+		return "unary（一元）"
+	}
+}
+
+// grpcTLSMode 连接安全模式（nil 视为明文）。
+func grpcTLSMode(t *GrpcTLS) string {
+	if t == nil {
+		return "plaintext"
+	}
+	if strings.TrimSpace(t.Mode) == "" {
+		return "plaintext"
+	}
+	return t.Mode
 }

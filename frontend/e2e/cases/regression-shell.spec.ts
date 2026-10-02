@@ -90,7 +90,7 @@ test.describe('外壳、布局与命令面板', () => {
     expect(await page.evaluate(() => getComputedStyle(document.body).fontSynthesis)).toBe('none')
   })
 
-  test('[A4] 弹窗打开不挤压布局：缩放 100% 与 150% 下五种状态尺寸一致', async ({ page, app }) => {
+  test('[A4] 弹窗打开不挤压布局：缩放 100% 与 150% 下各状态尺寸一致', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
@@ -110,10 +110,9 @@ test.describe('外壳、布局与命令面板', () => {
       await page.keyboard.press('Escape')
       await expect(page.locator('.n-modal').filter({ hasText: t('history.title') })).toBeHidden()
 
-      await page.locator('.sidebar').getByTitle(t('tree.newRequest')).click()
-      await expect(page.locator('.n-modal')).toBeVisible()
-      expect(await layout(page), `${tag}: 新建请求弹窗不应改变布局`).toEqual(base)
-      await page.getByRole('button', { name: t('common.cancel') }).click()
+      // 新建请求已改为「未落盘草稿 tab」（不再弹对话框），且侧栏「＋」变成了协议下拉：
+      // 原来这条「点新建 → 期望弹窗」的断言随交互变更失效，已移除（新建流程另开用例覆盖）。
+      // 这里保留其余弹窗（设置 / 历史）的布局基线比较。
 
       expect(await layout(page), `${tag}: 关闭弹窗后布局应回到基线`).toEqual(base)
       return base
@@ -143,17 +142,12 @@ test.describe('外壳、布局与命令面板', () => {
     expect(splitterWidth).toBeGreaterThanOrEqual(28) // design-spec 的 w28（含 1px 描边）
     expect(splitterWidth).toBeLessThanOrEqual(30)
     const box = (await splitter.boundingBox())!
-    // 胶囊位于分隔区正中且 @pointerdown.stop，故要从分隔区空白处（靠近顶端）按下才算拖分隔条
-    const startY = box.y + 20
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    // 布局切换已从分隔区挪到标题栏（TitleBar 的 .layouts）：中缝没有任何按钮热区，整条都可拖动
+    await expect(splitter.locator('button')).toHaveCount(0)
+    await expect(page.getByTestId('titlebar.layoutRight')).toBeVisible()
+    await page.mouse.move(box.x + box.width / 2, box.y + 20)
     await page.mouse.down()
-    await page.mouse.move(box.x + box.width / 2 - 140, box.y + box.height / 2, { steps: 10 })
-    await page.mouse.up()
-    expect(await width('.resp-col')).toBe(before) // 在胶囊上按下不应触发拖动
-
-    await page.mouse.move(box.x + box.width / 2, startY)
-    await page.mouse.down()
-    await page.mouse.move(box.x + box.width / 2 - 140, startY, { steps: 10 })
+    await page.mouse.move(box.x + box.width / 2 - 140, box.y + 20, { steps: 10 })
     await page.mouse.up()
 
     // 分隔区宽度不随拖动变化
@@ -168,9 +162,10 @@ test.describe('外壳、布局与命令面板', () => {
     await openRequest(page, 'ping')
     expect(Math.abs((await width('.resp-col')) - after)).toBeLessThan(12)
 
-    // 胶囊切到「上下布局」：请求区在上、响应区在下，且不产生横向溢出
+    // 标题栏按钮切到「上下布局」：请求区在上、响应区在下，且不产生横向溢出
     await page.getByTitle(t('editor.layoutVertical')).click()
     await expect(page.locator('.work')).toHaveClass(/bottom/)
+    await expect(page.getByTestId('titlebar.layoutBottom')).toHaveClass(/on/) // 激活态跟着走
     const boxes = await page.evaluate(() => {
       const e = document.querySelector('.editor-col')!.getBoundingClientRect()
       const r = document.querySelector('.resp-col')!.getBoundingClientRect()

@@ -7,7 +7,12 @@ import { useI18n } from 'vue-i18n'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
+import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
+import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
+import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
+import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
+import { isGrpc } from '@/lib/grpc'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
@@ -77,11 +82,11 @@ function syncUrlFromParams(): void {
   }
 }
 
-// URL 改了 → 回填 params
+// URL 改了 → 回填 params（gRPC 没有 query 段，跳过，顺带避免切 tab 时被误标脏）
 watch(
   () => props.tab.request.url,
   () => {
-    if (readonly.value || syncingFrom.value === 'params') return
+    if (isGrpcReq.value || readonly.value || syncingFrom.value === 'params') return
     syncParamsFromUrl()
     touch()
   },
@@ -93,9 +98,23 @@ function onParamsChange(): void {
   touch()
 }
 
-type Seg = 'params' | 'body' | 'headers' | 'auth' | 'vars' | 'script' | 'tests' | 'docs'
+type Seg =
+  | 'schema'
+  | 'message'
+  | 'metadata'
+  | 'options'
+  | 'params'
+  | 'body'
+  | 'headers'
+  | 'auth'
+  | 'vars'
+  | 'script'
+  | 'tests'
+  | 'docs'
 
-const seg = ref<Seg>('params')
+const isGrpcReq = computed(() => isGrpc(props.tab.request))
+/** gRPC 请求没有 query / 请求头 / 请求体，分段换成「定义 + 协议无关的变量 / 脚本 / 断言 / 文档」。 */
+const seg = ref<Seg>(isGrpcReq.value ? 'schema' : 'params')
 
 // 脚本/断言/前置变量（E15–E17）
 const varsPre = computed({
@@ -197,7 +216,7 @@ const hasScript = computed(
 )
 const hasAsserts = computed(() => (props.tab.request.asserts ?? []).some((a) => a.expr.trim()))
 
-const segments = computed<{ key: Seg; label: string; dot: boolean }[]>(() => [
+const httpSegments = computed<{ key: Seg; label: string; dot: boolean }[]>(() => [
   { key: 'params', label: t('editor.params'), dot: hasParams.value },
   { key: 'body', label: t('editor.body'), dot: hasBody.value },
   { key: 'headers', label: t('editor.headers'), dot: hasHeaders.value },
@@ -207,6 +226,34 @@ const segments = computed<{ key: Seg; label: string; dot: boolean }[]>(() => [
   { key: 'tests', label: t('editor.tests'), dot: hasAsserts.value },
   { key: 'docs', label: t('editor.docs'), dot: hasDocs.value },
 ])
+
+/** 定义了 .proto 即亮角标（对齐 HTTP 侧各段的 dot 语义） */
+const hasProto = computed(() => !!(props.tab.request.grpc?.proto ?? '').trim())
+/** 请求消息（Message 分段） */
+const hasMessage = computed(() => !!(props.tab.request.grpc?.message ?? '').trim())
+/** Metadata 有启用行即亮角标 */
+const hasMetadata = computed(() => (props.tab.request.grpc?.metadata ?? []).some((m) => m.name.trim()))
+
+/** 连接设置非默认（TLS / 压缩 / 超时覆盖）时亮角标 */
+const hasGrpcOptions = computed(() => {
+  const g = props.tab.request.grpc
+  if (!g) return false
+  const mode = (g.tls?.mode ?? '').trim().toLowerCase()
+  return (mode !== '' && mode !== 'none' && mode !== 'plaintext') || g.compress === 'gzip' || !!props.tab.request.settings?.timeoutSec
+})
+
+const grpcSegments = computed<{ key: Seg; label: string; dot: boolean }[]>(() => [
+  { key: 'schema', label: t('grpc.schema'), dot: hasProto.value },
+  { key: 'message', label: t('grpc.message'), dot: hasMessage.value },
+  { key: 'metadata', label: t('grpc.metadata'), dot: hasMetadata.value },
+  { key: 'options', label: t('grpc.options.title'), dot: hasGrpcOptions.value },
+  { key: 'vars', label: t('editor.vars'), dot: hasVars.value },
+  { key: 'script', label: t('editor.script'), dot: hasScript.value },
+  { key: 'tests', label: t('editor.tests'), dot: hasAsserts.value },
+  { key: 'docs', label: t('editor.docs'), dot: hasDocs.value },
+])
+
+const segments = computed(() => (isGrpcReq.value ? grpcSegments.value : httpSegments.value))
 
 function touch(): void {
   if (readonly.value) return
@@ -223,10 +270,13 @@ function formatJson(): void {
   }
 }
 
-// 切换 tab 时刷新解析预览
+// 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）
 watch(
   () => props.tab.key,
-  () => tabs.refreshResolve(),
+  () => {
+    seg.value = isGrpcReq.value ? 'schema' : 'params'
+    tabs.refreshResolve()
+  },
 )
 </script>
 
@@ -248,8 +298,16 @@ watch(
     </div>
 
     <div class="seg-body">
+      <!-- gRPC：定义分段（导入 / 更新 / 移除 .proto、服务方法列表） -->
+      <grpc-schema-pane v-if="isGrpcReq && seg === 'schema'" :tab="tab" />
+      <!-- gRPC：请求消息（生成样例 / 按定义校验 / 字段提示） -->
+      <grpc-message-pane v-else-if="isGrpcReq && seg === 'message'" :tab="tab" />
+      <!-- gRPC：Metadata（键值表复用） -->
+      <grpc-metadata-pane v-else-if="isGrpcReq && seg === 'metadata'" :tab="tab" />
+      <!-- gRPC：连接与选项（明文/TLS、超时、压缩） -->
+      <grpc-options-pane v-else-if="isGrpcReq && seg === 'options'" :tab="tab" />
       <key-value-table
-        v-if="seg === 'params'"
+        v-else-if="seg === 'params'"
         :rows="tab.request.params"
         :label="t('editor.query')"
         @change="onParamsChange"

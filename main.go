@@ -23,18 +23,24 @@ func main() {
 	platform.EnsureGSettingsBackend()
 	core := app.NewApp()
 	err := wails.Run(&options.App{
-		Title:     "api-doc-go",
-		Width:     1600,
-		Height:    1000,
+		Title: "api-doc-go",
+		// 初始尺寸只给「安全下限」：真正尺寸在 DomReady 里按屏幕可用范围决定（见 app.DomReady）——
+		// Width/Height 是逻辑像素，高分屏（125% 缩放）下逻辑屏可能只有 1536×960，
+		// 首选 1600×1000 放不下就会被系统居中到屏幕外（顶部/底部被推出）。
+		Width:     1120,
+		Height:    720,
 		MinWidth:  1120,
 		MinHeight: 720,
 		// 无边框窗口：标题栏由前端自绘（design-spec §2），拖动区靠 CSS --wails-draggable
 		Frameless: true,
+		// 先隐藏：DomReady 里自适应尺寸/位置后再显示，避免启动瞬间闪一下超大窗口
+		StartHidden: true,
 		// 窗口整体透明（alpha 0）：外壳圆角由 CSS 裁出（styles/base.css 的 --app-radius-window），
 		// 圆角以外的像素要透出桌面；任何不透明底色都会把圆角顶成直角。
 		BackgroundColour: &options.RGBA{},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        core.Startup,
+		OnDomReady:       core.DomReady,
 		Bind:             []interface{}{core},
 		// 三端都显式开透明：Linux 侧由 gdk_screen_is_composited 守卫（无合成器时保持不透明），
 		// Windows 侧走 DWM（< 22621 退化为 blur-behind），macOS 侧置 window.opaque = NO。

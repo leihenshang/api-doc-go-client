@@ -12,8 +12,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hasWailsRuntime, windowCtl } from '@/lib/ipc'
 
-const props = defineProps<{ dark: boolean }>()
-const emit = defineEmits<{ 'toggle-theme': [] }>()
+// layout 为 null 表示当前没有打开的请求（没有「请求 / 响应」可排布），此时不渲染这组按钮
+const props = defineProps<{ dark: boolean; layout?: 'right' | 'bottom' | null }>()
+const emit = defineEmits<{ 'toggle-theme': []; 'set-layout': [layout: 'right' | 'bottom'] }>()
 
 const { t } = useI18n()
 const customChrome = hasWailsRuntime()
@@ -74,6 +75,37 @@ onBeforeUnmount(() => {
     </span>
     <span class="brand">{{ t('app.brand') }}</span>
     <span class="sp" />
+
+    <!-- 响应区排列（左：请求响应左右 / 右：上下）：原先挂在分栏中缝的胶囊里，
+         挪到标题栏与主题按钮相邻，省掉中缝的视觉占位 -->
+    <div v-if="layout" class="layouts" role="group" :aria-label="t('settings.responseLayout')">
+      <button
+        class="lay"
+        :class="{ on: layout === 'right' }"
+        type="button"
+        data-testid="titlebar.layoutRight"
+        :title="t('editor.layoutHorizontal')"
+        @click="emit('set-layout', 'right')"
+      >
+        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
+          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
+          <line x1="7" y1="0.6" x2="7" y2="11.4" stroke="currentColor" />
+        </svg>
+      </button>
+      <button
+        class="lay"
+        :class="{ on: layout === 'bottom' }"
+        type="button"
+        data-testid="titlebar.layoutBottom"
+        :title="t('editor.layoutVertical')"
+        @click="emit('set-layout', 'bottom')"
+      >
+        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
+          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
+          <line x1="0.6" y1="6" x2="13.4" y2="6" stroke="currentColor" />
+        </svg>
+      </button>
+    </div>
 
     <button
       class="theme"
@@ -148,6 +180,41 @@ onBeforeUnmount(() => {
 
 .theme:hover {
   background: var(--app-row-hover);
+  color: var(--app-accent);
+}
+
+/* 布局切换：一个小分段控件（两侧都是 26×26），比原来中缝的胶囊（26×52 / 52×26）省地方 */
+.layouts {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+}
+
+.lay {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.lay:hover {
+  background: var(--app-row-hover);
+  color: var(--app-text-2);
+}
+
+/* 选中态用强调色淡底（比原来胶囊的实心强调色更安静，和旁边的主题按钮同量级） */
+.lay.on {
+  background: var(--app-active);
   color: var(--app-accent);
 }
 

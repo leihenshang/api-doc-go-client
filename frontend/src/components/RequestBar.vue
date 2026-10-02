@@ -1,18 +1,29 @@
 <script setup lang="ts">
-// 请求栏（design-spec §2 地址栏）：方法选择器（语义色）+ URL（{{变量}} 高亮）+ 格式化 + Send。
+// 请求栏（design-spec §2 地址栏）：HTTP 是「方法选择器（语义色）+ URL」，gRPC 是
+// 「协议徽标 + 服务/方法选择器 + 服务地址」（G1.3）；右侧统一是 格式化 / 生成代码 / Send。
 import { NIcon, NSelect } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { computed, h, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { OptionsOutline, CodeOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
+import MethodTag from '@/components/MethodTag.vue'
 import VarInput from '@/components/VarInput.vue'
+import {
+  grpcMethodFullName,
+  grpcOf,
+  grpcSendBlocker,
+  grpcServiceShort,
+  grpcStreamKey,
+  isGrpc,
+  splitGrpcMethod,
+} from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { methodColor, methodTint } from '@/lib/method'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
-import type { RequestDoc } from '@/types'
+import type { GrpcMethodInfo, RequestDoc } from '@/types'
 
 const props = defineProps<{ tab: Tab }>()
 const emit = defineEmits<{ codegen: [] }>()
@@ -24,6 +35,59 @@ const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].map
 
 const controlStyle = computed(
   () => `--vi-h:34px;--m-color:${methodColor(props.tab.request.method)};--m-tint:${methodTint(props.tab.request.method)}`,
+)
+
+// ---- gRPC 分支 ----
+const isGrpcReq = computed(() => isGrpc(props.tab.request))
+/** 当前请求的 grpc 段（直接改它的字段即改请求，touch() 由各 handler 负责）。 */
+const grpc = computed(() => grpcOf(props.tab.request))
+/** 定义里的方法：按服务分组，标签带服务短名（便于按服务名过滤）+ 流式标注。 */
+const grpcMethodOptions = computed<SelectOption[]>(() =>
+  (props.tab.grpcSchema?.services ?? []).map((s) => ({
+    type: 'group',
+    key: s.name,
+    label: s.name,
+    children: s.methods.map((m) => ({
+      value: m.fullName,
+      label:
+        m.stream === 'unary'
+          ? `${grpcServiceShort(s.name)}/${m.name}`
+          : `${grpcServiceShort(s.name)}/${m.name} · ${t(grpcStreamKey(m.stream))}`,
+    })),
+  })),
+)
+const grpcMethodsByFullName = computed(() => {
+  const map = new Map<string, GrpcMethodInfo>()
+  for (const s of props.tab.grpcSchema?.services ?? []) for (const m of s.methods) map.set(m.fullName, m)
+  return map
+})
+/** 已选方法（选中项存在时是选项值，定义缺失时退化成请求里存的 `服务.方法`）。 */
+const grpcMethodValue = computed(() => grpcMethodFullName(grpc.value.service, grpc.value.method))
+/** 选方法 = 写回服务 / 方法 / 流式形态（stream 供后续流式支持与保存时标注）。 */
+function setGrpcMethod(value: string | null): void {
+  const g = props.tab.request.grpc
+  if (!g) return
+  const fullName = value ?? ''
+  const known = grpcMethodsByFullName.value.get(fullName)
+  if (!fullName) {
+    g.service = ''
+    g.method = ''
+    g.stream = ''
+  } else if (known) {
+    g.service = splitGrpcMethod(fullName).service
+    g.method = known.name
+    g.stream = known.stream
+  } else {
+    const parts = splitGrpcMethod(fullName)
+    g.service = parts.service
+    g.method = parts.method
+    g.stream = ''
+  }
+  touch()
+}
+/** 不能发送的原因（G3.6）；HTTP 分支恒为空串。 */
+const sendBlocker = computed(() =>
+  isGrpcReq.value ? grpcSendBlocker(props.tab.request, !!props.tab.grpcSchema) : '',
 )
 
 // 地址栏不再单独占一行展示「替换后」文本：值只在悬停变量时给出（见 VarInput）。
@@ -55,9 +119,13 @@ function cancel(): void {
   tabs.cancelSend(props.tab.key)
 }
 
-// 规范化：去首尾空白，并把 {{ var }} 收成 {{var}}（不改变 URL 语义）
+// 规范化：去首尾空白，并把 {{ var }} 收成 {{var}}（HTTP 作用在 URL，gRPC 作用在服务地址）
 function formatUrl(): void {
-  props.tab.request.url = props.tab.request.url.trim().replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '{{$1}}')
+  const r = props.tab.request
+  const raw = r.grpc ? r.grpc.target : r.url
+  const fixed = raw.trim().replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '{{$1}}')
+  if (r.grpc) r.grpc.target = fixed
+  else r.url = fixed
   touch()
 }
 
@@ -92,36 +160,71 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
 <template>
   <div class="bar-wrap">
     <div class="req-line" :style="controlStyle">
-      <n-select
-        v-model:value="tab.request.method"
-        :options="methods"
-        :render-label="renderMethod"
-        class="method"
-        data-testid="req.method"
-        @update:value="touch"
-      />
-      <var-input
-        v-model="tab.request.url"
-        data-testid="req.url"
-        :placeholder="t('editor.urlPlaceholder')"
-        :vars="tab.resolve?.values ?? {}"
-        :missing="tab.resolve?.missing ?? []"
-        :secrets="secretNames"
-        @update:model-value="touch"
-        @paste="onUrlPaste"
-      />
+      <!-- gRPC（G1.3）：协议徽标 + 服务 / 方法选择器 + 服务地址（host:port，支持 {{变量}}） -->
+      <template v-if="isGrpcReq">
+        <method-tag method="GRPC" class="proto" data-testid="req.grpcBadge" />
+        <!-- 未选方法时给 null：naive 用空串会当成「已选中」而吃掉 placeholder -->
+        <n-select
+          :value="grpcMethodValue || null"
+          :options="grpcMethodOptions"
+          class="gmethod"
+          filterable
+          clearable
+          :disabled="!grpcMethodOptions.length"
+          :placeholder="grpcMethodOptions.length ? t('grpc.pickMethod') : t('grpc.needProto')"
+          :title="grpcMethodOptions.length ? '' : t('grpc.block.proto')"
+          data-testid="req.grpcMethod"
+          @update:value="setGrpcMethod"
+        />
+        <var-input
+          v-model="grpc.target"
+          data-testid="req.url"
+          :placeholder="t('grpc.targetPlaceholder')"
+          :vars="tab.resolve?.values ?? {}"
+          :missing="tab.resolve?.missing ?? []"
+          :secrets="secretNames"
+          @update:model-value="touch"
+        />
+      </template>
+      <template v-else>
+        <n-select
+          v-model:value="tab.request.method"
+          :options="methods"
+          :render-label="renderMethod"
+          class="method"
+          data-testid="req.method"
+          @update:value="touch"
+        />
+        <var-input
+          v-model="tab.request.url"
+          data-testid="req.url"
+          :placeholder="t('editor.urlPlaceholder')"
+          :vars="tab.resolve?.values ?? {}"
+          :missing="tab.resolve?.missing ?? []"
+          :secrets="secretNames"
+          @update:model-value="touch"
+          @paste="onUrlPaste"
+        />
+      </template>
       <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
         <n-icon :component="OptionsOutline" :size="16" />
       </button>
-      <button class="icon-btn" type="button" data-testid="req.codegen" :title="t('codegen.title')" @click="emit('codegen')">
+      <!-- 生成代码：HTTP 是 curl/fetch/axios/go/python，gRPC 是 grpcurl（Go 侧按协议分派，G11.5） -->
+      <button
+        class="icon-btn"
+        type="button"
+        data-testid="req.codegen"
+        :title="t('codegen.title')"
+        @click="emit('codegen')"
+      >
         <n-icon :component="CodeOutline" :size="16" />
       </button>
       <button
         class="send"
         type="button"
         data-testid="req.send"
-        :disabled="tab.sending || coll.isReadOnly"
-        :title="coll.isReadOnly ? t('sync.mirrorReadonly') : ''"
+        :disabled="tab.sending || coll.isReadOnly || !!sendBlocker"
+        :title="coll.isReadOnly ? t('sync.mirrorReadonly') : sendBlocker ? t(sendBlocker) : ''"
         @click="send"
       >
         <n-icon :component="tab.sending ? SyncOutline : SendOutline" :size="15" :class="{ spin: tab.sending }" />
@@ -182,9 +285,49 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
   color: var(--m-color);
 }
 
-/* 让方法选择器的输入区铺满整个高度，避免文字偏上 */
+/* 方法选择器：选中值必须在这 34px 里垂直居中。
+   naive 的 .n-base-selection-label 高度写的是 var(--n-height)，本主题下该变量没落到 label 上，
+   于是退化成"一行高"（21px）贴顶 —— 实测文字中线 149.5 vs 同行 URL 输入框/发送按钮 156，偏高 6.5px。
+   这里显式给出行高（--vi-h 由 .req-line 的 controlStyle 提供），naive 自带的 align-items:center 即可居中。 */
 .method :deep(.n-base-selection-label) {
-  height: 100%;
+  height: var(--vi-h, 34px);
+}
+
+/* 协议徽标（gRPC）：占位与行高对齐方法选择器；文字色由 MethodTag 走 --app-method-grpc */
+.proto {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  flex: 0 0 auto;
+}
+
+/* 服务 / 方法选择器：与 HTTP 方法选择器同一套底色、文字色与居中处理（注释见上） */
+.gmethod {
+  width: 200px;
+  flex: 0 0 auto;
+}
+
+.gmethod :deep(.n-base-selection) {
+  background: var(--m-tint) !important;
+  border-radius: 6px;
+  --n-color: var(--m-tint) !important;
+}
+
+.gmethod :deep(.n-base-selection .n-base-selection-label) {
+  color: var(--m-color);
+  font-family: var(--app-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gmethod :deep(.n-base-selection-suffix),
+.gmethod :deep(.n-base-selection-arrow) {
+  background: transparent;
+  color: var(--m-color);
+}
+
+.gmethod :deep(.n-base-selection-label) {
+  height: var(--vi-h, 34px);
 }
 
 .icon-btn {

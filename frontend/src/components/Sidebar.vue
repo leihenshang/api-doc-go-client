@@ -12,6 +12,7 @@ import {
   CreateOutline,
   ExpandOutline,
   FolderOpenOutline,
+  GitNetworkOutline,
   MoveOutline,
   Star,
   StarOutline,
@@ -30,6 +31,7 @@ const props = defineProps<{ tree: TreeNode[]; activeUid?: string; name: string }
 const emit = defineEmits<{
   open: [uid: string]
   'new-request': [folder: string]
+  'new-grpc-request': [folder: string]
   'import-curl': [folder: string]
 }>()
 const { t } = useI18n()
@@ -53,9 +55,21 @@ const INDENT = 13
 
 const folderMenu = computed(() => [
   { key: 'request', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
+  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
   { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
   { key: 'folder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
 ])
+
+/** 工具栏「＋」的下拉：选协议后开对应的未落盘草稿（G1.1）。 */
+const newMenu = computed(() => [
+  { key: 'http', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
+  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
+])
+
+function onNewMenu(key: string | number): void {
+  if (key === 'grpc') emit('new-grpc-request', '')
+  else emit('new-request', '')
+}
 
 const searching = computed(() => keyword.value.trim() !== '')
 
@@ -230,6 +244,7 @@ async function removeRequest(node: TreeNode): Promise<void> {
 
 function onFolderMenu(node: TreeNode, key: string | number): void {
   if (key === 'request') emit('new-request', node.path)
+  else if (key === 'grpc') emit('new-grpc-request', node.path)
   else if (key === 'curl') emit('import-curl', node.path)
   else void startAdd(node.path)
 }
@@ -326,9 +341,12 @@ watch(
       <n-button quaternary size="tiny" :title="t('tree.newFolder')" @click="startAdd('')">
         <template #icon><n-icon :component="FolderOpenOutline" /></template>
       </n-button>
-      <n-button quaternary size="tiny" :title="t('tree.newRequest')" data-testid="tree.new" @click="emit('new-request', '')">
-        <template #icon><n-icon :component="AddOutline" /></template>
-      </n-button>
+      <!-- 新建：下拉区分协议（HTTP / gRPC），两者都开「未落盘草稿」tab -->
+      <n-dropdown trigger="click" placement="bottom-end" :options="newMenu" @select="onNewMenu">
+        <n-button quaternary size="tiny" :title="t('tree.newRequest')" data-testid="tree.new">
+          <template #icon><n-icon :component="AddOutline" /></template>
+        </n-button>
+      </n-dropdown>
       <n-button quaternary size="tiny" :title="t('curl.title')" data-testid="tree.importCurl" @click="emit('import-curl', '')">
         <template #icon><n-icon :component="TerminalOutline" /></template>
       </n-button>
