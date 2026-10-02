@@ -2,9 +2,9 @@
 // 请求标签栏（design-spec §2）：首个固定为 Collection 概览页，其后是各请求 tab。
 // dot 表示有未落盘编辑，method 前置按语义色着色，响应状态码跟随 tab 展示。
 // G7：请求 tab 可拖拽排序（HTML5 DnD）。
-import { NIcon } from 'naive-ui'
+import { NDropdown, NIcon } from 'naive-ui'
 import { AddOutline, CloseOutline, LayersOutline } from '@vicons/ionicons5'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
@@ -15,11 +15,23 @@ const emit = defineEmits<{
   'select-overview': []
   close: [key: string]
   new: []
+  'new-grpc': []
   reorder: [from: number, to: number]
 }>()
 const { t } = useI18n()
 
 const dragFrom = ref(-1)
+
+/** 「＋」下拉：新建 HTTP / gRPC 请求（都是未落盘草稿，关闭时才问保存）。 */
+const newMenu = computed(() => [
+  { key: 'http', label: t('tree.newRequest') },
+  { key: 'grpc', label: t('grpc.newRequest') },
+])
+
+function onNewMenu(key: string | number): void {
+  if (key === 'grpc') emit('new-grpc')
+  else emit('new')
+}
 
 function onDragStart(i: number, e: DragEvent): void {
   dragFrom.value = i
@@ -81,9 +93,11 @@ function onDrop(i: number, e: DragEvent): void {
       </div>
     </div>
 
-    <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
-      <n-icon :component="AddOutline" :size="16" />
-    </button>
+    <n-dropdown trigger="click" placement="bottom-end" :options="newMenu" @select="onNewMenu">
+      <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')">
+        <n-icon :component="AddOutline" :size="16" />
+      </button>
+    </n-dropdown>
   </div>
 </template>
 

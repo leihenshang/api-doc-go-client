@@ -39,6 +39,96 @@ export interface RequestSettings {
   encodeUrl?: boolean
 }
 
+/** gRPC 连接安全设置（collection.Grpctls / 共享包 GRPCTLS）。 */
+export interface GrpcTLS {
+  /** 空 / plaintext = 明文；否则按 TLS（tls / mtls 由执行器按证书是否给全决定） */
+  mode?: string
+  ca?: string
+  cert?: string
+  key?: string
+  insecureSkipVerify?: boolean
+}
+
+/** 请求文件的 grpc 段（collection.GrpcBlock）：**字段存在即 gRPC 请求**（HTTP 请求为 undefined）。 */
+export interface GrpcDoc {
+  /** 服务地址 host:port（支持 {{变量}}） */
+  target: string
+  /** 服务全名（含包名，如 greet.Greeter） */
+  service: string
+  /** 方法名 */
+  method: string
+  /** 入口定义（集合内相对路径，如 protos/greeter.proto） */
+  proto?: string
+  /** 额外 import 搜索路径（集合内相对或绝对） */
+  imports?: string[]
+  metadata?: KV[]
+  /** 请求消息（protojson 文本，落盘为字符串） */
+  message?: string
+  /** unary | server | client | bidi（按所选方法派生） */
+  stream?: string
+  /** 请求压缩：空 / identity = 不压缩；gzip = 压缩（G7.5） */
+  compress?: string
+  tls?: GrpcTLS | null
+}
+
+/** 集合级默认 gRPC 定义（清单里的 grpc 段，P8）。 */
+export interface GrpcDefault {
+  proto?: string
+  imports?: string[]
+}
+
+/** 集合内一个已导入的定义（collection.ProtoFileInfo）。 */
+export interface GrpcProtoFile {
+  rel: string
+  size: number
+  /** 文件修改时间（**Unix 秒**，Go 侧 time.Unix）= 导入 / 更新时间 */
+  mod: number
+}
+
+/** 一个 gRPC 方法（proto.Method）。 */
+export interface GrpcMethodInfo {
+  name: string
+  fullName: string
+  input: string
+  output: string
+  comment: string
+  clientStreaming: boolean
+  serverStreaming: boolean
+  /** unary | server | client | bidi */
+  stream: string
+}
+
+/** 一个 gRPC 服务（proto.Service）。 */
+export interface GrpcService {
+  name: string
+  comment: string
+  methods: GrpcMethodInfo[]
+}
+
+/** 入参消息的一个字段（proto.FieldInfo）：Message 分段的字段提示（G5.4）。 */
+export interface GrpcFieldInfo {
+  /** proto 名：user_id */
+  name: string
+  /** protojson 名：userId（写请求消息用这个键） */
+  jsonName: string
+  /** 展示形态：string / repeated string / demo.Nested / map<string, string> */
+  type: string
+  /** scalar | message | enum | map */
+  kind: string
+  repeated: boolean
+  comment: string
+}
+
+/** 一次定义解析结果（app.GrpcSchemaInfo）：Schema 分段与请求栏「服务 / 方法」共用。 */
+export interface GrpcSchema {
+  /** 入口定义（相对集合目录） */
+  proto: string
+  imports: string[]
+  /** 集合内可用定义清单（下拉用） */
+  protos: GrpcProtoFile[]
+  services: GrpcService[]
+}
+
 export interface RequestDoc {
   uid: string
   name: string
@@ -51,6 +141,8 @@ export interface RequestDoc {
   body: ReqBody
   auth?: Auth | null
   settings?: RequestSettings | null
+  /** gRPC 段：非空即 gRPC 请求（method 固定 GRPC、url 由 Go 侧派生 grpc://目标/服务/方法） */
+  grpc?: GrpcDoc | null
   docs: string
   baseRev: number
   /** vars.pre-request（发送前赋值，value 支持 {{变量}}） */
@@ -130,11 +222,15 @@ export interface SendResult {
   proto: string
   timeMs: number
   size: number
+  /** 发送的请求体字节数（gRPC 为序列化消息大小；HTTP 未采集时缺省） */
+  sentSize?: number
   contentType: string
   /** true 时 body 为 base64 编码 */
   binary: boolean
   headers: KV[]
   body: string
+  /** gRPC 尾元数据（trailing metadata；HTTP 响应恒为空） */
+  trailers?: KV[] | null
   /** 脚本/断言产物（无脚本时缺省） */
   script?: ScriptResult | null
 }

@@ -62,6 +62,10 @@ export function GenerateCode(arg1, arg2, arg3) {
   return window['go']['app']['App']['GenerateCode'](arg1, arg2, arg3);
 }
 
+export function GetGrpcDefault() {
+  return window['go']['app']['App']['GetGrpcDefault']();
+}
+
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
@@ -74,12 +78,28 @@ export function GetSyncStatus() {
   return window['go']['app']['App']['GetSyncStatus']();
 }
 
+export function GrpcMessageFields(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GrpcMessageFields'](arg1, arg2, arg3, arg4);
+}
+
+export function GrpcSampleMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GrpcSampleMessage'](arg1, arg2, arg3, arg4);
+}
+
+export function GrpcValidateMessage(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['GrpcValidateMessage'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ImportBrunoDir(arg1) {
   return window['go']['app']['App']['ImportBrunoDir'](arg1);
 }
 
 export function ImportCollection(arg1, arg2, arg3) {
   return window['go']['app']['App']['ImportCollection'](arg1, arg2, arg3);
+}
+
+export function ImportGrpcProtos(arg1, arg2) {
+  return window['go']['app']['App']['ImportGrpcProtos'](arg1, arg2);
 }
 
 export function ListConflicts() {
@@ -98,12 +118,20 @@ export function ListEnvs() {
   return window['go']['app']['App']['ListEnvs']();
 }
 
+export function ListGrpcProtos() {
+  return window['go']['app']['App']['ListGrpcProtos']();
+}
+
 export function ListHistory(arg1) {
   return window['go']['app']['App']['ListHistory'](arg1);
 }
 
 export function ListResponseExamples(arg1) {
   return window['go']['app']['App']['ListResponseExamples'](arg1);
+}
+
+export function LoadGrpcSchema(arg1, arg2) {
+  return window['go']['app']['App']['LoadGrpcSchema'](arg1, arg2);
 }
 
 export function MockStatus() {
@@ -134,6 +162,10 @@ export function PickFile() {
   return window['go']['app']['App']['PickFile']();
 }
 
+export function PickGrpcProtoFiles() {
+  return window['go']['app']['App']['PickGrpcProtoFiles']();
+}
+
 export function Quit() {
   return window['go']['app']['App']['Quit']();
 }
@@ -152,6 +184,10 @@ export function RebuildIndex() {
 
 export function ReloadCollection() {
   return window['go']['app']['App']['ReloadCollection']();
+}
+
+export function RemoveGrpcProto(arg1) {
+  return window['go']['app']['App']['RemoveGrpcProto'](arg1);
 }
 
 export function RenameFolder(arg1, arg2) {
@@ -208,6 +244,10 @@ export function SearchIndex(arg1, arg2) {
 
 export function SendRequest(arg1, arg2) {
   return window['go']['app']['App']['SendRequest'](arg1, arg2);
+}
+
+export function SetGrpcDefault(arg1, arg2) {
+  return window['go']['app']['App']['SetGrpcDefault'](arg1, arg2);
 }
 
 export function SetHeadlessDir(arg1) {

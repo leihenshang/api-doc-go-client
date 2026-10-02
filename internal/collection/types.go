@@ -17,7 +17,35 @@ type (
 	envFile     = share.EnvFile
 	secretsFile = share.SecretsFile
 	manifest    = share.Manifest
+
+	GrpcBlock = share.GRPCBlock // grpc 段（磁盘）
+	GrpcTLS   = share.GRPCTLS   // grpc 段的连接安全设置
+	// GrpcDefault 集合级默认 gRPC 定义（清单里的 grpc 段，P8）
+	GrpcDefault = share.GRPCDefault
 )
+
+// 请求类型（磁盘 info.type）。HTTP 用 http 段，gRPC 用 grpc 段。
+const (
+	TypeHTTP = "http"
+	TypeGRPC = "grpc"
+)
+
+// MethodGRPC gRPC 请求在 Method 字段上的取值。
+// 索引、历史、搜索、同步都按「Method + URL」工作，gRPC 用协议名 + grpc:// 地址保持既有能力可用。
+const MethodGRPC = "GRPC"
+
+// GrpcURL 合成 gRPC 请求的地址（grpc://host:port/包.服务/方法）。
+// 与 runner 侧的调用路径同形，便于在索引/历史/搜索里一眼看出目标。
+func GrpcURL(target, service, method string) string {
+	if target == "" {
+		return ""
+	}
+	path := service
+	if method != "" {
+		path += "/" + method
+	}
+	return "grpc://" + target + "/" + path
+}
 
 // Request 一条接口的内存形态（带前端 JSON 契约；磁盘形态见共享包的 RequestFile）。
 type Request struct {
@@ -32,13 +60,19 @@ type Request struct {
 	Body     Body             `json:"body"`
 	Auth     *Auth            `json:"auth,omitempty"`
 	Settings *RequestSettings `json:"settings,omitempty"`
-	Docs     string           `json:"docs"`
-	BaseRev  int64            `json:"baseRev"` // 预留：同步基线（条目版本号）
+	// GRPC gRPC 请求段（非 nil 即 gRPC 请求）；HTTP 请求为 nil。
+	// Method 固定为 MethodGRPC、URL 为派生值（grpc://目标/服务/方法），不落盘。
+	GRPC    *GrpcBlock `json:"grpc,omitempty"`
+	Docs    string     `json:"docs"`
+	BaseRev int64      `json:"baseRev"` // 预留：同步基线（条目版本号）
 	// 脚本与断言（Bruno 超集；磁盘上落在顶层 vars/script/assert，经 Extra 往返）
 	VarsPreRequest []ScriptVar    `json:"varsPreRequest,omitempty"`
 	Script         *ScriptBlock   `json:"script,omitempty"`
 	Asserts        []ScriptAssert `json:"asserts,omitempty"`
 }
+
+// IsGRPC 是否 gRPC 请求（内存里以 grpc 段是否存在为准）。
+func (r Request) IsGRPC() bool { return r.GRPC != nil }
 
 // ScriptVar vars.pre-request 的一行。
 type ScriptVar struct {

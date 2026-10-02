@@ -44,7 +44,7 @@ import { message } from '@/lib/notice'
 import { nextTheme, isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
-import { useTabsStore } from '@/stores/tabs'
+import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
 import type { RequestDoc, SyncStatus, TreeNode } from '@/types'
 
@@ -369,6 +369,11 @@ function newDraft(folder = '', doc: RequestDoc | null = null): void {
   tabs.openDraft(doc, folder)
 }
 
+/** 新建 gRPC 请求（G1.1/G1.2）：同样是未落盘草稿，grpc 段全空，由请求栏与 Schema 分段补齐。 */
+function newGrpcDraft(folder = ''): void {
+  tabs.openDraft(blankGrpcRequest(), folder)
+}
+
 // ---- 导入 cURL（侧栏工具栏 / 分组菜单入口） ----
 const showCurl = ref(false)
 const curlFolder = ref('')
@@ -397,7 +402,16 @@ function requestClose(key: string): void {
     return
   }
   closingTab.value = tab
-  draftForm.value = { name: tab.request.name || tab.title, folder: tab.draftFolder }
+  draftForm.value = { name: draftName(tab), folder: tab.draftFolder }
+}
+
+/** 保存对话框的名称预填：已有名字优先，gRPC 用「方法 / 服务」名，最后退回页签标题。 */
+function draftName(tab: Tab): string {
+  const named = tab.request.name.trim()
+  if (named) return named
+  const g = tab.request.grpc
+  if (g) return (g.method || g.service || '').trim() || tab.title
+  return tab.title
 }
 
 /** 保存草稿（落盘到所选分组）→ 关闭 tab。 */
@@ -475,7 +489,13 @@ watch(
   >
     <div class="app">
       <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区（主题切换也放这里，未打开集合时也可用） -->
-      <title-bar :dark="settings.isDark" @toggle-theme="toggleTheme" />
+      <!-- 布局切换跟着「有没有打开的请求」走：没有请求时该按钮组不渲染 -->
+      <title-bar
+        :dark="settings.isDark"
+        :layout="tabs.active ? settings.responseLayout : null"
+        @toggle-theme="toggleTheme"
+        @set-layout="setLayout"
+      />
 
       <n-spin :show="coll.loading">
         <template v-if="coll.ready && coll.info">
@@ -506,6 +526,7 @@ watch(
                 :active-uid="tabs.active?.uid ?? ''"
                 @open="tabs.openRequest($event)"
                 @new-request="newDraft"
+                @new-grpc-request="newGrpcDraft"
                 @import-curl="openCurl"
               />
             </aside>
@@ -518,6 +539,7 @@ watch(
                 @select-overview="tabs.setActive('')"
                 @close="requestClose($event)"
                 @new="newDraft()"
+                @new-grpc="newGrpcDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)"
               />
 
@@ -528,40 +550,14 @@ watch(
                     <request-editor :tab="tabs.active" />
                   </section>
 
+                  <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
                   <div
                     class="splitter"
                     role="separator"
                     :title="t('editor.resizeHint')"
                     :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
                     @pointerdown="startResize"
-                  >
-                    <div class="capsule" @pointerdown.stop>
-                      <button
-                        class="cap"
-                        :class="{ on: settings.responseLayout === 'right' }"
-                        type="button"
-                        :title="t('editor.layoutHorizontal')"
-                        @click="setLayout('right')"
-                      >
-                        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
-                          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
-                          <line x1="7" y1="0.6" x2="7" y2="11.4" stroke="currentColor" />
-                        </svg>
-                      </button>
-                      <button
-                        class="cap"
-                        :class="{ on: settings.responseLayout === 'bottom' }"
-                        type="button"
-                        :title="t('editor.layoutVertical')"
-                        @click="setLayout('bottom')"
-                      >
-                        <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
-                          <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
-                          <line x1="0.6" y1="6" x2="13.4" y2="6" stroke="currentColor" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+                  />
 
                   <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
                     <response-panel :tab="tabs.active" />
@@ -747,7 +743,7 @@ watch(
   min-height: 0;
 }
 
-/* 分隔区（design-spec §2 的 w28）：浅灰底 + 两侧细线，中央浮着布局切换胶囊 */
+/* 分隔区（design-spec §2 的 w28）：浅灰底 + 两侧细线；中央不再放布局切换（已移到标题栏） */
 .splitter {
   flex: 0 0 28px;
   position: relative;
@@ -772,45 +768,6 @@ watch(
 
 .splitter:hover {
   background: var(--app-row-hover);
-}
-
-/* 胶囊按钮：横向布局时竖排（26×52），竖向布局时横排（52×26） */
-.capsule {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--app-border);
-  border-radius: 999px;
-  background: var(--app-panel);
-  box-shadow: var(--app-shadow-sm);
-}
-
-.work.bottom .capsule {
-  flex-direction: row;
-}
-
-.cap {
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 999px;
-  background: none;
-  color: var(--app-placeholder);
-  cursor: pointer;
-  padding: 0;
-}
-
-.cap:hover {
-  color: var(--app-text-2);
-}
-
-.cap.on {
-  background: var(--app-accent);
-  color: var(--app-on-accent);
 }
 
 .modal-ft {

@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package demo;
+
+// 故意 import 一个不存在的文件（import 缺失用例）
+import "nope/absent.proto";
+
+message UsesMissing {
+  string a = 1;
+}

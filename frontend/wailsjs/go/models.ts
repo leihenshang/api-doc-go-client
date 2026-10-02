@@ -1,5 +1,55 @@
 export namespace app {
 	
+	export class GrpcDefaultInfo {
+	    proto: string;
+	    imports: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GrpcDefaultInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proto = source["proto"];
+	        this.imports = source["imports"];
+	    }
+	}
+	export class GrpcSchemaInfo {
+	    proto: string;
+	    imports: string[];
+	    protos: collection.ProtoFileInfo[];
+	    services: proto.Service[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GrpcSchemaInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proto = source["proto"];
+	        this.imports = source["imports"];
+	        this.protos = this.convertValues(source["protos"], collection.ProtoFileInfo);
+	        this.services = this.convertValues(source["services"], proto.Service);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ResolveResult {
 	    text: string;
 	    missing: string[];
@@ -398,6 +448,75 @@ export namespace collection {
 		    return a;
 		}
 	}
+	export class GRPCTLS {
+	    mode?: string;
+	    ca?: string;
+	    cert?: string;
+	    key?: string;
+	    insecureSkipVerify?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GRPCTLS(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.ca = source["ca"];
+	        this.cert = source["cert"];
+	        this.key = source["key"];
+	        this.insecureSkipVerify = source["insecureSkipVerify"];
+	    }
+	}
+	export class GRPCBlock {
+	    target: string;
+	    service: string;
+	    method: string;
+	    proto?: string;
+	    imports?: string[];
+	    metadata?: KV[];
+	    message?: string;
+	    stream?: string;
+	    compress?: string;
+	    tls?: GRPCTLS;
+	
+	    static createFrom(source: any = {}) {
+	        return new GRPCBlock(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.target = source["target"];
+	        this.service = source["service"];
+	        this.method = source["method"];
+	        this.proto = source["proto"];
+	        this.imports = source["imports"];
+	        this.metadata = this.convertValues(source["metadata"], KV);
+	        this.message = source["message"];
+	        this.stream = source["stream"];
+	        this.compress = source["compress"];
+	        this.tls = this.convertValues(source["tls"], GRPCTLS);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class ImportSummary {
 	    imported: number;
 	    skipped: number;
@@ -416,6 +535,22 @@ export namespace collection {
 	}
 	
 	
+	export class ProtoFileInfo {
+	    rel: string;
+	    size: number;
+	    mod: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProtoFileInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rel = source["rel"];
+	        this.size = source["size"];
+	        this.mod = source["mod"];
+	    }
+	}
 	export class ScriptAssert {
 	    name?: string;
 	    expr: string;
@@ -492,6 +627,7 @@ export namespace collection {
 	    body: Body;
 	    auth?: Auth;
 	    settings?: RequestSettings;
+	    grpc?: GRPCBlock;
 	    docs: string;
 	    baseRev: number;
 	    varsPreRequest?: ScriptVar[];
@@ -515,6 +651,7 @@ export namespace collection {
 	        this.body = this.convertValues(source["body"], Body);
 	        this.auth = this.convertValues(source["auth"], Auth);
 	        this.settings = this.convertValues(source["settings"], RequestSettings);
+	        this.grpc = this.convertValues(source["grpc"], GRPCBlock);
 	        this.docs = source["docs"];
 	        this.baseRev = source["baseRev"];
 	        this.varsPreRequest = this.convertValues(source["varsPreRequest"], ScriptVar);
@@ -746,6 +883,93 @@ export namespace mocksrv {
 
 }
 
+export namespace proto {
+	
+	export class FieldInfo {
+	    name: string;
+	    jsonName: string;
+	    type: string;
+	    kind: string;
+	    repeated: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FieldInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.jsonName = source["jsonName"];
+	        this.type = source["type"];
+	        this.kind = source["kind"];
+	        this.repeated = source["repeated"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class Method {
+	    name: string;
+	    fullName: string;
+	    input: string;
+	    output: string;
+	    comment: string;
+	    clientStreaming: boolean;
+	    serverStreaming: boolean;
+	    stream: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Method(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.fullName = source["fullName"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.comment = source["comment"];
+	        this.clientStreaming = source["clientStreaming"];
+	        this.serverStreaming = source["serverStreaming"];
+	        this.stream = source["stream"];
+	    }
+	}
+	export class Service {
+	    name: string;
+	    comment: string;
+	    methods: Method[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Service(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.comment = source["comment"];
+	        this.methods = this.convertValues(source["methods"], Method);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace runner {
 	
 	export class Result {
@@ -754,9 +978,11 @@ export namespace runner {
 	    proto: string;
 	    timeMs: number;
 	    size: number;
+	    sentSize?: number;
 	    contentType: string;
 	    binary: boolean;
 	    headers: collection.KV[];
+	    trailers?: collection.KV[];
 	    body: string;
 	    script?: any;
 	
@@ -771,9 +997,11 @@ export namespace runner {
 	        this.proto = source["proto"];
 	        this.timeMs = source["timeMs"];
 	        this.size = source["size"];
+	        this.sentSize = source["sentSize"];
 	        this.contentType = source["contentType"];
 	        this.binary = source["binary"];
 	        this.headers = this.convertValues(source["headers"], collection.KV);
+	        this.trailers = this.convertValues(source["trailers"], collection.KV);
 	        this.body = source["body"];
 	        this.script = source["script"];
 	    }

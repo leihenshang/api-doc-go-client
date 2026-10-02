@@ -4,6 +4,7 @@ package watch
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,6 +12,11 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// DefaultExtensions 参与「集合外部改动」的文件类型（与集合扫描器一致）。
+// 其余文件——最典型的是集合里的 .proto 定义、证书、图片等——不触发事件：
+// 设计文档 D3 明确 proto 变更**不参与监听**，更新完全由用户在界面上显式「导入 / 更新定义」触发。
+var DefaultExtensions = []string{".yml", ".yaml", ".md"}
 
 // Event 一次有意义的外部改动（已防抖合并）。
 type Event struct {
@@ -31,6 +37,7 @@ type Watcher struct {
 	out     chan Event
 	closed  bool
 	skip    map[string]bool // 忽略的目录名（.trash 等）
+	exts    map[string]bool // 关心的小写扩展名（DefaultExtensions）
 }
 
 // DefaultDebounce 合并窗口：连续写盘（自动保存/批量导入）只触发一次事件。
@@ -52,6 +59,7 @@ func New(root string) (*Watcher, error) {
 			".trash": true, ".conflicts": true, "node_modules": true,
 			".git": true,
 		},
+		exts: extensionSet(DefaultExtensions),
 	}
 	// 递归加 watch（目录树不深；新建子目录时也会补挂）
 	if err := w.addRecursive(root); err != nil {
@@ -132,9 +140,18 @@ func (w *Watcher) onFS(root string, ev fsnotify.Event) {
 		return
 	}
 	rel = filepath.ToSlash(rel)
+
+	// 只关心集合文件类型：.proto / 证书 / 图片等一律不参与「外部改动」（D3）。
+	// 无扩展名的路径（目录、被删除的目录）继续上报，保持既有行为 —— 目录事件同时也是
+	// 「先建目录再写文件」的兜底：新建目录的 watch 若晚于其中的文件写入，仍会因目录事件重扫。
+	if ext := strings.ToLower(filepath.Ext(ev.Name)); ext != "" && !w.exts[ext] {
+		return
+	}
 	// 新建目录补挂 watch
 	if ev.Op&fsnotify.Create != 0 {
-		_ = w.w.Add(ev.Name)
+		if info, serr := os.Stat(ev.Name); serr == nil && info.IsDir() {
+			_ = w.w.Add(ev.Name)
+		}
 	}
 
 	w.mu.Lock()
@@ -180,4 +197,20 @@ func (w *Watcher) flush() {
 	default:
 		// 消费者忙：丢掉最旧（下次扫描会兜底）
 	}
+}
+
+// extensionSet 扩展名列表 → 小写集合（自动补前导点）。
+func extensionSet(exts []string) map[string]bool {
+	out := make(map[string]bool, len(exts))
+	for _, e := range exts {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if !strings.HasPrefix(e, ".") {
+			e = "." + e
+		}
+		out[e] = true
+	}
+	return out
 }

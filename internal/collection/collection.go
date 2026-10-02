@@ -42,6 +42,9 @@ type Collection struct {
 	Name string
 	idx  *index.DB      // 本地 SQLite 索引（C1）；惰性打开
 	w    *watch.Watcher // 外部改动监听（D1）；惰性启动
+	// grpcDefault 集合级默认 gRPC 定义（清单里的 grpc 段，P8）；nil = 未配置。
+	// 只有在内存里保留它，writeManifest 才不会把清单里的这一段写丢。
+	grpcDefault *share.GRPCDefault
 }
 
 // ---------- 集合清单（opencollection.yml） ----------
@@ -80,6 +83,7 @@ func Open(dir string) (*Collection, error) {
 			return nil, fmt.Errorf("opencollection.yml 解析失败: %w", err)
 		}
 		c.UID, c.Name = m.Meta.UID, m.Info.Name
+		c.grpcDefault = m.GRPC
 	}
 	if c.UID == "" {
 		c.UID = uuid.NewString()
@@ -283,11 +287,110 @@ const manifestVersion = "1.0.0"
 func (c *Collection) writeManifest() error {
 	m := &manifest{}
 	m.Info.Name, m.Meta.UID = c.Name, c.UID
+	m.GRPC = c.grpcDefault // 集合级默认定义要写回去，否则每次开集合都会被清掉
 	data, err := m.Encode(manifestVersion)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(c.Dir, "opencollection.yml"), data, 0o644)
+}
+
+// ---------- 集合级默认 gRPC 定义（P8） ----------
+
+// GrpcDefault 当前集合级默认 gRPC 定义（未配置时为 nil）。
+func (c *Collection) GrpcDefault() *share.GRPCDefault {
+	if c.grpcDefault == nil {
+		return nil
+	}
+	cp := *c.grpcDefault
+	cp.Imports = append([]string(nil), c.grpcDefault.Imports...)
+	return &cp
+}
+
+// SetGrpcDefault 写集合级默认 gRPC 定义（proto 为空 = 清除并删掉清单里的 grpc 段）。
+func (c *Collection) SetGrpcDefault(proto string, imports []string) error {
+	proto = strings.TrimSpace(proto)
+	if proto == "" {
+		c.grpcDefault = nil
+		return c.writeManifest()
+	}
+	c.grpcDefault = &share.GRPCDefault{Proto: proto, Imports: cleanPaths(imports)}
+	return c.writeManifest()
+}
+
+// applyGrpcDefault 请求自身没写定义时回落到集合级默认定义（P8）。
+// 只在内存里生效：写盘时 stripGrpcDefault 又会把它省略掉，读回照旧回落（round-trip 稳定）。
+func (c *Collection) applyGrpcDefault(r *Request) {
+	if r == nil || r.GRPC == nil || c.grpcDefault == nil {
+		return
+	}
+	if strings.TrimSpace(r.GRPC.Proto) != "" {
+		return
+	}
+	r.GRPC.Proto = c.grpcDefault.Proto
+	if len(r.GRPC.Imports) == 0 {
+		r.GRPC.Imports = append([]string(nil), c.grpcDefault.Imports...)
+	}
+}
+
+// stripGrpcDefault 写盘时省略与集合默认定义完全一致的 proto/imports（P8：请求只写 service/method）。
+// 注意 GRPC 是共享指针：这里必须先复制再改，避免把内存里的请求也改空。
+func (c *Collection) stripGrpcDefault(f *requestFile) {
+	if f == nil || f.GRPC == nil || c.grpcDefault == nil {
+		return
+	}
+	if strings.TrimSpace(f.GRPC.Proto) != strings.TrimSpace(c.grpcDefault.Proto) {
+		return
+	}
+	if !samePaths(f.GRPC.Imports, c.grpcDefault.Imports) {
+		return
+	}
+	cp := *f.GRPC
+	cp.Proto, cp.Imports = "", nil
+	f.GRPC = &cp
+}
+
+// cleanPaths 去空白、去重（保持顺序），并统一成正斜杠。
+func cleanPaths(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, p := range list {
+		p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+		if p == "" {
+			continue
+		}
+		dup := false
+		for _, item := range out {
+			if item == p {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// samePaths 两个路径列表是否等价（忽略顺序与重复）。
+func samePaths(a, b []string) bool {
+	ca, cb := cleanPaths(a), cleanPaths(b)
+	if len(ca) != len(cb) {
+		return false
+	}
+	for _, p := range ca {
+		found := false
+		for _, q := range cb {
+			if p == q {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- 内部：文件 ↔ 结构 ----------
@@ -303,11 +406,18 @@ func readRequestFile(path string) (*requestFile, error) {
 
 func (r *Request) toFile() *requestFile {
 	f := &requestFile{Docs: r.Docs, Settings: r.Settings}
-	f.Info.Name, f.Info.Type, f.Info.Seq = r.Name, "http", r.Seq
+	f.Info.Name, f.Info.Seq = r.Name, r.Seq
 	f.Meta.UID, f.Meta.BaseRev = r.UID, r.BaseRev
-	f.HTTP.Method, f.HTTP.URL = r.Method, r.URL
-	f.HTTP.Params, f.HTTP.Headers, f.HTTP.Body = r.Params, r.Headers, r.Body
-	f.HTTP.Auth = r.Auth
+	if r.IsGRPC() {
+		// gRPC：只写 grpc 段（http 段为空 → 靠 HTTPBlock.IsZero + omitempty 整段省略）
+		f.Info.Type = TypeGRPC
+		f.GRPC = r.GRPC
+	} else {
+		f.Info.Type = TypeHTTP
+		f.HTTP.Method, f.HTTP.URL = r.Method, r.URL
+		f.HTTP.Params, f.HTTP.Headers, f.HTTP.Body = r.Params, r.Headers, r.Body
+		f.HTTP.Auth = r.Auth
+	}
 	f.Extra = map[string]any{}
 	if len(r.VarsPreRequest) > 0 {
 		list := make([]map[string]any, 0, len(r.VarsPreRequest))
@@ -343,12 +453,23 @@ func (r *Request) toFile() *requestFile {
 func fromFile(path string, f *requestFile) *Request {
 	r := &Request{
 		UID: f.Meta.UID, Name: f.Info.Name, Seq: f.Info.Seq, Path: path,
-		Method: strings.ToUpper(f.HTTP.Method), URL: f.HTTP.URL,
-		Params: f.HTTP.Params, Headers: f.HTTP.Headers, Body: f.HTTP.Body,
-		Auth: f.HTTP.Auth, Settings: f.Settings,
-		Docs: f.Docs, BaseRev: f.Meta.BaseRev,
+		Settings: f.Settings, Docs: f.Docs, BaseRev: f.Meta.BaseRev,
 	}
 	r.VarsPreRequest, r.Script, r.Asserts = parseScriptExtra(f.Extra)
+
+	if f.Info.Type == TypeGRPC || f.GRPC != nil {
+		r.GRPC = f.GRPC
+		// Method/URL 为派生值（不落盘）：索引、历史、搜索、同步都按这两个字段工作。
+		r.Method = MethodGRPC
+		if f.GRPC != nil {
+			r.URL = GrpcURL(f.GRPC.Target, f.GRPC.Service, f.GRPC.Method)
+		}
+		return r
+	}
+	r.Method = strings.ToUpper(f.HTTP.Method)
+	r.URL = f.HTTP.URL
+	r.Params, r.Headers, r.Body = f.HTTP.Params, f.HTTP.Headers, f.HTTP.Body
+	r.Auth = f.HTTP.Auth
 	return r
 }
 
@@ -482,12 +603,13 @@ func (c *Collection) scan() (*scanResult, error) {
 			return nil // 非法 YAML：跳过（不中断整个扫描）
 		}
 		switch head.Info.Type {
-		case "http":
+		case TypeHTTP, TypeGRPC:
 			var f requestFile
 			if yaml.Unmarshal(data, &f) != nil || f.Meta.UID == "" {
 				return nil
 			}
 			r := fromFile(rel, &f)
+			c.applyGrpcDefault(r) // 没写 proto 的 gRPC 请求回落到集合默认定义（P8）
 			res.reqs[r.UID] = r
 			res.reqByPath[rel] = r
 		case "folder":
@@ -753,13 +875,7 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 	if src == nil {
 		return nil, fmt.Errorf("请求内容为空")
 	}
-	method := strings.ToUpper(strings.TrimSpace(src.Method))
-	if method == "" {
-		method = "GET"
-	}
 	r := &Request{
-		Method:         method,
-		URL:            strings.TrimSpace(src.URL),
 		Params:         src.Params,
 		Headers:        src.Headers,
 		Body:           src.Body,
@@ -770,6 +886,18 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 		Script:         src.Script,
 		Asserts:        src.Asserts,
 	}
+	if src.IsGRPC() {
+		// gRPC 草稿：原样带上 grpc 段；Method/URL 由集合层派生（供索引/历史/搜索使用）
+		r.GRPC = src.GRPC
+		r.Method = MethodGRPC
+		r.URL = GrpcURL(src.GRPC.Target, src.GRPC.Service, src.GRPC.Method)
+		return c.saveNewRequest(folder, name, r)
+	}
+	r.Method = strings.ToUpper(strings.TrimSpace(src.Method))
+	if r.Method == "" {
+		r.Method = "GET"
+	}
+	r.URL = strings.TrimSpace(src.URL)
 	if len(r.Params) == 0 {
 		r.Params = []KV{{Enabled: true}}
 	}
@@ -1151,6 +1279,7 @@ func (c *Collection) SaveRequest(r *Request) error {
 		return err
 	}
 	out := r.toFile()
+	c.stripGrpcDefault(out) // 与集合默认定义一致的 proto/imports 不写盘（P8）
 	// 磁盘上已有的未知顶层字段必须保留：Bruno 会忽略它们，但我们不能丢（round-trip）
 	// vars/script/assert 已升为 Request 一等字段，由 toFile 写出，不再从旧 Extra 合并回来。
 	if prev, err := readRequestFile(full); err == nil {

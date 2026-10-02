@@ -8,6 +8,10 @@ import type {
   CookieInfo,
   DocEntry,
   Env,
+  GrpcDefault,
+  GrpcFieldInfo,
+  GrpcProtoFile,
+  GrpcSchema,
   HistoryEntry,
   ImportSummary,
   IndexNode,
@@ -94,6 +98,10 @@ function normalizeRequest(r: RequestDoc): RequestDoc {
       raw: r.body?.raw ?? '',
       form: r.body?.form ?? [],
     },
+    // grpc 段的 imports/metadata 同样是可省略字段（Go 侧 omitempty）：归一成数组，界面免判空
+    grpc: r.grpc
+      ? { ...r.grpc, imports: r.grpc.imports ?? [], metadata: r.grpc.metadata ?? [] }
+      : null,
   }
 }
 
@@ -137,6 +145,31 @@ export const api = {
     call<RequestDoc>('CreateRequestFromDraft', folder, name, doc).then(normalizeRequest),
   /** 导入 cURL：把 curl 命令解析成请求草稿（不落盘）。 */
   parseCurl: (text: string) => call<RequestDoc>('ParseCurl', text).then(normalizeRequest),
+  /** gRPC：选择 .proto 定义（可多选，带 .proto 过滤；桌面端原生对话框）。 */
+  pickGrpcProtos: () => call<string[] | null>('PickGrpcProtoFiles').then((v) => v ?? []),
+  /** gRPC：导入 .proto（先编译校验，成功才复制进集合 protos/ 并重新解析；失败不落盘）。 */
+  importGrpcProtos: (files: string[], imports: string[]) =>
+    call<GrpcSchema>('ImportGrpcProtos', files, imports),
+  /** gRPC：集合内已导入的定义清单（免点文件选择器）。 */
+  listGrpcProtos: () => call<GrpcProtoFile[] | null>('ListGrpcProtos').then((v) => v ?? []),
+  /** gRPC：删除集合内的定义（引用检查由界面负责）。 */
+  removeGrpcProto: (rel: string) => call<null>('RemoveGrpcProto', rel),
+  /** gRPC：解析请求里已保存的定义（打开请求 / 更新定义后调用，命中缓存）。 */
+  loadGrpcSchema: (protoRel: string, imports: string[]) =>
+    call<GrpcSchema>('LoadGrpcSchema', protoRel, imports),
+  /** gRPC：入参消息的字段提示（Message 分段；G5.4）。 */
+  grpcMessageFields: (protoRel: string, imports: string[], service: string, method: string) =>
+    call<GrpcFieldInfo[] | null>('GrpcMessageFields', protoRel, imports, service, method).then((v) => v ?? []),
+  /** gRPC：按定义校验请求消息（Message 分段的内联提示；G5.3）。空串 = 通过。 */
+  grpcValidateMessage: (protoRel: string, imports: string[], service: string, method: string, message: string) =>
+    call<string>('GrpcValidateMessage', protoRel, imports, service, method, message),
+  /** gRPC：按定义生成请求消息样例（protojson 文本；G5.2）。 */
+  grpcSampleMessage: (protoRel: string, imports: string[], service: string, method: string) =>
+    call<string>('GrpcSampleMessage', protoRel, imports, service, method),
+  /** gRPC：集合级默认定义（P8；未配置返回 null）。 */
+  getGrpcDefault: () => call<GrpcDefault | null>('GetGrpcDefault'),
+  /** gRPC：写集合级默认定义（proto 为空 = 清除）。 */
+  setGrpcDefault: (proto: string, imports: string[]) => call<null>('SetGrpcDefault', proto, imports),
   createFolder: (parent: string, name: string) => call<null>('CreateFolder', parent, name),
   renameFolder: (uid: string, name: string) => call<null>('RenameFolder', uid, name),
   deleteFolder: (uid: string) => call<null>('DeleteFolder', uid),

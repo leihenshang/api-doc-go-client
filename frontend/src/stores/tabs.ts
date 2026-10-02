@@ -7,8 +7,10 @@
 import { defineStore } from 'pinia'
 import { i18n } from '@/i18n'
 import { api } from '@/lib/ipc'
+import { grpcSendBlocker } from '@/lib/grpc'
+import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
-import type { RequestDoc, ResolveResult, SendResult } from '@/types'
+import type { GrpcSchema, RequestDoc, ResolveResult, SendResult } from '@/types'
 
 export interface Tab {
   key: string
@@ -24,6 +26,10 @@ export interface Tab {
   draft: boolean
   /** 草稿的默认分组（保存对话框预选） */
   draftFolder: string
+  /** gRPC 定义解析结果（Schema 分段与请求栏「服务 / 方法」共用；HTTP 请求恒为 null） */
+  grpcSchema: GrpcSchema | null
+  /** gRPC 定义解析错误（常驻展示，直到重新导入；HTTP 请求恒为空） */
+  grpcError: string
 }
 
 let seq = 0
@@ -63,6 +69,38 @@ function blankRequest(): RequestDoc {
     headers: [{ name: 'Content-Type', value: 'application/json', enabled: true }],
     body: { type: 'none', raw: '', form: [] },
     auth: { type: 'none' },
+    docs: '',
+    baseRev: 0,
+  }
+}
+
+/**
+ * 新建 gRPC 草稿的空请求模板（G1.2）：grpc 段存在即 gRPC 请求；
+ * target/service/method/proto/message 全空，由用户在请求栏与 Schema 分段补齐。
+ * Method 固定 `GRPC`、URL 留空 —— 落盘时由集合层派生（对齐 collection.MethodGRPC / GrpcURL）。
+ */
+export function blankGrpcRequest(): RequestDoc {
+  return {
+    uid: '',
+    name: '',
+    seq: 0,
+    path: '',
+    method: 'GRPC',
+    url: '',
+    params: [],
+    headers: [],
+    body: { type: 'none', raw: '', form: [] },
+    auth: { type: 'none' },
+    grpc: {
+      target: '',
+      service: '',
+      method: '',
+      proto: '',
+      imports: [],
+      metadata: [{ name: '', value: '', enabled: true }],
+      message: '',
+      stream: '',
+    },
     docs: '',
     baseRev: 0,
   }
@@ -114,9 +152,10 @@ export const useTabsStore = defineStore('tabs', {
     openDraft(doc: RequestDoc | null, folder = ''): string {
       const r = doc ?? blankRequest()
       const tab: Tab = {
-        key: nextKey(), uid: nextDraftUid(), title: r.name || i18n.global.t('tab.newDraft'), request: r,
+        key: nextKey(), uid: nextDraftUid(),
+        title: r.name || i18n.global.t(r.grpc ? 'tab.newGrpcDraft' : 'tab.newDraft'), request: r,
         dirty: true, sending: false, response: null, error: '', resolve: null,
-        draft: true, draftFolder: folder,
+        draft: true, draftFolder: folder, grpcSchema: null, grpcError: '',
       }
       this.tabs.push(tab)
       this.setActive(tab.key)
@@ -125,6 +164,8 @@ export const useTabsStore = defineStore('tabs', {
         void this.doResolve(current)
         lastSnap.set(tab.key, snap(current.request))
       }
+      // 恢复的 gRPC 草稿已带定义路径：直接把 Schema 解析回来（空定义时是空操作）
+      void this.loadGrpcSchema(tab.key)
       this.saveSession()
       this.saveDrafts()
       return tab.key
@@ -156,7 +197,7 @@ export const useTabsStore = defineStore('tabs', {
       const tab: Tab = {
         key: nextKey(), uid: r.uid, title: r.name, request: r,
         dirty: false, sending: false, response: null, error: '', resolve: null,
-        draft: false, draftFolder: '',
+        draft: false, draftFolder: '', grpcSchema: null, grpcError: '',
       }
       this.tabs.push(tab)
       this.setActive(tab.key)
@@ -166,7 +207,30 @@ export const useTabsStore = defineStore('tabs', {
         void this.doResolve(current)
         lastSnap.set(tab.key, snap(current.request))
       }
+      void this.loadGrpcSchema(tab.key)
       this.saveSession()
+    },
+    /**
+     * 解析该 tab 里已保存的 gRPC 定义（打开请求 / 导入 / 更新 / 换定义后调用）。
+     * 结果与错误都常驻在 tab 上：成功 → 请求栏与 Schema 分段可用；失败 → 界面展示错误卡片（D4 的界面态）。
+     */
+    async loadGrpcSchema(key: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.key === key)
+      const g = tab?.request.grpc
+      if (!tab || !g) return
+      const proto = (g.proto ?? '').trim()
+      if (!proto) {
+        tab.grpcSchema = null
+        tab.grpcError = ''
+        return
+      }
+      try {
+        tab.grpcSchema = await api.loadGrpcSchema(proto, g.imports ?? [])
+        tab.grpcError = ''
+      } catch (e) {
+        tab.grpcSchema = null
+        tab.grpcError = e instanceof Error ? e.message : String(e)
+      }
     },
     setActive(key: string): void {
       this.activeKey = key
@@ -254,13 +318,24 @@ export const useTabsStore = defineStore('tabs', {
       clearTimeout(saveTimers.get(key))
       saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
     },
-    /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。 */
+    /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。
+     *  写盘被拒（D4/G3.5：定义解析失败等）时保留脏标记，并把原因挂到 grpcError 上供界面展示。 */
     async flush(key: string): Promise<void> {
       clearTimeout(saveTimers.get(key))
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.draft || !tab.dirty || !tab.uid) return
-      await api.saveRequest(tab.request)
-      tab.dirty = false
+      try {
+        await api.saveRequest(tab.request)
+        tab.dirty = false
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // 同一条错误只提示一次（自动保存会反复触发），Schema 分段常驻展示这次失败原因
+        if (tab.grpcError !== msg) {
+          tab.grpcError = msg
+          message.error(msg)
+        }
+        return
+      }
     },
     async flushAll(): Promise<void> {
       for (const t of this.tabs) await this.flush(t.key)
@@ -268,12 +343,14 @@ export const useTabsStore = defineStore('tabs', {
     async doResolve(tab: Tab): Promise<void> {
       const coll = useCollectionStore()
       if (!coll.ready) return
-      if (!tab.request.url.trim()) {
-        tab.resolve = null // 空 URL（刚新建的草稿）无需解析
+      // 变量来自「地址」：HTTP 是 URL，gRPC 是服务地址 target（G10.1）；两者都空时无需解析
+      const text = (tab.request.grpc ? tab.request.grpc.target : tab.request.url).trim()
+      if (!text) {
+        tab.resolve = null // 刚新建的空草稿
         return
       }
       try {
-        tab.resolve = await api.resolveText(tab.request.url, coll.currentEnv)
+        tab.resolve = await api.resolveText(text, coll.currentEnv)
       } catch {
         tab.resolve = null
       }
@@ -286,6 +363,13 @@ export const useTabsStore = defineStore('tabs', {
     async send(key: string): Promise<void> {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.sending) return
+      // gRPC 发送门禁（G3.6）：地址 / 定义 / 服务方法 / 消息任一未就绪都不发送（按钮已置灰，这里兜底）
+      const blocker = grpcSendBlocker(tab.request, !!tab.grpcSchema)
+      if (blocker) {
+        tab.response = null
+        tab.error = i18n.global.t(blocker)
+        return
+      }
       const coll = useCollectionStore()
       await this.flush(key)
       tab.sending = true

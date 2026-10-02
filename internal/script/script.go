@@ -62,6 +62,10 @@ type RunResult struct {
 }
 
 // Response 发送给脚本的响应视图（body 已尽量解析为 JSON 对象）。
+//
+// gRPC 响应（G10.2）：Status 是 gRPC 状态码（0 = OK，不是 HTTP 状态码），
+// 另有 IsGRPC / GRPCCode / Trailers 三个字段；断言与脚本里用 res.isGrpc 区分协议，
+// 用 res.grpcCode（或 res.status）判状态，用 res.trailers 读尾元数据。
 type Response struct {
 	Status       int               `json:"status"`
 	Headers      map[string]string `json:"headers"`
@@ -69,6 +73,12 @@ type Response struct {
 	BodyText     string            `json:"bodyText"`
 	ResponseTime int64             `json:"responseTime"`
 	ContentType  string            `json:"contentType"`
+	// IsGRPC 是否 gRPC 响应（HTTP 为 false）
+	IsGRPC bool `json:"isGrpc"`
+	// GRPCCode gRPC 状态码（HTTP 响应为 0）
+	GRPCCode int `json:"grpcCode"`
+	// Trailers gRPC 尾元数据（HTTP 响应为空对象）
+	Trailers map[string]string `json:"trailers"`
 }
 
 // Runner 一次请求生命周期内的脚本会话：变量在 pre → send → post 之间贯穿。
@@ -221,6 +231,9 @@ func (r *Runner) newVM(res *Response) *goja.Runtime {
 			"text":         res.BodyText,
 			"responseTime": res.ResponseTime,
 			"contentType":  res.ContentType,
+			"isGrpc":       res.IsGRPC,
+			"grpcCode":     res.GRPCCode,
+			"trailers":     res.Trailers,
 		})
 	}
 	return vm

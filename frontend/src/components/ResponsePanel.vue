@@ -10,6 +10,7 @@ import JsonTree from '@/components/JsonTree.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
 import { formatBytes, httpStatusText } from '@/lib/format'
+import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { extractFields, loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
@@ -22,7 +23,7 @@ const { t } = useI18n()
 
 const view = ref<'pretty' | 'raw'>('pretty')
 const wrap = ref(true)
-const seg = ref<'body' | 'headers' | 'fields'>('body')
+const seg = ref<'body' | 'headers' | 'trailers' | 'fields'>('body')
 const scope = ref<VarScope>('env')
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
 const inlineFieldsEl = ref<HTMLElement | null>(null)
@@ -57,10 +58,12 @@ const display = computed<SendResult | null>(() => {
       proto: r.proto ?? '',
       timeMs: r.timeMs ?? 0,
       size: r.size ?? 0,
+      sentSize: r.sentSize ?? 0,
       contentType: r.contentType ?? '',
       binary: !!r.binary,
       headers: r.headers ?? [],
       body: r.body ?? '',
+      trailers: r.trailers ?? [],
       script: r.script ?? null,
     }
   }
@@ -74,9 +77,14 @@ const display = computed<SendResult | null>(() => {
     binary: !!ex.response.binary,
     headers: ex.response.headers ?? [],
     body: ex.response.body ?? '',
+    trailers: [], // 示例快照不存尾元数据
     script: null, // example 快照未存脚本产物
   }
 })
+
+/** gRPC 响应：proto 由执行器固定写成 "gRPC"，此时的 status 是 gRPC code（不是 HTTP 状态码）。 */
+const isGrpcRes = computed(() => (display.value?.proto ?? '') === 'gRPC')
+const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
 
 const body = computed(() => display.value?.body ?? '')
 
@@ -99,6 +107,8 @@ const headerCount = computed(() => display.value?.headers?.length ?? 0)
 
 const statusType = computed<'success' | 'warning' | 'error'>(() => {
   const s = display.value?.status ?? 0
+  // gRPC：0=OK 绿，取消 / 超时黄，其余红（G8.2）
+  if (isGrpcRes.value) return grpcStatusType(s)
   if (s >= 200 && s < 300) return 'success'
   if (s >= 300 && s < 500) return 'warning'
   return 'error'
@@ -106,13 +116,17 @@ const statusType = computed<'success' | 'warning' | 'error'>(() => {
 
 const statusLabel = computed(() => {
   const s = display.value?.status ?? 0
+  // gRPC：状态码名 + 码值（`OK(0)` / `NOT_FOUND(5)`）
+  if (isGrpcRes.value) return grpcCodeLabel(s)
   return `${s} ${httpStatusText(s)}`.trim()
 })
 
 const meta = computed(() => {
   const r = display.value
   if (!r) return ''
-  return `${r.timeMs} ms${t('common.sep')}${formatBytes(r.size)}`
+  const out = `${r.timeMs} ms${t('common.sep')}${formatBytes(r.size)}`
+  // gRPC：把发送的请求消息大小也带上（G8.3）
+  return r.sentSize ? `${out}${t('common.sep')}↑ ${formatBytes(r.sentSize)}` : out
 })
 
 const exampleOptions = computed(() => [
@@ -398,7 +412,19 @@ async function toggleBookmark(path: string): Promise<void> {
           {{ t('resp.body') }}
         </button>
         <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab" data-seg="headers" @click="seg = 'headers'">
-          {{ t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
+          {{ t(isGrpcRes ? 'resp.initialMetadata' : 'resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
+        </button>
+        <!-- 尾元数据只存在于 gRPC（HTTP 响应没有这个概念），故按协议出现（G8.5） -->
+        <button
+          v-if="isGrpcRes"
+          class="seg-tab"
+          :class="{ on: seg === 'trailers' }"
+          type="button"
+          data-testid="resp.tab"
+          data-seg="trailers"
+          @click="seg = 'trailers'"
+        >
+          {{ t('resp.trailers') }}<span v-if="trailerCount" class="num">{{ trailerCount }}</span>
         </button>
         <button class="seg-tab" :class="{ on: seg === 'fields' }" type="button" data-testid="resp.tab" data-seg="fields" @click="seg = 'fields'">
           {{ t('resp.fieldsTab') }}<span v-if="fields.length" class="num">{{ fields.length }}</span>
@@ -467,6 +493,12 @@ async function toggleBookmark(path: string): Promise<void> {
           <div v-for="h in display.headers" :key="h.name" class="hrow mono" data-testid="resp.headerRow">
             <span class="hn">{{ h.name }}</span>
             <span class="hv">{{ h.value }}</span>
+          </div>
+        </div>
+        <div v-else-if="seg === 'trailers'" class="hlist">
+          <div v-for="tr in display.trailers" :key="tr.name" class="hrow mono" data-testid="resp.trailerRow">
+            <span class="hn">{{ tr.name }}</span>
+            <span class="hv">{{ tr.value }}</span>
           </div>
         </div>
         <response-fields
