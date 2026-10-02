@@ -418,7 +418,10 @@ async function toggleBookmark(path: string): Promise<void> {
       />
     </div>
 
-    <template v-else-if="display">
+    <!-- 内容分支：出错时只留错误条；否则「有响应 → 响应区 / 无响应 → 空态提示」。
+         注意这里必须自己带条件，不能写成 v-else-if/v-else —— 上一版的 v-else-if 挂到了上面
+         状态栏的 v-if 上，链条变成「无错误 ? 状态栏 : …」，导致响应区与空态永远不渲染。 -->
+    <template v-if="!tab.error && display">
       <!-- 标签栏：响应体 / 响应头 N / 响应字段 N + 请求 URL -->
       <div class="seg">
         <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body" @click="seg = 'body'">
@@ -527,8 +530,8 @@ async function toggleBookmark(path: string): Promise<void> {
       </div>
     </template>
 
-    <div v-else class="empty">
-      <svg class="plane" viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4">
+    <div v-else-if="!tab.error" class="empty">
+      <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4">
         <path d="M22 2 11 13" />
         <path d="M22 2 15 22l-4-9-9-4 20-7Z" />
       </svg>

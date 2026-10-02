@@ -155,8 +155,50 @@ test.describe('响应区：字段映射与响应示例', () => {
 
     // 回到本次响应 = 回到空态：状态栏与下拉留在原位
     await page.getByTestId('resp.backToLive').click()
-    await expect(page.getByText(t('resp.empty'))).toBeVisible()
+    await expect(page.getByText(t('resp.empty'), { exact: true })).toBeVisible()
     await expect(page.getByTestId('resp.status')).toHaveCount(0)
     await expect(page.getByTestId('resp.statusbar').getByTestId('resp.examples')).toHaveCount(1)
+  })
+
+  // 回归守门：状态栏改成常驻后，模板里的 v-else-if 一度挂到了状态栏的 v-if 上，
+  // 链条变成「无错误 → 只渲染状态栏」，于是发送后响应区空白（响应体/页签都不出现）、
+  // 切示例也没反应，而编译与类型检查都发现不了。三种状态这里逐个钉住。
+  test('[E23] 发送后响应体可见，示例切换与回到本次响应都正常', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+
+    // ① 未发送：状态栏占位（无状态码/耗时）+ 空态提示与飞机图标
+    await expect(page.getByTestId('resp.statusbar')).toBeVisible()
+    await expect(page.getByTestId('resp.status')).toHaveCount(0)
+    await expect(page.getByTestId('resp.emptyIcon')).toBeVisible()
+    await expect(page.getByText(t('resp.empty'), { exact: true })).toBeVisible()
+
+    // ② 发送：响应体必须真的渲染出来（这条就是那次回归的守门人）
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await expect(page.getByTestId('resp.status')).toContainText('200')
+    await expect(page.getByTestId('resp.meta')).toHaveCount(1)
+    await expect(page.getByTestId('resp.json')).toBeVisible()
+    await expect(page.getByTestId('resp.emptyIcon')).toHaveCount(0) // 空态让位给响应区
+    await expect(page.getByText(t('resp.empty'), { exact: true })).toHaveCount(0)
+
+    // ③ 存一个示例 → 切走再切回：提示条与响应体都要跟着换
+    const name = '切换示例'
+    await openSaveExample(page)
+    await exampleModal(page).locator('input').first().fill(name)
+    await exampleModal(page).getByRole('button', { name: t('common.save'), exact: true }).click()
+    await expect(page.getByTestId('resp.exnote')).toContainText(t('resp.viewingExample', { name }))
+
+    const pick = page.getByTestId('resp.examples')
+    await pick.click()
+    await page.locator('.n-base-select-option').filter({ hasText: t('resp.liveResponse') }).click()
+    await expect(page.getByTestId('resp.exnote')).toHaveCount(0) // 回到本次响应
+    await expect(page.getByTestId('resp.json')).toBeVisible()
+    await expect(page.getByTestId('resp.statusbar')).toHaveCount(1) // 状态栏没有被换掉
+
+    await pick.click()
+    await page.locator('.n-base-select-option').filter({ hasText: name }).click()
+    await expect(page.getByTestId('resp.exnote')).toBeVisible()
+    await expect(page.getByTestId('resp.json')).toBeVisible()
   })
 })
