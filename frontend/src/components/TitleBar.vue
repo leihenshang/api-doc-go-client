@@ -2,9 +2,13 @@
 // 自绘标题栏（主窗口无边框）：拖动区靠 CSS `--wails-draggable`，
 // 非桌面壳（浏览器 / devserver）下不渲染窗口控制按钮。
 // 右侧常驻主题切换按钮：未打开集合时也能改配色（工具栏那时还没渲染）。
+// 双击拖动区 = 最大化 / 还原（Windows 标题栏习惯）：Wails 的拖动默认延后到 mousemove
+// （runtime 里 flags.deferDragToMouseMove = true），静止双击不会进入系统移动循环，
+// 所以这里能正常收到 dblclick，直接调 WindowToggleMaximise 即可 —— 注意这不是「真全屏」，
+// 行为与系统标题栏一致（占满工作区，不盖任务栏）。
 import { NIcon } from 'naive-ui'
 import { CloseOutline, CopyOutline, MoonOutline, RemoveOutline, SquareOutline, SunnyOutline } from '@vicons/ionicons5'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hasWailsRuntime, windowCtl } from '@/lib/ipc'
 
@@ -15,22 +19,53 @@ const { t } = useI18n()
 const customChrome = hasWailsRuntime()
 const maximised = ref(false)
 
+/** 最大化后窗口铺满屏幕，外壳圆角要归零（见 styles/base.css 的 :root[data-window='max']）。 */
+const RESIZE_SYNC_MS = 180
+
 // 提示文案说明「点了会切到哪」而不是当前状态
 const themeHint = computed(() => (props.dark ? t('app.themeToLight') : t('app.themeToDark')))
 
-// 最大化由窗口管理器异步完成，切换后回读一次以换成正确的图标
-async function toggleMax(): Promise<void> {
-  windowCtl.toggleMaximise()
+/** 同步最大化状态：按钮、双击标题栏、Win+↑ 都会改变它。 */
+async function syncMaximised(): Promise<void> {
+  if (!customChrome) return
   maximised.value = await windowCtl.isMaximised()
+  document.documentElement.dataset.window = maximised.value ? 'max' : 'normal'
 }
 
-onMounted(async () => {
-  if (customChrome) maximised.value = await windowCtl.isMaximised()
+// 最大化由窗口管理器异步完成，切换后稍等再回读，避免图标停在旧状态
+async function toggleMax(): Promise<void> {
+  windowCtl.toggleMaximise()
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  await syncMaximised()
+}
+
+/** 双击拖动区 = 最大化 / 还原；落在窗口控制按钮、主题按钮上的双击不参与。 */
+function onTitleDblClick(e: MouseEvent): void {
+  if (!customChrome) return
+  if ((e.target as HTMLElement | null)?.closest('button')) return
+  void toggleMax()
+}
+
+// 拖动改变窗口大小 / 系统快捷键最大化时也会触发 resize，借它兜住状态同步
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+function onResize(): void {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => void syncMaximised(), RESIZE_SYNC_MS)
+}
+
+onMounted(() => {
+  void syncMaximised()
+  window.addEventListener('resize', onResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  if (resizeTimer) clearTimeout(resizeTimer)
 })
 </script>
 
 <template>
-  <header class="titlebar">
+  <header class="titlebar" data-testid="titlebar" @dblclick="onTitleDblClick">
     <span class="logo" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
         <path d="M22 2 11 13" />

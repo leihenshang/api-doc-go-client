@@ -116,6 +116,12 @@ body.dragging.row * {
   --app-radius-window: 10px;
 }
 
+/* 最大化（双击标题栏 / 标题栏按钮 / Win+↑）时窗口铺满屏幕：圆角会让四角透出桌面
+   （窗口本身是透明的），故归零。状态由 TitleBar 写到根节点的 data-window 上。 */
+:root[data-window='max'] {
+  --app-radius-window: 0px;
+}
+
 /* 暗色：底 #17181a / 面板 #1e1f22；主色沿用品牌绿，但在深底上提亮一档保证对比度 */
 :root[data-theme='dark'] {
   color-scheme: dark;
