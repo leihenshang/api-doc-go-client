@@ -797,6 +797,12 @@ func (a *App) SaveRequest(r *collection.Request) error {
 	if err := a.checkGrpcSavable(r); err != nil {
 		return err
 	}
+	// 以磁盘索引里的真实路径为准：请求可能已被移动（集合树里拖动改上级目录、弹窗「移动到…」、
+	// 另一个客户端窗口、或外部编辑器），而调用方手里的 path 还是旧的 —— 直接写会**在旧位置又写出一份**。
+	// 新建的请求不在索引里（ReadRequest 报错），此时保持调用方给的路径。
+	if cur, err := c.ReadRequest(r.UID); err == nil && cur.Path != "" && cur.Path != r.Path {
+		r.Path = cur.Path
+	}
 	return c.SaveRequest(r)
 }
 
