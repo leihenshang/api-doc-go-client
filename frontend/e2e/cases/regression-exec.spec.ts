@@ -4,7 +4,7 @@
 import { expect, test } from '../helpers/app'
 import { patchRequest } from '../helpers/api'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openSettings, rawJSON, saveSettings, send } from '../helpers/ui'
+import { openCollection, openRequest, openSettings, openSettingsSection, rawJSON, saveSettings, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333' // basic 种子里的 ping 请求
 const BINARY_HINT = t('resp.binary')
@@ -26,6 +26,7 @@ test.describe('请求执行：网络策略与响应形态', () => {
     await expect(page.locator('.resp .n-alert')).toContainText(/x509|certificate|证书|tls/i)
 
     await openSettings(page)
+  await openSettingsSection(page, 'network')
     await page.getByTestId('settings.insecureSsl').click()
     await saveSettings(page)
 
@@ -46,6 +47,7 @@ test.describe('请求执行：网络策略与响应形态', () => {
 
     // 关闭跟随：拿到 302 本身
     await openSettings(page)
+  await openSettingsSection(page, 'network')
     await page.getByTestId('settings.followRedirects').click()
     await saveSettings(page)
     await sendUrl(page, app, '{{host}}/redirect/2')
@@ -53,6 +55,7 @@ test.describe('请求执行：网络策略与响应形态', () => {
 
     // 打开跟随但上限 1：超过上限应报错
     await openSettings(page)
+  await openSettingsSection(page, 'network')
     await page.getByTestId('settings.followRedirects').click()
     await page.getByTestId('settings.maxRedirects').locator('input').fill('1')
     await saveSettings(page)
@@ -66,6 +69,7 @@ test.describe('请求执行：网络策略与响应形态', () => {
     await openRequest(page, 'ping')
 
     await openSettings(page)
+  await openSettingsSection(page, 'network')
     await page.getByTestId('settings.timeout').locator('input').fill('1')
     await saveSettings(page)
 

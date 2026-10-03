@@ -46,6 +46,9 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        core.Startup,
 		OnDomReady:       core.DomReady,
+		// 退出前收尾：停内嵌 MCP 服务（释放端口）与集合监听。
+		// wails dev 的 Ctrl+C 打到应用时也走这里（见 internal/app 的 watchSignals 注释）。
+		OnShutdown: core.Shutdown,
 		Bind:             []interface{}{core},
 		// 三端都显式开透明：Linux 侧由 gdk_screen_is_composited 守卫（无合成器时保持不透明），
 		// Windows 侧走 DWM（< 22621 退化为 blur-behind），macOS 侧置 window.opaque = NO。

@@ -30,8 +30,19 @@ doc/        功能规划与问题记录
 ### 开发（桌面窗口 + 前端热更新）
 
 ```bash
-wails dev
+./scripts/dev.ps1          # Windows：推荐（一次 Ctrl+C 结束全部，见下）
+./scripts/dev.sh           # macOS / Linux
+wails dev                  # 或直接用 wails dev（Ctrl+C 可能残留进程，见下）
 ```
+
+> **为什么推荐用脚本**：`wails dev` 在 Windows 上的进程树清理不可靠 —— 实测把 CLI 连同整棵树
+> (`taskkill /F /T`) 杀掉之后，它拉起的应用进程（`api-doc-client-dev.exe`，仍占 34115）与前端
+> vite（node，仍占 vite 端口）都还活着，终端提示符也不回来，看起来就是「Ctrl+C 停不掉开发服务」。
+> `scripts/dev.ps1` 在退出时按 **CLI → 进程名 → 端口** 三层兜底清扫，并复查端口后打印结果。
+> 手动兜底：`taskkill /F /IM api-doc-client-dev.exe`、`taskkill /F /IM wails.exe`。
+>
+> 应用侧也做了兜底：收到 Ctrl+C / SIGTERM 后会等 1.5s，若这段时间没人来收尾就自己关闭窗口
+> （`internal/app` 的 `watchSignals`），并通过 `OnShutdown` 释放内嵌 MCP 服务的端口。
 
 ### 仅前端（浏览器，无桌面窗口）
 

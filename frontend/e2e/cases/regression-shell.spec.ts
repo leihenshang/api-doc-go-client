@@ -5,7 +5,16 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { listCollectionFiles } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openSettings, reopenApp, saveSettings, treeRow, treeRowByUid } from '../helpers/ui'
+import {
+  openCollection,
+  openRequest,
+  openSettings,
+  openSettingsSection,
+  reopenApp,
+  saveSettings,
+  treeRow,
+  treeRowByUid,
+} from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 const PONG_UID = '88888888-8888-4888-8888-888888888888'
@@ -284,5 +293,41 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(tabs).toHaveCount(1) // 只剩那张草稿
     await expect(tabs.locator('.dot')).toHaveCount(1)
     await expect(page.getByTestId('tab.overview')).toBeVisible()
+  })
+  // 设置弹窗改为「左侧竖向分区菜单 + 右侧只显示当前分区」，这里钉住两件事：
+  // ① 分区可切换且只有当前分区可见（字段散落在不同分区时别把人绕进去）
+  // ② MCP 服务分区能启用内嵌服务并回显运行状态（设置 → 后端起服务这条链路）
+  test('[G12] 设置分区菜单切换，MCP 分区可启用内嵌服务', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openSettings(page)
+
+    // ① 四个分区都在左侧菜单里，右侧默认只显示第一个分区
+    for (const key of ['appearance', 'network', 'local', 'mcp'] as const) {
+      await expect(page.getByTestId(`settings.nav.${key}`)).toBeVisible()
+    }
+    await expect(page.getByTestId('settings.pane.appearance')).toBeVisible()
+    await expect(page.getByTestId('settings.pane.network')).toBeHidden()
+    await expect(page.getByTestId('settings.lang')).toBeVisible()
+    await expect(page.getByTestId('settings.timeout')).toBeHidden() // 网络分区此刻不该出现
+
+    // 切到网络分区：网络字段出现、界面字段消失、菜单项高亮
+    await openSettingsSection(page, 'network')
+    await expect(page.getByTestId('settings.timeout')).toBeVisible()
+    await expect(page.getByTestId('settings.lang')).toBeHidden()
+    await expect(page.getByTestId('settings.nav.network')).toHaveClass(/on/)
+
+    // ② MCP 分区：启用 + 只读 + 保存 → 后端起服务，状态回显「运行中」与连接地址
+    await openSettingsSection(page, 'mcp')
+    await page.getByTestId('settings.mcpEnabled').check()
+    await page.getByTestId('settings.mcpReadOnly').check() // 默认就是只读，显式确认
+    await saveSettings(page)
+
+    await openSettings(page)
+    await openSettingsSection(page, 'mcp')
+    await expect(page.getByTestId('settings.mcpRunning')).toBeVisible()
+    await expect(page.getByTestId('settings.mcpRunning')).toContainText('/mcp')
+    const token = await page.getByTestId('settings.mcpToken').locator('input').inputValue()
+    expect(token).toHaveLength(32) // 后端自动生成并回填
   })
 })
