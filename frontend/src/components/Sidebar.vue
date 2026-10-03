@@ -249,16 +249,27 @@ function onFolderMenu(node: TreeNode, key: string | number): void {
   else void startAdd(node.path)
 }
 
-// ---- 拖动调整上级目录 ----
-// 拖动分组或请求行到目标分组上即改其上级目录；拖到顶部「根目录」条或列表空白处移到根。
-// 拖动是「移动到…」弹窗的快捷方式，两者共用 coll.moveRequest / coll.moveFolder。
+// ---- 拖动调整上级目录（自己实现，不用 HTML5 拖拽）----
+// 拖动分组或请求行到目标分组上即改其上级目录；拖到顶部「集合根」行则移回根。
+//
+// 为什么不用 draggable / HTML5 DnD：桌面端跑在 WebView2 里，原生拖拽在嵌入式 WebView 下
+// 触发不可靠（用户反馈：鼠标根本拖不动），而且拖拽期间渲染进程的输入派发会被原生拖拽循环
+// 阻塞 —— 现象就是「按下去动了、但什么都不会发生」。改成 pointerdown/move/up 自己算命中，
+// 行为在 WebView2 / Chromium / Firefox 下一致，也不再依赖 dataTransfer。
+const DRAG_THRESHOLD = 4 // px：位移小于它算点击，不算拖动
+
 const dragNode = ref<TreeNode | null>(null)
-/** 当前悬停的放置目标；ok=false 表示非法（自己/后代），给「禁止」反馈而不是静默 */
+/** 按下但还没越过阈值：等他动了才算拖动，避免影响正常点击打开请求 */
+const pending = ref<{ node: TreeNode; x: number; y: number } | null>(null)
+/** 当前指针下的放置目标；ok=false 表示非法（自己/后代），给「禁止」反馈而不是静默 */
 const dropHint = ref<{ uid: string; path: string; ok: boolean } | null>(null)
 const dragging = computed(() => dragNode.value !== null)
 
 /** 搜索过滤时树是残缺的，这时不允许拖动（拖到看不见的分组会让人困惑） */
 const dragEnabled = computed(() => !searching.value && editing.value === null)
+
+/** 拖动结束后紧跟的那次 click 要吞掉，否则松手会顺手打开请求 */
+let suppressClick = false
 
 /**
  * 能否把 node 放进 destPath（空串 = 根）。
@@ -270,41 +281,84 @@ function canDrop(node: TreeNode, destPath: string): boolean {
   return true
 }
 
-function onDragStart(node: TreeNode, ev: DragEvent): void {
-  if (!dragEnabled.value || !ev.dataTransfer) {
-    ev.preventDefault()
-    return
-  }
-  dragNode.value = node
-  // 必须 setData 才能在部分浏览器里真正启动拖拽（Firefox），type 用纯自定义前缀
-  ev.dataTransfer.effectAllowed = 'move'
-  ev.dataTransfer.setData('text/plain', node.uid)
+function onRowPointerDown(node: TreeNode, ev: PointerEvent): void {
+  if (!dragEnabled.value || ev.button !== 0) return
+  // 只排除「行内操作控件」：展开箭头、悬停动作按钮、重命名输入框、下拉与链接。
+  // 注意不能一刀切排除所有 button —— 请求/分组的名字本身就是个 <button class="rname">，
+  // 一刀切会让整行都拖不动（实测就是这个原因导致鼠标拖起来毫无反应）。
+  const el = ev.target as HTMLElement | null
+  if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
+  pending.value = { node, x: ev.clientX, y: ev.clientY }
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', cancelDrag)
+  window.addEventListener('keydown', onDragKeydown)
 }
 
-function onDragEnd(): void {
+function detachDragListeners(): void {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', cancelDrag)
+  window.removeEventListener('keydown', onDragKeydown)
+}
+
+/** 指针所在位置对应的放置目标（用 elementFromPoint 命中行，不依赖事件冒泡顺序）。 */
+function hintAt(x: number, y: number): { uid: string; path: string; ok: boolean } | null {
+  const node = dragNode.value
+  if (!node) return null
+  const el = document.elementFromPoint(x, y) as HTMLElement | null
+  const row = el?.closest('[data-testid="tree.row"], [data-testid="tree.root"]') as HTMLElement | null
+  if (!row) return null
+  if (row.dataset.testid === 'tree.root') return { uid: '__root__', path: '', ok: true }
+  if (row.dataset.kind !== 'folder') return null // 请求行不能当容器
+  const path = row.dataset.path ?? ''
+  return { uid: row.dataset.uid ?? '', path, ok: canDrop(node, path) }
+}
+
+function onPointerMove(ev: PointerEvent): void {
+  const p = pending.value
+  if (!p) return
+  if (!dragNode.value) {
+    if (Math.abs(ev.clientX - p.x) < DRAG_THRESHOLD && Math.abs(ev.clientY - p.y) < DRAG_THRESHOLD) return
+    dragNode.value = p.node
+  }
+  ev.preventDefault() // 拖拽期间不选中文字
+  dropHint.value = hintAt(ev.clientX, ev.clientY)
+}
+
+function onDragKeydown(ev: KeyboardEvent): void {
+  if (ev.key === 'Escape') cancelDrag()
+}
+
+function cancelDrag(): void {
+  detachDragListeners()
+  pending.value = null
   dragNode.value = null
   dropHint.value = null
 }
 
-/** 悬停在某行：分组是放置目标；请求行不是（不能把请求挂到请求下）。 */
-function onRowDragOver(node: TreeNode, ev: DragEvent): void {
-  if (!dragNode.value || node.type !== 'folder') return
-  ev.preventDefault()
-  const ok = canDrop(dragNode.value, node.path)
-  if (ev.dataTransfer) ev.dataTransfer.dropEffect = ok ? 'move' : 'none'
-  dropHint.value = { uid: node.uid, path: node.path, ok }
-}
-
-function onRowDragLeave(node: TreeNode): void {
-  if (dropHint.value?.uid === node.uid) dropHint.value = null
-}
-
-/** 放下：移动到目标分组（或根，path 为空串）。 */
-async function onDrop(destPath: string, ev: DragEvent): Promise<void> {
-  ev.preventDefault()
+function onPointerUp(ev: PointerEvent): void {
   const node = dragNode.value
-  onDragEnd()
-  if (!node) return
+  const hint = node ? hintAt(ev.clientX, ev.clientY) : null
+  const dragged = node !== null
+  detachDragListeners()
+  pending.value = null
+  dragNode.value = null
+  dropHint.value = null
+  if (!dragged) return // 只是点击：交给 click 处理
+  suppressClick = true
+  setTimeout(() => (suppressClick = false), 0)
+  if (node && hint?.ok) void performMove(node, hint.path)
+}
+
+/** 行点击：请求行打开对应页签（拖动刚结束的那次点击忽略）。 */
+function onRowClick(node: TreeNode): void {
+  if (editing.value || suppressClick) return
+  if (node.type === 'request') emit('open', node.uid)
+}
+
+/** 执行移动：拖到分组（或根，path 为空串）。 */
+async function performMove(node: TreeNode, destPath: string): Promise<void> {
   if (!canDrop(node, destPath)) return
   // 已经在目标位置就不动（避免无意义的写盘与提示）
   if (node.path === destPath) return
@@ -432,16 +486,15 @@ watch(
       <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')" />
     </div>
 
-    <div ref="treeEl" class="tree">
+    <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">
+      <p v-if="dragging" class="drag-hint" data-testid="tree.dragHint">{{ t('tree.dragHint') }}</p>
       <!-- 集合根行：既是标题，也是「移回根目录」的放置目标（拖动时高亮） -->
       <div
         class="row root"
-        :class="{ 'drop-ok': dragging && dropHint?.path === '' && dropHint.ok }"
+        :class="{ 'drop-ok': dragging && dropHint?.uid === '__root__' && dropHint.ok }"
         :style="{ paddingLeft: '8px' }"
         data-testid="tree.root"
-        @dragover.prevent="dragging && (dropHint = { uid: '__root__', path: '', ok: true })"
-        @dragleave="dropHint?.uid === '__root__' && (dropHint = null)"
-        @drop="onDrop('', $event)"
+        :data-path="''"
       >
         <span class="rname coll-name" :title="name">{{ name }}</span>
         <span class="badge">{{ t('local.badge') }}</span>
@@ -460,8 +513,6 @@ watch(
         />
       </div>
 
-      <p v-if="dragging" class="drag-hint" data-testid="tree.dragHint">{{ t('tree.dragHint') }}</p>
-
       <div v-if="!rows.length && !adding" class="empty muted">{{ t('sidebar.empty') }}</div>
 
       <template v-for="row in rows" :key="row.node.type + row.node.path">
@@ -477,16 +528,12 @@ watch(
           }"
           :data-uid="row.node.uid"
           :data-kind="row.node.type"
+          :data-path="row.node.path"
           data-testid="tree.row"
           :aria-current="row.node.uid === props.activeUid ? 'true' : undefined"
           :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
-          :draggable="dragEnabled"
-          @click="row.node.type === 'request' && !editing ? emit('open', row.node.uid) : undefined"
-          @dragstart="onDragStart(row.node, $event)"
-          @dragend="onDragEnd"
-          @dragover="row.node.type === 'folder' && onRowDragOver(row.node, $event)"
-          @dragleave="onRowDragLeave(row.node)"
-          @drop="row.node.type === 'folder' && onDrop(row.node.path, $event)"
+          @click="onRowClick(row.node)"
+          @pointerdown="onRowPointerDown(row.node, $event)"
         >
           <template v-if="row.node.type === 'folder'">
             <button class="caret" :title="t('tree.expandAll')" @click="toggle(row.node.path)">
@@ -661,6 +708,7 @@ watch(
 }
 
 .tree {
+  position: relative;
   flex: 1 1 auto;
   overflow: auto;
   padding-bottom: 10px;
@@ -672,17 +720,31 @@ watch(
 }
 
 /* ---- 拖动调整上级目录 ---- */
+/* 拖动提示条必须**浮在树上**、不占布局：否则它一出现就把所有行往下推，
+   指针下的目标行会跟着变，用户就会放错地方（实测过）。pointer-events: none 保证它不吃命中。 */
 .drag-hint {
-  margin: 2px 8px 4px;
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  right: 6px;
+  z-index: 6;
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--app-accent-tint);
   color: var(--app-accent-dark);
   font-size: 11.5px;
+  box-shadow: var(--app-shadow-sm);
+  pointer-events: none;
 }
 
 .row.dragging {
   opacity: 0.45;
+}
+
+/* 拖动期间禁止选中文字（拖拽由指针事件驱动，不靠原生拖拽） */
+.tree.dnd-active {
+  user-select: none;
+  cursor: grabbing;
 }
 
 /* 合法放置目标：左侧强调条 + 淡底 */
