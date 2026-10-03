@@ -105,6 +105,14 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
     thColor: isDark.value ? '#202124' : '#fafafa',
     thFontWeight: '500',
   },
+  // 浮层（保存▾ 等）：naive 默认那套 `0 9px 28px` 浓投影看着像"大边框盒子"，
+  // 换成 app 的轻投影令牌 + 8px 圆角；底色浅色用面板白、暗色用 surface-3（否则与面板同色，糊在一起）
+  Popover: {
+    borderRadius: '8px',
+    boxShadow: 'var(--app-shadow-menu)',
+    color: isDark.value ? 'var(--app-surface-3)' : 'var(--app-panel)',
+    padding: '4px',
+  },
 }))
 
 const showEnvManager = ref(false)

@@ -34,17 +34,23 @@ test.describe('响应区：字段映射与响应示例', () => {
 
     await sendUrl(page, app, '{{host}}/json/withArray')
     await page.getByTestId('resp.updateFields').click()
-    const rows = page.getByTestId('resp.fields.row')
-    await expect(rows.first()).toBeVisible() // 字段就地出现在响应体下方
     await expect(page.getByTestId('resp.json')).toBeVisible() // 回归：更新字段不切页签，响应体不消失
+    const rows = page.getByTestId('resp.fields.row')
+    await expect(rows).toHaveCount(0) // 响应体下方不再挂字段表（只在「响应字段」页签里）
+    await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsTab'))
+
+    await openRespTab(page, 'fields')
+    await expect(rows.first()).toBeVisible()
     const count = await rows.count()
     expect(count).toBeGreaterThan(0) // 叶子字段：items.0.id / items.0.name / items.1.id / items.1.name / total
     await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsAdded', { n: count }))
 
     // 标注含义后，换成字段更少的响应再更新一次
     await page.getByTestId('resp.fields.meaning').first().locator('input').fill('业务主体')
+    await openRespTab(page, 'body')
     await sendUrl(page, app, '{{host}}/json/fewer')
     await page.getByTestId('resp.updateFields').click()
+    await openRespTab(page, 'fields')
 
     await expect(rows).toHaveCount(count) // 只追加：字段变少也不会删掉已有的
     await expect(page.getByTestId('resp.fields.meaning').first().locator('input')).toHaveValue('业务主体')

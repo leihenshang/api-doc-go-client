@@ -1,49 +1,33 @@
 <script setup lang="ts">
-// 「保存 ▾」下拉（response-panel design-spec §4）：
-// 三个保存菜单项 + 分隔线后「作用域」chips（集合/环境/全局，单选）。
-// 第 4 项「保存响应示例」为既有功能（E23）保留项，见 doc 的「有意差异」。
+// 「保存 ▾」下拉（response-panel design-spec §4）：只保留两个落盘动作 ——
+// ① 保存响应示例（E23，集合内 examples/*.yml，可 diff 可入库）
+// ② 保存响应体为文件（.json/.txt/.bin，落到用户选的位置）
+// 「保存全部字段为变量 / 保存选中值为变量」与分隔线后的「作用域」chips 已下线（变量入口收敛到
+// 字段表的「变量书签」，落点固定为当前环境），详见 doc 的「有意差异」。
 import { NIcon, NPopover } from 'naive-ui'
-import { CaretDownOutline } from '@vicons/ionicons5'
+import { BookmarkOutline, CaretDownOutline, DocumentOutline } from '@vicons/ionicons5'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { VarScope } from '@/lib/saveVars'
 
-const props = defineProps<{ scope: VarScope; canSaveExample: boolean }>()
+const props = defineProps<{ canSaveExample: boolean }>()
 const emit = defineEmits<{
-  'update:scope': [v: VarScope]
   'save-file': []
-  'save-all-vars': []
-  'save-selected-var': []
   'save-example': []
 }>()
 const { t } = useI18n()
 
 const open = ref(false)
 
-/** 浮层规格对齐 response-panel design-spec §4：240 宽、圆角 8、边框 + 投影（颜色走主题令牌，暗色同样适配）。 */
+/** 浮层宽度随内容（不再撑成 240px 的大盒子）；圆角/投影/底色由 App.vue 的 Popover 主题覆盖给到外层盒子，
+ *  这里只管内容宽度 —— 否则会给 naive 的两层盒子都描边，看起来像"框中框"。 */
 const menuStyle = {
-  width: '240px',
-  padding: '8px 0',
-  borderRadius: '8px',
-  border: '1px solid var(--app-border)',
-  boxShadow: 'var(--app-shadow-pop)',
+  minWidth: '168px',
+  maxWidth: '260px',
 }
 
-const scopes: { key: VarScope; label: string }[] = [
-  { key: 'collection', label: t('resp.scopeCollection') },
-  { key: 'env', label: t('resp.scopeEnv') },
-  { key: 'global', label: t('resp.scopeGlobal') },
-]
-
-function pickScope(v: VarScope): void {
-  emit('update:scope', v)
-}
-
-function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save-example'): void {
+function run(action: 'save-file' | 'save-example'): void {
   open.value = false
   if (action === 'save-file') emit('save-file')
-  else if (action === 'save-all-vars') emit('save-all-vars')
-  else if (action === 'save-selected-var') emit('save-selected-var')
   else emit('save-example')
 }
 </script>
@@ -64,34 +48,15 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
       </button>
     </template>
     <div class="menu">
-      <button class="mi" type="button" data-testid="resp.saveFile" @click="run('save-file')">
-        {{ t('resp.saveFile') }}
-      </button>
-      <button class="mi" type="button" data-testid="resp.saveAllVars" @click="run('save-all-vars')">
-        {{ t('resp.saveAllVars') }}
-      </button>
-      <button class="mi" type="button" data-testid="resp.saveSelectedVar" @click="run('save-selected-var')">
-        {{ t('resp.saveSelectedVar') }}
-      </button>
+      <!-- 正在回看示例时不再提供「保存为示例」（避免快照套快照），此时菜单里只剩存文件一项 -->
       <button v-if="props.canSaveExample" class="mi" type="button" data-testid="resp.saveExample" @click="run('save-example')">
-        {{ t('resp.saveExample') }}
+        <n-icon :component="BookmarkOutline" :size="14" />
+        <span>{{ t('resp.saveExample') }}</span>
       </button>
-      <div class="sep" />
-      <div class="scope-row">
-        <span class="scope-label">{{ t('resp.scope') }}</span>
-        <button
-          v-for="s in scopes"
-          :key="s.key"
-          class="chip"
-          :class="{ on: props.scope === s.key }"
-          type="button"
-          data-testid="resp.scope"
-          :data-scope="s.key"
-          @click="pickScope(s.key)"
-        >
-          {{ s.label }}
-        </button>
-      </div>
+      <button class="mi" type="button" data-testid="resp.saveFile" @click="run('save-file')">
+        <n-icon :component="DocumentOutline" :size="14" />
+        <span>{{ t('resp.saveFile') }}</span>
+      </button>
     </div>
   </n-popover>
 </template>
@@ -124,16 +89,19 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
   flex-direction: column;
 }
 
+/* 菜单项：图标 + 文字，hover 才是底色（常态无框，与工具条其它幽灵按钮同一量级） */
 .mi {
   display: flex;
   align-items: center;
-  height: 34px;
-  padding: 0 12px;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
   border: none;
+  border-radius: 6px;
   background: none;
   font-family: inherit;
   font-size: 12px;
-  color: var(--app-text);
+  color: var(--app-text-2);
   cursor: pointer;
   text-align: left;
   white-space: nowrap;
@@ -141,50 +109,6 @@ function run(action: 'save-file' | 'save-all-vars' | 'save-selected-var' | 'save
 
 .mi:hover {
   background: var(--app-row-hover);
-}
-
-.sep {
-  height: 1px;
-  background: var(--app-border);
-  margin: 8px 0;
-}
-
-.scope-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-}
-
-.scope-label {
-  font-size: 11px;
-  color: var(--app-muted);
-  flex: 0 0 auto;
-}
-
-.chip {
-  border: none;
-  background: var(--app-chip);
-  border-radius: 4px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-family: inherit;
-  color: var(--app-text-2);
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-
-.chip.on {
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
-  font-weight: 600;
-}
-
-.chip:hover {
-  background: var(--app-chip-hover);
-}
-
-.chip.on:hover {
-  background: var(--app-accent-tint);
+  color: var(--app-text);
 }
 </style>
