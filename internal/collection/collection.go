@@ -681,7 +681,7 @@ func (c *Collection) Tree() ([]*Node, error) {
 		}
 		n := &dirNode{name: name, path: dir}
 		dirs[dir] = n
-		p.children = append(p.children, &Node{Type: "folder", UID: res.uidByDir[dir], Name: name, Path: dir, Children: nil})
+		p.children = append(p.children, &Node{Type: "folder", UID: folderUIDOrFallback(res.uidByDir[dir], dir), Name: name, Path: dir, Children: nil})
 		return n
 	}
 	// 挂请求
@@ -1086,7 +1086,7 @@ func (c *Collection) MoveRequest(uid, destFolder string) error {
 	if !ok {
 		return errNotFound
 	}
-	dest, err := c.resolveFolder(destFolder)
+	dest, err := c.resolveFolderForMove(destFolder)
 	if err != nil {
 		return err
 	}
@@ -1124,7 +1124,7 @@ func (c *Collection) MoveFolder(uid, destParent string) error {
 	if dir == "" {
 		return fmt.Errorf("不能移动集合根目录")
 	}
-	dest, err := c.resolveFolder(destParent)
+	dest, err := c.resolveFolderForMove(destParent)
 	if err != nil {
 		return err
 	}
@@ -1158,16 +1158,87 @@ func (c *Collection) MoveFolder(uid, destParent string) error {
 }
 
 // resolveFolder 校验并规范化分组相对路径（必须是集合内已存在的目录）。
+// folderFallbackPrefix 给「没有 folder.yml 的分组」用的 uid 前缀。
+// 这类目录（外部创建、手工建目录、旧集合）在集合树里同样显示为分组，
+// 若 uid 留空，界面上的重命名/移动/删除都会失败（uid 为空 → 后端找不到目录）。
+const folderFallbackPrefix = "dir:"
+
+// folderUIDOrFallback folder.yml 里的 uid 优先；没有就用 "dir:<相对路径>" 作为稳定标识。
+func folderUIDOrFallback(uid, dir string) string {
+	if uid != "" {
+		return uid
+	}
+	return folderFallbackPrefix + dir
+}
+
+// resolveFolderUID 把分组 uid 解析成目录相对路径：真实 uid 查 uidByDir，
+// 兜底 uid（"dir:<路径>"）按**磁盘目录是否存在**判断 —— 这类目录没有 folder.yml，
+// 扫描结果里没有它的 nameByDir 记录，所以不能拿扫描结果当依据。
+func (c *Collection) resolveFolderUID(res *scanResult, uid string) (string, bool) {
+	if strings.HasPrefix(uid, folderFallbackPrefix) {
+		dir := strings.TrimPrefix(uid, folderFallbackPrefix)
+		if dir == "" {
+			return "", false
+		}
+		if st, err := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(dir))); err == nil && st.IsDir() {
+			return dir, true
+		}
+		return "", false
+	}
+	for dir, u := range res.uidByDir {
+		if u == uid {
+			return dir, true
+		}
+	}
+	return "", false
+}
+
 func (c *Collection) resolveFolder(parent string) (string, error) {
+	clean, err := normalizeFolderPath(parent)
+	if err != nil {
+		return "", err
+	}
+	if clean == "" {
+		return "", nil
+	}
+	if _, ok := c.folderUID(clean); !ok {
+		return "", fmt.Errorf("分组不存在: %s", clean)
+	}
+	return clean, nil
+}
+
+// resolveFolderForMove 解析「移动目标分组」：比 resolveFolder 宽松一档 ——
+// 磁盘上**已存在的目录**（集合树里能看到、但可能缺 folder.yml 的分组，例如外部创建或
+// 手工建目录的场景）也算合法目标，此时按需补一个 folder.yml 让分组身份成立。
+// 为什么需要：树里显示得出来、拖进去却报「分组不存在」是不一致的行为。
+func (c *Collection) resolveFolderForMove(parent string) (string, error) {
+	clean, err := normalizeFolderPath(parent)
+	if err != nil {
+		return "", err
+	}
+	if clean == "" {
+		return "", nil
+	}
+	if _, ok := c.folderUID(clean); ok {
+		return clean, nil
+	}
+	if st, statErr := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(clean))); statErr == nil && st.IsDir() {
+		if err := c.ensureDir(clean); err != nil {
+			return "", err
+		}
+		return clean, nil
+	}
+	return "", fmt.Errorf("分组不存在: %s", clean)
+}
+
+// normalizeFolderPath 规范化分组路径："" / "." / "/" 归一为根（空串），并挡掉 ../ 与绝对路径。
+func normalizeFolderPath(parent string) (string, error) {
 	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(parent)))
 	if clean == "." || clean == "/" {
 		return "", nil
 	}
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", fmt.Errorf("非法的分组路径")
-	}
-	if _, ok := c.folderUID(clean); !ok {
-		return "", fmt.Errorf("分组不存在: %s", clean)
 	}
 	return clean, nil
 }
@@ -1177,10 +1248,8 @@ func (c *Collection) findDir(uid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for dir, u := range res.uidByDir {
-		if u == uid {
-			return dir, nil
-		}
+	if dir, ok := c.resolveFolderUID(res, uid); ok {
+		return dir, nil
 	}
 	return "", errNotFound
 }
