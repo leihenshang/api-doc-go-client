@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 工具栏：左侧集合切换 + 离线/本地徽章，右侧环境切换 + Ctrl+K 本地搜索入口（design-spec §2）。
+// 集合 / 环境 / 本地搜索这一组控件（design-spec §2）。
+// 2026-10-03 起并入标题栏（TitleBar 的默认插槽），不再独占一行 —— testid 沿用 toolbar.* 保持兼容。
 import { NIcon, NDropdown } from 'naive-ui'
 import {
   ChevronDownOutline,
@@ -76,8 +77,6 @@ function onMenu(key: string | number): void {
       </button>
     </n-dropdown>
 
-    <span class="sp" />
-
     <env-picker
       :envs="envs"
       :model-value="currentEnv"
@@ -94,15 +93,14 @@ function onMenu(key: string | number): void {
 </template>
 
 <style scoped>
+/* 嵌入标题栏：不再有自己的高度/边框/底色，由标题栏统一排版。
+   整组控件显式 no-drag —— 标题栏是可拖动区，不加会让点击集合/环境变成拖窗口。 */
 .toolbar {
-  height: var(--app-toolbar-h);
-  flex: 0 0 auto;
+  --wails-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
-  background: var(--app-panel);
-  border-bottom: 1px solid var(--app-border);
+  min-width: 0;
 }
 
 .coll {
@@ -138,10 +136,6 @@ function onMenu(key: string | number): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
-}
-
-.sp {
-  flex: 1 1 auto;
 }
 
 .search {

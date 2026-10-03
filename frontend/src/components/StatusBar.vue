@@ -16,9 +16,6 @@ const props = defineProps<{
 const emit = defineEmits<{ 'open-sync': [] }>()
 const { t } = useI18n()
 
-// 与 frontend/package.json 的 version 保持一致（此处不引 JSON 模块，避免额外构建配置）
-const VERSION = 'v0.0.1'
-
 /** 同步状态摘要（状态栏左侧）。 */
 const syncText = computed(() => {
   const s = props.sync
@@ -59,7 +56,6 @@ function clock(ms: number): string {
     <span v-else-if="(props.lastSavedAt ?? 0) > 0" class="save" data-testid="statusbar.saved">
       {{ t('status.savedAt', { t: clock(props.lastSavedAt ?? 0) }) }}
     </span>
-    <span class="txt">{{ VERSION }}</span>
   </footer>
 </template>
 
@@ -81,12 +77,6 @@ function clock(ms: number): string {
 
 .sp {
   flex: 1 1 auto;
-}
-
-.txt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .save {
