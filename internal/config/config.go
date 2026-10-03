@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -18,6 +20,12 @@ const (
 
 	// defaultRespSize 响应区默认占比（%）。
 	defaultRespSize = 44
+
+	// MCP 服务默认值：默认不启用（用户显式开），只监听本机。
+	defaultMCPAddr = "127.0.0.1"
+	defaultMCPPort = 8189
+	minMCPPort     = 1024
+	maxMCPPort     = 65535
 )
 
 // Settings 全局设置：请求级 settings 未覆盖时生效。
@@ -34,6 +42,22 @@ type Settings struct {
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
+	// MCP 客户端内嵌的 MCP 服务设置（供外部 AI 工具读写集合；见《MCP服务使用手册.md》）。
+	// 单独一个分组而不是塞进网络/本地 —— 它的生命周期与其它设置不同（要起停一个监听服务）。
+	MCP MCPConfig `json:"mcp"`
+}
+
+// MCPConfig 内嵌 MCP HTTP 服务的配置（客户端内起一个 streamable HTTP 服务）。
+type MCPConfig struct {
+	Enabled  bool   `json:"enabled"`  // 是否启用；关闭时不监听任何端口
+	Addr     string `json:"addr"`     // 监听地址：127.0.0.1（本机）| 0.0.0.0（跨主机/WSL/局域网）
+	Port     int    `json:"port"`     // 监听端口（1024–65535）
+	Token    string `json:"token"`    // Bearer 令牌；启用且为空时自动生成并落盘
+	ReadOnly bool   `json:"readOnly"` // 只读模式：不注册创建/修改/删除类工具（默认开，联网暴露时更安全）
+	// AllowOrigins 允许的浏览器来源（Origin 白名单，逗号分隔在界面里填）。
+	// 带 Origin 的请求必须命中白名单才放行 —— MCP 规范的 DNS rebinding 防护；
+	// 非浏览器客户端（Claude Desktop / cursor / 命令行）不带 Origin，不受影响。
+	AllowOrigins []string `json:"allowOrigins"`
 }
 
 const (
@@ -65,6 +89,12 @@ func Default() Settings {
 		ResponseLayout:  LayoutRight,
 		ResponseSize:    defaultRespSize,
 		Theme:           ThemeLight,
+		MCP: MCPConfig{
+			Enabled:  false,
+			Addr:     defaultMCPAddr,
+			Port:     defaultMCPPort,
+			ReadOnly: true, // 联网暴露时默认只读：AI 不能删请求/改集合
+		},
 	}
 }
 
@@ -98,7 +128,34 @@ func (s Settings) Normalize() Settings {
 	if s.Theme != ThemeDark {
 		s.Theme = ThemeLight
 	}
+	s.MCP = s.MCP.normalize(def.MCP)
 	return s
+}
+
+// normalize 归一化 MCP 分组：地址兜底、端口夹到合法区间、来源去空去重。
+func (m MCPConfig) normalize(def MCPConfig) MCPConfig {
+	if strings.TrimSpace(m.Addr) == "" {
+		m.Addr = def.Addr
+	}
+	// 只保留可用的监听地址：空/非法一律回落默认（0.0.0.0 与 :: 都算合法）
+	if a := strings.TrimSpace(m.Addr); a != "0.0.0.0" && a != "::" && net.ParseIP(a) == nil {
+		m.Addr = def.Addr
+	}
+	if m.Port < minMCPPort || m.Port > maxMCPPort {
+		m.Port = def.Port
+	}
+	var origins []string
+	seen := make(map[string]bool, len(m.AllowOrigins))
+	for _, o := range m.AllowOrigins {
+		o = strings.TrimSpace(o)
+		if o == "" || seen[o] {
+			continue
+		}
+		seen[o] = true
+		origins = append(origins, o)
+	}
+	m.AllowOrigins = origins // 空列表归一为 nil：否则 save/load 往返后 [] ≠ nil（DeepEqual 敏感）
+	return m
 }
 
 // Dir 客户端配置目录（config.json / cookies.json / history.jsonl 都放这里）。

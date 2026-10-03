@@ -306,6 +306,52 @@ export interface Settings {
    * 只在 Ctrl+S / 关闭页签 / 「保存所有」时写盘，编辑期间文件保持不动（页签上有未保存圆点）。
    */
   autoSave: boolean
+  /** 客户端内嵌的 MCP 服务设置（设置页「MCP 服务」分区） */
+  mcp: MCPConfig
+}
+
+/**
+ * 内嵌 MCP HTTP 服务设置（config.MCPConfig）。
+ * 启用后客户端自己起一个 streamable HTTP 服务，外部 AI 工具（Claude Desktop / cursor / WSL 侧）可读写集合。
+ */
+export interface MCPConfig {
+  /** 是否启用；关闭时不监听任何端口 */
+  enabled: boolean
+  /** 监听地址：127.0.0.1（本机）| 0.0.0.0（跨主机：WSL / 局域网） */
+  addr: string
+  /** 监听端口（1024–65535） */
+  port: number
+  /** Bearer 令牌；启用且为空时后端自动生成并落盘 */
+  token: string
+  /** 只读模式：不注册创建/修改/删除类工具（默认开，暴露到网络时更安全） */
+  readOnly: boolean
+  /** 允许的浏览器来源（Origin 白名单，逗号分隔填在界面里）；非浏览器客户端不受影响 */
+  allowOrigins: string[]
+}
+
+/** 内嵌 MCP 服务的运行状态（app.MCPStatus）。 */
+export interface MCPStatus {
+  enabled: boolean
+  running: boolean
+  addr: string
+  port: number
+  /** 端点 URL（运行中才有） */
+  url: string
+  /** 健康检查地址（运行中才有，免令牌） */
+  health: string
+  token: string
+  readOnly: boolean
+  origins: string[]
+  /** 项目根目录（当前集合的父目录） */
+  root: string
+  /** 可见项目数 */
+  projects: number
+  /** 监听非回环地址（跨主机 / WSL / 局域网） */
+  crossHost: boolean
+  /** 启动失败原因（端口占用等）；正常为空 */
+  error: string
+  /** 连接提示 */
+  hint: string
 }
 
 /** 一条发送历史（internal/history.Entry）。 */

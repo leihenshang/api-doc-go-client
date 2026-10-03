@@ -50,6 +50,44 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class MCPStatus {
+	    enabled: boolean;
+	    running: boolean;
+	    addr: string;
+	    port: number;
+	    url: string;
+	    health: string;
+	    token: string;
+	    readOnly: boolean;
+	    origins: string[];
+	    root: string;
+	    projects: number;
+	    crossHost: boolean;
+	    error: string;
+	    hint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.running = source["running"];
+	        this.addr = source["addr"];
+	        this.port = source["port"];
+	        this.url = source["url"];
+	        this.health = source["health"];
+	        this.token = source["token"];
+	        this.readOnly = source["readOnly"];
+	        this.origins = source["origins"];
+	        this.root = source["root"];
+	        this.projects = source["projects"];
+	        this.crossHost = source["crossHost"];
+	        this.error = source["error"];
+	        this.hint = source["hint"];
+	    }
+	}
 	export class ResolveResult {
 	    text: string;
 	    missing: string[];
@@ -732,6 +770,28 @@ export namespace collection {
 
 export namespace config {
 	
+	export class MCPConfig {
+	    enabled: boolean;
+	    addr: string;
+	    port: number;
+	    token: string;
+	    readOnly: boolean;
+	    allowOrigins: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.addr = source["addr"];
+	        this.port = source["port"];
+	        this.token = source["token"];
+	        this.readOnly = source["readOnly"];
+	        this.allowOrigins = source["allowOrigins"];
+	    }
+	}
 	export class Settings {
 	    insecureSsl: boolean;
 	    timeoutSec: number;
@@ -745,6 +805,7 @@ export namespace config {
 	    theme: string;
 	    proxyUrl: string;
 	    autoSave: boolean;
+	    mcp: MCPConfig;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -764,7 +825,26 @@ export namespace config {
 	        this.theme = source["theme"];
 	        this.proxyUrl = source["proxyUrl"];
 	        this.autoSave = source["autoSave"];
+	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

@@ -57,6 +57,10 @@ type App struct {
 	syncStop chan struct{}
 	// protoCache gRPC 定义编译缓存：显式失效（用户导入/更新定义时 Invalidate），不做文件监听
 	protoCache *proto.Cache
+	// mcpBackend 内嵌 MCP HTTP 服务实现（由 main/devserver 注入，见 internal/mcp/embed.go）
+	mcpBackend MCPBackend
+	// mcpStatus 内嵌 MCP 服务最近一次状态（设置页展示；避免前端自己拼）
+	mcpStatus *MCPStatus
 }
 
 // inflightSend 一次在途发送的取消句柄。
@@ -110,7 +114,13 @@ const (
 
 // startup Wails 生命周期。
 // Startup Wails 生命周期钩子（必须导出：OnStartup 引用跨包方法）。
-func (a *App) Startup(ctx context.Context) { a.ctx = ctx }
+func (a *App) Startup(ctx context.Context) {
+	a.ctx = ctx
+	// 设置里启用了 MCP 就随应用起服务；此时通常还没打开集合，状态会提示先打开集合
+	if a.settings.MCP.Enabled {
+		a.applyMCP("")
+	}
+}
 
 // DomReady Wails 生命周期钩子：窗口与 WebView 就绪、首帧渲染前，把初始几何收敛到屏幕内再显示窗口。
 //
@@ -217,6 +227,10 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	// 换集合即丢弃编译缓存：缓存按绝对路径存结果，跨集合复用没有意义（也避免同路径陈旧结果）
 	a.protoCache.Invalidate()
 	go a.watchLoop(c)
+	// MCP 服务的项目根是「集合的父目录」，换集合后要重建才能看到新项目
+	if a.settings.MCP.Enabled {
+		a.applyMCP("")
+	}
 	return c.Info()
 }
 
@@ -1215,6 +1229,8 @@ func (a *App) SaveSettings(s *config.Settings) error {
 		a.jar = nil
 	}
 	a.mu.Unlock()
+	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里）
+	a.applyMCP("")
 	return nil
 }
 

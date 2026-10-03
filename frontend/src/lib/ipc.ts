@@ -15,6 +15,7 @@ import type {
   HistoryEntry,
   ImportSummary,
   IndexNode,
+  MCPStatus,
   MockStatus,
   RequestDoc,
   ResolveResult,
@@ -215,6 +216,9 @@ export const api = {
     call<ResolveResult>('ResolveText', text, envName).then(normalizeResolve),
   getSettings: () => call<Settings>('GetSettings'),
   saveSettings: (s: Settings) => call<null>('SaveSettings', s),
+  mcpStatus: () => call<MCPStatus>('MCPStatusText'),
+  applyMCPSettings: () => call<MCPStatus>('ApplyMCPSettings'),
+  regenerateMCPToken: () => call<MCPStatus>('RegenerateMCPToken'),
   listHistory: (limit: number) => call<HistoryEntry[] | null>('ListHistory', limit).then((v) => v ?? []),
   clearHistory: () => call<null>('ClearHistory'),
   replayHistory: (index: number, envName: string) =>
