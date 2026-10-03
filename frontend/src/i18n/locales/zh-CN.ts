@@ -260,10 +260,7 @@ export default {
     confirmDelFolder: '确认删除分组「{name}」？',
     confirmDelRequest: '确认删除请求「{name}」？删除后可在 .trash 找回。',
     externalChange: '检测到外部改动：{n} 个页签有未保存编辑，已保留编辑未覆盖；可手动 ⟳ 重载',
-    dragHint: '拖动中：放到分组上改其上级目录，拖到顶部集合名可移回根目录',
     dropRoot: '放到此处移回根目录',
-    moved: '已把「{name}」移动到 {dest}',
-    root: '根目录',
   },
   json: {
     invalid: '响应不是合法 JSON，已按原始文本展示',

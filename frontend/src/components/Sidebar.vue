@@ -373,7 +373,7 @@ async function performMove(node: TreeNode, destPath: string): Promise<void> {
     }
     // 已打开的页签要同步路径（面包屑与后续保存都靠它）
     if (node.type === 'request') tabs.syncPath(node.uid, destPath)
-    message.success(t('tree.moved', { name: node.name, dest: destPath || t('tree.root') }))
+    // 成功不再弹提示：落点横线 + 树即时刷新已经把结果说清楚了，多一条 toast 只是噪音
   } catch (e) {
     fail(e)
   }
@@ -487,7 +487,6 @@ watch(
     </div>
 
     <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">
-      <p v-if="dragging" class="drag-hint" data-testid="tree.dragHint">{{ t('tree.dragHint') }}</p>
       <!-- 集合根行：既是标题，也是「移回根目录」的放置目标（拖动时高亮） -->
       <div
         class="row root"
@@ -720,22 +719,6 @@ watch(
 }
 
 /* ---- 拖动调整上级目录 ---- */
-/* 拖动提示条必须**浮在树上**、不占布局：否则它一出现就把所有行往下推，
-   指针下的目标行会跟着变，用户就会放错地方（实测过）。pointer-events: none 保证它不吃命中。 */
-.drag-hint {
-  position: absolute;
-  top: 2px;
-  left: 6px;
-  right: 6px;
-  z-index: 6;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
-  font-size: 11.5px;
-  box-shadow: var(--app-shadow-sm);
-  pointer-events: none;
-}
 
 .row.dragging {
   opacity: 0.45;
@@ -747,14 +730,41 @@ watch(
   cursor: grabbing;
 }
 
-/* 合法放置目标：左侧强调条 + 淡底 */
+/* 合法放置目标：左强调条 + 淡底，并在**底边拉一条横线**（最直观地指出会落到哪一行）。
+   用伪元素画线而不是 border：border 会改变行高，把指针下的行推走。 */
 .row.drop-ok {
+  position: relative;
   box-shadow: inset 2px 0 0 var(--app-accent);
   background: var(--app-accent-tint);
+  border-radius: 4px;
+}
+
+.row.drop-ok::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--app-accent);
+  border-radius: 2px;
+}
+
+/* 非法目标也给一条红色底横线：位置照样看得见，但用颜色说明「这里不行」 */
+.row.drop-bad::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--app-danger);
+  border-radius: 2px;
 }
 
 /* 非法目标（自己/自己的后代）：淡红底，不给 accent 反馈 */
 .row.drop-bad {
+  position: relative;
   background: var(--app-danger-tint);
   cursor: not-allowed;
 }
