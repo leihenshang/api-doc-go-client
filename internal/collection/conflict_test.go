@@ -88,3 +88,24 @@ func TestSaveRequestUpdatesIndexHash(t *testing.T) {
 		t.Fatalf("再次保存后索引 hash 应更新")
 	}
 }
+
+func TestHashMatchesPrefix(t *testing.T) {
+	full := "fa837cf3dfc9abcdef0123456789abcdef0123456789abcdef0123456789"
+	cases := []struct {
+		name, actual, expect string
+		want                 bool
+	}{
+		{"全等", full, full, true},
+		{"12 位前缀（界面/MCP 展示的就是它）", full, full[:12], true},
+		{"8 位前缀（下限）", full, full[:8], true},
+		{"太短的前缀视为不可信", full, full[:4], false},
+		{"前缀不匹配", full, "0123456789abcdef", false},
+		{"空期望=不检查", full, "", true},
+		{"比实际更长", full, full + "00", false},
+	}
+	for _, c := range cases {
+		if got := hashMatches(c.actual, c.expect); got != c.want {
+			t.Errorf("%s: hashMatches(%.12s…, %.12s…)=%v want %v", c.name, c.actual, c.expect, got, c.want)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -14,18 +15,19 @@ func writeFile(path, content string) error {
 }
 
 func TestLoadWithoutFileReturnsDefault(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	got, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got != Default() {
+	// Settings 含 AllowOrigins slice，不能用 == 比较（结构体含不可比较字段）
+	if !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("缺文件时应返回默认值，实际 %+v", got)
 	}
 }
 
 func TestSaveThenLoadRoundTrip(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	s := Default()
 	s.InsecureSSL = true
 	s.TimeoutSec = 5
@@ -39,7 +41,7 @@ func TestSaveThenLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got != s {
+	if !reflect.DeepEqual(got, s) {
 		t.Fatalf("round-trip 不一致:\n want %+v\n got  %+v", s, got)
 	}
 }
@@ -91,4 +93,14 @@ func TestLoadMergesMissingFieldsWithDefault(t *testing.T) {
 	if !got.InsecureSSL || !got.FollowRedirects || got.TimeoutSec != 30 {
 		t.Fatalf("缺失字段未回落默认: %+v", got)
 	}
+}
+
+// isolateConfigDir 把「用户配置目录」指向临时目录，避免读到/写到真实配置。
+// Windows 上 os.UserConfigDir() 只看 %AppData%（忽略 XDG_CONFIG_HOME），
+// Linux/macOS 反而看 XDG_CONFIG_HOME —— 两个都设，保证跨平台隔离一致。
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
 }

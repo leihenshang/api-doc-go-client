@@ -17,7 +17,7 @@ func mustURL(t *testing.T, raw string) *url.URL {
 }
 
 func TestSetCookiesAndHostScoping(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	jar, err := New(true)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -40,7 +40,7 @@ func TestSetCookiesAndHostScoping(t *testing.T) {
 }
 
 func TestPersistAndReload(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	u := mustURL(t, "https://api.example.com/")
 	jar, err := New(true)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestPersistAndReload(t *testing.T) {
 }
 
 func TestDeleteAndExpire(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	u := mustURL(t, "https://api.example.com/")
 	jar, err := New(false)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestDeleteAndExpire(t *testing.T) {
 }
 
 func TestClearAndList(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	u := mustURL(t, "https://api.example.com/")
 	jar, err := New(true)
 	if err != nil {
@@ -93,4 +93,14 @@ func TestClearAndList(t *testing.T) {
 	if list := jar.List(); len(list) != 0 {
 		t.Fatalf("清空后仍有余留: %+v", list)
 	}
+}
+
+// isolateConfigDir 把「用户配置目录」指向临时目录，避免读到/写到真实配置。
+// Windows 上 os.UserConfigDir() 只看 %AppData%（忽略 XDG_CONFIG_HOME），
+// Linux/macOS 反而看 XDG_CONFIG_HOME —— 两个都设，保证跨平台隔离一致。
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
 }

@@ -289,6 +289,12 @@ func (c *Collection) CloseIndex() {
 // manifestVersion 集合清单的 opencollection 版本号。
 const manifestVersion = "1.0.0"
 
+// EnsureManifest 落一份 opencollection.yml（已存在则按当前内存值重写）。
+//
+// 供「创建项目」这类先建目录、后写内容的场景用：collection.Open 只在目录不存在时
+// 建目录，manifest 要等第一次写请求时才生成；提前落盘能让新项目立刻出现在列表里。
+func (c *Collection) EnsureManifest() error { return c.writeManifest() }
+
 func (c *Collection) writeManifest() error {
 	m := &manifest{}
 	m.Info.Name, m.Meta.UID = c.Name, c.UID
@@ -583,13 +589,15 @@ func (c *Collection) scan() (*scanResult, error) {
 			}
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".yml" && ext != ".yaml" {
-			return nil
-		}
 		dir := filepath.ToSlash(filepath.Dir(rel))
 		if dir == "." {
 			dir = ""
+		}
+		// 扩展名白名单：yml/yaml 是请求与环境文件；docs/*.md 是文档条目（B13）——
+		// 之前这里把 .md 一并挡掉，导致 ListDocs 永远扫不到任何文档（含客户端自己创建的）。
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".yml" && ext != ".yaml" && !(ext == ".md" && dir == docsDir) {
+			return nil
 		}
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
@@ -1286,7 +1294,7 @@ func (c *Collection) SaveRequest(r *Request) error {
 	full := filepath.Join(c.Dir, filepath.FromSlash(clean))
 	// 冲突检测：客户端带 hash 来时，磁盘内容必须还是它读到的那份，否则拒写（不覆盖别人的改动）
 	if r.ExpectHash != "" {
-		if h := fileHash(full); h != "" && h != r.ExpectHash {
+		if h := fileHash(full); h != "" && !hashMatches(h, r.ExpectHash) {
 			return fmt.Errorf("%s 磁盘上的文件已变化（可能被其它编辑器、另一个客户端窗口或同步改过），"+
 				"请「重新加载」后合并，或「另存为副本」再保存", conflictMarker)
 		}
@@ -1320,6 +1328,26 @@ func (c *Collection) SaveRequest(r *Request) error {
 	return nil
 }
 
+// hashMatches 比对「期望哈希」与磁盘实际哈希，支持 git 风格前缀（minHashPrefix 个字符以上即可）。
+//
+// 为什么允许前缀：界面与 MCP 工具的输出里 hash 只展示前 12 位（64 位全串太长、噪音大），
+// 若这里只做全等比较，调用方把展示出来的前缀原样传回来就会永远「冲突」，保护形同虚设。
+func hashMatches(actual, expect string) bool {
+	if expect == "" {
+		return true
+	}
+	if len(expect) >= len(actual) {
+		return actual == expect
+	}
+	if len(expect) < minHashPrefix {
+		return false // 前缀太短容易误判成「没冲突」，宁可直接报冲突
+	}
+	return strings.HasPrefix(actual, expect)
+}
+
+// minHashPrefix 允许的最短哈希前缀长度。
+const minHashPrefix = 8
+
 // refreshIndexNode 写盘后把索引里的 hash/mtime 更新成新值。
 //
 // 必要性：文件监听会忽略「自己刚写的路径」（ignoreWrite），所以索引不会因为我们自己的保存而更新；
@@ -1328,9 +1356,10 @@ func (c *Collection) refreshIndexNode(r *Request, full string, data []byte) {
 	if c.idx == nil {
 		return
 	}
+	// 索引里还没有（新创建的请求）也要写进去，否则它要等下次全量重建才能被搜索到
 	n, ok, err := c.idx.Get(r.UID)
 	if err != nil || !ok {
-		return
+		n = index.Node{UID: r.UID, Type: "request", Path: filepath.ToSlash(r.Path)}
 	}
 	n.Hash = sha256Hex(data)
 	if st, serr := os.Stat(full); serr == nil {

@@ -6,7 +6,7 @@ import (
 )
 
 func TestAppendTruncateAndList(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	for i := 0; i < 5; i++ {
 		e := Entry{Time: int64(i), URL: fmt.Sprintf("/u%d", i), Method: "GET", Status: 200}
 		if err := Append(e, 3); err != nil {
@@ -30,7 +30,7 @@ func TestAppendTruncateAndList(t *testing.T) {
 }
 
 func TestEntriesSurviveFailureAndClear(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfigDir(t)
 	if err := Append(Entry{Method: "GET", URL: "http://x", Error: "连接失败"}, 10); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
@@ -48,4 +48,13 @@ func TestEntriesSurviveFailureAndClear(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("清空失败: %+v", items)
 	}
+}
+
+// isolateConfigDir 把「用户配置目录」指向临时目录，避免读到/写到真实配置与真实历史。
+// Windows 上 os.UserConfigDir() 只看 %AppData%（忽略 XDG_CONFIG_HOME），Linux/macOS 反之 —— 两个都设。
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
 }

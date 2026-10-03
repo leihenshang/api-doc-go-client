@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useSettingsStore } from '@/stores/settings'
-import type { Settings } from '@/types'
+import type { MCPStatus, Settings } from '@/types'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [v: boolean]; saved: [] }>()
@@ -17,6 +17,60 @@ const form = ref<Settings>({ ...settings.form })
 const error = ref('')
 const notice = ref('')
 const saving = ref(false)
+
+/** 内嵌 MCP 服务的运行状态：打开设置时拉一次，保存后再拉一次。 */
+const mcp = ref<MCPStatus | null>(null)
+const mcpBusy = ref(false)
+
+async function loadMCP(): Promise<void> {
+  try {
+    const st = await api.mcpStatus()
+    mcp.value = st
+    // 后端在「启用但令牌为空」时会自动生成并落盘，把这个令牌回填到表单，
+    // 否则输入框会一直显示空，用户以为没生成（store 里存的仍是提交时的空值）。
+    if (st.token && !form.value.mcp.token) form.value.mcp.token = st.token
+  } catch {
+    mcp.value = null // 后端不支持（如纯浏览器态未注入）时静默降级
+  }
+}
+
+/** 来源白名单在界面上是逗号分隔的字符串，存的是数组。 */
+const originsText = computed({
+  get: () => (form.value.mcp?.allowOrigins ?? []).join(', '),
+  set: (v: string) => {
+    form.value.mcp.allowOrigins = v
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+  },
+})
+
+/** 换令牌：后端落盘 + 重启服务，随后刷新状态。 */
+async function regenerateToken(): Promise<void> {
+  mcpBusy.value = true
+  error.value = ''
+  try {
+    form.value.mcp.token = (await api.regenerateMCPToken()).token
+    mcp.value = await api.mcpStatus()
+    notice.value = t('settings.mcpTokenRotated')
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+/** 复制连接配置（含 URL 与令牌），方便直接粘到 AI 工具的 MCP 配置里。 */
+async function copyEndpoint(): Promise<void> {
+  if (!mcp.value?.url) return
+  const text = `${mcp.value.url}\nAuthorization: Bearer ${mcp.value.token}`
+  try {
+    await navigator.clipboard.writeText(text)
+    notice.value = t('settings.mcpCopied')
+  } catch {
+    error.value = t('settings.mcpCopyFailed')
+  }
+}
 
 const langOptions = [
   { label: '简体中文', value: 'zh-CN' },
@@ -36,6 +90,11 @@ const themeOptions = computed(() => [
   { label: t('settings.themeLight'), value: ThemeLight },
   { label: t('settings.themeDark'), value: ThemeDark },
 ])
+// 监听地址只给三种：回环（默认）/ 全网卡（跨主机）/ 指定局域网 IP
+const mcpAddrOptions = computed(() => [
+  { label: t('settings.mcpAddrLocal'), value: '127.0.0.1' },
+  { label: t('settings.mcpAddrAll'), value: '0.0.0.0' },
+])
 
 watch(
   () => props.show,
@@ -43,7 +102,9 @@ watch(
     if (!v) return
     error.value = ''
     notice.value = ''
-    form.value = { ...settings.form }
+    // mcp 是嵌套对象：必须逐层拷贝，否则表单里的编辑会直接写进 store（取消也回不去）
+    form.value = { ...settings.form, mcp: { ...settings.form.mcp, allowOrigins: [...(settings.form.mcp?.allowOrigins ?? [])] } }
+    void loadMCP()
   },
 )
 
@@ -69,6 +130,8 @@ async function save(): Promise<void> {
   error.value = ''
   try {
     await settings.save({ ...form.value })
+    // MCP 分区改动要重启内嵌服务，后端已自动应用，这里拉最新状态回显
+    await loadMCP()
     emit('saved')
     emit('update:show', false)
   } catch (e) {
@@ -206,6 +269,90 @@ function close(): void {
         <span class="lbl">{{ t('settings.historyLimit') }}</span>
         <n-input-number v-model:value="form.historyLimit" size="small" :min="10" :max="5000" class="num" />
       </div>
+
+      <!-- MCP 服务：单独一个分区（不混进「网络」）。生命周期与其它设置不同 ——
+           它要起停一个真实的监听端口，保存后由后端立即应用（地址/端口/令牌/只读/开关）。 -->
+      <div class="sec">{{ t('settings.mcp') }}</div>
+      <div class="row">
+        <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
+          {{ t('settings.mcpEnabled') }}
+        </n-checkbox>
+      </div>
+      <p class="hint muted">{{ t('settings.mcpEnabledHint') }}</p>
+      <div class="row">
+        <span class="lbl">{{ t('settings.mcpAddr') }}</span>
+        <n-select
+          v-model:value="form.mcp.addr"
+          :options="mcpAddrOptions"
+          size="small"
+          class="num"
+          data-testid="settings.mcpAddr"
+        />
+        <n-input-number
+          v-model:value="form.mcp.port"
+          size="small"
+          :min="1024"
+          :max="65535"
+          :disabled="!form.mcp.enabled"
+          data-testid="settings.mcpPort"
+        />
+      </div>
+      <p class="hint muted">{{ t('settings.mcpAddrHint') }}</p>
+      <div class="row">
+        <n-checkbox
+          v-model:checked="form.mcp.readOnly"
+          :disabled="!form.mcp.enabled"
+          data-testid="settings.mcpReadOnly"
+        >
+          {{ t('settings.mcpReadOnly') }}
+        </n-checkbox>
+      </div>
+      <p class="hint muted">{{ t('settings.mcpReadOnlyHint') }}</p>
+      <div class="row">
+        <span class="lbl">{{ t('settings.mcpOrigins') }}</span>
+        <n-input
+          v-model:value="originsText"
+          size="small"
+          class="grow"
+          :disabled="!form.mcp.enabled"
+          data-testid="settings.mcpOrigins"
+          :placeholder="t('settings.mcpOriginsPlaceholder')"
+        />
+      </div>
+      <div class="row">
+        <span class="lbl">{{ t('settings.mcpToken') }}</span>
+        <n-input
+          :value="form.mcp.token"
+          size="small"
+          class="grow mono"
+          readonly
+          data-testid="settings.mcpToken"
+          :placeholder="t('settings.mcpTokenPlaceholder')"
+        />
+        <n-button
+          size="tiny"
+          tertiary
+          :disabled="!form.mcp.enabled"
+          :loading="mcpBusy"
+          data-testid="settings.mcpTokenRegen"
+          @click="regenerateToken"
+        >
+          {{ t('settings.mcpTokenRegen') }}
+        </n-button>
+      </div>
+      <p v-if="mcp?.running" class="ok" data-testid="settings.mcpRunning">
+        {{ t('settings.mcpRunning', { url: mcp.url, projects: mcp.projects }) }}
+      </p>
+      <p v-else-if="mcp?.error" class="err" data-testid="settings.mcpError">{{ mcp.error }}</p>
+      <div v-if="mcp?.running" class="row">
+        <span class="lbl">{{ t('settings.mcpEndpoint') }}</span>
+        <span class="val mono">{{ mcp.url }}</span>
+        <span class="sp" />
+        <n-button size="tiny" tertiary data-testid="settings.mcpCopy" @click="copyEndpoint">
+          {{ t('settings.mcpCopy') }}
+        </n-button>
+      </div>
+      <p v-if="mcp?.hint" class="hint muted">{{ mcp.hint }}</p>
     </div>
 
     <template #footer>
@@ -246,6 +393,25 @@ function close(): void {
 
 .num {
   width: 130px;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.val {
+  font-size: 12px;
+  color: var(--app-text-2);
+  word-break: break-all;
+}
+
+.muted {
+  color: var(--app-muted);
+}
+
+.mono {
+  font-family: var(--app-mono);
 }
 
 .hint {

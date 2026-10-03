@@ -3,8 +3,10 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"api-doc-go-client/internal/app"
+	mcpsrv "api-doc-go-client/internal/mcp"
 	"api-doc-go-client/internal/platform"
 
 	"github.com/wailsapp/wails/v2"
@@ -22,6 +24,9 @@ func main() {
 	// 须在 wails.Run（GTK 初始化）之前：无会话总线时改用内存 backend，避免文件对话框刷 dconf 警告
 	platform.EnsureGSettingsBackend()
 	core := app.NewApp()
+	// 内嵌 MCP 服务：实现放在 internal/mcp（那边已经要用 App 的集合运行时，
+	// 反向依赖会成环），这里注入；设置页「MCP 服务」分区靠它启停。
+	core.SetMCPBackend(mcpsrv.NewBackend(log.New(os.Stderr, "mcp ", log.LstdFlags)))
 	err := wails.Run(&options.App{
 		Title: "api-doc-go",
 		// 初始尺寸只给「安全下限」：真正尺寸在 DomReady 里按屏幕可用范围决定（见 app.DomReady）——

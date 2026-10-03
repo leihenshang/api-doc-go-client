@@ -19,6 +19,8 @@ const DEFAULTS: Settings = {
   theme: ThemeLight,
   proxyUrl: '',
   autoSave: false,
+  // 内嵌 MCP 服务默认不启用、只监听本机、只读（与 Go 侧 config.Default() 一致）
+  mcp: { enabled: false, addr: '127.0.0.1', port: 8189, token: '', readOnly: true, allowOrigins: [] },
 }
 
 export const useSettingsStore = defineStore('settings', {
