@@ -6,7 +6,6 @@ import { NIcon } from 'naive-ui'
 import { ChevronDownOutline, CopyOutline, RefreshOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import SaveDropdown from '@/components/SaveDropdown.vue'
-import type { VarScope } from '@/lib/saveVars'
 
 const view = defineModel<'pretty' | 'raw'>('view', { required: true })
 const wrap = defineModel<boolean>('wrap', { required: true })
@@ -14,7 +13,6 @@ const wrap = defineModel<boolean>('wrap', { required: true })
 const props = defineProps<{
   isJson: boolean
   copied: boolean
-  scope: VarScope
   canSaveExample: boolean
 }>()
 const emit = defineEmits<{
@@ -22,10 +20,7 @@ const emit = defineEmits<{
   'collapse-all': []
   'update-fields': []
   'copy-body': []
-  'update:scope': [v: VarScope]
   'save-file': []
-  'save-all-vars': []
-  'save-selected-var': []
   'save-example': []
 }>()
 const { t } = useI18n()
@@ -99,12 +94,8 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
         {{ copied ? t('common.copied') : t('resp.copyBody') }}
       </button>
       <save-dropdown
-        :scope="props.scope"
         :can-save-example="props.canSaveExample"
-        @update:scope="emit('update:scope', $event)"
         @save-file="emit('save-file')"
-        @save-all-vars="emit('save-all-vars')"
-        @save-selected-var="emit('save-selected-var')"
         @save-example="emit('save-example')"
       />
     </div>

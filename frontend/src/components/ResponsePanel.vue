@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 响应面板（response-panel design-spec §3）：状态栏 → 标签栏 → 操作工具条 → 内容区。
-// 保存▾ 菜单（§4）：保存响应体为文件 / 保存全部字段为变量 / 保存选中值为变量（+ 保存响应示例，见有意差异），
-// 底部「作用域」chips（集合/环境/全局）决定变量落点（映射见 lib/saveVars.ts）。
+// 保存▾ 菜单（§4）只保留两个落盘动作：保存响应示例 / 保存响应体为文件（.json），
+// 「保存全部字段为变量 / 保存选中值为变量」与「作用域」chips 已下线（有意差异）；
+// 变量入口只剩字段表的「变量书签」，落点固定为当前环境（映射见 lib/saveVars.ts）。
 import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
 import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
@@ -13,20 +14,21 @@ import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { extractFields, loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
-import { deriveVarName, removeVar, saveVars, scopeVarNames, VAR_NAME_RE, type VarEntry, type VarScope } from '@/lib/saveVars'
+import { loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
+import { deriveVarName, removeVar, saveVars, scopeVarNames, type VarScope } from '@/lib/saveVars'
 import type { Tab } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
 
 const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
 
+/** 变量书签的落点：作用域 chips 下线后固定为「环境」。 */
+const VAR_SCOPE: VarScope = 'env'
+
 const view = ref<'pretty' | 'raw'>('pretty')
 const wrap = ref(true)
 const seg = ref<'body' | 'headers' | 'trailers' | 'fields'>('body')
-const scope = ref<VarScope>('env')
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
-const inlineFieldsEl = ref<HTMLElement | null>(null)
 
 const fields = ref<FieldRow[]>([])
 const examples = ref<ResponseExample[]>([])
@@ -34,9 +36,6 @@ const viewingUid = ref('') // 非空 = 正在回看已保存的示例
 const showSave = ref(false)
 const saveName = ref('')
 const copied = ref(false)
-const showVar = ref(false) // 保存选中值为变量弹窗
-const varName = ref('')
-const varValue = ref('')
 
 // 仅在选中了具体示例时才算"在看示例"：uid 为空/缺失一律视为本次响应，防止下拉与提示条状态错位
 const example = computed(() =>
@@ -134,13 +133,8 @@ const exampleOptions = computed(() => [
   ...examples.value.filter((e) => !!e.uid).map((e) => ({ label: e.name, value: e.uid })),
 ])
 
-const scopeLabel = computed(
-  () =>
-    ({ collection: t('resp.scopeCollection'), env: t('resp.scopeEnv'), global: t('resp.scopeGlobal') })[scope.value],
-)
-
-/** 当前作用域下已保存为变量的变量名（书签判定依据）。 */
-const scopeNames = computed(() => scopeVarNames(scope.value, props.tab))
+/** 书签判定依据：当前环境里已存在的变量名。 */
+const scopeNames = computed(() => scopeVarNames(VAR_SCOPE, props.tab))
 /** 已书签的字段路径集合（供字段表点亮）。 */
 const bookmarks = computed(
   () => new Set(fields.value.filter((f) => scopeNames.value.has(deriveVarName(f.path))).map((f) => f.path)),
@@ -176,6 +170,7 @@ async function reloadExamples(): Promise<void> {
 }
 
 /** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段与含义），停留在当前页签。
+ *  字段表只存在于「响应字段」页签（响应体下方不再挂表），所以提示里带上页签名，点了不会「没反应」。
  *  任何失败只提示，不允许抛错中断渲染（否则面板内容与下拉会整体卡死）。 */
 function updateFields(): void {
   try {
@@ -186,9 +181,6 @@ function updateFields(): void {
       message.success(t('resp.fieldsAdded', { n: added }))
     } else {
       message.info(t('resp.fieldsNoChange'))
-    }
-    if (seg.value === 'body') {
-      void nextTick(() => inlineFieldsEl.value?.scrollIntoView({ block: 'nearest' }))
     }
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -305,56 +297,13 @@ async function saveBody(): Promise<void> {
   }
 }
 
-/** 统一变量写入 + 提示；无环境等前置条件不满足时给引导。 */
-async function applyVars(entries: VarEntry[]): Promise<void> {
-  if (!entries.length) {
-    message.info(t('resp.varNoFields'))
-    return
-  }
-  try {
-    await saveVars(scope.value, props.tab, entries)
-    message.success(t('resp.varsSaved', { n: entries.length, scope: scopeLabel.value }))
-  } catch (e) {
-    if (e instanceof Error && e.message === 'no-env') message.warning(t('resp.varNoEnv'))
-    else message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-/** 保存全部字段为变量：对当前响应体的叶子字段按路径派生变量名。 */
-async function saveAllVars(): Promise<void> {
-  const rows = extractFields(body.value).filter((r) => r.type !== 'array' && r.type !== 'object')
-  await applyVars(rows.map((r) => ({ name: deriveVarName(r.path), value: r.value })))
-}
-
-/** 保存选中值为变量：取面板内当前文本选区，弹窗确认变量名。 */
-function openVarModal(): void {
-  const sel = window.getSelection()?.toString() ?? ''
-  if (!sel.trim()) {
-    message.info(t('resp.selectFirst'))
-    return
-  }
-  varValue.value = sel
-  const token = sel.trim()
-  varName.value = VAR_NAME_RE.test(token) && token.length <= 60 ? token : ''
-  showVar.value = true
-}
-
-async function submitVar(): Promise<void> {
-  const name = varName.value.trim()
-  if (!VAR_NAME_RE.test(name)) {
-    message.warning(t('resp.varNameInvalid'))
-    return
-  }
-  showVar.value = false
-  await applyVars([{ name, value: varValue.value }])
-}
-
-/** 字段行「变量书签」：已书签 → 删变量；未书签 → 按当前作用域保存字段值。 */
+/** 字段行「变量书签」：已书签 → 删变量；未书签 → 存成当前环境的变量。
+ *  「保存 ▾」里的变量入口与作用域 chips 已下线，变量落点固定为当前环境（映射见 lib/saveVars.ts）。 */
 async function toggleBookmark(path: string): Promise<void> {
   const name = deriveVarName(path)
   try {
     if (scopeNames.value.has(name)) {
-      await removeVar(scope.value, props.tab, name)
+      await removeVar(VAR_SCOPE, props.tab, name)
       message.success(t('resp.varRemoved', { name }))
       return
     }
@@ -364,8 +313,8 @@ async function toggleBookmark(path: string): Promise<void> {
       message.info(t('resp.varBookmarkLeaf'))
       return
     }
-    await saveVars(scope.value, props.tab, [{ name, value: row.value }])
-    message.success(t('resp.varSaved', { name, scope: scopeLabel.value }))
+    await saveVars(VAR_SCOPE, props.tab, [{ name, value: row.value }])
+    message.success(t('resp.varSaved', { name, scope: t('resp.scopeEnv') }))
   } catch (e) {
     if (e instanceof Error && e.message === 'no-env') message.warning(t('resp.varNoEnv'))
     else message.error(e instanceof Error ? e.message : String(e))
@@ -455,16 +404,12 @@ async function toggleBookmark(path: string): Promise<void> {
         v-model:wrap="wrap"
         :is-json="isJson"
         :copied="copied"
-        :scope="scope"
         :can-save-example="!example && !!tab.response"
         @expand-all="jv?.expandAll()"
         @collapse-all="jv?.collapseAll()"
         @update-fields="updateFields"
         @copy-body="copyBody"
-        @update:scope="scope = $event"
         @save-file="saveBody"
-        @save-all-vars="saveAllVars"
-        @save-selected-var="openVarModal"
         @save-example="openSave"
       />
 
@@ -492,18 +437,6 @@ async function toggleBookmark(path: string): Promise<void> {
           <div v-if="display.binary" class="binhint">{{ t('resp.binary') }}</div>
           <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
           <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
-          <!-- 字段表就地展示在响应体下方：点「更新响应字段」后响应体不消失、字段紧跟其后 -->
-          <div v-if="fields.length" ref="inlineFieldsEl" class="inline-fields">
-            <response-fields
-              :rows="fields"
-              :bookmarks="bookmarks"
-              @meaning="setMeaning"
-              @bookmark="toggleBookmark"
-              @remove="removeField"
-              @remove-many="removeMany"
-              @clear="clearFields"
-            />
-          </div>
         </template>
         <div v-else-if="seg === 'headers'" class="hlist">
           <div v-for="h in display.headers" :key="h.name" class="hrow mono" data-testid="resp.headerRow">
@@ -561,31 +494,6 @@ async function toggleBookmark(path: string): Promise<void> {
         <div class="modal-ft">
           <n-button size="small" @click="showSave = false">{{ t('common.cancel') }}</n-button>
           <n-button size="small" type="primary" :disabled="!saveName.trim()" @click="submitSave">{{ t('common.save') }}</n-button>
-        </div>
-      </template>
-    </n-modal>
-
-    <!-- 保存选中值为变量：变量名 + 值预览 + 当前作用域 -->
-    <n-modal v-model:show="showVar" preset="card" :title="t('resp.saveSelectedVar')" style="width: 440px">
-      <div class="save-form">
-        <span class="flabel">{{ t('resp.varName') }}</span>
-        <n-input
-          v-model:value="varName"
-          size="small"
-          data-testid="resp.varNameInput"
-          :placeholder="t('resp.varNamePlaceholder')"
-          @keyup.enter="submitVar"
-        />
-        <span class="flabel">{{ t('resp.value') }}</span>
-        <pre class="var-preview mono" data-testid="resp.varValue">{{ varValue }}</pre>
-        <p class="fhint">{{ t('resp.scope') }}：{{ scopeLabel }}</p>
-      </div>
-      <template #footer>
-        <div class="modal-ft">
-          <n-button size="small" @click="showVar = false">{{ t('common.cancel') }}</n-button>
-          <n-button size="small" type="primary" :disabled="!VAR_NAME_RE.test(varName.trim())" @click="submitVar">
-            {{ t('common.save') }}
-          </n-button>
         </div>
       </template>
     </n-modal>
@@ -854,10 +762,6 @@ async function toggleBookmark(path: string): Promise<void> {
   word-break: normal;
 }
 
-.inline-fields {
-  margin-top: 10px;
-}
-
 .hlist {
   display: flex;
   flex-direction: column;
@@ -948,19 +852,6 @@ async function toggleBookmark(path: string): Promise<void> {
   margin: 0;
   font-size: 11.5px;
   color: var(--app-muted);
-}
-
-.var-preview {
-  margin: 0;
-  max-height: 120px;
-  overflow: auto;
-  padding: 6px 8px;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  background: var(--app-surface-2);
-  font-size: 11.5px;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 
 .modal-ft {

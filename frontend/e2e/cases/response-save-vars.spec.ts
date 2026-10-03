@@ -1,5 +1,7 @@
-// [E25] 响应面板「保存 ▾」：保存全部字段为变量 / 保存选中值为变量 / 字段变量书签（作用域 chips）。
-// 用例只从语言包取文案；变量落点按作用域映射（集合→请求 vars.pre-request）。
+// [E25] 响应面板「保存 ▾」：菜单只保留「保存响应示例」与「保存响应体为文件（.json）」。
+// 「保存全部字段为变量 / 保存选中值为变量」与「作用域」chips 已下线，变量入口只剩字段表的
+// 「变量书签」，落点固定为当前环境 —— 本用例同时钉住这两件事。
+// 用例只从语言包取文案。
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
@@ -15,44 +17,34 @@ async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url
   await send(page)
 }
 
-test.describe('响应区：保存为变量', () => {
-  test('[E25] 保存全部字段/选中值/字段书签为变量', async ({ page, app }) => {
+test.describe('响应区：保存▾与变量书签', () => {
+  test('[E25] 保存▾只剩响应示例与响应体文件，变量书签写入当前环境', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
     await sendUrl(page, app, '{{host}}/json/flat')
 
-    // 作用域切到「集合」（不依赖环境即可写入）
+    // 菜单项：保存响应示例 + 保存响应体为文件；变量类菜单项与作用域 chips 已下线
     await page.getByTestId('resp.save').click()
-    await page.locator('[data-testid="resp.scope"][data-scope="collection"]').click()
+    await expect(page.getByTestId('resp.saveExample')).toBeVisible()
+    await expect(page.getByTestId('resp.saveFile')).toBeVisible()
+    await expect(page.getByTestId('resp.saveAllVars')).toHaveCount(0)
+    await expect(page.getByTestId('resp.saveSelectedVar')).toHaveCount(0)
+    await expect(page.getByTestId('resp.scope')).toHaveCount(0)
+    await page.keyboard.press('Escape')
 
-    // 字段表书签：点亮 = 保存为变量，再点 = 删除变量
+    // 字段表书签：点亮 = 该字段值存成当前环境的变量，再点 = 删除。
+    // 不假设环境里是否已存在同名变量（fixture 的 env 可能已定义），只断言「点一下翻转、再点回来」。
     await page.getByTestId('resp.updateFields').click()
     const bm = page.getByTestId('resp.fields.bookmark').first()
-    await bm.click()
-    await expect(page.locator('.n-message').last()).toContainText(t('resp.scopeCollection'))
-    await expect(bm).toHaveClass(/on/)
-    await bm.click()
-    await expect(bm).not.toHaveClass(/on/)
+    const lit = async (): Promise<boolean> => ((await bm.getAttribute('class')) ?? '').includes('on')
+    const before = await lit()
 
-    // 保存全部字段为变量：叶子字段全部点亮
-    await page.getByTestId('resp.save').click()
-    await page.getByTestId('resp.saveAllVars').click()
-    await expect(page.locator('.n-message').last()).toContainText(t('resp.scopeCollection'))
-    await expect(bm).toHaveClass(/on/)
+    await bm.click()
+    await expect.poll(lit).toBe(!before)
+    if (!before) await expect(page.locator('.n-message').last()).toContainText(t('resp.scopeEnv'))
 
-    // 保存选中值为变量：选中响应文本 → 弹窗命名 → 落点为当前作用域
-    await page.getByTestId('resp.raw').click()
-    await page.getByTestId('resp.rawBody').selectText()
-    await page.getByTestId('resp.save').click()
-    await page.getByTestId('resp.saveSelectedVar').click()
-    await page.getByTestId('resp.varNameInput').locator('input').fill('selVal')
-    await page
-      .locator('.n-modal')
-      .getByRole('button', { name: t('common.save'), exact: true })
-      .click()
-    await expect(page.locator('.n-message').last()).toContainText(
-      t('resp.varSaved', { name: 'selVal', scope: t('resp.scopeCollection') }),
-    )
+    await bm.click()
+    await expect.poll(lit).toBe(before)
   })
 })
