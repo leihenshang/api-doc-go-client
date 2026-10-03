@@ -44,6 +44,14 @@ wails dev                  # 或直接用 wails dev（Ctrl+C 可能残留进程�
 > 应用侧也做了兜底：收到 Ctrl+C / SIGTERM 后会等 1.5s，若这段时间没人来收尾就自己关闭窗口
 > （`internal/app` 的 `watchSignals`），并通过 `OnShutdown` 释放内嵌 MCP 服务的端口。
 
+> **启动日志里的 `Wails is now using the new Go WebView2Loader…` 是信息提示，不是错误**：
+> Wails v2.16 起用纯 Go 实现替换了原生的 `WebView2Loader.dll`（不再需要 CGO 与随包 DLL），
+> 只影响 WebView2 的**初始化**，与页面内的交互（输入、拖拽、渲染）无关。
+> 只有遇到「启动即崩 / 白屏 / WebView2 创建失败」这类初始化问题时才需要处理：
+> 临时回退旧 loader 用 `./scripts/dev.ps1 -tags native_webview2loader`（或 `wails build -tags …`），
+> 想长期固定就写进 `wails.json` 的 `"build:tags": "native_webview2loader"`（该 loader 上游已计划废弃）。
+> 新 loader 的问题请报到 https://github.com/wailsapp/wails/issues/2004。
+
 ### 仅前端（浏览器，无桌面窗口）
 
 ```bash

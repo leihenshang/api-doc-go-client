@@ -260,10 +260,7 @@ export default {
     confirmDelFolder: 'Delete folder “{name}”?',
     confirmDelRequest: 'Delete request “{name}”? It can be recovered from .trash.',
     externalChange: 'External changes detected: {n} tab(s) have unsaved edits — kept, not overwritten; reload with ⟳ if needed',
-    dragHint: 'Dragging: drop on a group to change its parent, drop on the collection name to move it back to the root',
     dropRoot: 'Drop here to move back to root',
-    moved: 'Moved “{name}” to {dest}',
-    root: 'root',
   },
   json: {
     invalid: 'Response is not valid JSON; showing raw text',

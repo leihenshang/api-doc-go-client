@@ -33,16 +33,17 @@ test.describe('集合树拖动', () => {
     await openCollection(page, app)
     expect(listCollectionFiles(dir)).toContain('api/ping.yml')
 
-    // 拖动中：提示条浮在树上（不占布局）、目标行高亮
+    // 拖动中：树进入拖动态（dnd-active），目标行高亮并带落点横线（.drop-ok::after）
     await mouseDrag(page, treeRow(page, 'ping'), folderRow(page, 'empty'), { release: false })
-    await expect(page.getByTestId('tree.dragHint')).toBeVisible()
+    await expect(page.locator('.tree')).toHaveClass(/dnd-active/)
     await expect(folderRow(page, 'empty')).toHaveClass(/drop-ok/)
     await page.mouse.up()
 
     await expect.poll(() => listCollectionFiles(dir)).toContain('empty/ping.yml')
     await expect.poll(() => listCollectionFiles(dir)).not.toContain('api/ping.yml')
-    await expect(page.locator('.n-message').last()).toBeVisible()
-    await expect(page.getByTestId('tree.dragHint')).toHaveCount(0)
+    await expect(page.locator('.tree')).not.toHaveClass(/dnd-active/)
+    // 移动不再弹 toast：落点横线 + 树刷新已经说明结果，多一条提示只是噪音
+    await expect(page.locator('.n-message')).toHaveCount(0)
   })
 
   test('[T2] 拖到集合根行可移回根目录', async ({ page, app }) => {
@@ -101,7 +102,7 @@ test.describe('集合树拖动', () => {
     await page.mouse.move(box.x + 20, box.y + box.height / 2)
     await page.mouse.down()
     await page.mouse.move(box.x + 60, box.y + box.height / 2 + 20, { steps: 6 })
-    await expect(page.getByTestId('tree.dragHint')).toHaveCount(0)
+    await expect(page.locator('.tree')).not.toHaveClass(/dnd-active/) // 搜索时不进入拖动状态
     await page.mouse.up()
     expect(listCollectionFiles(dir)).toEqual(snapshot)
   })
