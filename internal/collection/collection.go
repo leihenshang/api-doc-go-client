@@ -218,6 +218,11 @@ func fileHash(path string) string {
 	if err != nil {
 		return ""
 	}
+	return sha256Hex(data)
+}
+
+// sha256Hex 内容哈希（index 与冲突检测共用）。
+func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
@@ -539,6 +544,10 @@ func asBool(v any, def bool) bool {
 }
 
 // ---------- 扫描与树 ----------
+
+// conflictMarker 冲突错误的识别标记：写盘时发现磁盘内容已被别人改动，错误文本以它开头。
+// 前端据此展示「重新加载 / 另存为副本」而不是普通保存失败提示。
+const conflictMarker = "[conflict]"
 
 // scanResult 一次目录扫描的产物。
 type scanResult struct {
@@ -1275,6 +1284,13 @@ func (c *Collection) SaveRequest(r *Request) error {
 		return fmt.Errorf("缺少 uid")
 	}
 	full := filepath.Join(c.Dir, filepath.FromSlash(clean))
+	// 冲突检测：客户端带 hash 来时，磁盘内容必须还是它读到的那份，否则拒写（不覆盖别人的改动）
+	if r.ExpectHash != "" {
+		if h := fileHash(full); h != "" && h != r.ExpectHash {
+			return fmt.Errorf("%s 磁盘上的文件已变化（可能被其它编辑器、另一个客户端窗口或同步改过），"+
+				"请「重新加载」后合并，或「另存为副本」再保存", conflictMarker)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
 	}
@@ -1297,7 +1313,33 @@ func (c *Collection) SaveRequest(r *Request) error {
 		return err
 	}
 	c.ignoreWrite(clean)
-	return os.WriteFile(full, data, 0o644)
+	if err := os.WriteFile(full, data, 0o644); err != nil {
+		return err
+	}
+	c.refreshIndexNode(r, full, data)
+	return nil
+}
+
+// refreshIndexNode 写盘后把索引里的 hash/mtime 更新成新值。
+//
+// 必要性：文件监听会忽略「自己刚写的路径」（ignoreWrite），所以索引不会因为我们自己的保存而更新；
+// 若不同步，前端下一次读到的 hash 仍是旧值 → 下一次保存会被误判成外部改动（假冲突）。
+func (c *Collection) refreshIndexNode(r *Request, full string, data []byte) {
+	if c.idx == nil {
+		return
+	}
+	n, ok, err := c.idx.Get(r.UID)
+	if err != nil || !ok {
+		return
+	}
+	n.Hash = sha256Hex(data)
+	if st, serr := os.Stat(full); serr == nil {
+		n.MTime = st.ModTime().UnixMilli()
+	}
+	n.Title = r.Name
+	n.Method = r.Method
+	n.URL = r.URL
+	_ = c.idx.Upsert(n)
 }
 
 // DeleteRequest 删除请求：文件移入 .trash/（带时间戳，可人工找回）。

@@ -50,6 +50,9 @@ type App struct {
 	syncToken string
 	// syncStatus 状态栏同步状态
 	syncStatus SyncStatus
+	// eventSubs 浏览器态事件订阅（devserver 经 SSE 转发给前端；id 用于退订）
+	eventSubs   map[int]*eventSub
+	eventSubSeq int
 	// syncStop 定时同步停止信号
 	syncStop chan struct{}
 	// protoCache gRPC 定义编译缓存：显式失效（用户导入/更新定义时 Invalidate），不做文件监听
@@ -62,11 +65,37 @@ type inflightSend struct {
 }
 
 func NewApp() *App {
-	a := &App{settings: config.Default(), protoCache: proto.NewCache()}
+	a := &App{settings: config.Default(), protoCache: proto.NewCache(), eventSubs: map[int]*eventSub{}}
 	if s, err := config.Load(); err == nil {
 		a.settings = s
 	}
 	return a
+}
+
+// ---------- 应用事件订阅（浏览器态 / devserver） ----------
+
+// eventSub 一路订阅：SSE 连接各自持有一个 channel，断开时退订。
+type eventSub struct {
+	ch   chan map[string]any
+	self int
+}
+
+// SubscribeEvents 订阅应用事件（collection:changed 等）。devserver 用它把事件经 SSE 转发给浏览器；
+// 桌面态走 Wails EventsEmit，不需要订阅。返回的 channel 只读，退调用方负责 Unsubscribe。
+func (a *App) SubscribeEvents() (<-chan map[string]any, func()) {
+	a.mu.Lock()
+	a.eventSubSeq++
+	id := a.eventSubSeq
+	ch := make(chan map[string]any, 16)
+	sub := &eventSub{ch: ch, self: id}
+	a.eventSubs[id] = sub
+	a.mu.Unlock()
+	return ch, func() {
+		// 只从订阅列表移除、不 close channel：fan-out 持有快照在锁外发送，close 会引发向已关闭通道发送
+		a.mu.Lock()
+		delete(a.eventSubs, id)
+		a.mu.Unlock()
+	}
 }
 
 // 初始窗口几何（逻辑像素；Wails 的 Width/Height 与 ScreenGetAll 都是逻辑像素）。
@@ -191,7 +220,7 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	return c.Info()
 }
 
-// watchLoop 把外部改动事件转发给前端（Wails EventsEmit；devserver 无 ctx 时静默）。
+// watchLoop 把外部改动事件转发给前端（Wails EventsEmit；devserver 经 SubscribeEvents 的 SSE 转发）。
 func (a *App) watchLoop(c *collection.Collection) {
 	ch := c.WatchEvents()
 	if ch == nil {
@@ -201,6 +230,11 @@ func (a *App) watchLoop(c *collection.Collection) {
 		a.mu.Lock()
 		ctx := a.ctx
 		still := a.coll == c
+		payload := map[string]any{"paths": ev.Paths}
+		subs := make([]chan map[string]any, 0, len(a.eventSubs))
+		for _, s := range a.eventSubs {
+			subs = append(subs, s.ch)
+		}
 		a.mu.Unlock()
 		if !still {
 			return
@@ -208,7 +242,14 @@ func (a *App) watchLoop(c *collection.Collection) {
 		// 同步重建索引，保证搜索结果与磁盘一致
 		_ = c.RebuildIndex()
 		if ctx != nil {
-			runtime.EventsEmit(ctx, "collection:changed", map[string]any{"paths": ev.Paths})
+			runtime.EventsEmit(ctx, "collection:changed", payload)
+		}
+		// 浏览器态（无 Wails 事件总线）由订阅者自行消费
+		for _, s := range subs {
+			select {
+			case s <- payload:
+			default: // 订阅方堵塞则丢弃本次事件，不阻塞监听循环
+			}
 		}
 	}
 }

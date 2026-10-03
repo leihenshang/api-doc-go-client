@@ -136,6 +136,12 @@ function close(): void {
           data-testid="settings.layout"
         />
       </div>
+      <div class="row">
+        <span class="lbl">{{ t('settings.autoSave') }}</span>
+        <n-checkbox v-model:checked="form.autoSave" data-testid="settings.autoSave">
+          <span class="hint">{{ t('settings.autoSaveHint') }}</span>
+        </n-checkbox>
+      </div>
 
       <div class="sec">{{ t('settings.network') }}</div>
       <div class="row">

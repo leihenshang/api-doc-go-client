@@ -44,6 +44,23 @@ export function hasWailsRuntime(): boolean {
  * 订阅 Go 侧 EventsEmit（桌面端）；devserver 无此通道。
  * 统一转发为 window CustomEvent，App 用 addEventListener 接。
  */
+/** 浏览器态的 SSE 事件桥（devserver /api/events）：按事件名分发，多条 handler 共用一条连接。 */
+let eventSource: EventSource | null = null
+const eventHandlers = new Map<string, Set<(payload: unknown) => void>>()
+
+function ensureEventSource(): void {
+  if (eventSource) return
+  eventSource = new EventSource('/api/events')
+  eventSource.onmessage = (ev) => {
+    try {
+      const { name, payload } = JSON.parse(ev.data) as { name: string; payload: unknown }
+      eventHandlers.get(name)?.forEach((h) => h(payload))
+    } catch {
+      // 忽略坏帧
+    }
+  }
+}
+
 export function onAppEvent(name: string, handler: (payload: unknown) => void): void {
   const rt = (window as unknown as {
     runtime?: { EventsOn?: (n: string, cb: (d: unknown) => void) => void }
@@ -52,7 +69,10 @@ export function onAppEvent(name: string, handler: (payload: unknown) => void): v
     rt.EventsOn(name, handler)
     return
   }
-  // 浏览器调试：无 Wails 事件总线
+  // 浏览器调试：无 Wails 事件总线，走 devserver 的 SSE
+  ensureEventSource()
+  if (!eventHandlers.has(name)) eventHandlers.set(name, new Set())
+  eventHandlers.get(name)?.add(handler)
 }
 
 /** 自绘标题栏的窗口控制（无边框模式下替代系统装饰）。 */

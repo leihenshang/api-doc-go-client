@@ -630,6 +630,7 @@ export namespace collection {
 	    grpc?: GRPCBlock;
 	    docs: string;
 	    baseRev: number;
+	    expectHash?: string;
 	    varsPreRequest?: ScriptVar[];
 	    script?: ScriptBlock;
 	    asserts?: ScriptAssert[];
@@ -654,6 +655,7 @@ export namespace collection {
 	        this.grpc = this.convertValues(source["grpc"], GRPCBlock);
 	        this.docs = source["docs"];
 	        this.baseRev = source["baseRev"];
+	        this.expectHash = source["expectHash"];
 	        this.varsPreRequest = this.convertValues(source["varsPreRequest"], ScriptVar);
 	        this.script = this.convertValues(source["script"], ScriptBlock);
 	        this.asserts = this.convertValues(source["asserts"], ScriptAssert);
@@ -742,6 +744,7 @@ export namespace config {
 	    responseSize: number;
 	    theme: string;
 	    proxyUrl: string;
+	    autoSave: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -760,6 +763,7 @@ export namespace config {
 	        this.responseSize = source["responseSize"];
 	        this.theme = source["theme"];
 	        this.proxyUrl = source["proxyUrl"];
+	        this.autoSave = source["autoSave"];
 	    }
 	}
 

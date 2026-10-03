@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -55,6 +56,31 @@ func main() {
 			},
 			"bodyRaw": string(body),
 		})
+	})
+	// 应用事件流（SSE）：浏览器态没有 Wails 事件总线，文件监听等事件经这里推给前端。
+	// 每个连接独立订阅，断开即退订。
+	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		flusher.Flush()
+		events, done := core.SubscribeEvents()
+		defer done()
+		notify := r.Context().Done()
+		for {
+			select {
+			case ev := <-events:
+				data, _ := json.Marshal(map[string]any{"name": "collection:changed", "payload": ev})
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			case <-notify:
+				return
+			}
+		}
 	})
 	// App 方法反射桥：POST /api/App/<Method>，body 为参数数组
 	mux.HandleFunc("/api/App/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,14 +2,25 @@
 // 请求标签栏（design-spec §2）：首个固定为 Collection 概览页，其后是各请求 tab。
 // dot 表示有未落盘编辑，method 前置按语义色着色，响应状态码跟随 tab 展示。
 // G7：请求 tab 可拖拽排序（HTML5 DnD）。
+// 右键 tab 弹上下文菜单：关闭当前 / 关闭左侧所有 / 关闭右侧所有 / 复制新建 / 保存所有 / 关闭全部。
 import { NDropdown, NIcon } from 'naive-ui'
-import { AddOutline, CloseOutline, LayersOutline } from '@vicons/ionicons5'
-import { computed, ref } from 'vue'
+import type { DropdownOption } from 'naive-ui'
+import {
+  AddOutline,
+  ChevronBackOutline,
+  ChevronForwardOutline,
+  CloseCircleOutline,
+  CloseOutline,
+  CopyOutline,
+  LayersOutline,
+  SaveOutline,
+} from '@vicons/ionicons5'
+import { computed, h, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
 
-defineProps<{ tabs: Tab[]; activeKey: string }>()
+const props = defineProps<{ tabs: Tab[]; activeKey: string }>()
 const emit = defineEmits<{
   select: [key: string]
   'select-overview': []
@@ -17,6 +28,7 @@ const emit = defineEmits<{
   new: []
   'new-grpc': []
   reorder: [from: number, to: number]
+  command: [key: string, tabKey: string]
 }>()
 const { t } = useI18n()
 
@@ -31,6 +43,51 @@ const newMenu = computed(() => [
 function onNewMenu(key: string | number): void {
   if (key === 'grpc') emit('new-grpc')
   else emit('new')
+}
+
+// ---- 右键上下文菜单 ----
+const menuKey = ref('')
+const menuX = ref(0)
+const menuY = ref(0)
+
+/** 菜单项随位置变化：最左的 tab 没有「左侧」，最右的没有「右侧」。 */
+const menuOptions = computed<DropdownOption[]>(() => {
+  const i = props.tabs.findIndex((x) => x.key === menuKey.value)
+  const item = (key: string, label: string, icon: unknown, disabled = false) => ({
+    key,
+    label,
+    disabled,
+    icon: () => h(NIcon, { component: icon as never }),
+  })
+  return [
+    item('close', t('tab.closeCurrent'), CloseOutline),
+    item('close-left', t('tab.closeLeft'), ChevronBackOutline, i <= 0),
+    item('close-right', t('tab.closeRight'), ChevronForwardOutline, i < 0 || i >= props.tabs.length - 1),
+    { type: 'divider', key: 'd1' },
+    item('duplicate', t('tab.duplicate'), CopyOutline),
+    item('save-all', t('tab.saveAll'), SaveOutline),
+    { type: 'divider', key: 'd2' },
+    item('close-all', t('tab.closeAll'), CloseCircleOutline, props.tabs.length === 0),
+  ]
+})
+
+function openMenu(i: number, e: MouseEvent): void {
+  const tab = props.tabs[i]
+  if (!tab) return
+  emit('select', tab.key) // 右键先激活，和主流编辑器一致
+  menuKey.value = tab.key
+  menuX.value = e.clientX
+  menuY.value = e.clientY
+}
+
+function closeMenu(): void {
+  menuKey.value = ''
+}
+
+function onMenuSelect(key: string | number): void {
+  const target = menuKey.value
+  menuKey.value = ''
+  if (target) emit('command', String(key), target)
 }
 
 function onDragStart(i: number, e: DragEvent): void {
@@ -76,6 +133,7 @@ function onDrop(i: number, e: DragEvent): void {
         :title="tab.draft ? t('prompt.saveDraftHint') : tab.request.path"
         @click="emit('select', tab.key)"
         @keydown.enter="emit('select', tab.key)"
+        @contextmenu.prevent="openMenu(i, $event)"
         @dragstart="onDragStart(i, $event)"
         @dragover.prevent="onDragOver($event)"
         @drop="onDrop(i, $event)"
@@ -98,6 +156,19 @@ function onDrop(i: number, e: DragEvent): void {
         <n-icon :component="AddOutline" :size="16" />
       </button>
     </n-dropdown>
+
+    <!-- 右键 tab 的上下文菜单（手动定位到鼠标处；点外面自动收起） -->
+    <n-dropdown
+      trigger="manual"
+      placement="bottom-start"
+      :x="menuX"
+      :y="menuY"
+      :show="menuKey !== ''"
+      :options="menuOptions"
+      data-testid="tab.menu"
+      @select="onMenuSelect"
+      @clickoutside="closeMenu"
+    />
   </div>
 </template>
 
