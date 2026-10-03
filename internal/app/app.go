@@ -61,6 +61,9 @@ type App struct {
 	mcpBackend MCPBackend
 	// mcpStatus 内嵌 MCP 服务最近一次状态（设置页展示；避免前端自己拼）
 	mcpStatus *MCPStatus
+	// signalQuit 通知「外部已在收尾」（wails dev 的 Ctrl+C 会先打到 CLI 再到我们），
+	// 让信号处理器不必自己重复退出
+	signalQuit chan struct{}
 }
 
 // inflightSend 一次在途发送的取消句柄。
@@ -116,6 +119,8 @@ const (
 // Startup Wails 生命周期钩子（必须导出：OnStartup 引用跨包方法）。
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	a.signalQuit = make(chan struct{})
+	a.watchSignals()
 	// 设置里启用了 MCP 就随应用起服务；此时通常还没打开集合，状态会提示先打开集合
 	if a.settings.MCP.Enabled {
 		a.applyMCP("")

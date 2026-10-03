@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
-import { NButton, NCheckbox, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { CodeSlashOutline, ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
@@ -21,6 +22,19 @@ const saving = ref(false)
 /** 内嵌 MCP 服务的运行状态：打开设置时拉一次，保存后再拉一次。 */
 const mcp = ref<MCPStatus | null>(null)
 const mcpBusy = ref(false)
+
+// ---------- 左侧菜单分区 ----------
+// 每类设置一个分区，右侧只渲染当前分区（设置项多起来后不至于一路往下滚）。
+type SectionKey = 'appearance' | 'network' | 'local' | 'mcp'
+
+const sections = computed(() => [
+  { key: 'appearance' as const, label: t('settings.appearance'), icon: ColorPaletteOutline },
+  { key: 'network' as const, label: t('settings.network'), icon: GlobeOutline },
+  { key: 'local' as const, label: t('settings.local'), icon: FolderOpenOutline },
+  { key: 'mcp' as const, label: t('settings.mcp'), icon: CodeSlashOutline },
+])
+
+const active = ref<SectionKey>('appearance')
 
 async function loadMCP(): Promise<void> {
   try {
@@ -104,6 +118,7 @@ watch(
     notice.value = ''
     // mcp 是嵌套对象：必须逐层拷贝，否则表单里的编辑会直接写进 store（取消也回不去）
     form.value = { ...settings.form, mcp: { ...settings.form.mcp, allowOrigins: [...(settings.form.mcp?.allowOrigins ?? [])] } }
+    active.value = 'appearance' // 每次打开回到第一个分区（否则上次停留的地方会让人以为设置变了）
     void loadMCP()
   },
 )
@@ -157,12 +172,31 @@ function close(): void {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="t('settings.title')" style="width: 580px" @update:show="close">
-    <div class="body">
-      <p v-if="error" class="err">{{ error }}</p>
-      <p v-if="notice" class="ok">{{ notice }}</p>
+  <n-modal :show="show" preset="card" :title="t('settings.title')" style="width: 760px" @update:show="close">
+    <div class="cols">
+      <!-- 左侧竖向菜单：按设置类型分区，右侧只显示当前分区 -->
+      <nav class="nav" :aria-label="t('settings.title')">
+        <button
+          v-for="sec in sections"
+          :key="sec.key"
+          class="nav-item"
+          :class="{ on: active === sec.key }"
+          type="button"
+          :data-testid="`settings.nav.${sec.key}`"
+          :aria-current="active === sec.key"
+          @click="active = sec.key"
+        >
+          <n-icon :component="sec.icon" :size="15" />
+          <span>{{ sec.label }}</span>
+        </button>
+      </nav>
 
-      <div class="sec">{{ t('settings.appearance') }}</div>
+      <div class="body">
+        <p v-if="error" class="err">{{ error }}</p>
+        <p v-if="notice" class="ok">{{ notice }}</p>
+
+        <!-- 分区一：界面 -->
+        <div v-show="active === 'appearance'" class="pane" data-testid="settings.pane.appearance">
       <div class="row">
         <span class="lbl">{{ t('settings.language') }}</span>
         <n-select
@@ -206,9 +240,12 @@ function close(): void {
         </n-checkbox>
       </div>
 
-      <div class="sec">{{ t('settings.network') }}</div>
-      <div class="row">
-        <n-checkbox v-model:checked="form.insecureSsl" data-testid="settings.insecureSsl">
+        </div>
+
+        <!-- 分区二：网络与安全 -->
+        <div v-show="active === 'network'" class="pane" data-testid="settings.pane.network">
+          <div class="row">
+            <n-checkbox v-model:checked="form.insecureSsl" data-testid="settings.insecureSsl">
           {{ t('settings.insecureSsl') }}
         </n-checkbox>
       </div>
@@ -252,9 +289,12 @@ function close(): void {
         />
       </div>
 
-      <div class="sec">{{ t('settings.local') }}</div>
-      <div class="row">
-        <n-checkbox v-model:checked="form.persistCookies" data-testid="settings.persistCookies">
+        </div>
+
+        <!-- 分区三：本地数据 -->
+        <div v-show="active === 'local'" class="pane" data-testid="settings.pane.local">
+          <div class="row">
+            <n-checkbox v-model:checked="form.persistCookies" data-testid="settings.persistCookies">
           {{ t('settings.persistCookies') }}
         </n-checkbox>
         <span class="sp" />
@@ -270,11 +310,13 @@ function close(): void {
         <n-input-number v-model:value="form.historyLimit" size="small" :min="10" :max="5000" class="num" />
       </div>
 
-      <!-- MCP 服务：单独一个分区（不混进「网络」）。生命周期与其它设置不同 ——
-           它要起停一个真实的监听端口，保存后由后端立即应用（地址/端口/令牌/只读/开关）。 -->
-      <div class="sec">{{ t('settings.mcp') }}</div>
-      <div class="row">
-        <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
+        </div>
+
+        <!-- 分区四：MCP 服务。生命周期与其它设置不同 —— 它要起停一个真实的监听端口，
+             保存后由后端立即应用（地址/端口/令牌/只读/开关）。 -->
+        <div v-show="active === 'mcp'" class="pane" data-testid="settings.pane.mcp">
+          <div class="row">
+            <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
           {{ t('settings.mcpEnabled') }}
         </n-checkbox>
       </div>
@@ -353,6 +395,8 @@ function close(): void {
         </n-button>
       </div>
       <p v-if="mcp?.hint" class="hint muted">{{ mcp.hint }}</p>
+        </div>
+      </div>
     </div>
 
     <template #footer>
@@ -365,19 +409,65 @@ function close(): void {
 </template>
 
 <style scoped>
+/* 两栏：左侧竖向分区菜单 + 右侧当前分区的内容 */
+.cols {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 420px;
+}
+
+.nav {
+  flex: 0 0 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 10px;
+  border-right: 1px solid var(--app-border);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--app-text-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-item:hover {
+  background: var(--app-row-hover);
+  color: var(--app-text);
+}
+
+.nav-item.on {
+  background: var(--app-active);
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
 .body {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
-.sec {
-  margin-top: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--app-muted);
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .row {

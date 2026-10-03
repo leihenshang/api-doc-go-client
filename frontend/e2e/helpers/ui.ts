@@ -57,6 +57,16 @@ export async function openSettings(page: Page): Promise<void> {
   await expect(page.getByTestId('settings.theme')).toBeVisible()
 }
 
+/**
+ * 设置弹窗：切到指定分区（左侧竖向菜单）。
+ * 设置项按类型分了区（界面 / 网络与安全 / 本地数据 / MCP 服务），右侧只渲染当前分区，
+ * 所以操作别的分区的字段前必须先切过去。
+ */
+export async function openSettingsSection(page: Page, key: 'appearance' | 'network' | 'local' | 'mcp'): Promise<void> {
+  await page.getByTestId(`settings.nav.${key}`).click()
+  await expect(page.getByTestId(`settings.pane.${key}`)).toBeVisible()
+}
+
 /** 设置弹窗：保存并等待关闭 */
 export async function saveSettings(page: Page): Promise<void> {
   // 用「弹窗内的主按钮」定位：切到英文后文案是 Save，按中文文案找会失效；

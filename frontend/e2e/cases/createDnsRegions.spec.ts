@@ -11,7 +11,7 @@ import { expect, test } from '../helpers/app'
 import { hoverAndClick } from '../helpers/dom'
 import { listCollectionFiles, readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openSettings, saveSettings, send } from '../helpers/ui'
+import { openCollection, openSettings, openSettingsSection, saveSettings, send } from '../helpers/ui'
 
 const DEMO_URL = process.env.E2E_DEMO_URL ?? ''
 const DEMO_STATUS = process.env.E2E_DEMO_STATUS ?? ''
@@ -84,6 +84,7 @@ test(`[B2/B3/E1] 集合内新建分组 → 分组内新建请求 ${REQ_NAME || '
 
   await test.step('6. 勾选「忽略 SSL 证书校验」后重发 → 拿到响应', async () => {
     await openSettings(page)
+  await openSettingsSection(page, 'network')
     const ignoreSsl = page.getByTestId('settings.insecureSsl')
     await ignoreSsl.click()
     await expect(ignoreSsl).toHaveClass(/n-checkbox--checked/)
