@@ -19,6 +19,8 @@ import {
 import type { GlobalThemeOverrides } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NIcon } from 'naive-ui'
+import { WarningOutline } from '@vicons/ionicons5'
 import CommandPalette from '@/components/CommandPalette.vue'
 import CodeGenDialog from '@/components/CodeGenDialog.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
@@ -214,7 +216,7 @@ async function openCollection(dir: string): Promise<void> {
     message.warning(t('welcome.pickFailed'))
     return
   }
-  tabs.reset()
+  await tabs.reset() // 切换前把未保存改动落盘
   try {
     await coll.open(dir)
     // 恢复上次的 tab 现场（uid 仍在集合内才打开）
@@ -311,6 +313,11 @@ onMounted(() => {
     void tabs.flushAll()
     tabs.saveDrafts()
   })
+  // P1：窗口失焦即落盘（手动保存模式下这是唯一的隐式写盘点），
+  // 把「编辑完没保存就切走/关窗」的丢失窗口从防抖时长压到接近零
+  window.addEventListener('blur', () => {
+    void tabs.flushAll()
+  })
   // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户
   onAppEvent('collection:changed', () => onExternalChange())
   // 同步状态轮询（状态栏）
@@ -347,13 +354,13 @@ async function refreshSyncStatus(): Promise<void> {
 }
 
 function onExternalChange(): void {
-  const dirty = tabs.tabs.filter((t) => t.dirty)
-  if (dirty.length === 0) {
-    void coll.reload().then(() => tabs.refreshResolve())
-    return
-  }
-  // G10：有未保存编辑时绝不静默覆盖
-  message.warning(t('tree.externalChange', { n: dirty.length }), { duration: 6000 })
+  void (async () => {
+    await coll.reload() // 树 / 环境先跟上（watchLoop 已重建索引，hash 是新的）
+    await tabs.refreshResolve()
+    // G10 落地：干净页签回填磁盘内容；有未保存编辑的页签标冲突（冲突条给出两个出口）
+    const conflicts = await tabs.syncExternalChanges()
+    if (conflicts > 0) message.warning(t('conflict.external', { n: conflicts }), { duration: 6000 })
+  })()
 }
 
 onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
@@ -426,6 +433,43 @@ function requestClose(key: string): void {
     return
   }
   openDraftDialog(tab, false)
+}
+
+/** tab 栏右键菜单命令：关闭类走批量关闭（草稿自动跳过），复制新建开草稿，保存所有 = 立即 flush 全部改动。 */
+async function onTabCommand(cmd: string, key: string): Promise<void> {
+  const i = tabs.tabs.findIndex((t) => t.key === key)
+  if (cmd === 'save-all') {
+    const n = tabs.tabs.filter((t) => t.dirty && !t.draft && t.uid).length
+    if (!n) {
+      message.info(t('tab.nothingToSave'))
+      return
+    }
+    await tabs.flushAll()
+    message.success(t('tab.savedAll'))
+    return
+  }
+  if (i < 0) return
+  if (cmd === 'close') {
+    requestClose(key)
+    return
+  }
+  if (cmd === 'duplicate') {
+    tabs.duplicate(key)
+    return
+  }
+  const keys =
+    cmd === 'close-all'
+      ? tabs.tabs.map((t) => t.key)
+      : cmd === 'close-left'
+        ? tabs.tabs.slice(0, i).map((t) => t.key)
+        : tabs.tabs.slice(i + 1).map((t) => t.key)
+  const skipped = keys.filter((k) => tabs.tabs.find((t) => t.key === k)?.draft).length
+  const n = await tabs.closeMany(keys)
+  if (!n) {
+    message.info(t('tab.nothingToClose'))
+    return
+  }
+  message.success(skipped ? t('tab.closedSkipDraft', { n }) : t('tab.closedSome', { n }))
 }
 
 /** Ctrl+S：已落盘请求立即写盘（flush 会清掉待触发的防抖保存）；新建草稿开保存框，保存后留在原地。 */
@@ -578,9 +622,21 @@ watch(
                 @new="newDraft()"
                 @new-grpc="newGrpcDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)"
+                @command="onTabCommand"
               />
 
               <div v-if="tabs.active" class="detail">
+                <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的两个出口 -->
+                <div v-if="tabs.active.conflict" class="conflict-bar" data-testid="req.conflict">
+                  <n-icon :component="WarningOutline" :size="14" />
+                  <span class="ct">{{ t('conflict.bar') }}</span>
+                  <button class="cb" type="button" data-testid="conflict.reload" @click="tabs.reloadFromDisk(tabs.active.key)">
+                    {{ t('conflict.reload') }}
+                  </button>
+                  <button class="cb strong" type="button" data-testid="conflict.copy" @click="tabs.saveAsCopy(tabs.active.key)">
+                    {{ t('conflict.saveCopy') }}
+                  </button>
+                </div>
                 <request-bar :tab="tabs.active" @codegen="showCodegen = true" />
                 <div ref="workEl" class="work" :class="settings.responseLayout">
                   <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
@@ -610,6 +666,8 @@ watch(
             :requests="requestCount"
             :envs="coll.info.envs.length"
             :sync="syncStatus"
+            :saving-count="tabs.savingCount"
+            :last-saved-at="tabs.lastSavedAt"
             @open-sync="showSync = true"
           />
         </template>
@@ -821,5 +879,44 @@ watch(
   font-size: 12px;
   color: var(--app-muted);
   line-height: 1.6;
+}
+
+/* 冲突条：磁盘文件被外部改动且本页签有未保存编辑（写盘被拒后的两个出口） */
+.conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-warn);
+  border-radius: 6px;
+  background: var(--app-warn-tint);
+  color: var(--app-text-2);
+  font-size: 12px;
+}
+
+.conflict-bar .ct {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conflict-bar .cb {
+  border: 1px solid var(--app-border-strong);
+  border-radius: 6px;
+  background: var(--app-panel);
+  color: var(--app-text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.conflict-bar .cb.strong {
+  background: var(--app-warn);
+  border-color: var(--app-warn);
+  color: var(--app-on-accent);
+  font-weight: 600;
 }
 </style>

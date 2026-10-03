@@ -33,6 +33,7 @@ type Settings struct {
 	ResponseSize    int     `json:"responseSize"`   // 响应区占比（%）：right 时为宽度、bottom 时为高度，可拖动调整
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
+	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
 }
 
 const (

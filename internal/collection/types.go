@@ -65,6 +65,10 @@ type Request struct {
 	GRPC    *GrpcBlock `json:"grpc,omitempty"`
 	Docs    string     `json:"docs"`
 	BaseRev int64      `json:"baseRev"` // 预留：同步基线（条目版本号）
+	// ExpectHash 冲突检测：客户端带上「我读到这份文件时的内容哈希」（index 的 hash）。
+	// 磁盘上已不一致（别的编辑器 / 另一个客户端窗口 / 同步写回）就拒写，避免静默覆盖。
+	// 只在内存契约里传，不落盘（toFile 不含该字段）。
+	ExpectHash string `json:"expectHash,omitempty"`
 	// 脚本与断言（Bruno 超集；磁盘上落在顶层 vars/script/assert，经 Extra 往返）
 	VarsPreRequest []ScriptVar    `json:"varsPreRequest,omitempty"`
 	Script         *ScriptBlock   `json:"script,omitempty"`

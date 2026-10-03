@@ -145,6 +145,11 @@ export interface RequestDoc {
   grpc?: GrpcDoc | null
   docs: string
   baseRev: number
+  /**
+   * 保存冲突检测（仅随保存请求上传，不落盘）：客户端「读到这份文件时的内容哈希」。
+   * Go 侧 SaveRequest 发现磁盘哈希已不一致就拒写并返回 [conflict] 错误，避免覆盖外部改动。
+   */
+  expectHash?: string
   /** vars.pre-request（发送前赋值，value 支持 {{变量}}） */
   varsPreRequest?: ScriptVar[] | null
   /** script.pre-request / post-response（goja） */
@@ -296,6 +301,11 @@ export interface Settings {
   theme: 'light' | 'dark'
   /** HTTP(S) 代理；空 = 直连 */
   proxyUrl: string
+  /**
+   * 编辑后自动写盘（默认关）。关 = 手动保存模式：
+   * 只在 Ctrl+S / 关闭页签 / 「保存所有」时写盘，编辑期间文件保持不动（页签上有未保存圆点）。
+   */
+  autoSave: boolean
 }
 
 /** 一条发送历史（internal/history.Entry）。 */

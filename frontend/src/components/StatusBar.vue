@@ -8,6 +8,10 @@ const props = defineProps<{
   requests: number
   envs: number
   sync?: SyncStatus | null
+  /** 正在进行的写盘个数（>0 时显示「保存中…」） */
+  savingCount?: number
+  /** 最后一次成功写盘的时间戳（>0 时显示「已保存 HH:mm」） */
+  lastSavedAt?: number
 }>()
 const emit = defineEmits<{ 'open-sync': [] }>()
 const { t } = useI18n()
@@ -50,6 +54,11 @@ function clock(ms: number): string {
       {{ syncText }}
     </span>
     <span class="sp" />
+    <!-- 保存状态：写盘进行中 / 最近一次成功保存的时间（手动保存模式下帮助确认「存了没」） -->
+    <span v-if="(props.savingCount ?? 0) > 0" class="save run" data-testid="statusbar.saving">{{ t('status.saving') }}</span>
+    <span v-else-if="(props.lastSavedAt ?? 0) > 0" class="save" data-testid="statusbar.saved">
+      {{ t('status.savedAt', { t: clock(props.lastSavedAt ?? 0) }) }}
+    </span>
     <span class="txt">{{ VERSION }}</span>
   </footer>
 </template>
@@ -78,6 +87,16 @@ function clock(ms: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.save {
+  font-size: 11.5px;
+  color: var(--app-muted);
+  white-space: nowrap;
+}
+
+.save.run {
+  color: var(--app-accent);
 }
 
 .sync {

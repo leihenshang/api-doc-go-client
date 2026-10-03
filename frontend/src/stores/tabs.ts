@@ -10,6 +10,7 @@ import { api } from '@/lib/ipc'
 import { grpcSendBlocker } from '@/lib/grpc'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
+import { useSettingsStore } from '@/stores/settings'
 import type { GrpcSchema, RequestDoc, ResolveResult, SendResult } from '@/types'
 
 export interface Tab {
@@ -30,6 +31,15 @@ export interface Tab {
   grpcSchema: GrpcSchema | null
   /** gRPC 定义解析错误（常驻展示，直到重新导入；HTTP 请求恒为空） */
   grpcError: string
+  /**
+   * 磁盘内容哈希：最后一次「读盘 / 写盘成功」时的文件 sha256（index 提供）。
+   * 保存时作为 expectHash 上传，Go 侧发现磁盘哈希不一致就拒写（防覆盖外部改动）。
+   */
+  baseHash?: string
+  /** 磁盘文件已被外部改动且本页签有未保存编辑：写盘会被拒，需先「重新加载 / 另存为副本」 */
+  conflict?: boolean
+  /** 一次写盘正在进行（状态栏「保存中…」） */
+  saving?: boolean
 }
 
 let seq = 0
@@ -125,6 +135,14 @@ export const useTabsStore = defineStore('tabs', {
   state: () => ({
     tabs: [] as Tab[],
     activeKey: '',
+    /** 请求 uid → 磁盘内容哈希（来自 index；外部改动 / 自身写盘后刷新）。 */
+    hashes: {} as Record<string, string>,
+    /** 正在进行的写盘个数（状态栏「保存中…」） */
+    savingCount: 0,
+    /** 最后一次成功写盘的时间戳（状态栏「已保存 HH:mm」） */
+    lastSavedAt: 0,
+    /** 草稿写 localStorage 失败只提示一次的标记 */
+    draftsWarned: false,
   }),
   getters: {
     active: (s) => s.tabs.find((t) => t.key === s.activeKey) ?? null,
@@ -139,7 +157,10 @@ export const useTabsStore = defineStore('tabs', {
         return
       }
       const r = await api.readRequest(uid)
+      await this.refreshHashes()
       this.pushTab(r)
+      const tab = this.tabs.find((t) => t.uid === uid)
+      if (tab) tab.baseHash = this.hashes[uid] ?? ''
     },
     /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
     openDoc(r: RequestDoc): void {
@@ -259,10 +280,12 @@ export const useTabsStore = defineStore('tabs', {
       if (!tab) return
       tab.title = tab.request.name || tab.title
       tab.dirty = true
-      // 自动保存；草稿不写盘，改为把内容落到 localStorage（重启不丢）
+      // 自动保存是设置项（默认关 = 手动保存模式）：编辑期间不写盘，页签保留未保存圆点，
+      // 落盘只发生在 Ctrl+S / 关闭页签 / 「保存所有」。草稿始终走 localStorage（重启找回，不算写集合）。
       clearTimeout(saveTimers.get(key))
+      const settings = useSettingsStore()
       if (tab.draft) this.scheduleDrafts()
-      else saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
+      else if (settings.autoSave) saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
       // 解析预览
       clearTimeout(resolveTimers.get(key))
       resolveTimers.set(key, setTimeout(() => void this.doResolve(tab), RESOLVE_DEBOUNCE))
@@ -319,26 +342,148 @@ export const useTabsStore = defineStore('tabs', {
       saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
     },
     /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。
-     *  写盘被拒（D4/G3.5：定义解析失败等）时保留脏标记，并把原因挂到 grpcError 上供界面展示。 */
+     *  写盘前做冲突检测：把「读到文件时的哈希」作为 expectHash 上传，磁盘已被外部改动就拒写并标冲突。
+     *  写盘被拒（冲突 / 定义解析失败 / 磁盘错误）时保留脏标记，错误原因挂到 grpcError 供界面展示。 */
     async flush(key: string): Promise<void> {
       clearTimeout(saveTimers.get(key))
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.draft || !tab.dirty || !tab.uid) return
+      const coll = useCollectionStore()
+      // P2：只读集合（同步镜像）不允许写盘 —— 编辑可以，落盘不行
+      if (coll.isReadOnly) {
+        const msg = i18n.global.t('conflict.readOnly')
+        if (tab.grpcError !== msg) {
+          tab.grpcError = msg
+          message.warning(msg)
+        }
+        return
+      }
+      // P0：冲突未解决前不再尝试写盘（界面横幅提供「重新加载 / 另存为副本」）
+      if (tab.conflict) return
+      await this.refreshHashes()
+      const disk = this.hashes[tab.uid] ?? ''
+      if (tab.baseHash && disk && disk !== tab.baseHash) {
+        tab.conflict = true
+        message.warning(i18n.global.t('conflict.detected'))
+        return
+      }
+      tab.saving = true
+      this.savingCount++
       try {
-        await api.saveRequest(tab.request)
+        await api.saveRequest({ ...tab.request, expectHash: tab.baseHash || undefined })
         tab.dirty = false
+        tab.grpcError = ''
+        // Go 侧写盘后已把索引 hash 更新为新值，这里取回来作为下一次比对的基准
+        await this.refreshHashes()
+        tab.baseHash = this.hashes[tab.uid] ?? tab.baseHash
+        this.lastSavedAt = Date.now()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
+        if (msg.includes('[conflict]')) {
+          tab.conflict = true // Go 侧比对哈希发现磁盘被改：拒写
+          message.warning(i18n.global.t('conflict.detected'))
+          return
+        }
         // 同一条错误只提示一次（自动保存会反复触发），Schema 分段常驻展示这次失败原因
         if (tab.grpcError !== msg) {
           tab.grpcError = msg
           message.error(msg)
         }
         return
+      } finally {
+        tab.saving = false
+        this.savingCount = Math.max(0, this.savingCount - 1)
       }
     },
     async flushAll(): Promise<void> {
       for (const t of this.tabs) await this.flush(t.key)
+    },
+    /** 从索引取全量请求哈希（uid → hash）。失败时保留旧值，冲突检测退化为不检测。 */
+    async refreshHashes(): Promise<void> {
+      try {
+        const nodes = await api.searchIndex('', 0)
+        const map: Record<string, string> = {}
+        for (const n of nodes) {
+          if (n.type === 'request' && n.uid) map[n.uid] = n.hash ?? ''
+        }
+        this.hashes = map
+      } catch {
+        // 忽略：下次外部改动/保存时再刷
+      }
+    },
+    /**
+     * 外部改动（文件监听 / 同步）后同步打开的页签（G10 真正落地）：
+     * - 干净页签：磁盘内容已变 → 直接回填（用户没有任何未保存编辑，不丢东西）；
+     * - 脏页签：只标 `conflict`（写盘会被拒），由界面的冲突条提供「重新加载 / 另存为副本」。
+     * 返回新标冲突的页签数。
+     */
+    async syncExternalChanges(): Promise<number> {
+      const coll = useCollectionStore()
+      if (!coll.ready) return 0
+      await this.refreshHashes()
+      let conflicts = 0
+      for (const tab of this.tabs) {
+        if (tab.draft || !tab.uid) continue
+        const cur = this.hashes[tab.uid] ?? ''
+        if (!cur || !tab.baseHash || cur === tab.baseHash) continue
+        if (tab.dirty) {
+          if (!tab.conflict) {
+            tab.conflict = true
+            conflicts++
+          }
+          continue
+        }
+        try {
+          const doc = await api.readRequest(tab.uid)
+          tab.request = doc
+          tab.title = doc.name || tab.title
+          tab.baseHash = this.hashes[tab.uid] ?? cur
+          tab.grpcError = ''
+          // 文档换了一份，撤销历史作废（避免撤销跨过外部改动把旧内容写回去）
+          lastSnap.set(tab.key, snap(doc))
+          undoStacks.delete(tab.key)
+          redoStacks.delete(tab.key)
+          void this.doResolve(tab)
+          void this.loadGrpcSchema(tab.key)
+        } catch {
+          // 读失败保持现状
+        }
+      }
+      return conflicts
+    },
+    /** 冲突出路一：放弃内存里的编辑，重新从磁盘读取（清脏、清冲突、重建撤销基线）。 */
+    async reloadFromDisk(key: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab?.uid) return
+      const doc = await api.readRequest(tab.uid)
+      tab.request = doc
+      tab.title = doc.name || tab.title
+      tab.dirty = false
+      tab.conflict = false
+      tab.grpcError = ''
+      await this.refreshHashes()
+      tab.baseHash = this.hashes[tab.uid] ?? ''
+      lastSnap.set(key, snap(doc))
+      undoStacks.delete(key)
+      redoStacks.delete(key)
+      void this.doResolve(tab)
+      void this.loadGrpcSchema(key)
+      message.success(i18n.global.t('conflict.reloaded'))
+    },
+    /** 冲突出路二：把内存里的版本另存为副本（文件名冲突时集合层自动加序号），并打开副本页签。 */
+    async saveAsCopy(key: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab) return
+      const p = tab.request.path ?? ''
+      const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+      const name = i18n.global.t('conflict.copyName', { name: tab.request.name })
+      const created = await api.createRequestFromDraft(folder, name, {
+        ...tab.request,
+        name,
+        expectHash: undefined,
+      })
+      this.pushTab(created)
+      message.success(i18n.global.t('conflict.copySaved', { name }))
     },
     async doResolve(tab: Tab): Promise<void> {
       const coll = useCollectionStore()
@@ -412,8 +557,38 @@ export const useTabsStore = defineStore('tabs', {
       scrollPos.delete(key)
       this.saveSession()
     },
-    /** 关闭集合（切换集合）时清空内存会话（文件已自动保存；现场与草稿已单独落 localStorage）。 */
-    reset(): void {
+    /**
+     * 批量关闭（关闭左侧 / 右侧 / 全部）：**草稿一律跳过**。
+     * 批量关页签不该静默丢未落盘的内容 —— 草稿请用页签上的 × 或 Ctrl+W 单独走保存框。
+     * 返回实际关掉的个数（界面据此提示「关了几个、跳过几个草稿」）。
+     */
+    async closeMany(keys: string[]): Promise<number> {
+      const targets = keys.filter((k) => {
+        const t = this.tabs.find((x) => x.key === k)
+        return !!t && !t.draft
+      })
+      for (const k of targets) await this.close(k)
+      return targets.length
+    },
+    /**
+     * 复制新建：把该请求整份深拷贝成一张**未落盘草稿**（名字加「副本」，分组沿用原请求），
+     * 走的是与「新建」同一条保存路径 —— Ctrl+S 或关闭时才问名称与分组，天然不会覆盖原请求。
+     * 返回新 tab 的 key（失败返回空串）。
+     */
+    duplicate(key: string): string {
+      const src = this.tabs.find((t) => t.key === key)
+      if (!src) return ''
+      // 必须用 JSON 往返深拷贝：src.request 是 Vue 响应式代理，structuredClone 会抛 DataCloneError
+      const copy = JSON.parse(JSON.stringify(src.request)) as RequestDoc
+      copy.name = src.request.name ? i18n.global.t('tab.duplicateName', { name: src.request.name }) : ''
+      // 原请求文件路径去掉最后一段 = 所属分组（根目录为空串）
+      const p = src.request.path ?? ''
+      const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+      return this.openDraft(copy, folder)
+    },
+    /** 关闭集合（切换集合）时先落盘未保存改动，再清空内存会话（现场与草稿已单独落 localStorage）。 */
+    async reset(): Promise<void> {
+      await this.flushAll()
       for (const t of this.tabs) {
         clearTimeout(saveTimers.get(t.key))
         clearTimeout(resolveTimers.get(t.key))
@@ -447,8 +622,13 @@ export const useTabsStore = defineStore('tabs', {
       try {
         if (drafts.length) localStorage.setItem(draftsKey(coll.uid), JSON.stringify(drafts))
         else localStorage.removeItem(draftsKey(coll.uid))
+        this.draftsWarned = false
       } catch {
-        // localStorage 满/隐私模式：忽略
+        // P2：localStorage 满 / 隐私模式下草稿写不进去 —— 不能静默（重启会丢草稿），提示一次
+        if (!this.draftsWarned) {
+          this.draftsWarned = true
+          message.warning(i18n.global.t('tab.draftSaveFailed'))
+        }
       }
     },
     /** 打开集合后恢复上次未保存的草稿（放最后，保持「草稿是最近打开的」直觉）。 */

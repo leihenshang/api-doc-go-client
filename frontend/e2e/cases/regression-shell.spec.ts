@@ -230,4 +230,59 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(treeRow(page, 'ctrl-s-request')).toHaveCount(1)
     await expect(page.getByTestId('tab.item').filter({ hasText: 'ctrl-s-request' })).toBeVisible()
   })
+
+  // tab 栏右键菜单：关闭当前 / 左侧 / 右侧 / 全部、复制新建、保存所有。
+  // 复制新建走「未落盘草稿」路径（名字加「副本」），批量关闭时草稿要被跳过而不是静默丢掉。
+  test('[A7] tab 右键菜单：关闭左侧/右侧/全部、复制新建、保存所有', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await openRequest(page, 'pong')
+    await expect(page.getByTestId('tab.item')).toHaveCount(2)
+
+    const tab = (name: string) => page.getByTestId('tab.item').filter({ hasText: name })
+    const option = (label: string) => page.locator('.n-dropdown-option').filter({ hasText: label })
+    const tabs = page.getByTestId('tab.item')
+
+    // 菜单 6 项；最左的页签没有「关闭左侧所有」（禁用）
+    await tab('ping').click({ button: 'right' })
+    await expect(option(t('tab.closeCurrent'))).toBeVisible()
+    await expect(option(t('tab.closeAll'))).toBeVisible()
+    await expect(page.locator('.n-dropdown-option-body--disabled').filter({ hasText: t('tab.closeLeft') })).toHaveCount(1)
+
+    // 关闭右侧所有：ping 在最左，右边只剩 pong
+    await option(t('tab.closeRight')).click()
+    await expect(tabs).toHaveCount(1)
+    await expect(tab('pong')).toHaveCount(0)
+
+    // 复制新建：开一张未落盘草稿（名字带「副本」），关闭时走保存框
+    await tab('ping').click({ button: 'right' })
+    await option(t('tab.duplicate')).click()
+    await expect(tabs).toHaveCount(2)
+    await expect(tabs.filter({ hasText: t('tab.duplicateName', { name: 'ping' }) })).toBeVisible()
+    await page.getByTestId('tab.close').last().click()
+    await expect(page.getByTestId('draft.name')).toBeVisible() // 草稿：先问保存
+    await page.getByTestId('draft.discard').click()
+    await expect(tabs).toHaveCount(1)
+
+    // 保存所有：改一下地址（产生脏改动）→ 右键「保存所有」→ 提示 + 脏点消失
+    await tab('ping').click()
+    await page.getByTestId('req.url').fill('{{host}}/json/flat')
+    await page.getByTestId('req.url').blur()
+    await expect(tab('ping').locator('.dot')).toHaveCount(1)
+    await tab('ping').click({ button: 'right' })
+    await option(t('tab.saveAll')).click()
+    await expect(page.locator('.n-message').last()).toContainText(t('tab.savedAll'))
+    await expect(tab('ping').locator('.dot')).toHaveCount(0)
+
+    // 关闭全部：已落盘的关掉，**草稿跳过**并提示
+    await page.keyboard.press('Control+n')
+    await expect(tabs).toHaveCount(2)
+    await tab('ping').click({ button: 'right' })
+    await option(t('tab.closeAll')).click()
+    await expect(page.locator('.n-message').last()).toContainText(t('tab.closedSkipDraft', { n: 1 }))
+    await expect(tabs).toHaveCount(1) // 只剩那张草稿
+    await expect(tabs.locator('.dot')).toHaveCount(1)
+    await expect(page.getByTestId('tab.overview')).toBeVisible()
+  })
 })

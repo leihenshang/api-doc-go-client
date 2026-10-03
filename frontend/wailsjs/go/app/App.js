@@ -274,6 +274,10 @@ export function StopMock() {
   return window['go']['app']['App']['StopMock']();
 }
 
+export function SubscribeEvents() {
+  return window['go']['app']['App']['SubscribeEvents']();
+}
+
 export function SyncDocAssets(arg1) {
   return window['go']['app']['App']['SyncDocAssets'](arg1);
 }

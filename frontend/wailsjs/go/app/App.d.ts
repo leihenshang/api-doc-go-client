@@ -147,6 +147,8 @@ export function StopAutoSync():Promise<void>;
 
 export function StopMock():Promise<void>;
 
+export function SubscribeEvents():Promise<any|any>;
+
 export function SyncDocAssets(arg1:string):Promise<number>;
 
 export function UnbindSync():Promise<void>;

@@ -18,6 +18,7 @@ const DEFAULTS: Settings = {
   responseSize: 44,
   theme: ThemeLight,
   proxyUrl: '',
+  autoSave: false,
 }
 
 export const useSettingsStore = defineStore('settings', {
@@ -31,6 +32,8 @@ export const useSettingsStore = defineStore('settings', {
     uiScale: (s) => s.form.uiScale,
     responseLayout: (s) => s.form.responseLayout,
     responseSize: (s) => s.form.responseSize,
+    /** 编辑后自动写盘（默认关 = 手动保存模式） */
+    autoSave: (s) => s.form.autoSave,
     isDark: () => isDark.value,
   },
   actions: {
