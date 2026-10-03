@@ -26,24 +26,12 @@ const emit = defineEmits<{
   'select-overview': []
   close: [key: string]
   new: []
-  'new-grpc': []
   reorder: [from: number, to: number]
   command: [key: string, tabKey: string]
 }>()
 const { t } = useI18n()
 
 const dragFrom = ref(-1)
-
-/** 「＋」下拉：新建 HTTP / gRPC 请求（都是未落盘草稿，关闭时才问保存）。 */
-const newMenu = computed(() => [
-  { key: 'http', label: t('tree.newRequest') },
-  { key: 'grpc', label: t('grpc.newRequest') },
-])
-
-function onNewMenu(key: string | number): void {
-  if (key === 'grpc') emit('new-grpc')
-  else emit('new')
-}
 
 // ---- 右键上下文菜单 ----
 const menuKey = ref('')
@@ -151,11 +139,10 @@ function onDrop(i: number, e: DragEvent): void {
       </div>
     </div>
 
-    <n-dropdown trigger="click" placement="bottom-end" :options="newMenu" @select="onNewMenu">
-      <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')">
-        <n-icon :component="AddOutline" :size="16" />
-      </button>
-    </n-dropdown>
+    <!-- 「＋」＝新建 HTTP 请求（gRPC 入口在侧栏：工具栏「＋」下拉 / 分组行菜单） -->
+    <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
+      <n-icon :component="AddOutline" :size="16" />
+    </button>
 
     <!-- 右键 tab 的上下文菜单（手动定位到鼠标处；点外面自动收起） -->
     <n-dropdown

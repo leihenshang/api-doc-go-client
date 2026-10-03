@@ -576,29 +576,31 @@ watch(
         :layout="tabs.active ? settings.responseLayout : null"
         @toggle-theme="toggleTheme"
         @set-layout="setLayout"
-      />
+      >
+        <!-- 集合 / 环境 / 本地搜索并入标题栏（原先独占一行的工具栏） -->
+        <toolbar
+          v-if="coll.ready && coll.info"
+          :name="coll.name"
+          :dir="coll.dir"
+          :envs="coll.info.envs"
+          :current-env="coll.currentEnv"
+          @open-other="openCollection('')"
+          @reload="coll.reload()"
+          @history="showHistory = true"
+          @cookies="showCookies = true"
+          @settings="showSettings = true"
+          @palette="showPalette = true"
+          @manage-env="showEnvManager = true"
+          @import="showImport = true"
+          @export="exportDoc($event)"
+          @mock="showMock = true"
+          @sync="showSync = true"
+          @update:currentEnv="pickEnv"
+        />
+      </title-bar>
 
       <n-spin :show="coll.loading">
         <template v-if="coll.ready && coll.info">
-          <toolbar
-            :name="coll.name"
-            :dir="coll.dir"
-            :envs="coll.info.envs"
-            :current-env="coll.currentEnv"
-            @open-other="openCollection('')"
-            @reload="coll.reload()"
-            @history="showHistory = true"
-            @cookies="showCookies = true"
-            @settings="showSettings = true"
-            @palette="showPalette = true"
-            @manage-env="showEnvManager = true"
-            @import="showImport = true"
-            @export="exportDoc($event)"
-            @mock="showMock = true"
-            @sync="showSync = true"
-            @update:currentEnv="pickEnv"
-          />
-
           <div class="body">
             <aside class="side">
               <sidebar
@@ -620,7 +622,6 @@ watch(
                 @select-overview="tabs.setActive('')"
                 @close="requestClose($event)"
                 @new="newDraft()"
-                @new-grpc="newGrpcDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)"
                 @command="onTabCommand"
               />
