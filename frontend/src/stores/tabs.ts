@@ -192,6 +192,18 @@ export const useTabsStore = defineStore('tabs', {
       return tab.key
     },
     /** 把草稿落盘成真实请求：uid / 文件名 / 序号由集合层分配，成功后 tab 转正（不再是草稿）。 */
+    /**
+     * 请求在集合树里被移动（拖动改上级目录 / 「移动到…」）后，同步已打开页签里的路径。
+     * 不做的话：页签面包屑仍显示旧位置，而且后续保存会把文件写回旧路径（在旧目录里多出一份）。
+     */
+    syncPath(uid: string, path: string): void {
+      for (const tab of this.tabs) {
+        if (tab.uid !== uid) continue
+        if (tab.request.path === path) continue
+        tab.request.path = path
+        tab.draftFolder = ''
+      }
+    },
     async saveDraft(key: string, folder: string, name: string): Promise<RequestDoc> {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab) throw new Error('tab 不存在')

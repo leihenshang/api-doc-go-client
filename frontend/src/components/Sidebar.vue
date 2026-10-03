@@ -249,6 +249,82 @@ function onFolderMenu(node: TreeNode, key: string | number): void {
   else void startAdd(node.path)
 }
 
+// ---- 拖动调整上级目录 ----
+// 拖动分组或请求行到目标分组上即改其上级目录；拖到顶部「根目录」条或列表空白处移到根。
+// 拖动是「移动到…」弹窗的快捷方式，两者共用 coll.moveRequest / coll.moveFolder。
+const dragNode = ref<TreeNode | null>(null)
+/** 当前悬停的放置目标；ok=false 表示非法（自己/后代），给「禁止」反馈而不是静默 */
+const dropHint = ref<{ uid: string; path: string; ok: boolean } | null>(null)
+const dragging = computed(() => dragNode.value !== null)
+
+/** 搜索过滤时树是残缺的，这时不允许拖动（拖到看不见的分组会让人困惑） */
+const dragEnabled = computed(() => !searching.value && editing.value === null)
+
+/**
+ * 能否把 node 放进 destPath（空串 = 根）。
+ * 规则：目标必须是分组或根；分组不能移入自己或自己的后代（会成环）。
+ */
+function canDrop(node: TreeNode, destPath: string): boolean {
+  if (node.type === 'folder' && destPath === node.path) return false
+  if (node.type === 'folder' && destPath.startsWith(node.path + '/')) return false
+  return true
+}
+
+function onDragStart(node: TreeNode, ev: DragEvent): void {
+  if (!dragEnabled.value || !ev.dataTransfer) {
+    ev.preventDefault()
+    return
+  }
+  dragNode.value = node
+  // 必须 setData 才能在部分浏览器里真正启动拖拽（Firefox），type 用纯自定义前缀
+  ev.dataTransfer.effectAllowed = 'move'
+  ev.dataTransfer.setData('text/plain', node.uid)
+}
+
+function onDragEnd(): void {
+  dragNode.value = null
+  dropHint.value = null
+}
+
+/** 悬停在某行：分组是放置目标；请求行不是（不能把请求挂到请求下）。 */
+function onRowDragOver(node: TreeNode, ev: DragEvent): void {
+  if (!dragNode.value || node.type !== 'folder') return
+  ev.preventDefault()
+  const ok = canDrop(dragNode.value, node.path)
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = ok ? 'move' : 'none'
+  dropHint.value = { uid: node.uid, path: node.path, ok }
+}
+
+function onRowDragLeave(node: TreeNode): void {
+  if (dropHint.value?.uid === node.uid) dropHint.value = null
+}
+
+/** 放下：移动到目标分组（或根，path 为空串）。 */
+async function onDrop(destPath: string, ev: DragEvent): Promise<void> {
+  ev.preventDefault()
+  const node = dragNode.value
+  onDragEnd()
+  if (!node) return
+  if (!canDrop(node, destPath)) return
+  // 已经在目标位置就不动（避免无意义的写盘与提示）
+  if (node.path === destPath) return
+  try {
+    if (node.type === 'folder') await coll.moveFolder(node.uid, destPath)
+    else await coll.moveRequest(node.uid, destPath)
+    // 目标分组若是折叠的会自动展开，否则用户看不到「移动成功了」
+    if (destPath && collapsed.value.has(destPath)) {
+      const next = new Set(collapsed.value)
+      next.delete(destPath)
+      collapsed.value = next
+    }
+    // 已打开的页签要同步路径（面包屑与后续保存都靠它）
+    if (node.type === 'request') tabs.syncPath(node.uid, destPath)
+    message.success(t('tree.moved', { name: node.name, dest: destPath || t('tree.root') }))
+  } catch (e) {
+    fail(e)
+  }
+}
+
 // ---- 移动到目标分组 ----
 const moving = ref<{ node: TreeNode; dest: string } | null>(null)
 
@@ -357,9 +433,19 @@ watch(
     </div>
 
     <div ref="treeEl" class="tree">
-      <div class="row root" :style="{ paddingLeft: '8px' }">
+      <!-- 集合根行：既是标题，也是「移回根目录」的放置目标（拖动时高亮） -->
+      <div
+        class="row root"
+        :class="{ 'drop-ok': dragging && dropHint?.path === '' && dropHint.ok }"
+        :style="{ paddingLeft: '8px' }"
+        data-testid="tree.root"
+        @dragover.prevent="dragging && (dropHint = { uid: '__root__', path: '', ok: true })"
+        @dragleave="dropHint?.uid === '__root__' && (dropHint = null)"
+        @drop="onDrop('', $event)"
+      >
         <span class="rname coll-name" :title="name">{{ name }}</span>
         <span class="badge">{{ t('local.badge') }}</span>
+        <span v-if="dragging" class="drop-tip">{{ t('tree.dropRoot') }}</span>
       </div>
 
       <div v-if="adding && adding.parent === ''" class="row" :style="{ paddingLeft: `${8 + INDENT}px` }">
@@ -374,18 +460,33 @@ watch(
         />
       </div>
 
+      <p v-if="dragging" class="drag-hint" data-testid="tree.dragHint">{{ t('tree.dragHint') }}</p>
+
       <div v-if="!rows.length && !adding" class="empty muted">{{ t('sidebar.empty') }}</div>
 
       <template v-for="row in rows" :key="row.node.type + row.node.path">
         <div
           class="row"
-          :class="{ folder: row.node.type === 'folder', on: row.node.uid === props.activeUid, clickable: row.node.type === 'request' }"
+          :class="{
+            folder: row.node.type === 'folder',
+            on: row.node.uid === props.activeUid,
+            clickable: row.node.type === 'request',
+            dragging: dragNode?.uid === row.node.uid,
+            'drop-ok': dropHint?.uid === row.node.uid && dropHint.ok,
+            'drop-bad': dropHint?.uid === row.node.uid && !dropHint.ok,
+          }"
           :data-uid="row.node.uid"
           :data-kind="row.node.type"
           data-testid="tree.row"
           :aria-current="row.node.uid === props.activeUid ? 'true' : undefined"
           :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
+          :draggable="dragEnabled"
           @click="row.node.type === 'request' && !editing ? emit('open', row.node.uid) : undefined"
+          @dragstart="onDragStart(row.node, $event)"
+          @dragend="onDragEnd"
+          @dragover="row.node.type === 'folder' && onRowDragOver(row.node, $event)"
+          @dragleave="onRowDragLeave(row.node)"
+          @drop="row.node.type === 'folder' && onDrop(row.node.path, $event)"
         >
           <template v-if="row.node.type === 'folder'">
             <button class="caret" :title="t('tree.expandAll')" @click="toggle(row.node.path)">
@@ -568,6 +669,40 @@ watch(
 .empty {
   padding: 16px 12px;
   font-size: 12px;
+}
+
+/* ---- 拖动调整上级目录 ---- */
+.drag-hint {
+  margin: 2px 8px 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
+  font-size: 11.5px;
+}
+
+.row.dragging {
+  opacity: 0.45;
+}
+
+/* 合法放置目标：左侧强调条 + 淡底 */
+.row.drop-ok {
+  box-shadow: inset 2px 0 0 var(--app-accent);
+  background: var(--app-accent-tint);
+}
+
+/* 非法目标（自己/自己的后代）：淡红底，不给 accent 反馈 */
+.row.drop-bad {
+  background: var(--app-danger-tint);
+  cursor: not-allowed;
+}
+
+.drop-tip {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 11px;
+  color: var(--app-accent-dark);
+  white-space: nowrap;
 }
 
 .row {
