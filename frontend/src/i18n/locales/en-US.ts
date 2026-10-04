@@ -223,6 +223,7 @@ export default {
     bodyForm: 'Form',
     bodyMultipart: 'Multipart form',
     formatJson: 'Format',
+    jsonBroken: 'Invalid JSON syntax',
     formatUrl: 'Format URL',
     curlPasted: 'Request filled from cURL: {method} {url}',
     rawPlaceholder: 'Request body (supports {\'{variables}\'})',

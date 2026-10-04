@@ -4,6 +4,7 @@
 import { NCheckbox, NInput, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
@@ -11,6 +12,7 @@ import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
 import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
+import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
 import { isGrpc } from '@/lib/grpc'
 import { isDark } from '@/lib/theme'
@@ -270,6 +272,11 @@ function formatJson(): void {
   }
 }
 
+/** JSON 模式下语法有误（只在内容非空、且不含 {{变量}} 时判断）。 */
+const jsonBroken = computed(
+  () => props.tab.request.body.raw.trim() !== '' && !hasVarPlaceholder(props.tab.request.body.raw) && !isParsableJson(props.tab.request.body.raw),
+)
+
 // 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）
 watch(
   () => props.tab.key,
@@ -379,9 +386,21 @@ watch(
             <button v-if="bodyType === 'json'" class="fmt" type="button" @click="formatJson">
               {{ t('editor.formatJson') }}
             </button>
+            <span v-if="bodyType === 'json' && jsonBroken" class="fmtbad" data-testid="body.jsonBroken">
+              {{ t('editor.jsonBroken') }}
+            </span>
           </div>
+          <!-- JSON 走带语法着色的编辑器（透明 textarea 叠高亮层，编辑行为不变）；
+               纯文本仍用原来的输入框，不引入没必要的着色。 -->
+          <json-body-editor
+            v-if="bodyType === 'json'"
+            v-model="tab.request.body.raw"
+            :rows="12"
+            :placeholder="t('editor.rawPlaceholder')"
+            @input="touch"
+          />
           <n-input
-            v-if="bodyType === 'json' || bodyType === 'text'"
+            v-else-if="bodyType === 'text'"
             v-model:value="tab.request.body.raw"
             type="textarea"
             :rows="12"
@@ -547,6 +566,11 @@ watch(
 
 .atype {
   width: 160px;
+}
+
+.fmtbad {
+  font-size: 11.5px;
+  color: var(--app-danger);
 }
 
 .brow {
