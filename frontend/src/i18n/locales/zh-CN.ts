@@ -223,6 +223,7 @@ export default {
     bodyForm: '表单',
     bodyMultipart: 'multipart 表单',
     formatJson: '格式化',
+    jsonBroken: 'JSON 语法有误',
     formatUrl: '格式化 URL',
     curlPasted: '已按 cURL 填充请求：{method} {url}',
     rawPlaceholder: '请求体内容（支持 {\'{变量}\'}）',
