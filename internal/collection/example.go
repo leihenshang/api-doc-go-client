@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,9 +91,15 @@ func exampleDir(reqPath string) string {
 	return path.Join(examplesDirName, path.Dir(p), strings.TrimSuffix(path.Base(p), path.Ext(p)))
 }
 
+// exampleSaveMu 串行化「选名 → 计算序号 → 写文件」：这三步之间没有原子性，
+// 并发保存（两个 MCP 会话 / 界面与 MCP 同时存）会取到同一个名字并互相覆盖。
+var exampleSaveMu sync.Mutex
+
 // SaveResponseExample 保存一次响应（req 为发送时的请求快照）；
 // 同名示例自动去重为「name (1)」「name (2)」，与 Bruno 的命名一致。
 func (c *Collection) SaveResponseExample(reqUID, name string, req ExampleRequest, res ExampleResponse) (*ResponseExample, error) {
+	exampleSaveMu.Lock()
+	defer exampleSaveMu.Unlock()
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
@@ -140,15 +147,20 @@ func (c *Collection) nextExampleSeq(relDir string) int {
 }
 
 // uniqueExampleName 取示例目录内不冲突的显示名（同时用作文件名）。
+//
+// 循环从 base 开始逐个试 base (1)…base (maxExampleSeq)：不能用「先改名再检查」的写法
+// （那样最后一个候选名会被跳过，等于少一个可用名）。
 func uniqueExampleName(dir, base string) (string, error) {
 	name := base
-	for i := 1; i <= maxExampleSeq; i++ {
+	for i := 1; ; i++ {
 		if _, err := os.Stat(filepath.Join(dir, name+".yml")); os.IsNotExist(err) {
 			return name, nil
 		}
+		if i > maxExampleSeq {
+			return "", fmt.Errorf("同名示例过多: %s", base)
+		}
 		name = fmt.Sprintf("%s (%d)", base, i)
 	}
-	return "", fmt.Errorf("同名示例过多: %s", base)
 }
 
 // ListResponseExamples 某请求已保存的响应示例（新 → 旧）。

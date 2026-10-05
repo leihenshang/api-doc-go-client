@@ -234,6 +234,12 @@ export interface SendResult {
   binary: boolean
   headers: KV[]
   body: string
+  /** 响应体超过上限被截断（此时 size 是截断后的长度） */
+  truncated?: boolean
+  /** 响应体真实大小（截断时按 Content-Length 推断；未知为 0） */
+  fullSize?: number
+  /** 发送过程中的非致命告警（如跨域重定向丢弃了凭据头、响应体被截断） */
+  warnings?: string[] | null
   /** gRPC 尾元数据（trailing metadata；HTTP 响应恒为空） */
   trailers?: KV[] | null
   /** 脚本/断言产物（无脚本时缺省） */

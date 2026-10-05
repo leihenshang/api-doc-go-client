@@ -18,11 +18,20 @@ package script
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 )
+
+// execTimeout 单段脚本 / 单条断言的执行上限。
+//
+// 必要性：goja 是纯 Go 解释器，`while(true){}` 会让 RunString 永不返回 —— 而脚本源码
+// 来自请求文件（可能由不可信集合或同步服务端下发），因此必须硬性中断，否则一次发送就
+// 把调用方（Wails IPC / MCP 工具）永久挂死。
+const execTimeout = 5 * time.Second
 
 // Var 脚本阶段的变量条目（对应 vars.pre-request 的一行）。
 type Var struct {
@@ -170,7 +179,7 @@ func (r *Runner) evalAsserts(res *Response, asserts []Assert) []AssertResult {
 			continue
 		}
 		vm := r.newVM(res)
-		val, err := vm.RunString(fmt.Sprintf("Boolean(%s)", expr))
+		val, err := runWithTimeout(vm, fmt.Sprintf("Boolean(%s)", expr))
 		if err != nil {
 			item.Error = err.Error()
 			out = append(out, item)
@@ -185,8 +194,24 @@ func (r *Runner) evalAsserts(res *Response, asserts []Assert) []AssertResult {
 // exec 运行一段脚本；res 为 nil 表示 pre-request 阶段（无 res 对象）。
 func (r *Runner) exec(src string, res *Response) error {
 	vm := r.newVM(res)
-	_, err := vm.RunString(src)
+	_, err := runWithTimeout(vm, src)
 	return err
+}
+
+// runWithTimeout 执行源码，超过 execTimeout 时中断 VM 并返回可读错误。
+//
+// 注意 Interrupt 后 VM 不可复用 —— 因此每次执行都用 newVM 造的新实例（现有实现即如此）。
+func runWithTimeout(vm *goja.Runtime, src string) (goja.Value, error) {
+	timer := time.AfterFunc(execTimeout, func() {
+		vm.Interrupt(fmt.Sprintf("脚本执行超过 %s", execTimeout))
+	})
+	defer timer.Stop()
+	val, err := vm.RunString(src)
+	var interrupted *goja.InterruptedError
+	if errors.As(err, &interrupted) {
+		return nil, fmt.Errorf("脚本执行超时（超过 %s），已中断（检查是否有死循环）", execTimeout)
+	}
+	return val, err
 }
 
 // newVM 每次执行用干净的 goja VM，注入 bru / res。

@@ -20,6 +20,9 @@ const fileName = "cookies.json"
 type stored struct {
 	Host   string      `json:"host"`
 	Cookie http.Cookie `json:"cookie"`
+	// HostOnly 响应未下发 Domain 属性（= 只回发明文主机，不含子域）。
+	// 旧记录缺该字段时按 false 处理（沿用历史行为，不会突然丢 Cookie）。
+	HostOnly bool `json:"hostOnly,omitempty"`
 }
 
 // Jar 并发安全的 Cookie 罐；persist 为 true 时变更即落盘。
@@ -66,16 +69,54 @@ func (j *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	j.flush()
 }
 
+// set 记录一条 Cookie。
+//
+// 安全要点（浏览器同款规则）：
+//   - Domain 必须是「请求主机本身或其后缀」，否则丢弃 —— 否则任意站点都能用
+//     `Set-Cookie: Domain=victim.com` 往别人的域里塞 Cookie（会话固定/覆盖），
+//     甚至 `Domain=com` 变成对所有 *.com 生效的超级 Cookie；
+//   - 未下发 Domain = host-only，只回发到该主机（不再匹配子域）。
 func (j *Jar) set(u *url.URL, c *http.Cookie) {
-	host := u.Hostname()
-	if c.Domain != "" {
-		host = strings.TrimPrefix(strings.ToLower(c.Domain), ".")
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return
 	}
-	j.remove(host, c.Name, c.Path)
+	domain := host
+	hostOnly := true
+	if d := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(c.Domain), ".")); d != "" {
+		switch {
+		case d == host:
+			// 与请求主机完全相同（含 localhost 这类无点主机）
+		case strings.Contains(d, ".") && strings.HasSuffix(host, "."+d):
+			// 父域匹配。注意：这里没有 Public Suffix List（不引依赖），
+			// 因此只挡「单标签 TLD」（Domain=com）这种最典型的滥用；
+			// co.uk 之类多标签公共后缀仍会通过，属于已知限制。
+		default:
+			return // 跨站 Domain：拒绝写入
+		}
+		domain, hostOnly = d, false
+	}
+	// 覆盖判定按「同一请求上下文下同名的旧条目」：旧的可能是 host-only、也可能带 Domain，
+	// 只按新 domain 删会漏掉它们（例如 Domain 从 api.example.com 变成 .example.com）。
+	j.removeForHost(u, c.Name, c.Path)
 	if c.MaxAge < 0 {
 		return
 	}
-	j.items = append(j.items, stored{Host: host, Cookie: *c})
+	j.items = append(j.items, stored{Host: domain, Cookie: *c, HostOnly: hostOnly})
+}
+
+// removeForHost 删除「对该请求主机生效」的同名同路径条目。
+func (j *Jar) removeForHost(u *url.URL, name, path string) {
+	requestHost := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	kept := j.items[:0]
+	for _, s := range j.items {
+		owner := s.Host == requestHost || strings.HasSuffix(requestHost, "."+s.Host)
+		if owner && s.Cookie.Name == name && s.Cookie.Path == path {
+			continue
+		}
+		kept = append(kept, s)
+	}
+	j.items = kept
 }
 
 // Cookies 返回可用于该 URL 的 Cookie。
@@ -96,9 +137,15 @@ func (j *Jar) Cookies(u *url.URL) []*http.Cookie {
 }
 
 func (j *Jar) match(u *url.URL, s stored) bool {
-	host := strings.ToLower(u.Hostname())
-	if host != s.Host && !strings.HasSuffix(host, "."+s.Host) {
-		return false
+	if s.Cookie.Secure && !strings.EqualFold(u.Scheme, "https") {
+		return false // Secure Cookie 不得走明文
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host != s.Host {
+		// host-only：只回发本源主机；带 Domain 的才允许子域
+		if s.HostOnly || !strings.HasSuffix(host, "."+s.Host) {
+			return false
+		}
 	}
 	p := s.Cookie.Path
 	if p == "" {

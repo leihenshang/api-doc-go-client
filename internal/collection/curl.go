@@ -331,8 +331,10 @@ func curlMethod(a *curlArgs) string {
 
 // splitCurlQuery 把 URL 里的 query 拆成参数表（与编辑器的 URL ↔ 参数表联动一致），fragment 丢弃。
 func splitCurlQuery(raw string) (string, []KV) {
+	// fragment 必须先整体丢掉：`?` 之后的部分里也可能带 `#frag`，
+	// 只对 `?` 之前做 Cut 会把 fragment 留在最后一个参数值里。
+	raw, _, _ = strings.Cut(raw, "#")
 	base, query, _ := strings.Cut(raw, "?")
-	base, _, _ = strings.Cut(base, "#")
 	if query == "" {
 		return base, nil
 	}

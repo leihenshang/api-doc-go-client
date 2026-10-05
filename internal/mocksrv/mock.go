@@ -128,7 +128,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		if ex.Response.ContentType == "" {
 			w.Header().Set("Content-Type", "application/json")
 		}
-		w.WriteHeader(ex.Response.Status)
+		// 示例的 status 可能缺失（YAML 默认 0）或被手工改坏：net/http 对非法状态码会 panic
+		status := ex.Response.Status
+		if status < 100 || status > 599 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
 		body := ex.Response.Body
 		if ex.Response.Binary {
 			// base64 存的二进制：mock 直接回原文本占位（客户端 mock 场景以 JSON 为主）

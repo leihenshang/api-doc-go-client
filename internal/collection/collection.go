@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -135,6 +136,15 @@ func (c *Collection) WatchEvents() <-chan watch.Event {
 	return c.w.Events()
 }
 
+// WatchDone 监听器关闭信号（未启动时返回 nil）。
+// 事件通道在 Close 后不会再关闭，消费方（watchLoop）靠它退出，避免 goroutine 永久阻塞。
+func (c *Collection) WatchDone() <-chan struct{} {
+	if c.w == nil {
+		return nil
+	}
+	return c.w.Done()
+}
+
 // StopWatch 停止监听。
 func (c *Collection) StopWatch() {
 	if c.w != nil {
@@ -153,12 +163,29 @@ func (c *Collection) ignoreWrite(rel string) {
 // ---------- 本地索引（C1） ----------
 
 // indexPath 索引文件放在用户配置目录（不污染集合、不进 git）。
+//
+// UID 来自集合清单（不可信输入），必须转成安全文件名后才能拼路径：否则
+// `meta.uid: ../../x` 会把 sqlite 建到配置目录之外（MkdirAll + 建表 = 越界写盘）。
 func (c *Collection) indexPath() string {
+	name := safeIndexName(c.UID) + ".sqlite"
 	base, err := config.Dir()
 	if err != nil {
 		return filepath.Join(c.Dir, ".index.sqlite")
 	}
-	return filepath.Join(base, "index", c.UID+".sqlite")
+	return filepath.Join(base, "index", name)
+}
+
+// indexNameAllowed 索引文件名的合法字符（与 uuid 的字符集一致）。
+var indexNameAllowed = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// safeIndexName 把 UID 转成可安全用作文件名的字符串：
+// 合法则原样返回（保持既有索引文件不被弃用），否则退化为 UID 的哈希（稳定且不含路径分隔符）。
+func safeIndexName(uid string) string {
+	if indexNameAllowed.MatchString(uid) && uid != "." && uid != ".." {
+		return uid
+	}
+	sum := sha256.Sum256([]byte(uid))
+	return "u" + hex.EncodeToString(sum[:16])
 }
 
 // ensureIndex 惰性打开索引库。
@@ -238,6 +265,18 @@ func (c *Collection) DirtyNodes() ([]index.Node, error) {
 	return db.Dirty()
 }
 
+// DirtyNodesFast 只读索引里的 dirty 集，不做全量重建（不 walk 目录、不读请求文件）。
+//
+// 供高频轮询使用（状态栏的 GetSyncStatus）：RebuildIndex 会遍历整个集合并逐个读 yml，
+// 一旦被轮询反复调用，大集合下会明显卡顿。索引本身由文件监听与每次保存维护，通常是最新的。
+func (c *Collection) DirtyNodesFast() ([]index.Node, error) {
+	db, err := c.ensureIndex()
+	if err != nil {
+		return nil, err
+	}
+	return db.Dirty()
+}
+
 // MarkSynced 标记某请求已同步（hash 固化 + base_rev 更新）。
 func (c *Collection) MarkSynced(uid, hash string, baseRev int64) error {
 	db, err := c.ensureIndex()
@@ -295,15 +334,158 @@ const manifestVersion = "1.0.0"
 // 建目录，manifest 要等第一次写请求时才生成；提前落盘能让新项目立刻出现在列表里。
 func (c *Collection) EnsureManifest() error { return c.writeManifest() }
 
+// writeManifest 落盘集合清单。
+//
+// 以「读改写」的方式更新既有文件（而不是按已知字段整份重写）：清单里可能有本客户端
+// 不认识的键（未来的字段、其它工具的元数据）与键顺序、注释，整份重写会静默丢掉它们。
 func (c *Collection) writeManifest() error {
-	m := &manifest{}
-	m.Info.Name, m.Meta.UID = c.Name, c.UID
-	m.GRPC = c.grpcDefault // 集合级默认定义要写回去，否则每次开集合都会被清掉
-	data, err := m.Encode(manifestVersion)
+	path := filepath.Join(c.Dir, "opencollection.yml")
+	doc, err := loadManifestDoc(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(c.Dir, "opencollection.yml"), data, 0o644)
+	doc.setScalar("opencollection", manifestVersion)
+	setMapScalar(doc.ensureMap("info"), "name", c.Name)
+	setMapScalar(doc.ensureMap("meta"), "uid", c.UID)
+	// 集合级默认定义要写回去，否则每次开集合都会被清掉；未配置时删掉该段
+	if c.grpcDefault == nil {
+		doc.remove("grpc")
+	} else if node, err := encodeYAMLValue(c.grpcDefault); err != nil {
+		return fmt.Errorf("序列化集合级 gRPC 定义: %w", err)
+	} else {
+		doc.setNode("grpc", node)
+	}
+	data, err := yaml.Marshal(doc.root)
+	if err != nil {
+		return fmt.Errorf("序列化集合清单: %w", err)
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// Meta 集合身份（清单里的名称与 uid）。
+type Meta struct {
+	Name string
+	UID  string
+}
+
+// ReadMeta 只读集合清单，不建索引、不起文件监听、不写盘。
+//
+// 用途：扫描项目列表（MCP 的 list_projects）这类只读场景 —— 之前那里走 Open，
+// 会对每个项目建索引、写清单、起一个 fsnotify 监听并永不释放（句柄泄漏 + 只读操作有副作用）。
+func ReadMeta(dir string) (Meta, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return Meta{}, err
+	}
+	data, err := os.ReadFile(filepath.Join(abs, "opencollection.yml"))
+	if err != nil {
+		return Meta{}, err
+	}
+	m, err := share.DecodeManifest(data)
+	if err != nil {
+		return Meta{}, fmt.Errorf("opencollection.yml 解析失败: %w", err)
+	}
+	meta := Meta{Name: m.Info.Name, UID: m.Meta.UID}
+	if meta.Name == "" {
+		meta.Name = filepath.Base(abs)
+	}
+	return meta, nil
+}
+
+// ---------- 清单的 YAML 节点操作（保真读改写） ----------
+
+// manifestDoc 清单的 YAML 节点视图：保留未知键、键顺序与注释。
+type manifestDoc struct{ root *yaml.Node }
+
+func loadManifestDoc(path string) (*manifestDoc, error) {
+	doc := &manifestDoc{root: &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return doc, nil
+		}
+		return nil, fmt.Errorf("读取集合清单: %w", err)
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return nil, fmt.Errorf("解析集合清单: %w", err)
+	}
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return doc, nil
+		}
+		node = *node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("集合清单不是键值结构")
+	}
+	doc.root = &node
+	return doc, nil
+}
+
+// setMapScalar 在 mapping 节点上写一个字符串值（键不存在则追加到末尾）。
+func setMapScalar(n *yaml.Node, key, val string) {
+	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: val}
+	if old := lookupMapKey(n, key); old != nil {
+		*old = *node
+		return
+	}
+	n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, node)
+}
+
+// lookupMapKey 取 mapping 节点里某个键的值节点。
+func lookupMapKey(n *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func (d *manifestDoc) setScalar(key, val string) { setMapScalar(d.root, key, val) }
+
+// ensureMap 取（或新建）一个子 mapping。
+func (d *manifestDoc) ensureMap(key string) *yaml.Node {
+	if old := lookupMapKey(d.root, key); old != nil && old.Kind == yaml.MappingNode {
+		return old
+	}
+	d.setNode(key, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"})
+	return lookupMapKey(d.root, key)
+}
+
+// setNode 写入任意节点（键不存在则追加）。
+func (d *manifestDoc) setNode(key string, node *yaml.Node) {
+	if old := lookupMapKey(d.root, key); old != nil {
+		*old = *node
+		return
+	}
+	d.root.Content = append(d.root.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, node)
+}
+
+func (d *manifestDoc) remove(key string) {
+	for i := 0; i+1 < len(d.root.Content); i += 2 {
+		if d.root.Content[i].Value == key {
+			d.root.Content = append(d.root.Content[:i], d.root.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+// encodeYAMLValue 把一个结构体编码成 YAML 节点（用于写回 grpc 段）。
+func encodeYAMLValue(v any) (*yaml.Node, error) {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return nil, err
+	}
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		return node.Content[0], nil
+	}
+	return &node, nil
 }
 
 // ---------- 集合级默认 gRPC 定义（P8） ----------

@@ -59,7 +59,7 @@ func Compile(ctx context.Context, files []string, importPaths []string) (*Result
 		return nil, err
 	}
 	compiler := protocompile.Compiler{
-		Resolver:       protocompile.WithStandardImports(&protocompile.SourceResolver{ImportPaths: paths}),
+		Resolver:       sandboxResolver{inner: protocompile.WithStandardImports(&protocompile.SourceResolver{ImportPaths: paths})},
 		SourceInfoMode: protocompile.SourceInfoStandard, // 需要注释：服务/方法说明展示
 	}
 	compiled, err := compiler.Compile(ctx, names...)
@@ -141,6 +141,42 @@ func (r *Result) MessageDescriptor(name string) (protoreflect.MessageDescriptor,
 		return nil, fmt.Errorf("%q 不是消息类型", name)
 	}
 	return md, nil
+}
+
+// sandboxResolver 拒绝越界的定义文件名。
+//
+// 为什么需要：protocompile 的 SourceResolver 是 `filepath.Join(importPath, path)`，
+// 没有任何越界检查 —— 一份 `import "../../../../etc/passwd";` 的 proto 就能让编译器
+// 去读 import 路径之外的文件（并把解析失败的内容片段带回错误信息）。集合是纯文本、
+// 可能来自不可信仓库/同步服务端，因此这里按「文件名本身」做一层沙箱。
+type sandboxResolver struct{ inner protocompile.Resolver }
+
+func (s sandboxResolver) FindFileByPath(path string) (protocompile.SearchResult, error) {
+	if unsafeProtoName(path) {
+		return protocompile.SearchResult{}, fmt.Errorf("非法的定义文件路径: %s", path)
+	}
+	return s.inner.FindFileByPath(path)
+}
+
+// unsafeProtoName 判定定义文件名是否试图跳出 import 路径。
+func unsafeProtoName(path string) bool {
+	p := strings.TrimSpace(path)
+	if p == "" || strings.ContainsRune(p, '\x00') {
+		return true
+	}
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
+		return true
+	}
+	// Windows 盘符（C:foo.proto）与 UNC 前缀
+	if len(p) >= 2 && p[1] == ':' {
+		return true
+	}
+	for _, seg := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveNames 把输入文件映射成「相对某个 import 路径」的编译名（protocompile 的 ImportPaths 语义）。

@@ -308,6 +308,9 @@ export default {
     closeHint: '关闭当前页签',
     saveNowHint: '立即保存',
     binary: '二进制响应：内容已按 base64 展示',
+    /** 响应体超过 10MB 被截断（size 是截断后的长度） */
+    truncated: '响应体已截断',
+    truncatedFull: '响应体已截断（实际 {size}）',
     fields: '字段映射',
     fieldsTab: '响应字段',
     fieldsHint: '点「更新响应字段」解析；重复更新只追加新字段，已填含义保留',

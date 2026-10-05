@@ -294,10 +294,7 @@ export const useTabsStore = defineStore('tabs', {
       tab.dirty = true
       // 自动保存是设置项（默认关 = 手动保存模式）：编辑期间不写盘，页签保留未保存圆点，
       // 落盘只发生在 Ctrl+S / 关闭页签 / 「保存所有」。草稿始终走 localStorage（重启找回，不算写集合）。
-      clearTimeout(saveTimers.get(key))
-      const settings = useSettingsStore()
-      if (tab.draft) this.scheduleDrafts()
-      else if (settings.autoSave) saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
+      this.scheduleAfterEdit(tab)
       // 解析预览
       clearTimeout(resolveTimers.get(key))
       resolveTimers.set(key, setTimeout(() => void this.doResolve(tab), RESOLVE_DEBOUNCE))
@@ -335,8 +332,7 @@ export const useTabsStore = defineStore('tabs', {
       tab.title = prev.name || tab.title
       tab.dirty = true
       lastSnap.set(key, snap(prev))
-      clearTimeout(saveTimers.get(key))
-      saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
+      this.scheduleAfterEdit(tab)
     },
     /** 重做一步。 */
     redo(key: string): void {
@@ -350,8 +346,17 @@ export const useTabsStore = defineStore('tabs', {
       tab.title = next.name || tab.title
       tab.dirty = true
       lastSnap.set(key, snap(next))
-      clearTimeout(saveTimers.get(key))
-      saveTimers.set(key, setTimeout(() => void this.flush(key), SAVE_DEBOUNCE))
+      this.scheduleAfterEdit(tab)
+    },
+    /** 编辑后的落盘调度（touch / undo / redo 共用）：
+     *  草稿走 localStorage；已落盘请求只在开启自动保存时写盘（默认手动保存模式）。
+     *  撤销/重做之前无条件排 flush，等于绕过了「手动保存」设置 —— 按 Ctrl+Z 就落盘。 */
+    scheduleAfterEdit(tab: Tab): void {
+      clearTimeout(saveTimers.get(tab.key))
+      if (tab.draft) this.scheduleDrafts()
+      else if (useSettingsStore().autoSave) {
+        saveTimers.set(tab.key, setTimeout(() => void this.flush(tab.key), SAVE_DEBOUNCE))
+      }
     },
     /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。
      *  写盘前做冲突检测：把「读到文件时的哈希」作为 expectHash 上传，磁盘已被外部改动就拒写并标冲突。
@@ -540,11 +545,13 @@ export const useTabsStore = defineStore('tabs', {
         tab.sending = false
       }
     },
-    /** 取消当前 tab 的在途发送。 */
+    /** 取消当前 tab 的在途发送。
+     *  必须用「真正发出去的 uid」：草稿 tab 的 tab.uid 是本地临时标识（draft-…），
+     * 而 Go 侧按请求自身的 uid 登记在途发送（草稿为空串），传 draft-… 永远匹配不上。 */
     cancelSend(key: string): void {
       const tab = this.tabs.find((t) => t.key === key)
-      if (!tab || !tab.sending || !tab.uid) return
-      void api.cancelSend(tab.uid)
+      if (!tab || !tab.sending) return
+      void api.cancelSend(tab.request.uid ?? '')
     },
     async close(key: string): Promise<void> {
       clearTimeout(saveTimers.get(key))
@@ -592,6 +599,9 @@ export const useTabsStore = defineStore('tabs', {
       if (!src) return ''
       // 必须用 JSON 往返深拷贝：src.request 是 Vue 响应式代理，structuredClone 会抛 DataCloneError
       const copy = JSON.parse(JSON.stringify(src.request)) as RequestDoc
+      // 副本是「未落盘草稿」：uid 必须清空，否则它会被当成原请求（发送时按原 uid 登记，
+      // 取消原请求的在途发送、历史也记到原请求名下）。
+      copy.uid = ''
       copy.name = src.request.name ? i18n.global.t('tab.duplicateName', { name: src.request.name }) : ''
       // 原请求文件路径去掉最后一段 = 所属分组（根目录为空串）
       const p = src.request.path ?? ''
@@ -601,6 +611,9 @@ export const useTabsStore = defineStore('tabs', {
     /** 关闭集合（切换集合）时先落盘未保存改动，再清空内存会话（现场与草稿已单独落 localStorage）。 */
     async reset(): Promise<void> {
       await this.flushAll()
+      // 先把草稿落 localStorage 再清空：挂起的防抖保存会被下面的 clearTimeout 取消，
+      // 不补这一下就会丢掉「切换集合前最后一段草稿编辑」。
+      this.saveDrafts()
       for (const t of this.tabs) {
         clearTimeout(saveTimers.get(t.key))
         clearTimeout(resolveTimers.get(t.key))

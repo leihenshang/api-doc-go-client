@@ -63,14 +63,23 @@ func (e *Engine) RunOne() (*Report, error) {
 				return rep, err
 			}
 			e.Bind.Cursor = ch.Cursor
-			// has_more 时继续拉
-			for ch.HasMore {
-				ch, err = e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
-				if err != nil {
+			// has_more 时继续拉（带上限：服务端恒返回 has_more 或游标不前进时不能无限循环）
+			for pages := 1; ch.HasMore; pages++ {
+				if pages >= maxPullPages {
+					rep.Errors = append(rep.Errors, fmt.Sprintf("增量拉取超过 %d 页，已停止（服务端可能未推进游标）", maxPullPages))
+					return rep, nil
+				}
+				next, cerr := e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
+				if cerr != nil {
 					break
 				}
-				_ = e.applyItems(ch.Items, rep)
-				e.Bind.Cursor = ch.Cursor
+				_ = e.applyItems(next.Items, rep)
+				if next.Cursor <= e.Bind.Cursor {
+					// 游标没有推进：继续循环只会重复拉同一批数据
+					rep.Errors = append(rep.Errors, "服务端游标未推进，已停止增量拉取")
+					break
+				}
+				ch, e.Bind.Cursor = next, next.Cursor
 			}
 		}
 	} else if e.Bind.Cursor == 0 {
@@ -89,9 +98,16 @@ func (e *Engine) RunOne() (*Report, error) {
 	return rep, nil
 }
 
+// maxPullPages 单轮同步最多拉取的页数（增量与全量共用）。
+const maxPullPages = 200
+
 func (e *Engine) pullSnapshot(rep *Report) error {
 	offset := 0
-	for {
+	for pages := 0; ; pages++ {
+		if pages >= maxPullPages {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("全量拉取超过 %d 页，已停止（服务端可能未推进 offset）", maxPullPages))
+			return nil
+		}
 		sn, err := e.CLI.Snapshot(e.Bind.ProjectID, offset, 500)
 		if err != nil {
 			return err

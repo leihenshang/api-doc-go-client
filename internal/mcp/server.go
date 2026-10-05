@@ -179,14 +179,17 @@ func originAllowed(origin string, allow []string) bool {
 	return false
 }
 
-// normalizeAddr 补全监听地址：空 → :8189；只给端口 → 0.0.0.0:端口（跨主机可达）。
+// normalizeAddr 补全监听地址。
+//
+// 兜底必须是回环（127.0.0.1）而不是全网卡：调用方漏传地址时不该把集合暴露到局域网；
+// 只给端口（":8189"）时同理按回环处理，需要跨主机请在配置里显式写 0.0.0.0。
 func normalizeAddr(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		return "0.0.0.0:8189" // 与只给端口一样是全网卡；写全是为了启动日志里能直接看出监听范围
+		return "127.0.0.1:8189"
 	}
 	if strings.HasPrefix(addr, ":") {
-		return "0.0.0.0" + addr
+		return "127.0.0.1" + addr
 	}
 	return addr
 }

@@ -253,9 +253,18 @@ func writeMDSection(b *strings.Builder, title string, rows []KV) {
 	fmt.Fprintf(b, "**%s**\n\n", title)
 	fmt.Fprintf(b, "| 名称 | 值 | 说明 |\n|---|---|---|\n")
 	for _, r := range live {
-		fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", r.Name, r.Value, r.Description)
+		// 单元格里的 `|` 必须转义：否则该行会多出一列，整张表列数对不上
+		fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", escapePipe(r.Name), escapePipe(r.Value), escapePipe(r.Description))
 	}
 	fmt.Fprintf(b, "\n")
+}
+
+// escapePipe 表格单元格里的竖线（Markdown 表格用 \| 表示字面量竖线）。
+func escapePipe(s string) string {
+	if !strings.Contains(s, "|") {
+		return s
+	}
+	return strings.ReplaceAll(s, "|", `\|`)
 }
 
 // ExportHTML 导出单文件 HTML（内联样式，可直接浏览器打开/分享）。
@@ -384,8 +393,9 @@ func mdToHTML(src string) string {
 		// 表格
 		if strings.HasPrefix(trim, "|") {
 			cells := splitRow(trim)
-			// 分隔行 |---|---|
-			if i+1 < len(lines) && strings.Contains(lines[i+1], "---") {
+			// 分隔行 |---|---|：必须整行都是表格分隔语法，
+			// 只判断「下一行含 ---」会把普通正文误当表头（后续内容被吞进表里）
+			if i+1 < len(lines) && isTableSeparator(lines[i+1]) {
 				if !inTable {
 					b.WriteString("<table>\n<thead><tr>")
 					for _, c := range cells {
@@ -417,49 +427,84 @@ func mdToHTML(src string) string {
 	return b.String()
 }
 
+// splitRow 按未转义的 `|` 切分表格行（支持 \| 表示字面量竖线）。
 func splitRow(row string) []string {
 	row = strings.Trim(row, "|")
-	parts := strings.Split(row, "|")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		out = append(out, strings.TrimSpace(p))
+	var (
+		out []string
+		cur strings.Builder
+	)
+	for i := 0; i < len(row); i++ {
+		switch {
+		case row[i] == '\\' && i+1 < len(row) && row[i+1] == '|':
+			cur.WriteByte('|')
+			i++
+		case row[i] == '|':
+			out = append(out, strings.TrimSpace(cur.String()))
+			cur.Reset()
+		default:
+			cur.WriteByte(row[i])
+		}
 	}
+	out = append(out, strings.TrimSpace(cur.String()))
 	return out
 }
 
+// isTableSeparator 判断一行是否为 Markdown 表格的分隔行（|---|---|）。
+func isTableSeparator(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "|") || !strings.Contains(t, "-") {
+		return false
+	}
+	for _, r := range t {
+		switch r {
+		case '|', '-', ':', ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // inlineMD 处理 `code` 与 **bold**（导出用的最小集）。
+//
+// 必须一次扫描、按 code span 优先：先做全局替换会让 `**` 的配对跨越 code span，
+// 产出交叉标签（<code><strong>a</code> b</strong>），奇数个反引号还会留下未闭合的 <code>。
+// 未闭合的 ` / ** 一律按字面量输出。
 func inlineMD(s string) string {
-	s = html.EscapeString(s)
-	s = strings.ReplaceAll(s, "**", "\x00") // 临时占位，避免嵌套
 	var b strings.Builder
-	inCode := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '`' {
-			if inCode {
-				b.WriteString("</code>")
-			} else {
+	for i := 0; i < len(s); {
+		switch {
+		case s[i] == '`':
+			if end := strings.IndexByte(s[i+1:], '`'); end >= 0 {
 				b.WriteString("<code>")
+				b.WriteString(html.EscapeString(s[i+1 : i+1+end]))
+				b.WriteString("</code>")
+				i += end + 2
+				continue
 			}
-			inCode = !inCode
-			continue
+			b.WriteString(html.EscapeString("`"))
+			i++
+		case strings.HasPrefix(s[i:], "**"):
+			if end := strings.Index(s[i+2:], "**"); end >= 0 {
+				b.WriteString("<strong>")
+				b.WriteString(html.EscapeString(s[i+2 : i+2+end]))
+				b.WriteString("</strong>")
+				i += end + 4
+				continue
+			}
+			b.WriteString(html.EscapeString("**"))
+			i += 2
+		default:
+			j := i + 1
+			for j < len(s) && s[j] != '`' && !strings.HasPrefix(s[j:], "**") {
+				j++
+			}
+			b.WriteString(html.EscapeString(s[i:j]))
+			i = j
 		}
-		b.WriteByte(s[i])
 	}
-	out := b.String()
-	// 成对 ** → <strong>
-	for {
-		i := strings.Index(out, "\x00")
-		if i < 0 {
-			break
-		}
-		j := strings.Index(out[i+1:], "\x00")
-		if j < 0 {
-			out = strings.ReplaceAll(out, "\x00", "")
-			break
-		}
-		out = out[:i] + "<strong>" + out[i+1:i+1+j] + "</strong>" + out[i+1+j+1:]
-	}
-	return out
+	return b.String()
 }
 
 // grpcStreamLabel 流式形态的中文标注（导出文档用）。

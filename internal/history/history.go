@@ -123,11 +123,14 @@ func writeAll(items []Entry) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return fmt.Errorf("创建配置目录: %w", err)
 	}
-	f, err := os.Create(p)
+	// 0600：历史里存的是请求快照（含 Authorization / Basic / body 里的令牌），
+	// 与 config.json / cookies.json / *.secrets.yml 保持同一权限，别让同机其他用户读到。
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("写入历史: %w", err)
 	}
 	defer f.Close()
+	_ = f.Chmod(0o600) // 老版本建的文件可能是 0644：这里顺手收权
 
 	w := bufio.NewWriter(f)
 	for _, e := range items {
