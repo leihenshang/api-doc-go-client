@@ -11,8 +11,14 @@
 ## 常用命令
 
 ```bash
-# 门禁：gofmt + build + vet + go test + vue-tsc + i18n，秒级
+# 门禁：gofmt + build + vet + go test + vue-tsc + i18n，秒级（CI 用这个）
 bash scripts/check.sh
+
+# 加上 e2e（Playwright + devserver + cmd/testfixtures，跑真实构建产物）：
+bash scripts/check.sh --smoke    # 前端构建 + @smoke 冒烟（约 1 分钟）
+bash scripts/check.sh --full     # 前端构建 + 全量 e2e（约 3 分钟；--skip-build 可跳过构建）
+bash scripts/check.sh --e2e-ui   # Playwright UI 交互调试
+# 前置：cd frontend && npm i && npx playwright install chromium；用例与夹具说明见 frontend/e2e/README.md
 ```
 
 ## 必须遵守（改动相关）

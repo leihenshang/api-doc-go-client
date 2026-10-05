@@ -29,15 +29,31 @@ export const treeRow = (page: Page, name: string): Locator =>
 export const treeRowByUid = (page: Page, uid: string): Locator =>
   page.locator(`[data-testid="tree.row"][data-uid="${uid}"]`)
 
-/** 侧栏：打开某个请求（行内名称按钮） */
+/**
+ * 侧栏：打开某个请求（行内名称按钮）。
+ * 打开是异步的（读盘 → 建 tab → 渲染编辑器），这里等到请求栏就绪：
+ * 不等的话，紧接着量布局会量到「请求列还没渲染」的空档（A4 曾因此偶发失败）。
+ */
 export async function openRequest(page: Page, name: string): Promise<void> {
   await page.getByTestId('tree.row').filter({ hasText: name }).getByTestId('tree.row.name').click()
+  await expect(page.getByTestId('req.url')).toBeVisible()
 }
 
 /** 请求栏：切换方法下拉并选中（naive NSelect 的选项挂在 body 上） */
 export async function pickMethod(page: Page, method: string): Promise<void> {
   await page.getByTestId('req.method').click()
   await page.locator('.n-base-select-option').filter({ hasText: method }).click()
+}
+
+/**
+ * 手动保存模式下把当前编辑落盘：Ctrl+S 后等状态栏出现保存指示。
+ * 默认关闭自动保存（G12），所以「改完就要断言磁盘」的用例必须先显式保存。
+ */
+export async function saveNow(page: Page): Promise<void> {
+  await page.keyboard.press('Control+s')
+  await expect(
+    page.getByTestId('statusbar.saved').or(page.getByTestId('statusbar.saving')),
+  ).toBeVisible({ timeout: 10_000 })
 }
 
 /** 请求栏：点发送，并等到「状态码徽标」或「错误告警」出现（不靠固定 sleep） */

@@ -535,7 +535,12 @@ watch(
           @pointerdown="onRowPointerDown(row.node, $event)"
         >
           <template v-if="row.node.type === 'folder'">
-            <button class="caret" :title="t('tree.expandAll')" @click="toggle(row.node.path)">
+            <button
+              class="caret"
+              data-testid="tree.row.caret"
+              :title="t('tree.expandAll')"
+              @click="toggle(row.node.path)"
+            >
               <n-icon
                 :component="isCollapsed(row.node.path) ? ChevronForwardOutline : ChevronDownOutline"
                 :size="13"

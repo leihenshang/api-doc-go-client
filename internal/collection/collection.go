@@ -154,9 +154,18 @@ func (c *Collection) StopWatch() {
 }
 
 // ignoreWrite 自写回环：写盘前短暂屏蔽对该相对路径的监听。
+// 拿不到写入内容时用它（窗口内一律忽略）。
 func (c *Collection) ignoreWrite(rel string) {
 	if c.w != nil {
 		c.w.Ignore(rel, 400*time.Millisecond)
+	}
+}
+
+// ignoreWriteContent 自写回环（带内容指纹）：窗口内只有「文件内容仍等于我方写入的那份」
+// 才忽略；同一窗口里别人改的内容照常上报（否则别人的改动会被静默吞掉）。
+func (c *Collection) ignoreWriteContent(rel string, content []byte) {
+	if c.w != nil {
+		c.w.IgnoreWrite(rel, sha256Hex(content), 400*time.Millisecond)
 	}
 }
 
@@ -1649,7 +1658,7 @@ func (c *Collection) SaveRequest(r *Request) error {
 	if err != nil {
 		return err
 	}
-	c.ignoreWrite(clean)
+	c.ignoreWriteContent(clean, data)
 	if err := os.WriteFile(full, data, 0o644); err != nil {
 		return err
 	}

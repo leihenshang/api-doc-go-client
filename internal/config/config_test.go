@@ -96,6 +96,29 @@ func TestLoadMergesMissingFieldsWithDefault(t *testing.T) {
 }
 
 // isolateConfigDir 把「用户配置目录」指向临时目录，避免读到/写到真实配置。
+// 覆盖变量在两端都生效：设了它就一定落在指定目录（e2e / devserver 隔离靠它）。
+func TestDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvDirOverride, dir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+
+	got, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	if got != filepath.Clean(dir) {
+		t.Fatalf("Dir() = %q，期望覆盖值 %q", got, filepath.Clean(dir))
+	}
+	// Save/Load 一并验证：文件确实写在覆盖目录里
+	if err := Save(Default()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, fileName)); err != nil {
+		t.Fatalf("设置文件未落在覆盖目录: %v", err)
+	}
+}
+
 // Windows 上 os.UserConfigDir() 只看 %AppData%（忽略 XDG_CONFIG_HOME），
 // Linux/macOS 反而看 XDG_CONFIG_HOME —— 两个都设，保证跨平台隔离一致。
 func isolateConfigDir(t *testing.T) {
