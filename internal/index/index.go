@@ -72,6 +72,9 @@ func Open(path string) (*DB, error) {
 	} {
 		_, _ = db.Exec(alter)
 	}
+	// 收权：索引里有请求 URL（可能带 user:pass@）与标题，不应被同机其他用户读取。
+	// sqlite 驱动不会按 0600 建文件，这里显式 chmod 一次。
+	_ = os.Chmod(path, 0o600)
 	return &DB{db: db}, nil
 }
 

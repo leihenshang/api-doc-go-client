@@ -17,7 +17,7 @@
 | **D3** | **不监听 proto 变更** | 不做文件监听、不做热更新、不提示「定义已变化」；**更新只由用户手动「重新导入 / 更新定义」触发**。因此必须让「当前用的是哪份定义、什么时候导入的」在界面上可见（G2.4） |
 | **D4** | **解析失败即提示失败，不允许保存** | ① 导入动作原子化：解析失败 → 不复制、不落盘、不更新定义；② 已存在的 gRPC 请求在定义解析失败期间**禁止保存与发送**（唯一例外见 §5：允许改「定义路径 / import」这条修复通道，避免把用户锁死） |
 | **D5** | 服务地址与定义解耦 | 同一份 proto 可指向多套环境（`{{host}}` 变量），地址变更不触发重新解析 |
-| **D6** | 首期只做 unary | 流式（server / client / bidi）、mTLS、反射、代码生成按 §7 阶段推进 |
+| **D6** | 首期只做 unary | 现状：unary + TLS/mTLS + 压缩 + grpcurl 生成 + 集合级默认定义**已完成**；流式（server / client / bidi）与反射未做（见 §7） |
 
 **明确不做**（避免范围蔓延）：
 
@@ -335,43 +335,40 @@ docs: ""
 
 ---
 
-## 7. 分阶段实施计划
+## 7. 分阶段实施计划与状态
 
-| 阶段 | 内容 | 估时(人日) | 验收标准 |
-|---|---|---|---|
-| **P0** | 依赖引入；`internal/proto`：编译 + 显式 generation 缓存 + 服务方法枚举 + 生成样例；单测（fixture `.proto`） | 1 | `go test ./internal/proto` 绿；同一 `.proto` 编译结果被复用（generation 不变时不重编） |
-| **P0.5** | `watch` 扩展名白名单 + 单测 + 导入时 `Ignore` | 0.5 | 改 `.proto` 不再触发「集合已变更」；改 `.yml` 仍触发 |
-| **P1** | `internal/runner/grpc.go`：unary 打通（`dynamicpb` / `protojson` / metadata / status / trailers / 明文 + TLS 基础） | 1.5–2 | `cmd/grpcfixture` 上 unary 成功、错误码正确、尾元数据可见；单测覆盖 |
-| **P2** | UI：新建入口 + RequestBar 服务·方法选择器 + **Schema 分段**（导入/更新/错误/来源/方法列表） | 2–2.5 | 导入失败原子化（不落盘）；来源与时间可见；服务方法可搜可选 |
-| **P3** | UI：**Message 分段**（生成样例 + 校验反馈）+ Metadata 分段 + 响应面板（状态/初始元数据/**尾元数据**/JSON） | 2–2.5 | 端到端：导入 → 输地址 → 选方法 → 发送 → 看到响应与尾元数据 |
-| **P4** | 落盘/索引/历史/搜索适配 + grpcurl 生成 + 导出 | 1–1.5 | gRPC 请求可保存/重启恢复/可搜到/历史可回看；`grpcurl` 命令可直接复制执行 |
-| **P5** | 流式（server/client/bidi）+ 增量事件推送 + 取消 + 上限 | 2–3 | 4 种方法（unary/server/client/bidi）在 fixture 上跑通；流式消息增量出现；取消可中断 |
-| **P6** | TLS/mTLS + 证书选择 + 压缩 + `protos/` 目录下拉（免选文件） | 1–1.5 | mTLS 双向认证对 fixture 成功；无需文件选择器即可从集合内挑 proto |
-| **P7** | 反射（可选增强：「从服务地址拉取定义」） | 1–1.5 | 对开启反射的服务可零文件调用；关闭反射时给出明确提示 |
-| **P8** | 集合级默认定义（`opencollection.yml` 配一次，请求只写 service/method）+ 集合内多 proto 管理界面 | 1–1.5 | 多请求共享一份定义时无需重复填路径 |
-| **P9** | 测试与回归：`cmd/grpcfixture`（4 种方法 + 错误码 + metadata 校验 + 可选反射/双向 TLS） | 1.5–2 | 门禁绿；关键路径有单测；真窗口手工核对一轮 |
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P0 | 依赖引入；`internal/proto`：编译 + 显式 generation 缓存 + 服务方法枚举 + 生成样例（含单测） | ✅ 2026-10-02 |
+| P0.5 | `watch` 扩展名白名单（`.yml/.yaml/.md`）+ 单测 + 导入 proto 时自写回环抑制 | ✅ |
+| P1 | `runner/grpc.go`：unary 动态调用（`dynamicpb`/`protojson`）、metadata、状态、尾元数据、明文/TLS 基础 | ✅ |
+| P2 | UI：新建入口 + 请求栏服务·方法选择器 + Schema 分段（导入/更新/错误/来源/方法列表） | ✅ |
+| P3 | UI：Message 分段（生成样例 + 实时校验 + 字段提示）+ Metadata 分段 + 响应面板（状态/初始元数据/尾元数据/JSON） | ✅ |
+| P4 | 落盘/索引/历史/搜索适配 + grpcurl 生成 + Markdown 导出 + 保存前置校验 | ✅ |
+| P6 | TLS/mTLS + 证书选择 + gzip 压缩 + 集合内定义下拉 | ✅ |
+| P8 | 集合级默认定义（清单 `grpc` 段，请求只写 service/method）+ 定义管理界面 | ✅ |
+| P9 | `cmd/grpcfixture`（4 种形态 + 错误码 + metadata + 可选 TLS + gzip）+ 单测纳入门禁 | ✅ |
+| P5 | 流式（server / client / bidi）+ 增量事件推送 + 取消 + 上限 | ⬜ 未做 |
+| P7 | 反射（「从服务地址拉取定义」，可选增强） | ⬜ 未做 |
 
-- **MVP（P0–P3，端到端可用）≈ 6–7.5 人日**
-- **全量 ≈ 13–16 人日**（不含服务端展示）
-- 进度：**P0 / P0.5 / P1 / P2 / P3 / P4 / P6 / P8 / P9 已完成** —— 除流式与反射外的功能全部落地，落点与实施细节见 §10。
-- **剩余**：**P5 流式**（server / client / bidi + 增量事件 + 取消 + 上限，6 项）与 **P7 反射**（计划里标注为可选增强）。
+**MVP（P0–P3，端到端可用）与除流式/反射外的全部功能均已落地**，落点见 §9/§10。
 
 ---
 
 ## 8. 风险与待定项
 
-| # | 风险 / 待定 | 影响 | 应对 |
+| # | 风险 / 待定 | 影响 | 现状与应对 |
 |---|---|---|---|
-| R1 | import 路径在真实工程里常需要多个 vendor 目录 | 解析失败率高 | UI 支持多 import 路径 + 明确报错；P6 提供「集合内 `protos/` 自动加入 import」 |
-| R2 | 大 proto（googleapis / k8s）编译耗时 | 首次解析卡顿 | 缓存 + 异步解析 + loading；解析在 Go 侧不阻塞 UI |
-| R3 | `Method`/`URL` 复用造成语义混淆 | 搜索/同步列表可读性 | 建议 index/history 加 `Type` 列；UI 用协议标签区分 |
-| R4 | 流式与「一次返回 Result」IPC 模型冲突 | 需要早期定型 | P1 即确定事件名与载荷格式，避免 P5 返工 |
-| R5 | 体积 +8~12MB | 分发/更新变大 | 可接受；如需瘦身可后续用 build tag 拆分 |
-| R6 | 共享模块 schema 变更影响服务端 | 需协同发版 | 先 `replace` 联调；服务端只需「不认识也不崩」（现状已满足） |
-| R7 | 「不允许保存」把用户锁死 | 体验风险 | §5 的唯一例外：允许改定义路径/import |
-| **T1** | 是否要「内联 proto 文本」（把定义内容直接存进请求文件） | 影响 schema 设计 | 待定，倾向不做（与 D2 冲突，且文件体积大） |
-| **T2** | gRPC code 放 `Status` 还是新增 `GRPCCode` | 影响历史/断言语义 | 待定，实施 P1 时定（倾向新增字段并让 `Status` 与之同步，兼容现有 UI） |
-| **T3** | Compile 缓存进程内是否跨集合共享 | 影响内存占用 | 待定，倾向按集合隔离（切换集合即清空） |
+| R1 | import 路径在真实工程里常需要多个 vendor 目录 | 解析失败率高 | UI 支持多 import 路径 + 明确报错；集合内 `protos/` 自动加入 import；`import "../.."` 越界已被 resolver 沙箱拒绝 |
+| R2 | 大 proto（googleapis / k8s）编译耗时 | 首次解析卡顿 | 缓存（按集合隔离）+ 解析在 Go 侧不阻塞 UI |
+| R3 | `Method`/`URL` 复用造成语义混淆 | 搜索/同步列表可读性 | 已用 `Method=GRPC` + 派生 URL + 协议标签区分 |
+| R4 | 流式与「一次返回 Result」IPC 模型冲突 | P5 需先定型事件格式 | P5 未开工：动工前先定事件名与载荷格式 |
+| R5 | 体积 +6.0 MB（实测 28.30 → 34.34 MB） | 分发/更新变大 | 可接受；如需瘦身用 build tag 拆分 |
+| R6 | 共享模块 schema 变更影响服务端 | 需协同发版 | 已发版（现 `api-doc-go-share v0.5.0`）；服务端「不认识也不崩」 |
+| R7 | 「不允许保存」把用户锁死 | 体验风险 | §5 的唯一例外（允许改定义路径/import）；实现为 `checkGrpcSavable` 前置校验 |
+| **T1** | 是否「内联 proto 文本」进请求文件 | 影响 schema 设计 | 不做（与 D2 冲突，且文件体积大） |
+| **T2** | gRPC code 放 `Status` 还是新增 `GRPCCode` | 影响历史/断言语义 | 已定：`Status` 放 gRPC code + `res.grpcCode` 同值（HTTP 恒 0），`isGrpc` 区分协议 |
+| **T3** | Compile 缓存是否跨集合共享 | 影响内存占用 | 已定：按集合隔离（换集合即 `protoCache.Invalidate()`） |
 
 ---
 
@@ -419,7 +416,7 @@ docs: ""
 7. **`http:` 段不改成指针**（§2.3 原计划的调整）：yaml.v3 认 `IsZeroer`，给 `HTTPBlock` 加 `IsZero()` + 标签改 `http,omitempty` 即可让 gRPC 文件不写空 `http: {}`，而 HTTP 文件照旧 —— 比改成 `*HTTPBlock` 的迁移风险小得多（服务端与既有读取方都不用动）。已用单测双向锁定（gRPC 文件无 `http:`、HTTP 文件有 `url:`）。
 8. **导入两步走**：先用「源路径」编译校验，成功后再复制进集合 `protos/`，最后按集合内相对路径重新解析并返回 —— 这样解析失败时**不落盘**（D4）。
 9. **多文件导入的入口定义**取「自身定义了服务的第一个文件」（`proto.Compile` 返回的 `Files` 与入参文件顺序一一对应，可按下标回推），其余文件在 `Protos` 里供切换。
-10. **共享包已发版**：`api-doc-go-share` 已发布 **v0.4.0**（2026-10-02，含 `grpc` 段、`HTTPBlock.IsZero` + `http,omitempty`；CHANGELOG/README 同步更新，tag 与 master 均已推送 GitHub）。客户端 `go.mod` 直接 `require ... v0.4.0`，联调期的临时 `replace` 已删除 —— 其他机器与 CI 都能正常构建。服务端仍停在 v0.3.0 不受影响（本次只有新增与「写盘省略空 http 段」，无破坏性变更）。
+10. **共享包已发版**：`api-doc-go-share` 已发版并持续递增（当前 **v0.5.0**，含 `grpc` 段、`HTTPBlock.IsZero` + `http,omitempty`、`codegen.GrpcurlSnippet`）。客户端 `go.mod` 直接依赖该 tag，联调期的临时 `replace` 已删除 —— 其他机器与 CI 都能正常构建。服务端仍停在 v0.3.0 不受影响（本次只有新增与「写盘省略空 http 段」，无破坏性变更）。
 11. **体积实测**：引入 grpc + protobuf + protocompile 后桌面端 `28.30 MB → 34.34 MB`（**+6.0 MB**），比 §7 预估的 +8~12MB 略好。
 12. **naive 选择器的空值**：`:value` 传**空串**会被当成「已选中」，placeholder 被吃掉（服务/方法选择器一开始就不显示「先导入 .proto 定义」）；未选中必须传 `null`。同理 `@update:value` 的清空回调给的是 `null`，写回前要归一成 `''`。
 13. **`collection.ProtoFileInfo.mod` 是 Unix 秒**（Go `time.Unix()`），前端要 `new Date(mod * 1000)`；当毫秒用会显示成 1970。`GrpcProtoFile.mod` 的类型注释已标注单位。
@@ -429,38 +426,26 @@ docs: ""
 17. **字段默认值的合法写法**：枚举给 `0`（protojson 接受枚举数字，且 proto3 首个枚举值恒为 0），message / map / repeated 给 `{}` / `{}` / `[]`，`null` 对任意字段都合法（= 默认值）——样例生成仍按名字给（`"COLOR_UNSPECIFIED"`）。
 18. **取原生 textarea 要认对属性**：naive 的 `InputInst` 暴露的是 `textareaElRef`（不是 `textareaEl`）；「点击字段插入到光标处」要靠它 + `setSelectionRange`。
 19. **popconfirm 的确认回调**：`@positive-click` 才执行动作，光点触发按钮只会展开气泡（「生成样例」的覆盖确认、P8 的「设为默认」都是这样，写 e2e 要先点确认按钮）。
-20. **清单改动必须回写**：`Collection.writeManifest` 是「全量重写」，集合级默认定义要在 `Collection` 里留一份内存副本（`grpcDefault`）再写回，否则每次打开集合都会把它写丢。
+20. **清单改动必须回写**：`Collection.writeManifest` 已改为「读改写 YAML 节点」（保留未知键、键顺序与注释），但集合级默认定义仍需在 `Collection` 里留一份内存副本（`grpcDefault`）再写回，否则每次打开集合都会把它写丢。
 21. **共享包 `GRPCDefault` 只有 yaml 标签**：直接经 App 方法返回会序列化成 `{"Proto":…}`（前端按 `proto` 取不到，P8 联调时踩到）；App 层用 `GrpcDefaultInfo` 显式小驼峰 DTO 提供给前端。
 22. **请求级 settings 的 YAML 键是 `timeout`**（JSON 才是 `timeoutSec`）：核对落盘别按 JSON 名找。
 23. **gzip 需要服务端配解压器**：客户端 `grpc.UseCompressor(gzip.Name)` 只带压缩标记，服务端没 import `encoding/gzip` 会回 `UNIMPLEMENTED: Decompressor is not installed for grpc-encoding "gzip"`（`cmd/grpcfixture` 已注册；真实服务端要自备，Options 分段的提示里也写了）。
 
-## 11. 关键落点证据（现状）
+## 11. 关键落点索引（按文件，不记行号）
 
 | 主题 | 位置 |
 |---|---|
-| 请求内存模型 | `internal/collection/types.go:23-41` |
-| 请求磁盘形态 + `Extra` 兼容 | `api-doc-go-share/collection/request.go:34-41,53` |
-| `type` 分派（读） | `internal/collection/collection.go:484-495`（未知类型跳过：`:500`） |
-| 集合扫描扩展名过滤 | `internal/collection/collection.go:456` |
-| 集合外部改动监听 | `internal/collection/collection.go:114`、`internal/watch/watch.go:125-160`、`internal/app/app.go:177` |
-| 执行器入口 / 结果 | `internal/runner/runner.go:81` / `:66-77` |
-| 发送编排（含脚本与历史） | `internal/app/app.go:907,937-973,1038-1058` |
-| 前端 IPC | `frontend/src/lib/ipc.ts:129-130,151` |
-| 编辑器分段 | `frontend/src/components/RequestEditor.vue`（HTTP / gRPC 两套 `segments`） |
-| 请求栏（HTTP 方法枚举 + gRPC 分派） | `frontend/src/components/RequestBar.vue`（`isGrpcReq` 分支） |
-| gRPC 前端入口 | `frontend/src/components/Sidebar.vue`（工具栏「＋」下拉 / 分组菜单）、`frontend/src/components/TabBar.vue`（「＋」下拉）、`frontend/src/App.vue#newGrpcDraft` |
-| gRPC 前端通用逻辑 | `frontend/src/lib/grpc.ts`（协议判定 / 发送门禁 / 服务·方法换算、`isGrpc`/`grpcOf`/`grpcSendBlocker`） |
-| gRPC Schema 分段 | `frontend/src/components/GrpcSchemaPane.vue`、`frontend/src/stores/tabs.ts#loadGrpcSchema`（tab.grpcSchema / tab.grpcError） |
-| gRPC Message 分段 | `frontend/src/components/GrpcMessagePane.vue`、`internal/proto/fields.go`（`Fields`/`ValidateMessage`）、`App.GrpcMessageFields`/`GrpcValidateMessage`/`GrpcSampleMessage` |
-| gRPC Metadata 分段 | `frontend/src/components/GrpcMetadataPane.vue`（复用 `components/KeyValueTable.vue`） |
-| gRPC 响应渲染 | `frontend/src/components/ResponsePanel.vue`（`isGrpcRes` 分派 +「响应尾」页签）、`frontend/src/lib/grpc.ts`（gRPC code 表） |
-| gRPC 协议色 | `frontend/src/lib/method.ts`（`GRPC` → `--app-method-grpc`）、`frontend/src/styles/base.css` |
-| 响应面板分段/状态语义 | `frontend/src/components/ResponsePanel.vue:25,100-110` |
-| 状态码短语表 | `frontend/src/lib/format.ts:37-40` |
-| 方法色 | `frontend/src/lib/method.ts:4-13` |
-| 索引 / 历史 / 同步字段 | `internal/index/index.go:17-30`、`internal/history/history.go:18-30`、`internal/syncengine/engine.go:231-284` |
-| 代码生成（共享包） | `api-doc-go-share/codegen/codegen.go:15-21,46-65` |
-| 导出 Markdown | `internal/collection/export.go:182` |
-| 服务端协议字段预留 | `api-doc-go/server/internal/model/api.go:14`、`server/internal/dto/dto.go:122` |
-| 服务端跳过非 http | `api-doc-go/server/internal/service/bruno.go:68` |
-| devserver 反射桥 | `cmd/devserver/main.go:87-136` |
+| 定义编译 / 缓存 / 样例 / 字段 | `internal/proto/`（`compile.go`、`cache.go`、`template.go`、`fields.go`；`compile.go` 内含拒绝越界文件名的沙箱 resolver） |
+| gRPC 执行器 | `internal/runner/grpc.go`（动态调用、metadata、状态、尾元数据、TLS/mTLS、gzip） |
+| App 门面（导入/解析/发送） | `internal/app/grpc.go`（`ImportGrpcProtos`/`LoadGrpcSchema`/`GrpcSampleMessage`/`GrpcValidateMessage`/`sendGRPC`） |
+| 集合内定义与默认定义 | `internal/collection/proto.go`（`protos/` 导入/列举/删除）、`collection.go`（`GrpcDefault`/`strip`/`apply`）、清单 `grpc` 段 |
+| 请求内存 / 磁盘模型 | `internal/collection/types.go`、`api-doc-go-share/collection/request.go`（`GRPCBlock`/`GRPCTLS`、`HTTPBlock.IsZero`） |
+| 协议分派（读/写） | `internal/collection/collection.go`（按 `info.type`；`Method=GRPC` + 派生 URL 供索引/历史/搜索复用） |
+| 监听与扩展名白名单 | `internal/watch/watch.go`（`DefaultExtensions`） |
+| 索引 / 历史 / 同步字段 | `internal/index`、`internal/history`、`internal/syncengine` |
+| 前端入口与通用逻辑 | `Sidebar.vue`/`TabBar.vue`/`App.vue#newGrpcDraft`、`lib/grpc.ts` |
+| 前端分段 | `GrpcSchemaPane.vue`、`GrpcMessagePane.vue`、`GrpcMetadataPane.vue`、`RequestEditor.vue`（按协议切分段） |
+| 响应渲染与协议色 | `ResponsePanel.vue`（`isGrpcRes` + 「响应尾」页签）、`lib/grpc.ts`、`lib/method.ts` |
+| 代码生成 / 导出 | `api-doc-go-share/codegen`（`GrpcurlSnippet`）、`internal/collection/export.go` |
+| 测试夹具 | `cmd/grpcfixture`（动态收发 + 4 种形态 + 错误码 + 可选 TLS/gzip） |
+| 服务端（仅参考） | 预留 `protocol_type` 字段；解析时跳过非 `http` |

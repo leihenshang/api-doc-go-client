@@ -5,9 +5,12 @@ package syncengine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -39,12 +42,62 @@ type Client struct {
 
 // New 创建客户端。
 func New(baseURL, token, device string) *Client {
+	base, err := ValidateServerURL(baseURL)
+	if err != nil {
+		// 校验失败时保留原值：调用方（App.SetSyncBind / RunSync）已经在入口处做过校验并给出错误，
+		// 这里只兜底，避免把非法地址悄悄改写成别的地址。
+		base = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	}
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
+		BaseURL: base,
 		Token:   token,
 		Device:  device,
 		http:    &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+// maxSyncBody 单次同步响应的读取上限（防异常服务端用超大响应把内存吃光）。
+const maxSyncBody = 32 << 20 // 32MB
+
+// ValidateServerURL 校验并规范化服务端地址。
+//
+// 规则：必须显式带 http/https；**非回环地址禁止明文 http** —— 同步请求会带
+// `Authorization: Bearer <PAT>`，走 http 等于把长期令牌明文放在网络上。
+// 本机开发服务（127.0.0.1 / localhost / ::1）允许 http，否则没法联调。
+func ValidateServerURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("服务端地址为空")
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("服务端地址无法解析: %w", err)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("服务端地址缺少主机名（需要形如 https://host:port）: %s", trimmed)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+	case "http":
+		if !isLoopbackHost(u.Hostname()) {
+			return "", fmt.Errorf("服务端地址 %s 使用明文 http，会把访问令牌明文发到网络上；请改用 https（本机回环地址除外）", trimmed)
+		}
+	default:
+		return "", fmt.Errorf("服务端地址只支持 http/https: %s", trimmed)
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// isLoopbackHost 主机名是否指向本机。
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(strings.Trim(host, "[]")) {
+	case "", "localhost":
+		return true
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // ---- 协议 DTO（与 service.Sync* 对齐）----
@@ -159,7 +212,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 		return fmt.Errorf("同步请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxSyncBody))
 	if err != nil {
 		return err
 	}
@@ -194,13 +247,18 @@ func (c *Client) Meta() (*Meta, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxSyncBody))
 	var wrap struct {
-		Code int  `json:"code"`
-		Data Meta `json:"data"`
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data Meta   `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &wrap); err != nil {
 		return nil, err
+	}
+	// 与 do() 保持一致：业务码非 200 必须报错，否则会把「服务端拒绝」当成能力协商成功
+	if wrap.Code != 200 {
+		return nil, fmt.Errorf("服务端返回 %d: %s", wrap.Code, wrap.Msg)
 	}
 	m = wrap.Data
 	return &m, nil

@@ -18,6 +18,12 @@ const (
 	defaultMaxRD = 5
 	defaultLimit = 200
 
+	// 数值上限：只有下限兜底是不够的 —— 超大的 timeoutSec 在换算成 time.Duration 时
+	// 会 int64 溢出（变成负值，请求立刻超时），超大的 historyLimit 会让历史文件无界增长。
+	maxTimeoutSec   = 600
+	maxRedirects    = 20
+	maxHistoryLimit = 5000
+
 	// defaultRespSize 响应区默认占比（%）。
 	defaultRespSize = 44
 
@@ -109,11 +115,20 @@ func (s Settings) Normalize() Settings {
 	if s.TimeoutSec <= 0 {
 		s.TimeoutSec = def.TimeoutSec
 	}
+	if s.TimeoutSec > maxTimeoutSec {
+		s.TimeoutSec = maxTimeoutSec
+	}
 	if s.MaxRedirects <= 0 {
 		s.MaxRedirects = def.MaxRedirects
 	}
+	if s.MaxRedirects > maxRedirects {
+		s.MaxRedirects = maxRedirects
+	}
 	if s.HistoryLimit <= 0 {
 		s.HistoryLimit = def.HistoryLimit
+	}
+	if s.HistoryLimit > maxHistoryLimit {
+		s.HistoryLimit = maxHistoryLimit
 	}
 	if s.UIScale < minUIScale || s.UIScale > maxUIScale {
 		s.UIScale = def.UIScale

@@ -28,6 +28,7 @@ import (
 	"api-doc-go-client/internal/script"
 	"api-doc-go-client/internal/syncengine"
 	"api-doc-go-client/internal/varx"
+	"api-doc-go-client/internal/watch"
 
 	"github.com/leihenshang/api-doc-go-share/codegen"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -44,6 +45,9 @@ type App struct {
 	jar         *cookiejar.Jar // 惰性创建的 Cookie 罐
 	// sendCancels 按请求 uid 记录在途发送（指针身份用于避免旧请求结束时误删新请求）。
 	sendCancels map[string]*inflightSend
+	// draftSends 未落盘草稿（uid 为空）的在途发送：它们共用不了 uid 键，
+	// 单列一份避免「发送草稿 A 把草稿 B 取消掉」。
+	draftSends []*inflightSend
 	// mock 本地 Mock 服务（H7）
 	mock *mocksrv.Server
 	// syncToken 当前会话的 PAT（不落盘）
@@ -227,8 +231,15 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 		return nil, err
 	}
 	a.mu.Lock()
+	// 换集合必须把本地 Mock 一起下线：它持有旧 collection 的引用，
+	// 否则之后 StartMock 会因为 a.mock != nil 而继续用旧集合匹配/回放。
+	oldMock := a.mock
+	a.mock = nil
 	a.coll = c
 	a.mu.Unlock()
+	if oldMock != nil {
+		_ = oldMock.Stop()
+	}
 	// 换集合即丢弃编译缓存：缓存按绝对路径存结果，跨集合复用没有意义（也避免同路径陈旧结果）
 	a.protoCache.Invalidate()
 	go a.watchLoop(c)
@@ -240,12 +251,26 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 }
 
 // watchLoop 把外部改动事件转发给前端（Wails EventsEmit；devserver 经 SubscribeEvents 的 SSE 转发）。
+//
+// 退出条件有两个：watcher 关闭信号（切换集合时 StopWatch）与事件通道关闭。
+// 只等事件通道会在切换集合后永久阻塞（通道不会被关闭），每个被换掉的集合都泄漏一个 goroutine。
 func (a *App) watchLoop(c *collection.Collection) {
 	ch := c.WatchEvents()
 	if ch == nil {
 		return
 	}
-	for ev := range ch {
+	done := c.WatchDone()
+	for {
+		var ev watch.Event
+		select {
+		case e, ok := <-ch:
+			if !ok {
+				return
+			}
+			ev = e
+		case <-done:
+			return
+		}
 		a.mu.Lock()
 		ctx := a.ctx
 		still := a.coll == c
@@ -284,14 +309,14 @@ func (a *App) ReloadCollection() (*collection.CollectionInfo, error) {
 }
 
 // SearchIndex 本地索引搜索（C1/H4）：按标题/URL/方法/路径模糊匹配。
-// limit <= 0 时取默认 200。
+//
+// limit <= 0 = 不限条数（取全量）。内部调用方（冲突检测要全部请求的 hash、MCP 的
+// hashOf/searchIn）都按「0 = 全量」使用；此前在这里兜底成 200，会让 >200 个请求的
+// 集合静默丢结果（冲突检测直接退化成不检测）。界面搜索自己传 limit。
 func (a *App) SearchIndex(q string, limit int) ([]index.Node, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
-	}
-	if limit <= 0 {
-		limit = 200
 	}
 	return c.Search(q, limit)
 }
@@ -367,6 +392,8 @@ func (a *App) GetSyncBind() (*syncengine.BindInfo, error) {
 }
 
 // SetSyncBind 绑定/更新服务端项目（PAT 只存内存，落盘由调用方决定）。
+//
+// 地址必须通过校验：非回环地址禁止明文 http（PAT 会以 Bearer 明文过网）。
 func (a *App) SetSyncBind(serverURL string, projectID uint64, mode, token string) (*syncengine.BindInfo, error) {
 	c, err := a.requireCollection()
 	if err != nil {
@@ -375,11 +402,15 @@ func (a *App) SetSyncBind(serverURL string, projectID uint64, mode, token string
 	if strings.TrimSpace(serverURL) == "" || projectID == 0 {
 		return nil, errors.New("服务端地址与项目 ID 必填")
 	}
+	base, err := syncengine.ValidateServerURL(serverURL)
+	if err != nil {
+		return nil, err
+	}
 	if mode == "" {
 		mode = syncengine.ModeAuto
 	}
 	b := syncengine.BindInfo{
-		Linked: true, ServerURL: strings.TrimRight(serverURL, "/"),
+		Linked: true, ServerURL: base,
 		ProjectID: projectID, Mode: mode,
 	}
 	// 继承已有 cursor
@@ -420,6 +451,12 @@ func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	b, err := syncengine.LoadBind(c.Dir)
 	if err != nil || !b.Linked {
 		return nil, errors.New("当前集合未关联服务端项目")
+	}
+	// 绑定信息来自集合内的 .sync.json（可被手工/外部改动），用前再校验一次地址
+	if base, verr := syncengine.ValidateServerURL(b.ServerURL); verr != nil {
+		return nil, verr
+	} else {
+		b.ServerURL = base
 	}
 	tok := token
 	if tok == "" {
@@ -484,7 +521,8 @@ func (a *App) GetSyncStatus() *SyncStatus {
 		return &SyncStatus{}
 	}
 	b, _ := syncengine.LoadBind(c.Dir)
-	dirty, _ := c.DirtyNodes()
+	// 轻量读取：状态栏会高频轮询，不能每次都做全量索引重建（walk 整个集合）
+	dirty, _ := c.DirtyNodesFast()
 	confs, _ := c.ListConflicts()
 
 	a.mu.Lock()
@@ -633,7 +671,11 @@ func (a *App) DeleteDoc(uid string) error {
 }
 
 // SyncDocAssets 拉取文档引用的附件到本地 assets/（R9）。
-// 文档正文里的 /uploads/xxx 或 http(s) 图片，按需下载。
+//
+// 只下载「绑定服务端的同源地址」（相对路径 /uploads/xxx 按服务端地址补全）：
+// 文档正文既可能来自本地、也可能由同步服务端下发，若允许任意 http(s) 地址，
+// 一个恶意文档就能把用户的访问令牌（Bearer）送给第三方域名，同时构成 SSRF。
+// 非同源地址一律跳过（计入 skipped，不报错，避免一条坏链接中断整次同步）。
 func (a *App) SyncDocAssets(token string) (int, error) {
 	c, err := a.requireCollection()
 	if err != nil {
@@ -653,35 +695,40 @@ func (a *App) SyncDocAssets(token string) (int, error) {
 	if tok == "" || !b.Linked {
 		return 0, errors.New("未关联服务端或缺少令牌")
 	}
+	client := &http.Client{Timeout: assetFetchTimeout}
 	count := 0
 	for _, d := range docs {
-		urls := collection.DocImageURLs(d.Content)
-		for _, u := range urls {
-			// 只拉 /uploads/ 或服务端 URL
-			n, err := fetchAsset(c, b.ServerURL, tok, u)
-			if err == nil {
-				count += n
+		for _, u := range collection.DocImageURLs(d.Content) {
+			n, ferr := fetchAsset(client, c, b.ServerURL, tok, u)
+			if ferr != nil {
+				continue // 单条失败不影响其余附件
 			}
+			count += n
 		}
 	}
 	return count, nil
 }
 
-// fetchAsset 下载单个附件并保存到 assets/。
-func fetchAsset(c *collection.Collection, serverURL, token, rawURL string) (int, error) {
-	full := rawURL
-	if strings.HasPrefix(rawURL, "/") {
-		full = strings.TrimRight(serverURL, "/") + rawURL
-	}
-	if !strings.HasPrefix(full, "http") {
-		return 0, nil
+const (
+	// assetFetchTimeout 附件下载超时（此前用 http.DefaultClient：无超时，坏链接会挂死）。
+	assetFetchTimeout = 60 * time.Second
+	// maxAssetSize 单个附件上限（此前无上限，超大响应会把内存吃光）。
+	maxAssetSize = 32 << 20 // 32MB
+)
+
+// fetchAsset 下载单个附件并保存到 assets/；非服务端同源地址直接跳过。
+func fetchAsset(client *http.Client, c *collection.Collection, serverURL, token, rawURL string) (int, error) {
+	full, err := assetURL(serverURL, rawURL)
+	if err != nil {
+		return 0, err
 	}
 	req, err := http.NewRequest(http.MethodGet, full, nil)
 	if err != nil {
 		return 0, err
 	}
+	// 令牌只在同源（assetURL 已保证）时附加
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -689,7 +736,7 @@ func fetchAsset(c *collection.Collection, serverURL, token, rawURL string) (int,
 	if resp.StatusCode != 200 {
 		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAssetSize))
 	if err != nil {
 		return 0, err
 	}
@@ -702,6 +749,38 @@ func fetchAsset(c *collection.Collection, serverURL, token, rawURL string) (int,
 		return 0, err
 	}
 	return 1, nil
+}
+
+// assetURL 把文档里的图片地址规范化成可下载的完整 URL：
+// 仅接受「相对路径（按服务端补全）」或「与服务端同源的绝对地址」，其余返回错误。
+func assetURL(serverURL, rawURL string) (string, error) {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" {
+		return "", errors.New("空地址")
+	}
+	// 协议相对地址（//host/path）指向的是别的站点，必须在「相对路径」分支之前挡掉
+	if strings.HasPrefix(raw, "//") {
+		return "", errors.New("非同源地址已跳过")
+	}
+	base, err := urlpkg.Parse(strings.TrimSpace(serverURL))
+	if err != nil || base.Host == "" ||
+		(base.Scheme != "http" && base.Scheme != "https") {
+		return "", errors.New("服务端地址无效")
+	}
+	if strings.HasPrefix(raw, "/") {
+		return strings.TrimRight(base.String(), "/") + raw, nil
+	}
+	target, err := urlpkg.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if target.Scheme != "http" && target.Scheme != "https" {
+		return "", fmt.Errorf("不支持的协议: %s", target.Scheme)
+	}
+	if !strings.EqualFold(base.Scheme, target.Scheme) || !strings.EqualFold(base.Host, target.Host) {
+		return "", errors.New("非同源地址已跳过")
+	}
+	return target.String(), nil
 }
 
 func (a *App) CreateRequest(folder, name, method string) (*collection.Request, error) {
@@ -1079,21 +1158,9 @@ func (a *App) SendRequest(r *collection.Request, envName string) (*runner.Result
 
 	ctx, cancel := context.WithCancel(context.Background())
 	it := &inflightSend{cancel: cancel}
-	a.mu.Lock()
-	if a.sendCancels == nil {
-		a.sendCancels = map[string]*inflightSend{}
-	}
-	if prev, ok := a.sendCancels[r.UID]; ok {
-		prev.cancel() // 同一请求重发：先取消上一次
-	}
-	a.sendCancels[r.UID] = it
-	a.mu.Unlock()
+	a.registerSend(r.UID, it)
 	defer func() {
-		a.mu.Lock()
-		if a.sendCancels[r.UID] == it {
-			delete(a.sendCancels, r.UID)
-		}
-		a.mu.Unlock()
+		a.unregisterSend(r.UID, it)
 		cancel()
 	}()
 
@@ -1173,13 +1240,53 @@ func (a *App) executeRequest(ctx context.Context, r *collection.Request, vars ma
 	return runner.Send(ctx, *r, vars, a.sendOptions())
 }
 
-// CancelSend 取消按 uid 标识的在途发送；无在途发送时为空操作。
+// registerSend 登记在途发送：同 uid 重发先取消上一次；uid 为空的草稿单独登记（互不取消）。
+func (a *App) registerSend(uid string, it *inflightSend) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if uid == "" {
+		a.draftSends = append(a.draftSends, it)
+		return
+	}
+	if a.sendCancels == nil {
+		a.sendCancels = map[string]*inflightSend{}
+	}
+	if prev, ok := a.sendCancels[uid]; ok {
+		prev.cancel()
+	}
+	a.sendCancels[uid] = it
+}
+
+// unregisterSend 发送结束时移除登记（指针身份比对：不误删同一 uid 的新一轮发送）。
+func (a *App) unregisterSend(uid string, it *inflightSend) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if uid != "" {
+		if a.sendCancels[uid] == it {
+			delete(a.sendCancels, uid)
+		}
+		return
+	}
+	for i, x := range a.draftSends {
+		if x == it {
+			a.draftSends = append(a.draftSends[:i], a.draftSends[i+1:]...)
+			return
+		}
+	}
+}
+
+// CancelSend 取消按 uid 标识的在途发送；uid 为空表示取消全部「未落盘草稿」的发送。
 func (a *App) CancelSend(uid string) {
 	a.mu.Lock()
-	it := a.sendCancels[uid]
-	delete(a.sendCancels, uid)
+	var targets []*inflightSend
+	if uid == "" {
+		targets, a.draftSends = a.draftSends, nil
+	} else if it, ok := a.sendCancels[uid]; ok {
+		targets = append(targets, it)
+		delete(a.sendCancels, uid)
+	}
 	a.mu.Unlock()
-	if it != nil {
+	for _, it := range targets {
 		it.cancel()
 	}
 }
@@ -1401,7 +1508,13 @@ func (a *App) GenerateCode(lang, envName string, r *collection.Request) (string,
 		case "apikey":
 			key, _ := varx.Resolve(r.Auth.Key, vars)
 			val, _ := varx.Resolve(r.Auth.Value, vars)
-			if key != "" && !strings.EqualFold(r.Auth.In, "query") {
+			switch {
+			case key == "":
+			// in=query 的 API Key 是拼进地址的（与 runner.applyAuth 一致）：
+			// 之前这里既不生成头也不拼 query，代码片段与真实请求不一致（少了密钥）。
+			case strings.EqualFold(r.Auth.In, "query"):
+				url = appendQueryParam(url, key, val)
+			default:
 				headers = append(headers, codegen.KV{Name: key, Value: val})
 			}
 		}
@@ -1414,6 +1527,22 @@ func (a *App) GenerateCode(lang, envName string, r *collection.Request) (string,
 		Headers: headers,
 		Body:    body,
 	})
+}
+
+// appendQueryParam 往 URL 上追加一个查询参数（URL 解析失败时退回字符串拼接）。
+func appendQueryParam(raw, key, val string) string {
+	u, err := urlpkg.Parse(raw)
+	if err != nil {
+		sep := "?"
+		if strings.Contains(raw, "?") {
+			sep = "&"
+		}
+		return raw + sep + urlpkg.QueryEscape(key) + "=" + urlpkg.QueryEscape(val)
+	}
+	q := u.Query()
+	q.Set(key, val)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // renderBodyForCode 把请求体序列化成可放进代码片段的字符串。

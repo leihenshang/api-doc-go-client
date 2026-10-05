@@ -36,6 +36,7 @@ type Watcher struct {
 	timer   *time.Timer
 	out     chan Event
 	closed  bool
+	done    chan struct{}   // Close 时关闭：消费方据此退出（out 通道本身不关闭，避免向已关闭通道发送）
 	skip    map[string]bool // 忽略的目录名（.trash 等）
 	exts    map[string]bool // 关心的小写扩展名（DefaultExtensions）
 }
@@ -55,6 +56,7 @@ func New(root string) (*Watcher, error) {
 		ignoreUntil: map[string]time.Time{},
 		pending:     map[string]struct{}{},
 		out:         make(chan Event, 8),
+		done:        make(chan struct{}),
 		skip: map[string]bool{
 			".trash": true, ".conflicts": true, "node_modules": true,
 			".git": true,
@@ -72,6 +74,9 @@ func New(root string) (*Watcher, error) {
 
 // Events 只读事件通道（防抖后的合并事件）。
 func (w *Watcher) Events() <-chan Event { return w.out }
+
+// Done 关闭信号：Close 后立即可读。消费方 select 它即可退出，不必依赖 out 被关闭。
+func (w *Watcher) Done() <-chan struct{} { return w.done }
 
 // Ignore 自写回环：在 d 时长内忽略对 rel 的改动。
 func (w *Watcher) Ignore(rel string, d time.Duration) {
@@ -91,6 +96,7 @@ func (w *Watcher) Close() error {
 	if w.timer != nil {
 		w.timer.Stop()
 	}
+	close(w.done) // 唤醒消费方（事件通道不关闭：flush 可能仍在锁外发送）
 	w.mu.Unlock()
 	return w.w.Close()
 }
@@ -141,17 +147,21 @@ func (w *Watcher) onFS(root string, ev fsnotify.Event) {
 	}
 	rel = filepath.ToSlash(rel)
 
+	// 新建目录补挂 watch。必须在扩展名过滤**之前**判断：目录名可以带点（如 v1.0），
+	// 其「扩展名」是 .0 —— 先过滤就会漏挂，之后该目录下的改动再也收不到事件。
+	if ev.Op&fsnotify.Create != 0 {
+		if info, serr := os.Stat(ev.Name); serr == nil && info.IsDir() {
+			base := filepath.Base(ev.Name)
+			if !w.skip[base] && !strings.HasPrefix(base, ".") {
+				_ = w.w.Add(ev.Name)
+			}
+		}
+	}
 	// 只关心集合文件类型：.proto / 证书 / 图片等一律不参与「外部改动」（D3）。
 	// 无扩展名的路径（目录、被删除的目录）继续上报，保持既有行为 —— 目录事件同时也是
 	// 「先建目录再写文件」的兜底：新建目录的 watch 若晚于其中的文件写入，仍会因目录事件重扫。
 	if ext := strings.ToLower(filepath.Ext(ev.Name)); ext != "" && !w.exts[ext] {
 		return
-	}
-	// 新建目录补挂 watch
-	if ev.Op&fsnotify.Create != 0 {
-		if info, serr := os.Stat(ev.Name); serr == nil && info.IsDir() {
-			_ = w.w.Add(ev.Name)
-		}
 	}
 
 	w.mu.Lock()

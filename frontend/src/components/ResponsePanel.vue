@@ -64,6 +64,9 @@ const display = computed<SendResult | null>(() => {
       body: r.body ?? '',
       trailers: r.trailers ?? [],
       script: r.script ?? null,
+      truncated: !!r.truncated,
+      fullSize: r.fullSize ?? 0,
+      warnings: r.warnings ?? [],
     }
   }
   return {
@@ -78,6 +81,9 @@ const display = computed<SendResult | null>(() => {
     body: ex.response.body ?? '',
     trailers: [], // 示例快照不存尾元数据
     script: null, // example 快照未存脚本产物
+    truncated: false, // 示例快照不记录截断信息（存的就是当时展示的内容）
+    fullSize: 0,
+    warnings: [],
   }
 })
 
@@ -125,7 +131,13 @@ const meta = computed(() => {
   if (!r) return ''
   const out = `${r.timeMs} ms${t('common.sep')}${formatBytes(r.size)}`
   // gRPC：把发送的请求消息大小也带上（G8.3）
-  return r.sentSize ? `${out}${t('common.sep')}↑ ${formatBytes(r.sentSize)}` : out
+  const withSent = r.sentSize ? `${out}${t('common.sep')}↑ ${formatBytes(r.sentSize)}` : out
+  // 截断必须显式标注：否则用户会把「前 10MB」当成完整响应体
+  if (!r.truncated) return withSent
+  const label = r.fullSize
+    ? t('resp.truncatedFull', { size: formatBytes(r.fullSize) })
+    : t('resp.truncated')
+  return `${withSent}${t('common.sep')}${label}`
 })
 
 const exampleOptions = computed(() => [
@@ -367,6 +379,11 @@ async function toggleBookmark(path: string): Promise<void> {
       />
     </div>
 
+    <!-- 发送告警（跨域重定向丢弃凭据头、响应体被截断等）：非致命但必须让用户看见 -->
+    <div v-if="display?.warnings?.length" class="warns" data-testid="resp.warnings">
+      <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
+    </div>
+
     <!-- 内容分支：出错时只留错误条；否则「有响应 → 响应区 / 无响应 → 空态提示」。
          注意这里必须自己带条件，不能写成 v-else-if/v-else —— 上一版的 v-else-if 挂到了上面
          状态栏的 v-if 上，链条变成「无错误 ? 状态栏 : …」，导致响应区与空态永远不渲染。 -->
@@ -511,6 +528,22 @@ async function toggleBookmark(path: string): Promise<void> {
 
 .err {
   margin-bottom: 8px;
+}
+
+/* 发送告警：跨域重定向丢弃凭据头、响应体被截断等 —— 用提醒色弱化呈现，不抢状态码的注意力 */
+.warns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.warn {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--app-warn);
 }
 
 /* 状态栏（design-spec §3 第 1 排，h44）：响应 · 200 OK 徽章 · 12 ms · 145 KB，右侧「本次响应 ▾」 */

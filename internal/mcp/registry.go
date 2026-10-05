@@ -105,17 +105,19 @@ func (r *Registry) scan() error {
 		case collection.IsBrunoDir(abs):
 			e.skipped = "这是 Bruno 集合目录，请先用客户端的「导入」功能转换"
 		default:
-			// 只有含 manifest 的目录才算项目；其余（比如随手放的一层壳）标为跳过并说明原因
-			if _, err := os.Stat(filepath.Join(abs, "opencollection.yml")); err != nil {
+			// 只有含 manifest 的目录才算项目；其余（比如随手放的一层壳）标为跳过并说明原因。
+			// 这里刻意只读清单（ReadMeta）：扫描是只读操作，不能对每个项目建索引、写清单、
+			// 起 fsnotify 监听 —— 之前走 Open 会为每个项目留下永不释放的监听句柄。
+			if _, statErr := os.Stat(filepath.Join(abs, "opencollection.yml")); statErr != nil {
 				e.skipped = "缺少 opencollection.yml（不是 api-doc-go 集合）"
 				break
 			}
-			c, err := collection.Open(abs)
+			meta, err := collection.ReadMeta(abs)
 			if err != nil {
-				e.skipped = "集合打开失败: " + err.Error()
+				e.skipped = "集合清单不可用: " + err.Error()
 				break
 			}
-			e.Name, e.UID = c.Name, c.UID
+			e.Name, e.UID = meta.Name, meta.UID
 		}
 		entries = append(entries, e)
 	}
@@ -288,8 +290,13 @@ func (r *Registry) CreateProject(name, dirName string) (Project, error) {
 	// 允许项目名与目录名不同：目录名来自 dirName，manifest 的 info.name 用 name；
 	// Open 只在目录不存在时建目录，这里提前落 manifest 让新项目立刻出现在列表里
 	c.Name = name
-	if err := c.EnsureManifest(); err != nil {
-		return Project{}, err
+	manifestErr := c.EnsureManifest()
+	// 这里的实例只为「建目录 + 落清单」临时存在：索引与文件监听要立刻释放，
+	// 否则每建一个项目就留下一个常驻 watcher（真正使用时由 Registry.App 再打开一份）。
+	c.StopWatch()
+	c.CloseIndex()
+	if manifestErr != nil {
+		return Project{}, manifestErr
 	}
 	if err := r.Reload(); err != nil {
 		return Project{}, err

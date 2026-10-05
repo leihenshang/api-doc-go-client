@@ -308,6 +308,9 @@ export default {
     closeHint: 'Close current tab',
     saveNowHint: 'Save now',
     binary: 'Binary response: shown as base64',
+    /** Response body exceeded 10 MB and was truncated (size is the truncated length) */
+    truncated: 'Response truncated',
+    truncatedFull: 'Response truncated ({size} actual)',
     fields: 'Field mapping',
     fieldsTab: 'Fields',
     fieldsHint: 'Click “Update fields” to parse; repeated updates only append new fields and keep your meanings',

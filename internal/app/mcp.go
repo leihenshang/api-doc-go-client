@@ -154,13 +154,23 @@ func (a *App) MCPStatusText() *MCPStatus {
 }
 
 // applyMCP 重启内嵌 MCP 服务。newToken 非空时先换令牌（设置页「重新生成」用）。
+//
+// 「启用但令牌为空」时自动生成并**落盘**：只保存在内存里的话，下一次
+// SaveSettings（例如切主题）或重启应用都会再生成一个新令牌，已连上的 AI 客户端
+// 会突然 401，且用户看不出发生了什么。
 func (a *App) applyMCP(newToken string) *MCPStatus {
 	a.mu.Lock()
 	cfg := a.settings.MCP
 	if newToken != "" {
 		cfg.Token = newToken
 	}
+	generated := false
+	if cfg.Enabled && strings.TrimSpace(cfg.Token) == "" {
+		cfg.Token = newMCPToken()
+		generated = true
+	}
 	a.settings.MCP = cfg
+	persist := a.settings
 	backend := a.mcpBackend
 	root := ""
 	if a.coll != nil {
@@ -168,16 +178,20 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 	}
 	a.mu.Unlock()
 
+	// 落盘放锁外（要做文件 IO）；失败不阻断服务启动，但要让用户看到
+	persistErr := ""
+	if generated {
+		if err := config.Save(persist.Normalize()); err != nil {
+			persistErr = fmt.Sprintf("令牌已生成但写入配置失败（重启后会变）: %v", err)
+		}
+	}
+
 	// 未注入实现（纯浏览器/devserver 未开启 MCP 的构建）：如实回报，不静默
 	if backend == nil {
 		st := &MCPStatus{Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
 			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Error: errNoMCPBackend.Error()}
 		a.setMCPStatus(st)
 		return st
-	}
-	// 启用但没令牌 → 生成一个（「开了就有鉴权」，不裸奔）
-	if cfg.Enabled && strings.TrimSpace(cfg.Token) == "" {
-		cfg.Token = newMCPToken()
 	}
 
 	st, err := backend.Start(MCPRequest{
@@ -196,6 +210,9 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 			CrossHost: !isLoopbackHost(cfg.Addr),
 			Error:     err.Error(),
 		}
+	}
+	if persistErr != "" {
+		st.Error = strings.TrimSpace(strings.Join([]string{st.Error, persistErr}, "；"))
 	}
 	a.setMCPStatus(st)
 	return st

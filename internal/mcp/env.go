@@ -281,6 +281,14 @@ func (s *Service) SetEnvVar(in SetEnvVarInput) (EnvVarEntry, error) {
 	}
 	entry := collection.Var{Name: name, Value: in.Value, Secret: in.Secret, Enabled: enabled}
 	kept := false // 本次是否没动密钥
+	if !hasVar(envs[idx].Vars, name) && in.Secret && isMaskish(in.Value) {
+		// 新建敏感变量的路径没有「旧值」可保留：把掩码当值写进 .secrets.yml 等于存了个假密钥，
+		// 而且之后 AI 再也拿不到真值 —— 直接报错，让调用方给真实密钥。
+		return EnvVarEntry{}, fmt.Errorf(
+			"变量 %s.%s 是新变量，secret=true 时 value 必须是真实密钥（收到的是掩码/占位符 %q），"+
+				"否则会把掩码本身存成密钥；若只是想占位，请先传真实值或把 secret 设为 false",
+			envName, name, in.Value)
+	}
 	for i := range envs[idx].Vars {
 		if envs[idx].Vars[i].Name != name {
 			continue
@@ -426,6 +434,16 @@ func indexOfEnv(envs []collection.Env, name string) int {
 		}
 	}
 	return -1
+}
+
+// hasVar 环境里是否已有同名变量。
+func hasVar(vars []collection.Var, name string) bool {
+	for i := range vars {
+		if vars[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceVar 覆盖同名变量或追加到末尾（保持既有顺序，避免无意义的文件抖动）。

@@ -85,17 +85,40 @@ func (c *Collection) CreateDoc(name, uid string) (*DocEntry, error) {
 	return d, nil
 }
 
-// SaveDoc 写回文档文件。
+// SaveDoc 写回文档文件。Path 必须落在集合的 docs/ 目录内（防越界写盘）。
 func (c *Collection) SaveDoc(d *DocEntry) error {
 	if d == nil || d.UID == "" {
 		return fmt.Errorf("缺少 uid")
 	}
-	full := filepath.Join(c.Dir, filepath.FromSlash(d.Path))
+	full, err := c.docPath(d.Path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
 	}
 	c.ignoreWrite(d.Path)
 	return writeDocFile(full, d)
+}
+
+// docPath 校验并解析文档相对路径：必须是集合内 docs/ 下的 .md 文件。
+//
+// 为什么必须校验：DocEntry 经 App 门面由前端 / devserver 桥传入，Path 属于外部输入；
+// 不校验就等于提供了「任意路径写 .md」的能力（参见 SaveRequest 的同类校验）。
+func (c *Collection) docPath(rel string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rel)))
+	if clean == "." || clean == "" || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		return "", fmt.Errorf("非法的文档路径: %s", rel)
+	}
+	if !strings.EqualFold(filepath.Ext(clean), ".md") {
+		return "", fmt.Errorf("文档必须是 .md 文件: %s", rel)
+	}
+	full := filepath.Join(c.Dir, clean)
+	base := filepath.Clean(filepath.Join(c.Dir, docsDir))
+	if full != base && !strings.HasPrefix(full, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("文档必须位于 %s 目录内: %s", docsDir, rel)
+	}
+	return full, nil
 }
 
 // DeleteDoc 删除文档（移入 .trash）。

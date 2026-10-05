@@ -33,9 +33,43 @@ func TestSetCookiesAndHostScoping(t *testing.T) {
 	if len(jar.Cookies(other)) != 0 {
 		t.Fatalf("不应把 Cookie 发给其他主机")
 	}
+	// 未下发 Domain = host-only：不回发子域（浏览器同款语义）
 	deeper := mustURL(t, "https://sub.api.example.com/v1")
-	if len(jar.Cookies(deeper)) != 1 {
-		t.Fatalf("子域应匹配（域名 Cookie）")
+	if len(jar.Cookies(deeper)) != 0 {
+		t.Fatalf("host-only Cookie 不应发给子域: %+v", jar.Cookies(deeper))
+	}
+	// 显式 Domain 为父域时子域才匹配
+	jar.SetCookies(api, []*http.Cookie{{Name: "wide", Value: "w", Path: "/", Domain: ".example.com"}})
+	if got := jar.Cookies(deeper); len(got) != 1 || got[0].Name != "wide" {
+		t.Fatalf("Domain 父域 Cookie 应下发给子域: %+v", got)
+	}
+}
+
+// 跨站 Domain 必须被拒绝：否则任意站点都能往别人的域里塞 Cookie（会话固定/超级 Cookie）。
+func TestRejectForeignDomainAndSecureOverHTTP(t *testing.T) {
+	isolateConfigDir(t)
+	jar, err := New(false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	evil := mustURL(t, "https://evil.com/")
+	jar.SetCookies(evil, []*http.Cookie{{Name: "sid", Value: "injected", Path: "/", Domain: "victim.com"}})
+	victim := mustURL(t, "https://victim.com/")
+	if got := jar.Cookies(victim); len(got) != 0 {
+		t.Fatalf("跨站 Domain 应被拒绝: %+v", got)
+	}
+	// 公共后缀（com）同样拒绝
+	jar.SetCookies(evil, []*http.Cookie{{Name: "su", Value: "1", Path: "/", Domain: "com"}})
+	if got := jar.Cookies(mustURL(t, "https://any-other.com/")); len(got) != 0 {
+		t.Fatalf("顶级域 Domain 应被拒绝: %+v", got)
+	}
+	// Secure Cookie 不得走明文
+	jar.SetCookies(mustURL(t, "https://api.example.com/"), []*http.Cookie{{Name: "s", Value: "1", Path: "/", Secure: true}})
+	if got := jar.Cookies(mustURL(t, "http://api.example.com/")); len(got) != 0 {
+		t.Fatalf("Secure Cookie 不应走 http: %+v", got)
+	}
+	if got := jar.Cookies(mustURL(t, "https://api.example.com/")); len(got) != 1 {
+		t.Fatalf("Secure Cookie 应走 https: %+v", got)
 	}
 }
 

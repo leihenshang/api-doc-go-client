@@ -7,9 +7,17 @@ import (
 	"strings"
 )
 
+// brunoProbeDepth 递归探测的最大深度：目录树异常深时不必挖到底（也避免栈膨胀）。
+const brunoProbeDepth = 16
+
 // IsBrunoDir 判断目录是否为原生 Bruno 集合（含 bruno.json 或 .bru 文件）。
 // 这类目录不能直接打开，须走导入流程转换为本客户端格式。
-func IsBrunoDir(dir string) bool {
+func IsBrunoDir(dir string) bool { return isBrunoDir(dir, 0) }
+
+func isBrunoDir(dir string, depth int) bool {
+	if depth > brunoProbeDepth {
+		return false
+	}
 	if _, err := os.Stat(filepath.Join(dir, "bruno.json")); err == nil {
 		return true
 	}
@@ -21,8 +29,8 @@ func IsBrunoDir(dir string) bool {
 		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".bru") {
 			return true
 		}
-		if e.IsDir() && e.Name() != "node_modules" && e.Name() != ".git" {
-			if IsBrunoDir(filepath.Join(dir, e.Name())) {
+		if e.IsDir() && e.Name() != "node_modules" && e.Name() != ".git" && e.Name() != ".trash" {
+			if isBrunoDir(filepath.Join(dir, e.Name()), depth+1) {
 				return true
 			}
 		}

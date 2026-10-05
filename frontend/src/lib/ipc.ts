@@ -89,9 +89,14 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   if (fn) {
     return fn(...args) as Promise<T>
   }
+  // devserver 反射桥要求：POST + application/json（跨站简单请求打不进来）。
+  // 若 devserver 用 -token 启动（绑非回环地址时必填），令牌从 localStorage 读并随请求带上。
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const devToken = localStorage.getItem('dev.token')
+  if (devToken) headers['X-Dev-Token'] = devToken
   const res = await fetch(`/api/App/${method}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(args),
   })
   const text = await res.text()
@@ -135,7 +140,7 @@ function normalizeInfo(info: CollectionInfo): CollectionInfo {
 }
 
 function normalizeSend(res: SendResult): SendResult {
-  return { ...res, headers: res.headers ?? [] }
+  return { ...res, headers: res.headers ?? [], warnings: res.warnings ?? [] }
 }
 
 function normalizeResolve(res: ResolveResult): ResolveResult {
