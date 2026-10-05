@@ -224,7 +224,7 @@ export const useTabsStore = defineStore('tabs', {
     },
     /** 丢弃草稿（关闭 tab，不落盘）。 */
     async discardDraft(key: string): Promise<void> {
-      await this.close(key)
+      await this.close(key, { save: false })
     },
     pushTab(r: RequestDoc): void {
       const tab: Tab = {
@@ -553,17 +553,25 @@ export const useTabsStore = defineStore('tabs', {
       if (!tab || !tab.sending) return
       void api.cancelSend(tab.request.uid ?? '')
     },
-    async close(key: string): Promise<void> {
+    /**
+     * 关闭页签。
+     * `save: false` 给「用户明确选择不保存」的场景用（未保存询问框的「不保存」、删掉请求后关页签）：
+     * 这时**绝不写盘**，否则会把刚被删掉的文件写回来、或把用户选择丢弃的改动悄悄落盘。
+     * 默认 `save: true` 保持既有语义：关闭前 flush 一次（补上防抖还没触发的最后编辑），
+     * 失败也不阻止关闭（本地已自动保存，关闭不该卡住）；界面上的未保存询问在关闭前就拦住了。
+     */
+    async close(key: string, opts: { save?: boolean } = {}): Promise<void> {
       clearTimeout(saveTimers.get(key))
       clearTimeout(resolveTimers.get(key))
       clearTimeout(historyTimers.get(key))
       const idx = this.tabs.findIndex((t) => t.key === key)
       if (idx < 0) return
-      // flush 失败不阻止关闭：本地已自动保存，关闭不应卡住
-      try {
-        await this.flush(key)
-      } catch {
-        // 忽略保存错误，仍继续关闭
+      if (opts.save !== false) {
+        try {
+          await this.flush(key)
+        } catch {
+          // 忽略保存错误，仍继续关闭
+        }
       }
       this.tabs.splice(idx, 1)
       if (this.activeKey === key) {
@@ -575,6 +583,12 @@ export const useTabsStore = defineStore('tabs', {
       lastSnap.delete(key)
       scrollPos.delete(key)
       this.saveSession()
+      // 草稿列表要和页签保持一致：丢弃草稿后不补这一下，重启会把已丢弃的草稿又找回来
+      this.saveDrafts()
+    },
+    /** 丢弃未保存的改动直接关闭（不写盘）：供「未保存询问框」的「不保存」使用。 */
+    async closeDiscard(key: string): Promise<void> {
+      await this.close(key, { save: false })
     },
     /**
      * 批量关闭（关闭左侧 / 右侧 / 全部）：**草稿一律跳过**。
@@ -630,7 +644,8 @@ export const useTabsStore = defineStore('tabs', {
     async deleteRequest(uid: string): Promise<void> {
       await api.deleteRequest(uid)
       const tab = this.tabs.find((t) => t.uid === uid)
-      if (tab) await this.close(tab.key)
+      // 不 save：文件刚被删除，flush 会把它写回来
+      if (tab) await this.close(tab.key, { save: false })
     },
     /** 草稿编辑防抖落 localStorage（草稿没有磁盘副本，重启后靠它找回）。 */
     scheduleDrafts(): void {

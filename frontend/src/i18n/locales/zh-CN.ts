@@ -580,5 +580,8 @@ export default {
     saveOnlyHint: '填好名称、选好分组即可保存（Ctrl+S）：保存后页签留在原地，可继续编辑。',
     draftSaved: '已保存请求「{name}」',
     discard: '不保存',
+    unsavedTitle: '有未保存的修改',
+    unsavedHint: '「{name}」有未保存的修改，关闭页签前要保存吗？',
+    saveAndClose: '保存并关闭',
   },
 }
