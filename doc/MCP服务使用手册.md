@@ -8,7 +8,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 直接查接口、读详情、建请求、跑请求并把响应留存成示例。共 **10 个工具**：
+让 AI 直接查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **16 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -16,12 +16,21 @@
 | 查询 | `get_project_modules` | 某个项目有哪些模块（目录），每个模块下有哪些请求 |
 | 查询 | `get_request_detail` | 某个接口的完整详情：请求 / headers / 说明 / 已保存的响应示例 |
 | 查询 | `search_requests` | 模糊搜索：「大概记得内容，记不清名字」 |
+| 查询 | `list_envs` | 有哪些环境、每个环境里有哪些变量（**敏感值只回掩码**） |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `update_request` | 改请求 / 移动模块（带冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可人工找回） |
+| 写 | `create_env` | 新建环境（可同时写入初始变量） |
+| 写 | `rename_env` | 给环境改名（敏感值一起搬，旧文件进 `.trash`） |
+| 写 | `delete_env` | 删除环境（文件进 `.trash`，可人工找回） |
+| 写 | `set_env_var` | 新增/更新**单个**变量（按名 upsert；敏感值回填掩码 = 不改） |
+| 写 | `delete_env_var` | 删掉某个变量 |
+
+> **敏感值（`secret: true`）的值永远只回掩码 `••••••`**，AI 拿不到真实密钥 —— 这是有意的。
+> 轮换密钥就把新值传给 `set_env_var`；不想动它就把掩码原样传回（见 5.11）。
 
 **AI 侧看到的返回**是一段可读文本（不是结构化 JSON），超大内容会被裁剪并明确标注 ——
 细节见「六、输出裁剪」。
@@ -231,6 +240,56 @@ mcpserver.exe -root D:\collections -http 0.0.0.0:8189 -http-token <你的令牌>
 
 ---
 
+### 5.11 环境变量工具（6 个）
+
+环境 = `environments/<env>.yml`，请求里用 `{{变量名}}` 引用其中的变量。
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `list_envs` | `project`（必填）、`query` | 列出环境与变量。`query` 对**环境名和变量名**都做模糊过滤**每个环境还带一个 `hash`**，写操作时回传即可获得并发保护（见下） |
+| `create_env` | `project`、`name`（必填）、`vars[]`（可选） | 新建环境。重名报错，不覆盖。`vars` 里的每条：`{name, value, secret, enabled}`；**`enabled` 不传 = 启用** |
+| `rename_env` | `project`、`name`、`newName`（必填）、`ifMatch`（可选） | 改名。两个文件一起搬，旧文件进 `.trash`。目标名已被占用会报错；**只改大小写（`dev`→`DEV`）也会被拒绝**（Windows 上那是同一个文件，改名会让环境消失）。建议带 `ifMatch` |
+| `delete_env` | `project`、`name` | 删环境，两个文件都进 `.trash`。**环境不存在会报错**（不会静默成功） |
+| `set_env_var` | `project`、`env`、`name`、`value`（必填）、`secret`、`enabled`、`ifMatch` | 按变量名 upsert，**只改这一条**（其它变量、顺序、启用状态都不动）。`enabled: false` 停用某变量（**新增变量也认**）。**强烈建议带 `ifMatch`** |
+| `delete_env_var` | `project`、`env`、`name`（必填）、`ifMatch` | 删一个变量。变量不存在会报错。建议带 `ifMatch` |
+
+**名字规则**（服务端强校验，不合规直接报错）：
+
+| 对象 | 规则 | 原因 |
+|---|---|---|
+| 环境名 | 字母、数字、`-`、`_` | 环境名就是文件名 |
+| 环境名判重 | **大小写不敏感**（`DEV` 视为 `dev`） | Windows/macOS 文件系统不区分大小写，`DEV.yml` 就是 `dev.yml`。若按大小写敏感判重，`create_env("DEV")` 会绕过检查并**原地覆盖** `dev`，连密钥一起销毁，且无报错、无 `.trash` 备份 |
+| 改名 | **不允许只改大小写** | 同上：`dev`→`DEV` 会先写回同一文件、再把同一文件删掉 → 环境凭空消失。要改大小写请换一个拼写完全不同的名字 |
+| 变量名 | `[A-Za-z_][A-Za-z0-9_]*` | 必须能被 `{{name}}` 引用（与客户端渲染语法一致），也顺带排除了路径分隔符 |
+
+#### 敏感值的三条约定（重要）
+
+1. **读不到真值**：`list_envs` / `set_env_var` 的返回里，敏感变量的值一律是 `••••••`。
+2. **掩码回传 = 「这条密钥我不动」**：`set_env_var` 收到的值是掩码（或 `••••`/`●●●●`/`····`/`******` 这类被改写过的占位）时，
+   **原密钥保持不变**，返回里会写「传回的是掩码，密钥保持原样未改动」。要轮换就传新值。
+   > 只认 `• ● · *` 这几种装饰字符。**`.` 和 `?` 不算掩码** —— 它们是现实中可能真实出现的密码字符；
+   > 把它们当掩码会让「把密钥改成 `...`」被静默忽略，而调用方看不出自己根本没改成。
+3. **空值会被拒绝**：对已存在的敏感变量传 `value: ""` 会**报错**而不是清空 —— 静默把密钥清掉是最坏的帮倒忙。
+   确实要清空就把 `secret` 改成 `false` 并给一个新值（它会变成普通变量）。
+
+#### 并发保护（`ifMatch`）
+
+环境是**整份重写**的文件（改一个变量也要重写整个 `<env>.yml`），所以：
+
+- `list_envs` 的每个环境都带一个 `hash`（内容哈希，展示前 12 位）；
+- `set_env_var` / `delete_env_var` / `rename_env` 传 `ifMatch: "<hash>"` → 磁盘文件在你读取之后
+  被别人（客户端界面 / 另一个 AI 会话 / 外部编辑器）改过就**拒绝写入**，并提示重新 `list_envs` 合并；
+- **不传 = 最后写者赢**（与客户端行为一致），可能覆盖别人的改动。
+
+推荐节奏：`list_envs` → 改 → 带 `ifMatch` 写入。`set_env_var` / `rename_env` 成功后会返回**新的 hash**，
+连续操作可链式带上，不用反复 `list_envs`。
+
+停用的变量（`enabled: false`）不参与 `{{name}}` 解析：它还在文件里、也还会被 `list_envs` 列出来，
+但发送请求时不生效。输出里会标注「已停用」，别把它当成「没生效」去反复排查。
+
+> **新建集合自带一个环境**：客户端第一次打开某个集合时会自动建 `dev`（含 `host=http://127.0.0.1:8080`），
+> 所以 `create_env` 直接建 `dev` 会报「已存在」。
+
 ## 六、典型工作流（可以直接对 AI 这么说）
 
 ### ① 摸清一个陌生项目
@@ -266,7 +325,19 @@ AI 会把命令原样传给 `create_request.curl`，再按你指定的 `name` / 
 AI 会：`get_request_detail(uid=…)` 拿到 `hash` → `update_request(ifMatch=<hash>, url=…)`。
 若这期间有人改了同一个文件，写入被拒并提示重新读取合并。
 
-### ⑥ 只读模式下的用法
+### ⑥ 搭一套环境变量（含密钥）
+
+> 「给 `shop-api` 建一个 `staging` 环境：`host=https://staging.example.com`、`apiKey` 是敏感值，
+> 密钥先留空，我一会儿给你；再把 `host` 停用看看效果」
+
+AI 会：`create_env`（`apiKey` 标 `secret: true`、值留空）→ `set_env_var(enabled: false)` 停用 `host` →
+`list_envs` 回显。**注意它看不到 `apiKey` 的真值**（只回 `••••••`），所以轮换密钥必须由你把新值给它。
+
+> 「把 `staging` 改名成 `uat`，然后把 `uat` 删掉」
+
+AI 会：`rename_env(dev→uat)`（敏感值跟着搬）→ `delete_env`（文件进 `.trash`，可人工找回）。
+
+### ⑦ 只读模式下的用法
 
 给 `-readonly` 起的服务，AI 只能查 + 试发（不落盘），适合放行给「只想让它答疑/查文档」的机器人。
 
@@ -387,6 +458,14 @@ curl -s -X POST http://127.0.0.1:8189/mcp -H "$H1" -H "$H2" -H "Authorization: B
 | 写操作提示「unknown tool」 | 用了 `-readonly`：写工具没注册。去掉该参数重启 |
 | HTTP 模式起不来 | 端口被占：换一个 `-http 127.0.0.1:8190`；HTTP 路径固定 `/mcp` |
 | AI 收到的项目统计是 0 | 懒加载：项目首次被访问后才填统计。访问一次即可 |
+| `环境 "dev" 已存在` | 新建集合时客户端会自动生成一个 `dev` 环境（含 `host`）。要么换个名，要么直接用它 |
+| `找不到环境 "xxx"` | 环境名拼错或还没建（`list_envs` 看现有）。新建集合默认只有 `dev` 一个 |
+| `变量名 "1bad" 不合法` | 变量名必须以字母/下划线开头，只含字母数字下划线 —— 否则 `{{1bad}}` 引用不到 |
+| `环境 "DEV" 已存在（磁盘上实际是 "dev"）` | 环境名判重**大小写不敏感**：Windows 上 `DEV.yml` 就是 `dev.yml`，这两个名字是同一个环境 |
+| `新环境名 "DEV" 与原环境 "dev" …同一个文件` | 不允许只改大小写改名（否则环境会消失），换一个拼写完全不同的名字 |
+| `[conflict] 环境 … 的文件已变化` | 读取之后有人改了它。重新 `list_envs` 看最新内容，合并后带新的 `ifMatch` 再写；或去掉 `ifMatch` 强制覆盖（会丢掉对方的改动） |
+| 变量「配了但没生效」 | 看 `list_envs` 输出里有没有「已停用」标注：`enabled: false` 的变量不参与 `{{name}}` 解析 |
+| 密钥被改成 `••••••` 了？ | 不会：传回掩码（或 `••••`/`******`/`??????` 这类占位）时服务会**保留原密钥**并说明「传回的是掩码」。真要轮换就传新值；要清空得把 `secret` 改 false |
 | WSL 里连不上 Windows 上的服务 | 先 `curl http://127.0.0.1:8189/healthz`：`000` = 地址或防火墙问题（mirrored 模式用 `127.0.0.1`，别用 `ip route default` 的路由器地址）；有响应但 401 = 令牌不对 |
 | 401 unauthorized | 客户端没带 `Authorization: Bearer <token>`，或令牌与服务启动时打印的不一致（服务重启会自动换新令牌，需同步到客户端配置） |
 | 403 origin not allowed | 请求带 `Origin` 头但不在 `-http-allow-origin` 允许列表（浏览器端客户端要显式允许该来源） |
@@ -505,6 +584,13 @@ printf '%s\n' \
 | `send_request` | `project` + (`uid` 或 `method`+`url`) | `env`、`saveExample`、`exampleName`、`includeBody`、`maxBodyBytes` |
 | `update_request` | `project` `uid` | `name`/`url`/`method`/`headers`/`body`/`docs`/`folder`、`ifMatch` |
 | `delete_request` | `project` `uid` | — |
+| `list_envs` | `project` | `query` |
+| `create_env` | `project` `name` | `vars[]`（`{name,value,secret,enabled}`） |
+| `rename_env` | `project` `name` `newName` | `ifMatch`（建议带） |
+| `delete_env` | `project` `name` | — |
+| `set_env_var` | `project` `env` `name` `value` | `secret`、`enabled`（不传=启用/保持原状）、`ifMatch`（建议带） |
+| `delete_env_var` | `project` `env` `name` | `ifMatch`（建议带） |
 
 默认约定回顾：自动保存响应示例（`saveExample` 默认开）、响应体裁剪 8192 字节、列表 50/200 条、
+敏感变量值只回掩码（掩码回传=不改，`.`/`?` 不算掩码）、新建环境与新建变量省略 `enabled` 即启用、写操作建议带 `ifMatch`、
 删除进 `.trash`、`-root` 下含 `opencollection.yml` 的子目录=项目、`project` 三种写法（uid/名称/路径）。

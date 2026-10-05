@@ -71,7 +71,7 @@ Claude Desktop 配置示例：
 - 读操作前会 `ReloadCollection`（重扫 + 重建索引），因为集合的扫描与索引是「打开时快照」
   —— 与桌面端「写完就 reload」的做法一致。
 
-## 三、工具清单（10 个）
+## 三、工具清单（16 个）
 
 | 工具 | 作用 | 关键入参 | 模糊匹配 |
 |---|---|---|---|
@@ -85,6 +85,12 @@ Claude Desktop 配置示例：
 | `send_request` | 发送并可选保存响应示例 | `project`、`uid` 或 `method`+`url`、`env?`、`saveExample?`(默认 true)、`exampleName?`、`includeBody?`(默认 true)、`maxBodyBytes?` | — |
 | `update_request` | 局部修改 / 移动模块 | `project`、`uid`、`name?`/`url?`/`method?`/`headers?`/`body?`/`docs?`/`folder?`、`ifMatch?` | — |
 | `delete_request` | 移除请求（进 `.trash`，可找回） | `project`、`uid` | — |
+| `list_envs` | 环境与变量清单（敏感值掩码 + 内容 hash） | `project`、`query?` | ✅ 环境名 + 变量名 |
+| `create_env` | 新建环境（可带初始变量） | `project`、`name`、`vars?` | — |
+| `rename_env` | 环境改名（敏感值一起搬） | `project`、`name`、`newName`、`ifMatch?` | — |
+| `delete_env` | 删除环境（进 `.trash`） | `project`、`name` | — |
+| `set_env_var` | 单条变量 upsert | `project`、`env`、`name`、`value`、`secret?`、`enabled?`、`ifMatch?` | — |
+| `delete_env_var` | 删一个变量 | `project`、`env`、`name`、`ifMatch?` | — |
 
 ## 四、模糊匹配规则
 
@@ -107,6 +113,26 @@ Claude Desktop 配置示例：
 - 列表默认 50 条（`limit`，上限 200）。
 - 工具结果统一是**可读文本**（不进结构化 JSON）：AI 工具链里文本更省 token、也更好读。
 - 业务错误用 `isError: true` 返回（AI 能读到并纠正），不是协议级 error。
+
+## 五之二、环境变量管理的设计取舍
+
+落盘复用 collection 层既有能力（`environments/<env>.yml`；敏感值自动拆到 `<env>.secrets.yml` 并收权 0600；
+删除进 `.trash`），工具层只做门面。三个值得记的决定：
+
+| 决定 | 做法 | 理由 |
+|---|---|---|
+| **敏感值永不出门** | 读一律替换成 `••••••`（掩码常量取自共享包 `varx.MaskedValue`，界面与 MCP 不会漂移） | AI 的上下文会进日志/第三方模型；真密钥没有必要让 AI 看见 |
+| **掩码回传 = 不改** | `set_env_var` 收到的值命中掩码（`isMaskish`：整串由 `• ● · *` 构成）时保留原密钥，并在结果里说明「传回的是掩码」 | AI 只能看到掩码，若原样回写就会把占位符当密钥存进去 —— 实测过一次，密钥直接废掉。只做字节级相等会漏掉「掩码经 shell/编辑器变样」的情况（`??????`）。**刻意不收 `.` 与 `?`**：它们是现实中可能真实出现的密码字符，收进来会让「把密钥改成 `...`」被静默忽略而调用方看不出来 |
+| **空值清空改为报错** | 对已存在的敏感变量传 `value: ""` 直接报错，并给出三条出路（传回掩码 / 传新值轮换 / `secret:false` 转普通变量） | 静默清空密钥是最坏的「帮倒忙」；要清空得让人显式决定 |
+| **`enabled` 用 `*bool`** | `create_env` 的 `vars[].enabled` 与 `set_env_var` 的 `enabled` 都是指针 | bool 零值是 false：AI 忘了传就会「建出来就停用」——变量在列表里看得见、`{{name}}` 却解析不到，是极难排查的坑 |
+| **名字规则复用共享包** | 环境名用 `share.ValidEnvName`；变量名用 `[A-Za-z_][A-Za-z0-9_]*`（与占位符正则同源） | 不建「永远无法被 `{{name}} 引用」的变量；顺带排除路径分隔符 |
+| **环境名判重大小写不敏感** | `indexOfEnv` 用 `strings.EqualFold`；`create_env("DEV")` 在 Windows 上会绕过检查，`SaveEnv` 随即原地覆盖 `dev.yml` 与 `dev.secrets.yml`（密钥一并销毁，无报错、无 `.trash` 备份） | 环境名即文件名，而目标文件系统（Windows / macOS 默认）不区分大小写。文本比较与文件系统语义不一致 = 静默数据丢失 |
+| **拒绝只改大小写的改名** | `rename_env("dev"→"DEV")` 报错拒绝；`Collection.RenameEnv` 也用 `EqualFold(oldMain, newMain)` 兜底 | 改名是「写新名 + 删旧名」两步：同一文件下等于先写回再自己删掉 → 环境凭空消失（实测环境列表变空，只在 `.trash` 里找得到） |
+| **改名下沉到 collection 层** | `Collection.RenameEnv(old, new, expectHash)` 一步完成「读旧 → 校验旧名哈希 → 写新 → 旧文件进 .trash」 | 并发校验必须落在**旧名**文件上。在服务层拼 `SaveEnv(新名)+DeleteEnv(旧名)` 时，`SaveEnvChecked` 拿到的 `Env.Name` 已是新名 → 新文件不存在 → 哈希为空 → 校验被静默跳过（这个坑实测踩过一次） |
+| **写操作支持 ifMatch** | `list_envs` 每��环境返回内容 hash（前 12 位，git 风格前缀比对）；`set_env_var`/`delete_env_var`/`rename_env` 传 `ifMatch` 则拒绝覆盖期间发生的外部改动，并回传新 hash 供链式使用；不传 = 最后写者赢 | 环境是「读整份 → 改一处 → 整份写回」，同一文件还有客户端界面与其它 AI 会话两个写方，不校验就会静默抹掉对方的改动。与请求侧 `ExpectHash` 同一套思路 |
+| **删除先查存在性** | `delete_env` / `delete_env_var` 对不存在的对象报错 | collection 层删除是幂等静默的（界面反复点没问题），但对 AI「删掉了」必须为真 |
+| **改名走「写新 + 删旧」** | `SaveEnv(新名)` 后 `DeleteEnv(旧名)` | 环境的两个文件必须同时搬；先写后删中途失败最坏是「两个环境都在」，不会丢数据，旧数据还在 `.trash` |
+| **默认环境 = 排序第一个** | 输出里标「默认（send_request 不指定 env 时用它）」 | 与客户端行为一致（前端也取 `envNames[0]`），AI 不必猜 |
 
 ## 六、安全与正确性
 

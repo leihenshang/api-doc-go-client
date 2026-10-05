@@ -58,8 +58,14 @@ type Registry struct {
 }
 
 // NewRegistry 扫描 root 下一级子目录，识别含 opencollection.yml 的项目。
-// newApp 为 nil 时只能扫描/查看项目信息，打开项目会报错。
+//
+// newApp 只在测试里需要替换（注入假运行时）；为 nil 时用真实的 app.NewApp。
+// 这里兜底而不是要求每个调用方都传：漏传过一次（独立 mcpserver 二进制就曾因此
+// 所有「打开项目」的工具报「未提供运行时工厂」），代价是整个二进制不可用。
 func NewRegistry(root string, newApp NewAppFunc) (*Registry, error) {
+	if newApp == nil {
+		newApp = defaultNewApp
+	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err

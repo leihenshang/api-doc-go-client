@@ -45,6 +45,10 @@ func (ts *toolSet) registerReadTools(server *mcp.Server) {
 		Name:        "search_requests",
 		Description: "模糊搜索接口：按名称/URL/方法/路径/header/说明/body 打分排序（分数越高越相关，matched 列出命中字段）。project 省略时在所有已加载项目里搜。适合「记得大概内容但记不清名字」的场景。",
 	}, ts.searchRequests)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_envs",
+		Description: "列出项目的全部环境与其中的变量（敏感变量的值只回掩码 ••••••，拿不到真实密钥）。query 可对环境名与变量名做模糊过滤。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
+	}, ts.listEnvs)
 }
 
 func (ts *toolSet) registerWriteTools(server *mcp.Server) {
@@ -68,6 +72,32 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 		Name:        "delete_request",
 		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
 	}, ts.deleteRequest)
+	ts.registerEnvWriteTools(server)
+}
+
+// registerEnvWriteTools 环境变量的写操作（4 个环境级 + 2 个变量级）。
+// 单列一个函数：环境变量是一组有共同约定的工具（敏感值掩码、名字规则），放一起更好维护。
+func (ts *toolSet) registerEnvWriteTools(server *mcp.Server) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_env",
+		Description: "新建环境（environments/<name>.yml），可同时写入初始变量。重名会报错，不覆盖已有环境。环境名只允许字母、数字、- 与 _。",
+	}, ts.createEnv)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "rename_env",
+		Description: "给环境改名：按新名写一份（敏感值一起搬过去），再把旧名移入 .trash。目标名已被占用会报错；只改大小写（如 dev→DEV）也会被拒绝——在 Windows 上那是同一个文件，改名会让环境消失。ifMatch 传 list_envs 里的 hash 可检测期间的外部改动并拒绝覆盖。",
+	}, ts.renameEnv)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "delete_env",
+		Description: "删除环境（两个文件都移入集合的 .trash，可人工找回）。删之前建议先 list_envs 确认里面没有还要用的变量。",
+	}, ts.deleteEnv)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "set_env_var",
+		Description: "新增或更新某环境里的一个变量（按变量名 upsert，只改这一条，其它变量与顺序都不动）。强烈建议先 list_envs 拿到该环境的 hash 再带 ifMatch 写入（环境是整份重写，不带校验会覆盖期间的其它改动）。secret=true 时值落盘进 .secrets.yml，之后对外只回掩码；若把掩码原样传回表示「密钥不变」，不会覆盖真值（掩码被改写成 •••• / ????? 这类占位也认）；对已存在的敏感变量传空值会被拒绝，避免误清空密钥。enabled=false 可停用某变量（不参与 {{name}} 解析）。",
+	}, ts.setEnvVar)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "delete_env_var",
+		Description: "从某环境里删掉一个变量。变量不存在会报错（避免「以为删掉了」）。ifMatch 传 list_envs 里该环境的 hash 可获得并发保护。",
+	}, ts.deleteEnvVar)
 }
 
 func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
@@ -282,6 +312,115 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 		return fmt.Sprintf("已移除请求 %s（文件已移入 .trash，可人工找回）", in.UID), nil
 	})
+}
+
+// ---- 环境变量工具的 handler ----
+
+// listEnvsIn list_envs 的入参。
+type listEnvsIn struct {
+	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Query   string `json:"query,omitempty" jsonschema:"按环境名 / 变量名模糊过滤；留空返回全部"`
+}
+
+func (ts *toolSet) listEnvs(ctx context.Context, req *mcp.CallToolRequest, in listEnvsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		envs, err := ts.svc.ListEnvs(in.Project, in.Query)
+		if err != nil {
+			return "", err
+		}
+		return renderEnvs(in.Project, envs), nil
+	})
+}
+
+// renameEnvIn rename_env 的入参。
+type renameEnvIn struct {
+	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Name    string `json:"name" jsonschema:"当前环境名"`
+	NewName string `json:"newName" jsonschema:"新环境名（只允许字母、数字、- 与 _；不能与现有名重复，也不允许只改大小写）"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
+}
+
+func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in renameEnvIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		env, err := ts.svc.RenameEnv(in.Project, in.Name, in.NewName, in.IfMatch)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已把环境 %s 改名为 %s（%d 个变量已搬过去，旧文件在 .trash 可找回，hash %s…）",
+			in.Name, env.Name, len(env.Vars), env.Hash), nil
+	})
+}
+
+// deleteEnvIn delete_env 的入参。
+type deleteEnvIn struct {
+	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Name    string `json:"name" jsonschema:"要删除的环境名"`
+}
+
+func (ts *toolSet) deleteEnv(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		if err := ts.svc.DeleteEnv(in.Project, in.Name); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已删除环境 %s（文件已移入 .trash，可人工找回）", in.Name), nil
+	})
+}
+
+func (ts *toolSet) createEnv(ctx context.Context, req *mcp.CallToolRequest, in CreateEnvInput) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		env, err := ts.svc.CreateEnv(in)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已创建环境 %s（项目 %s，初始变量 %d 个）%s",
+			env.Name, in.Project, len(env.Vars), envTip(len(env.Vars))), nil
+	})
+}
+
+func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in SetEnvVarInput) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		v, err := ts.svc.SetEnvVar(in)
+		if err != nil {
+			return "", err
+		}
+		extra := ""
+		switch {
+		case v.KeptSecret:
+			extra = "（传回的是掩码，密钥保持原样未改动）"
+		case v.Secret:
+			extra = "（敏感值已落盘进 .secrets.yml，对外只回掩码）"
+		}
+		if !v.Enabled {
+			extra += "（已停用：不参与 {{name}} 解析）"
+		}
+		return fmt.Sprintf("已写入变量 %s.%s = %s（secret=%v，enabled=%v）%s（环境 hash %s…）",
+			in.Env, v.Name, v.Value, v.Secret, v.Enabled, extra, v.Hash), nil
+	})
+}
+
+// deleteEnvVarIn delete_env_var 的入参。
+type deleteEnvVarIn struct {
+	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Env     string `json:"env" jsonschema:"所属环境名"`
+	Name    string `json:"name" jsonschema:"要删除的变量名"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
+}
+
+func (ts *toolSet) deleteEnvVar(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvVarIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		if err := ts.svc.DeleteEnvVar(in.Project, in.Env, in.Name, in.IfMatch); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已从环境 %s 删除变量 %s", in.Env, in.Name), nil
+	})
+}
+
+// envTip 变量为空时提醒 AI 接下来该做什么（空环境在客户端里就是个空壳）。
+func envTip(n int) string {
+	if n > 0 {
+		return ""
+	}
+	return "；该环境目前没有任何变量，用 set_env_var 添加（请求里以 {{变量名}} 引用）"
 }
 
 // wrap 把 handler 的结果与错误转成 MCP 工具结果：

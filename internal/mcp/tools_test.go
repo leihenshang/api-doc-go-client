@@ -25,6 +25,8 @@ func TestRegisterToolsAll(t *testing.T) {
 	want := []string{
 		"list_projects", "get_project_modules", "get_request_detail", "search_requests",
 		"create_request", "create_module", "create_project", "send_request", "update_request", "delete_request",
+		// 环境变量管理：1 个读 + 5 个写
+		"list_envs", "create_env", "rename_env", "delete_env", "set_env_var", "delete_env_var",
 	}
 	if len(names) != len(want) {
 		t.Fatalf("工具数 %d，期望 %d：%v", len(names), len(want), names)
@@ -55,18 +57,20 @@ func TestRegisterToolsReadOnly(t *testing.T) {
 	}
 	for _, n := range names {
 		switch n {
-		case "create_request", "create_module", "create_project", "update_request", "delete_request":
+		case "create_request", "create_module", "create_project", "update_request", "delete_request",
+			"create_env", "rename_env", "delete_env", "set_env_var", "delete_env_var":
 			t.Errorf("只读模式不应注册写工具 %s", n)
 		}
 	}
-	found := false
+	found := map[string]bool{}
 	for _, n := range names {
-		if n == "send_request" {
-			found = true
-		}
+		found[n] = true
 	}
-	if !found {
+	if !found["send_request"] {
 		t.Error("只读模式仍应提供 send_request（强制不落盘）")
+	}
+	if !found["list_envs"] {
+		t.Error("只读模式仍应提供 list_envs（查环境变量属于读操作）")
 	}
 }
 

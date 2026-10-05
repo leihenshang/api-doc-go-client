@@ -806,8 +806,43 @@ func (c *Collection) readEnv(name string) (*Env, error) {
 	return env, nil
 }
 
-// SaveEnv 保存环境：secret 变量的值写入 *.secrets.yml（不进可提交文件），主文件留占位。
-func (c *Collection) SaveEnv(env Env) error {
+// SaveEnv 保存环境（不做并发校验；界面单写者场景够用）。
+// 需要「别人是否在我读之后改过」保护的调用方走 SaveEnvChecked。
+func (c *Collection) SaveEnv(env Env) error { return c.SaveEnvChecked(env, "") }
+
+// EnvFileHash 返回环境主文件的内容哈希（不存在返回空串）。
+//
+// 给并发保护用：环境是「整份重写」，调用方先读后写的窗口里若被别人改过，
+// 直接写回会静默抹掉对方的改动。读到的哈希留着，写入时校验即可发现。
+// 只哈希主文件 *.yml：secrets 文件只随 secret 变量增删一起重写，冲突时主文件哈希已能反映。
+func (c *Collection) EnvFileHash(name string) string {
+	if !validEnvName(name) {
+		return ""
+	}
+	mainP, _ := c.envPaths(name)
+	return fileHash(mainP)
+}
+
+// SaveEnvChecked 保存环境：secret 变量的值写入 *.secrets.yml（不进可提交文件），主文件留占位。
+//
+// expectHash 非空时先校验磁盘内容是否仍是该哈希（支持 git 风格前缀，≥8 位即可），
+// 不一致直接返回带 conflictMarker 的错误且**不落盘**，避免覆盖别人的改动。
+func (c *Collection) SaveEnvChecked(env Env, expectHash string) error {
+	if !validEnvName(env.Name) {
+		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
+	}
+	if expectHash != "" {
+		mainP, _ := c.envPaths(env.Name)
+		if h := fileHash(mainP); h != "" && !hashMatches(h, expectHash) {
+			return fmt.Errorf("%s 环境 %s 的文件已变化（可能客户端界面或另一个 AI 会话刚改过），"+
+				"请重新 list_envs 读取后合并，或换个环境名重试", conflictMarker, env.Name)
+		}
+	}
+	return c.saveEnv(env)
+}
+
+// saveEnv 真正落盘（调用方已做完名字与冲突校验）。
+func (c *Collection) saveEnv(env Env) error {
 	if !validEnvName(env.Name) {
 		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
 	}
@@ -840,6 +875,49 @@ func (c *Collection) SaveEnv(env Env) error {
 		return err
 	}
 	return os.WriteFile(secP, secData, 0o600) // secrets 文件收权
+}
+
+// RenameEnv 给环境改名：读旧（含 secrets 合并）→ 写新名 → 旧的两个文件移入 .trash/。
+//
+// 为什么在 collection 层做、而不是让调用方「SaveEnv(新名) + DeleteEnv(旧名)」：
+//
+//	① 并发校验要校验**旧名**文件的哈希。若放在调用层，SaveEnvChecked 收到的 Env.Name 已经是
+//	   新名，它会去看新文件（不存在 → 哈希为空 → 校验被静默跳过），保护形同虚设；
+//	② 旧名与新名在大小写不敏感的文件系统上是同一个文件时，写新名等于原地覆盖旧文件，
+//	   紧接着删旧名就把环境删没了。这里直接拒绝；
+//	③ 环境的两个文件必须同时搬，只有这一层知道它们的布局。
+func (c *Collection) RenameEnv(oldName, newName, expectHash string) error {
+	if !validEnvName(oldName) || !validEnvName(newName) {
+		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
+	}
+	oldMain, _ := c.envPaths(oldName)
+	newMain, _ := c.envPaths(newName)
+	if _, err := os.Stat(oldMain); err != nil {
+		return fmt.Errorf("找不到环境 %s", oldName)
+	}
+	// 大小写不敏感的文件系统上，dev → DEV 是同一个文件：先写后删等于让环境凭空消失。
+	if strings.EqualFold(oldMain, newMain) {
+		return fmt.Errorf("新环境名 %s 与原名在当前文件系统上是同一个文件，改名不会生效", newName)
+	}
+	if _, err := os.Stat(newMain); err == nil {
+		return fmt.Errorf("环境名 %s 已被占用", newName)
+	}
+	if expectHash != "" {
+		if h := fileHash(oldMain); h != "" && !hashMatches(h, expectHash) {
+			return fmt.Errorf("%s 环境 %s 的文件已变化（可能客户端界面或另一个 AI 会话刚改过），"+
+				"请重新 list_envs 读取后合并，或换个环境名重试", conflictMarker, oldName)
+		}
+	}
+	env, err := c.readEnv(oldName)
+	if err != nil {
+		return err
+	}
+	env.Name = newName
+	if err := c.saveEnv(*env); err != nil {
+		return err
+	}
+	// 新文件已落盘后才删旧的：中途失败最坏是「两个环境都在」，不会丢数据。
+	return c.DeleteEnv(oldName)
 }
 
 // DeleteEnv 删除环境（主文件与 secrets 文件移入 .trash/）。
