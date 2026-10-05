@@ -121,6 +121,69 @@ test.describe('保存模型与冲突检测', () => {
     await expect(tab).toHaveCount(0)
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml')).toContain('/json/nested')
   })
+
+  test('[E26] 批量关闭脏页签：按页签顺序依次询问，取消即中止整批', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await openRequest(page, 'pong')
+    const pingYml = readCollectionFile(dir, 'api/ping.yml') ?? ''
+    const pongYml = readCollectionFile(dir, 'api/pong.yml') ?? ''
+    const tabs = page.getByTestId('tab.item')
+    const ask = page.locator('.n-modal').filter({ hasText: t('prompt.unsavedTitle') })
+    const closeAll = async (): Promise<void> => {
+      await page.getByTestId('tab.item').first().click({ button: 'right' })
+      await page.locator('.n-dropdown-option').filter({ hasText: t('tab.closeAll') }).click()
+    }
+
+    // 只是打开/切换页签不算脏：URL 的 watch 会随 props.tab 变化触发，旧实现会在这里凭空标脏
+    await expect(tabs.locator('.dot')).toHaveCount(0)
+
+    // 两张页签都改脏
+    await page.getByTestId('req.url').fill('{{host}}/json/nested')
+    await page.getByTestId('req.url').blur()
+    await page.getByTestId('tab.item').filter({ hasText: 'ping' }).click()
+    await page.getByTestId('req.url').fill('{{host}}/json/fewer')
+    await page.getByTestId('req.url').blur()
+    await expect(tabs.locator('.dot')).toHaveCount(2)
+
+    // ① 依次询问：第一个取消 → 整批中止，两张都还在，磁盘没动
+    await closeAll()
+    await expect(ask).toBeVisible()
+    await expect(page.getByTestId('closeask.seq')).toContainText(t('prompt.unsavedBatch', { i: 1, n: 2 }))
+    await page.getByTestId('closeask.cancel').click()
+    await expect(ask).toHaveCount(0)
+    await expect(tabs).toHaveCount(2)
+    await expect(page.locator('.n-message').last()).toContainText(t('tab.closeAborted', { n: 0 }))
+    expect(readCollectionFile(dir, 'api/ping.yml')).toBe(pingYml)
+    expect(readCollectionFile(dir, 'api/pong.yml')).toBe(pongYml)
+
+    // ② 依次询问：第一个「不保存」→ 立刻问第二个（进度 2/2）→ 也不保存 → 全关且磁盘原样
+    await closeAll()
+    await expect(page.getByTestId('closeask.seq')).toContainText(t('prompt.unsavedBatch', { i: 1, n: 2 }))
+    await page.getByTestId('closeask.discard').click()
+    await expect(page.getByTestId('closeask.seq')).toContainText(t('prompt.unsavedBatch', { i: 2, n: 2 }))
+    await page.getByTestId('closeask.discard').click()
+    await expect(tabs).toHaveCount(0)
+    await page.waitForTimeout(300)
+    expect(readCollectionFile(dir, 'api/ping.yml')).toBe(pingYml)
+    expect(readCollectionFile(dir, 'api/pong.yml')).toBe(pongYml)
+
+    // ③ 混着选：第一个「保存并关闭」→ 落盘后继续问第二个
+    await openRequest(page, 'ping')
+    await openRequest(page, 'pong')
+    await page.getByTestId('req.url').fill('{{host}}/json/nested')
+    await page.getByTestId('req.url').blur()
+    await page.getByTestId('tab.item').filter({ hasText: 'ping' }).click()
+    await page.getByTestId('req.url').fill('{{host}}/json/fewer')
+    await page.getByTestId('req.url').blur()
+    await closeAll()
+    await page.getByTestId('closeask.save').click()
+    await page.getByTestId('closeask.discard').click()
+    await expect(tabs).toHaveCount(0)
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml')).toContain('/json/fewer')
+    expect(readCollectionFile(dir, 'api/pong.yml')).toBe(pongYml) // 第二个选了不保存
+  })
 })
 
 async function exists(p: string): Promise<boolean> {

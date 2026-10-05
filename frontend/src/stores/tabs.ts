@@ -591,19 +591,6 @@ export const useTabsStore = defineStore('tabs', {
       await this.close(key, { save: false })
     },
     /**
-     * 批量关闭（关闭左侧 / 右侧 / 全部）：**草稿一律跳过**。
-     * 批量关页签不该静默丢未落盘的内容 —— 草稿请用页签上的 × 或 Ctrl+W 单独走保存框。
-     * 返回实际关掉的个数（界面据此提示「关了几个、跳过几个草稿」）。
-     */
-    async closeMany(keys: string[]): Promise<number> {
-      const targets = keys.filter((k) => {
-        const t = this.tabs.find((x) => x.key === k)
-        return !!t && !t.draft
-      })
-      for (const k of targets) await this.close(k)
-      return targets.length
-    },
-    /**
      * 复制新建：把该请求整份深拷贝成一张**未落盘草稿**（名字加「副本」，分组沿用原请求），
      * 走的是与「新建」同一条保存路径 —— Ctrl+S 或关闭时才问名称与分组，天然不会覆盖原请求。
      * 返回新 tab 的 key（失败返回空串）。
