@@ -60,6 +60,15 @@ type ProjectApp interface {
 	ParseCurl(curl string) (*collection.Request, error)
 	SearchIndex(query string, limit int) ([]index.Node, error)
 	SendRequest(r *collection.Request, envName string) (*runner.Result, error)
+	ListEnvs() ([]collection.Env, error)
+	SaveEnv(env *collection.Env) error
+	// SaveEnvChecked 带并发写保护地保存环境（expectHash 为空则不校验）。
+	SaveEnvChecked(env *collection.Env, expectHash string) error
+	// EnvFileHash 环境主文件内容哈希（不存在返回空串），供调用方做写前校验。
+	EnvFileHash(name string) (string, error)
+	// RenameEnv 环境改名（两个文件一起搬，旧文件进 .trash）；expectHash 非空时校验旧文件。
+	RenameEnv(oldName, newName, expectHash string) error
+	DeleteEnv(name string) error
 	ListResponseExamples(reqUID string) ([]*collection.ResponseExample, error)
 	SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error)
 	ListDocs() ([]*collection.DocEntry, error)

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"api-doc-go-client/internal/collection"
@@ -194,4 +195,50 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// renderEnvs 把环境列表渲染成可读文本（list_envs 的输出）。
+//
+// 排序：环境按名字（与服务端一致），变量按名字 —— map 的迭代顺序随机，
+// 不排序的话同一份配置每次输出顺序都不同，AI 会以为内容在变。
+func renderEnvs(project string, envs []EnvEntry) string {
+	if len(envs) == 0 {
+		return fmt.Sprintf("项目 %s 还没有任何环境。用 create_env 新建（请求里以 {{变量名}} 引用其中的变量）。", project)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "项目 %s 共 %d 个环境：\n", project, len(envs))
+	for _, env := range envs {
+		tag := ""
+		if env.Default {
+			tag = "（默认：send_request 不指定 env 时用它）"
+		}
+		hash := ""
+		if env.Hash != "" {
+			hash = fmt.Sprintf(" · hash %s…", env.Hash)
+		}
+		fmt.Fprintf(&sb, "\n%s%s · %d 个变量%s\n", env.Name, tag, len(env.Vars), hash)
+		names := make([]string, 0, len(env.Vars))
+		for name := range env.Vars {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			v := env.Vars[name]
+			mark := ""
+			if !v.Enabled {
+				mark = "（已停用，不参与解析）"
+			}
+			if v.Secret {
+				mark += "（敏感值）"
+			}
+			fmt.Fprintf(&sb, "  %s = %s%s\n", v.Name, v.Value, mark)
+		}
+		if len(names) == 0 {
+			sb.WriteString("  （空环境，用 set_env_var 添加变量）\n")
+		}
+	}
+	sb.WriteString("\n提示：敏感变量的值只回掩码，这是有意为之（不把真实密钥交给 AI）；")
+	sb.WriteString("set_env_var 把掩码原样传回即表示「这条密钥不变」。\n")
+	sb.WriteString("写变量前建议把上面的 hash 作为 if_match 传回：环境是整份重写，不带校验会覆盖期间的其它改动。")
+	return sb.String()
 }
