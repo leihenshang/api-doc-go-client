@@ -424,15 +424,42 @@ function closeDraftDialog(): void {
   draftSaveOnly.value = false
 }
 
-/** 统一关闭入口：草稿弹保存框，其余（已落盘）直接关。 */
+// ---- 未保存询问框：已落盘请求有未保存改动时，关闭页签前先问「保存并关闭 / 不保存 / 取消」----
+// 之前是直接关掉并顺手 flush 落盘：用户按了 × 却不知道改动被写进了文件（手动保存模型下更意外），
+// 也没机会改成「不要这次改动」。这里把选择权交回用户。
+const closeAskKey = ref('')
+const closeAskTab = computed(() => tabs.tabs.find((t) => t.key === closeAskKey.value) ?? null)
+
+/** 询问框「保存并关闭」：写盘成功才关；写盘被拒（冲突 / 只读 / 磁盘错误）时页签留着，原因由 flush 提示。 */
+async function closeAskSave(): Promise<void> {
+  const tab = closeAskTab.value
+  if (!tab) return
+  closeAskKey.value = ''
+  await tabs.flush(tab.key)
+  if (tab.dirty || tab.conflict) return
+  await tabs.close(tab.key)
+}
+
+/** 询问框「不保存」：丢弃这次改动直接关（绝不写盘）。 */
+async function closeAskDiscard(): Promise<void> {
+  const tab = closeAskTab.value
+  closeAskKey.value = ''
+  if (tab) await tabs.closeDiscard(tab.key)
+}
+
+/** 统一关闭入口：草稿弹保存框；已落盘但有未保存改动先问一句；其余直接关。 */
 function requestClose(key: string): void {
   const tab = tabs.tabs.find((x) => x.key === key)
   if (!tab) return
-  if (!tab.draft) {
-    void tabs.close(key)
+  if (tab.draft) {
+    openDraftDialog(tab, false)
     return
   }
-  openDraftDialog(tab, false)
+  if (tab.dirty) {
+    closeAskKey.value = key
+    return
+  }
+  void tabs.close(key)
 }
 
 /** tab 栏右键菜单命令：关闭类走批量关闭（草稿自动跳过），复制新建开草稿，保存所有 = 立即 flush 全部改动。 */
@@ -726,6 +753,30 @@ watch(
               @click="confirmSaveDraft"
             >
               {{ t('common.save') }}
+            </n-button>
+          </div>
+        </template>
+      </n-modal>
+
+      <!-- 已落盘请求有未保存改动：关页签前问一句，别静默写盘 -->
+      <n-modal
+        :show="closeAskTab !== null"
+        preset="card"
+        :title="t('prompt.unsavedTitle')"
+        style="width: 420px"
+        @update:show="(v: boolean) => (v ? undefined : (closeAskKey = ''))"
+      >
+        <p class="draft-hint">{{ t('prompt.unsavedHint', { name: closeAskTab?.title ?? '' }) }}</p>
+        <template #footer>
+          <div class="modal-ft">
+            <n-button size="small" data-testid="closeask.cancel" @click="closeAskKey = ''">
+              {{ t('common.cancel') }}
+            </n-button>
+            <n-button size="small" data-testid="closeask.discard" @click="closeAskDiscard">
+              {{ t('prompt.discard') }}
+            </n-button>
+            <n-button size="small" type="primary" data-testid="closeask.save" @click="closeAskSave">
+              {{ t('prompt.saveAndClose') }}
             </n-button>
           </div>
         </template>

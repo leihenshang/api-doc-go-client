@@ -52,6 +52,7 @@ frontend/e2e/
 │   response-save-vars.spec.ts     保存▾ 菜单与字段表变量书签
 │   req-body-highlight.spec.ts     JSON 体着色与高亮层对齐
 │   tree-dnd.spec.ts               集合树指针拖拽
+│   tree-guides.spec.ts            集合树连接线：缩进 / 祖先竖线延续 / └ 收线 / 横线落在行中线
 │   createDnsRegions.spec.ts       @demo：打真实外部 https 接口，未设 E2E_DEMO_URL 即 skip
 ├─ fixtures/         集合种子（basic / bruno-sample；`__FIXTURE__`、`__TLS__` 由 fixture 运行期替换）
 ├─ helpers/

@@ -49,9 +49,23 @@ const addInput = ref<InputInst | null>(null)
 interface Row {
   node: TreeNode
   depth: number
+  /** 是否是父级（可见）子行里的最后一个：决定本行连接线画成 ├ 还是 └ */
+  last: boolean
+  /**
+   * 逐级祖先的竖向连接线是否继续，下标 i 对应深度 i+1 的祖先（长度 = depth - 1）。
+   * 祖先还有后续兄弟才需要把竖线延伸下来，否则那一列是空的。
+   */
+  lines: boolean[]
 }
 
-const INDENT = 13
+const INDENT = 16
+
+/**
+ * 连接线列相对「本行内容起点」的偏移，取展开按钮宽度的一半（`.caret` 宽 16px，图标在按钮里居中）。
+ * 这样父分组的连接线正好从它的展开图标圆心垂下来，子行的横线则终止在内容起点 —— 于是
+ * 「竖线 — 展开图标 — 内容」在同一列上对齐；如果偏移取 0，竖线会贴在按钮左边缘，看着与图标错开。
+ */
+const GUIDE_OFFSET = 8
 
 const folderMenu = computed(() => [
   { key: 'request', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
@@ -95,17 +109,24 @@ const rows = computed<Row[]>(() => {
   // H5：收藏的请求置顶展示（不改变磁盘顺序）
   const favUids = coll.favSet
   const favRows: Row[] = []
-  const walk = (nodes: TreeNode[], depth: number): void => {
-    for (const n of nodes) {
-      out.push({ node: n, depth })
-      if (n.type === 'folder' && n.children?.length && !isCollapsed(n.path)) walk(n.children, depth + 1)
-    }
+  // lines 逐级下传：进入子层时把「本行还有后续兄弟」补进列尾，正好是子行的一列祖先竖线。
+  // 注意深度 0：挂在集合根下的分组，其祖先列是「集合根行」这一列 —— 根行不是树节点、不画线，
+  // 所以第一层下传空数组（否则 depth=1 行会在自己的列上多画一条竖线，├ 被画成满行）。
+  const walk = (nodes: TreeNode[], depth: number, lines: boolean[]): void => {
+    nodes.forEach((n, i) => {
+      const last = i === nodes.length - 1
+      out.push({ node: n, depth, last, lines })
+      if (n.type === 'folder' && n.children?.length && !isCollapsed(n.path)) {
+        walk(n.children, depth + 1, depth === 0 ? [] : [...lines, !last])
+      }
+    })
   }
-  walk(src, 0)
+  walk(src, 0, [])
   if (!searching.value && favUids.size) {
     for (const r of out) {
       if (r.node.type === 'request' && favUids.has(r.node.uid)) {
-        favRows.push({ node: r.node, depth: 0 })
+        // 置顶区是平铺展示，不参与层级连接线
+        favRows.push({ node: r.node, depth: 0, last: true, lines: [] })
       }
     }
     if (favRows.length) {
@@ -115,6 +136,12 @@ const rows = computed<Row[]>(() => {
   }
   return out
 })
+
+/** 行内「新建子分组」输入行所属的父行（连接线要与目标层级对齐）。 */
+const addParentRow = computed(
+  () =>
+    rows.value.find((r) => r.node.type === 'folder' && r.node.path === adding.value?.parent) ?? null,
+)
 
 const allCollapsed = computed(() => {
   const dirs: string[] = []
@@ -534,6 +561,22 @@ watch(
           @click="onRowClick(row.node)"
           @pointerdown="onRowPointerDown(row.node, $event)"
         >
+          <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局） -->
+          <span v-if="row.depth > 0" class="guides" aria-hidden="true" data-testid="tree.row.guides">
+            <span
+              v-for="(cont, i) in row.lines"
+              :key="`l${i}`"
+              class="gl"
+              :class="{ on: cont }"
+              :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
+            />
+            <span
+              class="gl own"
+              :class="{ last: row.last }"
+              :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }"
+            />
+            <span class="gl stub" :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
+          </span>
           <template v-if="row.node.type === 'folder'">
             <button
               class="caret"
@@ -627,6 +670,28 @@ watch(
           class="row"
           :style="{ paddingLeft: 8 + (row.depth + 2) * INDENT + 'px' }"
         >
+          <!-- 输入行是该分组的子行：接上它那一列（还有后续兄弟则竖线继续），自己是 └ -->
+          <span v-if="addParentRow" class="guides" aria-hidden="true">
+            <span
+              v-for="(cont, i) in addParentRow.lines"
+              :key="`l${i}`"
+              class="gl"
+              :class="{ on: cont }"
+              :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
+            />
+            <!-- 父分组自身那一列：它挂在集合根下（depth 0）时没有祖先列，不能画 -->
+            <span
+              v-if="addParentRow.depth > 0"
+              class="gl"
+              :class="{ on: !addParentRow.last }"
+              :style="{ left: addParentRow.depth * INDENT + GUIDE_OFFSET + 'px' }"
+            />
+            <span
+              class="gl own last"
+              :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }"
+            />
+            <span class="gl stub" :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
+          </span>
           <n-input
             :ref="setAddRef"
             v-model:value="addValue"
@@ -783,6 +848,7 @@ watch(
 }
 
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 3px;
@@ -790,6 +856,51 @@ watch(
   padding-right: 6px;
   cursor: pointer;
   user-select: none;
+}
+
+/* ---- 集合树连接线（层级可见性）----
+   缩进由行的 padding-left 提供，连接线用绝对定位叠加在缩进区里（不占布局，行高/命中不受影响）：
+   第 m 列在 x = 8 + m*INDENT + GUIDE_OFFSET，也就是「深度 m-1 那个分组的展开图标圆心」那一列。 */
+.guides {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+/* 竖向连接线：默认留空（该级祖先已是最后一个子行），.on 才落线 */
+.gl {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+}
+
+.gl.on {
+  background: var(--app-guide);
+}
+
+/* 本行的 ├：整行高，接到下一个兄弟 */
+.gl.own {
+  background: var(--app-guide);
+}
+
+/* 本行的 └：只画到中线 */
+.gl.own.last {
+  bottom: auto;
+  height: 50%;
+}
+
+/* 指向内容的短横线（与 .gl.own 同列，落在行的垂直中线上）：宽度 = INDENT - GUIDE_OFFSET */
+.gl.stub {
+  top: calc(50% - 0.5px);
+  bottom: auto;
+  width: 8px;
+  height: 1px;
+  background: var(--app-guide);
+  border-radius: 1px;
 }
 
 .row:hover {
@@ -801,12 +912,16 @@ watch(
   cursor: pointer;
 }
 
-/* 请求行方法与文字水平对齐、紧凑间距 */
+/* 请求行方法与文字：同字号、同基线。
+   方法徽标默认 10px（给页签 / 请求栏那种紧凑场景），树上比 12.5px 的请求名小一截；
+   字号不同时，相同 line-height 下两者的基线会差出 1px 以上，看着就是两个字错位。
+   这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。 */
 .row > .mt,
 .row > .rname {
   display: inline-flex;
   align-items: center;
   line-height: 26px;
+  font-size: 12.5px;
 }
 
 /* 方法与名称之间再收窄 */

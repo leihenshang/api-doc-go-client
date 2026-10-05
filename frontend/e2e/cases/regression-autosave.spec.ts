@@ -85,6 +85,42 @@ test.describe('保存模型与冲突检测', () => {
     await page.waitForTimeout(1500)
     expect(readCollectionFile(dir, 'api/ping.yml')).toContain('/json/flat') // 又回到手动：不写盘
   })
+
+  test('[E26] 关闭脏页签先问保存：保存并关闭 / 不保存 / 取消', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    const before = readCollectionFile(dir, 'api/ping.yml') ?? ''
+    const tab = page.getByTestId('tab.item').filter({ hasText: 'ping' })
+
+    // ① 关页签必须先问，且此刻还没写盘
+    await editUrl(page, '{{host}}/json/nested')
+    await expect(tab.locator('.dot')).toHaveCount(1)
+    await page.keyboard.press('Control+w')
+    await expect(page.locator('.n-modal').filter({ hasText: t('prompt.unsavedTitle') })).toBeVisible()
+    expect(readCollectionFile(dir, 'api/ping.yml')).toBe(before)
+    await expect(tab).toBeVisible()
+
+    // ② 取消：页签与未保存圆点都还在，磁盘未动
+    await page.getByTestId('closeask.cancel').click()
+    await expect(page.locator('.n-modal').filter({ hasText: t('prompt.unsavedTitle') })).toHaveCount(0)
+    await expect(tab.locator('.dot')).toHaveCount(1)
+    expect(readCollectionFile(dir, 'api/ping.yml')).toBe(before)
+
+    // ③ 不保存：页签关掉，磁盘保持原样（丢弃真的丢弃）。这里走页签上的 × 按钮
+    await tab.getByTestId('tab.close').click()
+    await page.getByTestId('closeask.discard').click()
+    await expect(tab).toHaveCount(0)
+    expect(readCollectionFile(dir, 'api/ping.yml')).toBe(before)
+
+    // ④ 保存并关闭：改动落盘后再关页签
+    await openRequest(page, 'ping')
+    await editUrl(page, '{{host}}/json/nested')
+    await page.keyboard.press('Control+w')
+    await page.getByTestId('closeask.save').click()
+    await expect(tab).toHaveCount(0)
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml')).toContain('/json/nested')
+  })
 })
 
 async function exists(p: string): Promise<boolean> {

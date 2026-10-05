@@ -579,5 +579,8 @@ export default {
     saveOnlyHint: 'Name it, pick a folder and save (Ctrl+S): the tab stays open for further editing.',
     draftSaved: 'Saved request “{name}”',
     discard: 'Discard',
+    unsavedTitle: 'Unsaved changes',
+    unsavedHint: '“{name}” has unsaved changes. Save before closing the tab?',
+    saveAndClose: 'Save and close',
   },
 }
