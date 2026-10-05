@@ -4,11 +4,20 @@ import path from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test, type AppFixture } from '../helpers/app'
 import { t, tEn } from '../helpers/i18n'
-import { openCollection, openRequest, openSettings, openReqTab, reopenApp, saveSettings } from '../helpers/ui'
+import {
+  openCollection,
+  openRequest,
+  openSettings,
+  openReqTab,
+  reopenApp,
+  saveNow,
+  saveSettings,
+} from '../helpers/ui'
 
+// devserver 用 API_DOC_CONFIG_DIR 把配置目录指到隔离目录（configDir 就是配置目录本身）
 const readConfig = (app: AppFixture): string => {
   try {
-    return readFileSync(path.join(app.configDir, 'api-doc-client', 'config.json'), 'utf8')
+    return readFileSync(path.join(app.configDir, 'config.json'), 'utf8')
   } catch {
     return ''
   }
@@ -131,7 +140,8 @@ test.describe('主题与多语言', () => {
     await page.locator('.md-editor .cm-content').click()
     await page.keyboard.type(md)
 
-    // 落盘 round-trip
+    // 落盘 round-trip（默认手动保存：先 Ctrl+S 再把磁盘内容读回来）
+    await saveNow(page)
     await expect.poll(() => readFileSync(path.join(dir, 'api/ping.yml'), 'utf8')).toContain('列表项一')
 
     // 切「仅预览」：h2/列表正常渲染，且原始 HTML 必须被转义（脚本不执行）

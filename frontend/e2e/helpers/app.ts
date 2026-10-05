@@ -103,7 +103,10 @@ export const test = base.extend<{ app: AppFixture }>({
       const url = `http://127.0.0.1:${apiPort}`
       const fixtureUrl = `http://127.0.0.1:${fxPort}`
       const tlsUrl = `https://127.0.0.1:${tlsPort}`
-      const env = { ...process.env, XDG_CONFIG_HOME: configDir }
+      // 配置目录隔离：用客户端自己的覆盖变量（两端都生效）。
+      // 曾经只设 XDG_CONFIG_HOME / AppData：Windows 上 os.UserConfigDir() 只认 %AppData%，
+      // 大小写与继承环境一冲突就会写进用户真实配置目录（config/cookies/history/index 全被污染）。
+      const env = { ...process.env, API_DOC_CONFIG_DIR: configDir }
 
       const fixtures = spawnServer(binName(path.join(runDir, 'testfixtures')), ['-addr', `127.0.0.1:${fxPort}`], env, 'fixtures')
       const dev = spawnServer(
@@ -113,7 +116,12 @@ export const test = base.extend<{ app: AppFixture }>({
         'devserver',
       )
       await waitReady(`${fixtureUrl}/json/flat`, { method: 'GET' })
-      await waitReady(`${url}/api/App/GetSettings`, { method: 'POST', body: '[]' })
+      // 反射桥只接受同源 JSON 请求（防 CSRF / DNS rebinding），必须显式带 Content-Type
+      await waitReady(`${url}/api/App/GetSettings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '[]',
+      })
 
       let counter = 0
       const api = {
@@ -123,7 +131,11 @@ export const test = base.extend<{ app: AppFixture }>({
         runDir,
         configDir,
         ipc: async <T>(method: string, ...args: unknown[]): Promise<T> => {
-          const res = await fetch(`${url}/api/App/${method}`, { method: 'POST', body: JSON.stringify(args) })
+          const res = await fetch(`${url}/api/App/${method}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(args),
+          })
           const payload = (await res.json()) as { ok: boolean; data?: unknown; error?: string }
           if (!payload.ok) throw new Error(`${method} 调用失败: ${payload.error}`)
           return payload.data as T

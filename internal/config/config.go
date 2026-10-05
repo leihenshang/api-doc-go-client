@@ -173,8 +173,18 @@ func (m MCPConfig) normalize(def MCPConfig) MCPConfig {
 	return m
 }
 
+// EnvDirOverride 配置目录覆盖（测试 / devserver 用）：设为绝对路径时 Dir() 直接返回它。
+//
+// 为什么需要：os.UserConfigDir() 在 Windows 只认 %AppData%、在类 Unix 只认 XDG_CONFIG_HOME，
+// 测试靠 Setenv 隔离时极易漏一边（Windows 上就会写进用户真实配置目录），
+// 而这个变量在两端都生效，是唯一可靠的隔离开关。
+const EnvDirOverride = "API_DOC_CONFIG_DIR"
+
 // Dir 客户端配置目录（config.json / cookies.json / history.jsonl 都放这里）。
 func Dir() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(EnvDirOverride)); override != "" {
+		return filepath.Clean(override), nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("定位用户配置目录: %w", err)

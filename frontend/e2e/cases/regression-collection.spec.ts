@@ -5,10 +5,11 @@ import { expect, test } from '../helpers/app'
 import { hoverAndClick } from '../helpers/dom'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, pickMethod, treeRow, treeRowByUid } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, pickMethod, saveNow, treeRow, treeRowByUid } from '../helpers/ui'
 
-/** naive popconfirm 的确认按钮 */
-const confirmButton = (page: import('@playwright/test').Page) => page.locator('.n-popconfirm .n-button--primary-type')
+/** naive popconfirm 的确认按钮；用过的 popconfirm 会留在 DOM 里，取最近打开的那个（最后可见的） */
+const confirmButton = (page: import('@playwright/test').Page) =>
+  page.locator('.n-popconfirm:visible').getByRole('button', { name: t('common.confirm') }).last()
 
 // 种子里的固定 uid（basic 集合）
 const EMPTY_UID = '55555555-5555-4555-8555-555555555555'
@@ -25,6 +26,7 @@ test.describe('集合文件层与会话', () => {
     await expect(url).toHaveValue('{{host}}/json/flat')
     await url.fill('{{host}}/json/nested')
     await url.blur()
+    await saveNow(page) // 默认手动保存：改完要显式落盘
 
     const file = 'account/用户-列表.yml'
     await expect.poll(() => readCollectionFile(dir, file), { timeout: 10_000 }).toContain('/json/nested')
@@ -43,6 +45,7 @@ test.describe('集合文件层与会话', () => {
     const typed = '{{host}}/json/nested?probe=1'
     await url.fill(typed)
     await url.blur()
+    await saveNow(page) // 默认手动保存：落盘才能验证「写盘后编辑器不被回写覆盖」
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml'), { timeout: 10_000 }).toContain('probe=1')
 
     // 等一轮文件监听/自动重载，确认编辑器内容与光标输入没有被回写覆盖
@@ -94,6 +97,7 @@ test.describe('集合文件层与会话', () => {
     await row.getByTestId('kv.name').locator('input').fill('probe')
     await row.getByTestId('kv.value').locator('input').fill('1')
     await row.getByTestId('kv.desc').locator('input').fill('参数说明')
+    await saveNow(page) // 默认手动保存：先落盘再断言文件内容
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml'), { timeout: 10_000 }).toContain('参数说明')
 
     // 多行批量编辑往返：同名行的「说明」应保留

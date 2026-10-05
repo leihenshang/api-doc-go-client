@@ -26,7 +26,7 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
-    await page.getByTestId('req.url').locator('input').fill('http://127.0.0.1:9/edited')
+    await page.getByTestId('req.url').fill('http://127.0.0.1:9/edited')
     // 未等防抖自动保存，Ctrl+S 应立刻落盘（未保存圆点消失）
     await page.keyboard.press('Control+s')
     await expect(page.getByTestId('tab.item').filter({ hasText: 'ping' }).locator('.dot')).toHaveCount(0)
@@ -38,8 +38,9 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
-    // 指向必然会挂起的地址（无路由的本地端口），发送后立刻取消
-    await page.getByTestId('req.url').locator('input').fill('http://127.0.0.1:1/slow')
+    // 用夹具的延迟端点保证请求真的在途：指向无路由的本地端口在 Windows 会立刻 ECONNREFUSED，
+    // 请求瞬间结束，取消按钮根本来不及出现（跨平台不可靠）
+    await page.getByTestId('req.url').fill('{{host}}/delay?ms=3000')
     await page.getByTestId('req.send').click()
     const cancel = page.getByTestId('req.cancel')
     await expect(cancel).toBeVisible()
@@ -63,7 +64,7 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
-    const url = page.getByTestId('req.url').locator('input')
+    const url = page.getByTestId('req.url')
     await url.fill('http://example.com/one')
     // 等撤销快照提交（400ms 停顿）
     await page.waitForTimeout(600)

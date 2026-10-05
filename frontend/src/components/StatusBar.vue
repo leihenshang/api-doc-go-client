@@ -51,6 +51,10 @@ function clock(ms: number): string {
       {{ syncText }}
     </span>
     <span class="sp" />
+    <!-- 集合规模：与集合树一致（种子/扫描的权威计数来自 App 传入的 props） -->
+    <span class="counts" data-testid="statusbar.counts">
+      {{ t('status.requests', { n: props.requests }) }}{{ t('common.sep') }}{{ t('status.envs', { n: props.envs }) }}
+    </span>
     <!-- 保存状态：写盘进行中 / 最近一次成功保存的时间（手动保存模式下帮助确认「存了没」） -->
     <span v-if="(props.savingCount ?? 0) > 0" class="save run" data-testid="statusbar.saving">{{ t('status.saving') }}</span>
     <span v-else-if="(props.lastSavedAt ?? 0) > 0" class="save" data-testid="statusbar.saved">
@@ -77,6 +81,11 @@ function clock(ms: number): string {
 
 .sp {
   flex: 1 1 auto;
+}
+
+.counts {
+  color: var(--app-muted);
+  white-space: nowrap;
 }
 
 .save {

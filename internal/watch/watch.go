@@ -3,6 +3,8 @@
 package watch
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,8 +31,11 @@ type Watcher struct {
 	mu       sync.Mutex
 	w        *fsnotify.Watcher
 	debounce time.Duration
-	// ignore 窗口内忽略的路径前缀（自写回环）
+	// ignore 窗口内忽略的路径（自写回环）
 	ignoreUntil map[string]time.Time
+	// ignoreHash 自写回环的内容指纹（rel → 我方写入内容的 sha256）：
+	// 窗口内事件只有「内容仍与指纹一致」才丢弃，别人在同一窗口里改的照常上报。
+	ignoreHash map[string]string
 	// pending 防抖窗口内收集的变更
 	pending map[string]struct{}
 	timer   *time.Timer
@@ -54,6 +59,7 @@ func New(root string) (*Watcher, error) {
 		w:           fw,
 		debounce:    DefaultDebounce,
 		ignoreUntil: map[string]time.Time{},
+		ignoreHash:  map[string]string{},
 		pending:     map[string]struct{}{},
 		out:         make(chan Event, 8),
 		done:        make(chan struct{}),
@@ -78,11 +84,20 @@ func (w *Watcher) Events() <-chan Event { return w.out }
 // Done 关闭信号：Close 后立即可读。消费方 select 它即可退出，不必依赖 out 被关闭。
 func (w *Watcher) Done() <-chan struct{} { return w.done }
 
-// Ignore 自写回环：在 d 时长内忽略对 rel 的改动。
-func (w *Watcher) Ignore(rel string, d time.Duration) {
+// Ignore 自写回环（无指纹）：在 d 时长内忽略对 rel 的改动。
+// 写盘方能给出内容哈希时优先用 IgnoreWrite —— 这个版本会把同一窗口内的**别人**的改动也一起吞掉。
+func (w *Watcher) Ignore(rel string, d time.Duration) { w.IgnoreWrite(rel, "", d) }
+
+// IgnoreWrite 自写回环（带内容指纹）：d 窗口内对 rel 的事件，只有「文件内容仍等于 hash」
+// 才丢弃（确认是我方刚写的那份）；内容已变说明是别人改的，照常上报。
+//
+// hash 为空时退化为「窗口内一律忽略」（写盘方拿不到内容时的保守做法）。
+func (w *Watcher) IgnoreWrite(rel, hash string, d time.Duration) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.ignoreUntil[filepath.ToSlash(rel)] = time.Now().Add(d)
+	key := filepath.ToSlash(rel)
+	w.ignoreUntil[key] = time.Now().Add(d)
+	w.ignoreHash[key] = hash
 }
 
 // Close 停止监听。
@@ -169,17 +184,22 @@ func (w *Watcher) onFS(root string, ev fsnotify.Event) {
 	if w.closed {
 		return
 	}
-	// 自写回环抑制
+	// 自写回环抑制：窗口内且内容与「我方写入的指纹」一致才算自己写的；否则放行（别人改的）
 	if until, ok := w.ignoreUntil[rel]; ok && time.Now().Before(until) {
-		return
+		if h := w.ignoreHash[rel]; h == "" || fileSHA256(ev.Name) == h {
+			return
+		}
+		delete(w.ignoreUntil, rel)
+		delete(w.ignoreHash, rel)
 	}
-	// 也匹配前缀（目录级 ignore）
+	// 也匹配前缀（目录级 ignore）：目录级忽略拿不到单个文件的内容指纹，仍按时间窗口放行
 	for p, until := range w.ignoreUntil {
 		if time.Now().After(until) {
 			delete(w.ignoreUntil, p)
+			delete(w.ignoreHash, p)
 			continue
 		}
-		if rel == p || strings.HasPrefix(rel, p+"/") {
+		if rel != p && strings.HasPrefix(rel, p+"/") {
 			return
 		}
 	}
@@ -207,6 +227,16 @@ func (w *Watcher) flush() {
 	default:
 		// 消费者忙：丢掉最旧（下次扫描会兜底）
 	}
+}
+
+// fileSHA256 文件内容哈希（读不到返回空串 = 与任何指纹都不相等，按外部改动处理）。
+func fileSHA256(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // extensionSet 扩展名列表 → 小写集合（自动补前导点）。

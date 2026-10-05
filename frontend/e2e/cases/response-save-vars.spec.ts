@@ -5,7 +5,7 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, send } from '../helpers/ui'
+import { openCollection, openRequest, openRespTab, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -36,6 +36,7 @@ test.describe('响应区：保存▾与变量书签', () => {
     // 字段表书签：点亮 = 该字段值存成当前环境的变量，再点 = 删除。
     // 不假设环境里是否已存在同名变量（fixture 的 env 可能已定义），只断言「点一下翻转、再点回来」。
     await page.getByTestId('resp.updateFields').click()
+    await openRespTab(page, 'fields') // 字段表只在「响应字段」页签里渲染
     const bm = page.getByTestId('resp.fields.bookmark').first()
     const lit = async (): Promise<boolean> => ((await bm.getAttribute('class')) ?? '').includes('on')
     const before = await lit()
