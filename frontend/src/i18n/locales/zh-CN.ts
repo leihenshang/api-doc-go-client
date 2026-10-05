@@ -184,6 +184,7 @@ export default {
     duplicateName: '{name} 副本',
     closedSome: '已关闭 {n} 个页签',
     closedSkipDraft: '已关闭 {n} 个页签（未落盘的新请求请单独关闭）',
+    closeAborted: '已中止关闭（本次已关闭 {n} 个）',
     savedAll: '已保存全部改动',
     nothingToSave: '没有需要保存的改动',
     nothingToClose: '没有可关闭的页签',
@@ -582,6 +583,7 @@ export default {
     discard: '不保存',
     unsavedTitle: '有未保存的修改',
     unsavedHint: '「{name}」有未保存的修改，关闭页签前要保存吗？',
+    unsavedBatch: '批量关闭：第 {i}/{n} 个',
     saveAndClose: '保存并关闭',
   },
 }

@@ -184,6 +184,7 @@ export default {
     duplicateName: '{name} copy',
     closedSome: 'Closed {n} tab(s)',
     closedSkipDraft: 'Closed {n} tab(s) (unsaved new requests are kept)',
+    closeAborted: 'Stopped (closed {n})',
     savedAll: 'All changes saved',
     nothingToSave: 'Nothing to save',
     nothingToClose: 'No tab to close',
@@ -581,6 +582,7 @@ export default {
     discard: 'Discard',
     unsavedTitle: 'Unsaved changes',
     unsavedHint: '“{name}” has unsaved changes. Save before closing the tab?',
+    unsavedBatch: 'Closing tabs: {i} of {n}',
     saveAndClose: 'Save and close',
   },
 }

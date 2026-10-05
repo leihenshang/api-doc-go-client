@@ -427,39 +427,101 @@ function closeDraftDialog(): void {
 // ---- 未保存询问框：已落盘请求有未保存改动时，关闭页签前先问「保存并关闭 / 不保存 / 取消」----
 // 之前是直接关掉并顺手 flush 落盘：用户按了 × 却不知道改动被写进了文件（手动保存模型下更意外），
 // 也没机会改成「不要这次改动」。这里把选择权交回用户。
-const closeAskKey = ref('')
-const closeAskTab = computed(() => tabs.tabs.find((t) => t.key === closeAskKey.value) ?? null)
+//
+// 用 Promise 而不是「记一个 key 等按钮回调」：批量关闭要**按页签顺序依次**问，逐个 await
+// （关一个 → 问下一个），取消即中止整批 —— 靠 key 状态做不到「等用户答完再继续」。
+type CloseChoice = 'save' | 'discard' | 'cancel'
 
-/** 询问框「保存并关闭」：写盘成功才关；写盘被拒（冲突 / 只读 / 磁盘错误）时页签留着，原因由 flush 提示。 */
-async function closeAskSave(): Promise<void> {
-  const tab = closeAskTab.value
-  if (!tab) return
-  closeAskKey.value = ''
-  await tabs.flush(tab.key)
-  if (tab.dirty || tab.conflict) return
-  await tabs.close(tab.key)
+const closeAsk = ref<{
+  tab: Tab
+  /** 批量关闭时的进度（用于提示「第 i / n 个」），单个关闭为 null */
+  seq: { i: number; n: number } | null
+  resolve: (c: CloseChoice) => void
+} | null>(null)
+const closeAskTab = computed(() => closeAsk.value?.tab ?? null)
+const closeAskSeq = computed(() => closeAsk.value?.seq ?? null)
+
+/** 弹询问框并等用户作答。 */
+function askClose(tab: Tab, seq: { i: number; n: number } | null = null): Promise<CloseChoice> {
+  return new Promise<CloseChoice>((resolve) => {
+    closeAsk.value = { tab, seq, resolve }
+  })
 }
 
-/** 询问框「不保存」：丢弃这次改动直接关（绝不写盘）。 */
-async function closeAskDiscard(): Promise<void> {
-  const tab = closeAskTab.value
-  closeAskKey.value = ''
-  if (tab) await tabs.closeDiscard(tab.key)
+/** 询问框作答（按钮 / Esc / 遮罩关闭都走这里，否则 await 会一直挂着）。 */
+function answerClose(choice: CloseChoice): void {
+  const ask = closeAsk.value
+  closeAsk.value = null
+  ask?.resolve(choice)
+}
+
+/**
+ * 关掉一个页签（草稿走保存框；脏页签先问）。
+ * 返回是否真的关掉了 —— 批量关闭据此判断「用户取消（中止整批）」还是「写盘被拒（保留页签）」。
+ * `seq` 用于批量关闭时提示进度（「第 i / n 个」）。
+ */
+async function closeOne(key: string, seq: { i: number; n: number } | null = null): Promise<boolean> {
+  const tab = tabs.tabs.find((t) => t.key === key)
+  if (!tab) return true // 已经不在了（批量关闭过程中被前面的操作带走）：算处理过
+  if (tab.draft) {
+    openDraftDialog(tab, false)
+    return false
+  }
+  if (!tab.dirty) {
+    await tabs.close(key)
+    return true
+  }
+  const choice = await askClose(tab, seq)
+  if (choice === 'cancel') return false
+  if (choice === 'discard') {
+    await tabs.closeDiscard(key)
+    return true
+  }
+  // 保存并关闭：写盘被拒（冲突 / 只读 / 磁盘错误）时页签留着，原因由 flush 自己提示
+  await tabs.flush(key)
+  if (tab.dirty || tab.conflict) return false
+  await tabs.close(key)
+  return true
 }
 
 /** 统一关闭入口：草稿弹保存框；已落盘但有未保存改动先问一句；其余直接关。 */
 function requestClose(key: string): void {
-  const tab = tabs.tabs.find((x) => x.key === key)
-  if (!tab) return
-  if (tab.draft) {
-    openDraftDialog(tab, false)
+  void closeOne(key)
+}
+
+/**
+ * 批量关闭（关闭左侧 / 右侧 / 全部）：按页签顺序逐个关，脏页签**依次**询问；
+ * 草稿一律跳过（不该静默丢未落盘内容，请用页签上的 × 或 Ctrl+W 单独走保存框）；
+ * 用户点「取消」= 中止整批，剩下的一律保留（与主流编辑器一致）。
+ */
+async function closeManySequential(keys: string[]): Promise<void> {
+  // 先数出要问几个脏页签：草稿会被静默跳过，算进去会让「第 i / n 个」的 n 虚高
+  const dirty = keys.filter((k) => {
+    const td = tabs.tabs.find((x) => x.key === k)
+    return !!td && !td.draft && td.dirty
+  }).length
+  let closed = 0
+  let skipped = 0
+  let asked = 0
+  for (const key of keys) {
+    const tab = tabs.tabs.find((t) => t.key === key)
+    if (!tab) continue
+    if (tab.draft) {
+      skipped++
+      continue
+    }
+    const seq = tab.dirty ? { i: ++asked, n: dirty } : null
+    if (!(await closeOne(key, seq))) {
+      message.info(t('tab.closeAborted', { n: closed }))
+      return
+    }
+    closed++
+  }
+  if (!closed) {
+    message.info(t('tab.nothingToClose'))
     return
   }
-  if (tab.dirty) {
-    closeAskKey.value = key
-    return
-  }
-  void tabs.close(key)
+  message.success(skipped ? t('tab.closedSkipDraft', { n: closed }) : t('tab.closedSome', { n: closed }))
 }
 
 /** tab 栏右键菜单命令：关闭类走批量关闭（草稿自动跳过），复制新建开草稿，保存所有 = 立即 flush 全部改动。 */
@@ -490,13 +552,7 @@ async function onTabCommand(cmd: string, key: string): Promise<void> {
       : cmd === 'close-left'
         ? tabs.tabs.slice(0, i).map((t) => t.key)
         : tabs.tabs.slice(i + 1).map((t) => t.key)
-  const skipped = keys.filter((k) => tabs.tabs.find((t) => t.key === k)?.draft).length
-  const n = await tabs.closeMany(keys)
-  if (!n) {
-    message.info(t('tab.nothingToClose'))
-    return
-  }
-  message.success(skipped ? t('tab.closedSkipDraft', { n }) : t('tab.closedSome', { n }))
+  await closeManySequential(keys)
 }
 
 /** Ctrl+S：已落盘请求立即写盘（flush 会清掉待触发的防抖保存）；新建草稿开保存框，保存后留在原地。 */
@@ -758,24 +814,27 @@ watch(
         </template>
       </n-modal>
 
-      <!-- 已落盘请求有未保存改动：关页签前问一句，别静默写盘 -->
+      <!-- 已落盘请求有未保存改动：关页签前问一句，别静默写盘（批量关闭时按页签顺序逐个弹） -->
       <n-modal
         :show="closeAskTab !== null"
         preset="card"
         :title="t('prompt.unsavedTitle')"
         style="width: 420px"
-        @update:show="(v: boolean) => (v ? undefined : (closeAskKey = ''))"
+        @update:show="(v: boolean) => (v ? undefined : answerClose('cancel'))"
       >
+        <p v-if="closeAskSeq" class="draft-hint" data-testid="closeask.seq">
+          {{ t('prompt.unsavedBatch', { i: closeAskSeq.i, n: closeAskSeq.n }) }}
+        </p>
         <p class="draft-hint">{{ t('prompt.unsavedHint', { name: closeAskTab?.title ?? '' }) }}</p>
         <template #footer>
           <div class="modal-ft">
-            <n-button size="small" data-testid="closeask.cancel" @click="closeAskKey = ''">
+            <n-button size="small" data-testid="closeask.cancel" @click="answerClose('cancel')">
               {{ t('common.cancel') }}
             </n-button>
-            <n-button size="small" data-testid="closeask.discard" @click="closeAskDiscard">
+            <n-button size="small" data-testid="closeask.discard" @click="answerClose('discard')">
               {{ t('prompt.discard') }}
             </n-button>
-            <n-button size="small" type="primary" data-testid="closeask.save" @click="closeAskSave">
+            <n-button size="small" type="primary" data-testid="closeask.save" @click="answerClose('save')">
               {{ t('prompt.saveAndClose') }}
             </n-button>
           </div>

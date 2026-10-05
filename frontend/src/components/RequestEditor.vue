@@ -84,13 +84,23 @@ function syncUrlFromParams(): void {
   }
 }
 
-// URL 改了 → 回填 params（gRPC 没有 query 段，跳过，顺带避免切 tab 时被误标脏）
+/** 各页签上一次见到的 URL：用来区分「用户改了 URL」与「切页签导致取值自然变化」 */
+const lastUrlByTab = new Map<string, string>()
+
+// URL 改了 → 回填 params（gRPC 没有 query 段，跳过）。
+// 切页签同样会走到这里 —— 这个 watch 的取值是「当前 tab 的 url」，props.tab 一换取值就变了 ——
+// 但那是换了个请求、不是编辑：只重建参数表，不标脏。否则什么都没改也会冒出未保存圆点
+// （实测打开第二个请求、右键切换页签都会触发），关闭页签时还会为此多问一次。
 watch(
-  () => props.tab.request.url,
-  () => {
+  () => [props.tab.key, props.tab.request.url] as const,
+  ([key, url]) => {
+    const known = lastUrlByTab.get(key)
+    const edited = known !== undefined && known !== url
+    // 记录必须放在守卫之前：被守卫挡掉的那次也要更新基线，否则下次会被误判成编辑
+    lastUrlByTab.set(key, url)
     if (isGrpcReq.value || readonly.value || syncingFrom.value === 'params') return
     syncParamsFromUrl()
-    touch()
+    if (edited) touch()
   },
 )
 
