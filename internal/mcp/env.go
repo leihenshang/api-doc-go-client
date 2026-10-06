@@ -73,14 +73,14 @@ type EnvVarIn struct {
 
 // CreateEnvInput create_env 的入参。
 type CreateEnvInput struct {
-	Project string     `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string     `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Name    string     `json:"name" jsonschema:"环境名（文件名即环境名，只允许字母、数字、- 与 _）"`
 	Vars    []EnvVarIn `json:"vars,omitempty" jsonschema:"可选：建环境时一并写入的变量"`
 }
 
 // SetEnvVarInput set_env_var 的入参（按变量名 upsert）。
 type SetEnvVarInput struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Env     string `json:"env" jsonschema:"所属环境名（用 list_envs 看现有环境）"`
 	Name    string `json:"name" jsonschema:"变量名（[A-Za-z_][A-Za-z0-9_]*）"`
 	Value   string `json:"value" jsonschema:"变量值；若该变量是敏感值且这里传回掩码，则保持原密钥不变"`
@@ -94,7 +94,7 @@ type SetEnvVarInput struct {
 // ListEnvs 列出项目全部环境及其变量（敏感值掩码）。
 // query 为空即不过滤；非空时按「环境名 / 变量名」子串匹配（忽略大小写与全角空格）。
 func (s *Service) ListEnvs(project, query string) ([]EnvEntry, error) {
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolve(project)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s *Service) CreateEnv(in CreateEnvInput) (EnvEntry, error) {
 	if err != nil {
 		return EnvEntry{}, err
 	}
-	a, _, err := s.reg.App(in.Project)
+	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return EnvEntry{}, err
 	}
@@ -187,7 +187,7 @@ func (s *Service) RenameEnv(project, name, newName, ifMatch string) (EnvEntry, e
 	if err != nil {
 		return EnvEntry{}, err
 	}
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return EnvEntry{}, err
 	}
@@ -234,7 +234,7 @@ func (s *Service) DeleteEnv(project, name string) error {
 	if err != nil {
 		return err
 	}
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func (s *Service) SetEnvVar(in SetEnvVarInput) (EnvVarEntry, error) {
 	if err != nil {
 		return EnvVarEntry{}, err
 	}
-	a, _, err := s.reg.App(in.Project)
+	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return EnvVarEntry{}, err
 	}
@@ -367,7 +367,7 @@ func (s *Service) DeleteEnvVar(project, envName, varName, ifMatch string) error 
 	if name == "" {
 		return errNeedVarName
 	}
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}

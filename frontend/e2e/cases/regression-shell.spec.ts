@@ -317,10 +317,12 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(page.getByTestId('settings.lang')).toBeHidden()
     await expect(page.getByTestId('settings.nav.network')).toHaveClass(/on/)
 
-    // ② MCP 分区：启用 + 只读 + 保存 → 后端起服务，状态回显「运行中」与连接地址
+    // ② MCP 分区：启用 + 只读 + **授权一个工作目录** + 保存 → 后端起服务，状态回显「运行中」与连接地址
+    //    （白名单为空是安全默认：启用但没授权任何目录时服务不会监听，见 mcp-allow 用例）
     await openSettingsSection(page, 'mcp')
     await page.getByTestId('settings.mcpEnabled').check()
     await page.getByTestId('settings.mcpReadOnly').check() // 默认就是只读，显式确认
+    await page.getByTestId('settings.mcpAllowCurrent').click() // 把当前打开的工作目录加入白名单
     await saveSettings(page)
 
     await openSettings(page)

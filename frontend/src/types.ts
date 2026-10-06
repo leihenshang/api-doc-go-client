@@ -221,6 +221,27 @@ export interface CollectionInfo {
   envs: Env[]
 }
 
+/**
+ * 一个已打开的工作目录（侧栏根行）。
+ *
+ * `root` 是工作目录标识（后端用规范化绝对路径；Windows 上忽略大小写）——
+ * 所有「按根」的调用与会话存储键都用它：集合 uid 不能当身份，
+ * 拷贝出来的两个目录清单 uid 是相同的。
+ */
+export interface CollectionSummary {
+  root: string
+  info: CollectionInfo
+  /** 是否为当前活动根（集合级动作都作用于它） */
+  active: boolean
+  /** 同步镜像：该根下写操作都会被拒（界面据此置灰） */
+  readOnly: boolean
+  /** 已关联服务端项目 */
+  linked: boolean
+  /** 本地 Mock 是否正在服务该根 */
+  mocking: boolean
+  mockPort?: number
+}
+
 export interface SendResult {
   url: string
   status: number
@@ -312,6 +333,11 @@ export interface Settings {
    * 只在 Ctrl+S / 关闭页签 / 「保存所有」时写盘，编辑期间文件保持不动（页签上有未保存圆点）。
    */
   autoSave: boolean
+  /**
+   * 启动时最多恢复几个工作目录（1–32，默认 8）。
+   * 每个根常驻一个文件监听 + 一次索引扫描；超出的目录不静默丢，启动时提示、可从工具条「最近打开」补开。
+   */
+  restoreLimit: number
   /** 客户端内嵌的 MCP 服务设置（设置页「MCP 服务」分区） */
   mcp: MCPConfig
 }
@@ -333,6 +359,19 @@ export interface MCPConfig {
   readOnly: boolean
   /** 允许的浏览器来源（Origin 白名单，逗号分隔填在界面里）；非浏览器客户端不受影响 */
   allowOrigins: string[]
+  /**
+   * MCP 可访问的工作目录白名单（每条区分只读/可写）。
+   * 空 = 不授权任何目录：AI 读写不到任何集合（安全默认），需要用时在设置里显式添加。
+   */
+  allow: MCPAllowDir[]
+}
+
+/** MCP 可访问的工作目录（白名单条目）。 */
+export interface MCPAllowDir {
+  /** 工作目录绝对路径（目录自身或它的一级子目录含 opencollection.yml 即算项目） */
+  path: string
+  /** 是否允许写（新建/修改/删除）；false = 只读授权 */
+  writable: boolean
 }
 
 /** 内嵌 MCP 服务的运行状态（app.MCPStatus）。 */
@@ -348,7 +387,9 @@ export interface MCPStatus {
   token: string
   readOnly: boolean
   origins: string[]
-  /** 项目根目录（当前集合的父目录） */
+  /** 生效的工作目录白名单（空 = 未授权任何目录） */
+  allow?: MCPAllowDir[]
+  /** 展示用：第一个授权目录（空 = 白名单为空） */
   root: string
   /** 可见项目数 */
   projects: number

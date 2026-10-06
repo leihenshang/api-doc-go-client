@@ -49,15 +49,29 @@ func splitAndTrim(s string) []string {
 
 func main() {
 	var (
-		root        = flag.String("root", "", "项目根目录（其下含 opencollection.yml 的子目录即一个项目）")
+		root        = flag.String("root", "", "【旧写法】单个可写工作目录：等价于 -allow-writable 传同一个目录")
+		allow       = flag.String("allow", "", "MCP 可访问的工作目录（逗号分隔，只读授权）；目录本身或其一级子目录含 opencollection.yml 即算项目")
+		allowW      = flag.String("allow-writable", "", "MCP 可访问且**可写**的工作目录（逗号分隔）；写工具只在这些目录里生效")
 		addr        = flag.String("http", "", "启用 streamable HTTP 的监听地址，如 127.0.0.1:8189；留空 = 只走 stdio")
 		readOnly    = flag.Bool("readonly", false, "只读模式：不注册创建/修改/删除类工具")
 		httpToken   = flag.String("http-token", "", "HTTP 传输的 Bearer 令牌；绑非回环地址时不给则自动生成并打印")
 		allowOrigin = flag.String("http-allow-origin", "", "允许的浏览器来源（Origin），逗号分隔；* = 任意。用于浏览器端客户端与 DNS rebinding 防护")
 	)
 	flag.Parse()
-	if *root == "" {
-		fmt.Fprintln(os.Stderr, "错误：需要 -root 指定项目根目录")
+	// 白名单：-allow（只读）+ -allow-writable（可写）；-root 是旧写法，按可写授权处理
+	var allowDirs []mcp.AllowDir
+	for _, d := range splitAndTrim(*allow) {
+		allowDirs = append(allowDirs, mcp.AllowDir{Path: d, Writable: false})
+	}
+	for _, d := range splitAndTrim(*allowW) {
+		allowDirs = append(allowDirs, mcp.AllowDir{Path: d, Writable: true})
+	}
+	for _, d := range splitAndTrim(*root) {
+		allowDirs = append(allowDirs, mcp.AllowDir{Path: d, Writable: true})
+	}
+	allowDirs = mcp.NormalizeAllow(allowDirs)
+	if len(allowDirs) == 0 {
+		fmt.Fprintln(os.Stderr, "错误：需要至少一个授权的工作目录（-allow 只读 / -allow-writable 可写；-root 为旧写法）")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -65,12 +79,21 @@ func main() {
 	// 日志一律走 stderr：stdio 传输下 stdout 属于 JSON-RPC 协议，写日志会破坏会话
 	logger := log.New(os.Stderr, "mcpserver ", log.LstdFlags)
 
-	server, svc, err := mcp.NewServer(mcp.Config{Root: *root, ReadOnly: *readOnly, Logger: logger})
+	server, svc, err := mcp.NewServer(mcp.Config{Allow: allowDirs, ReadOnly: *readOnly, Logger: logger})
 	if err != nil {
 		logger.Fatalf("启动失败: %v", err)
 	}
-	projects := len(svc.Projects())
-	logger.Printf("已扫描项目根 %s：%d 个项目（%s）", *root, projects, map[bool]string{true: "只读", false: "读写"}[*readOnly])
+	// 启动日志把生效范围打清楚：排查「AI 说没有项目」时第一眼就能看到授权了什么
+	desc := make([]string, 0, len(allowDirs))
+	for _, a := range allowDirs {
+		perm := "只读"
+		if a.Writable {
+			perm = "可写"
+		}
+		desc = append(desc, fmt.Sprintf("%s(%s)", a.Path, perm))
+	}
+	logger.Printf("授权工作目录 %d 个：%s", len(allowDirs), strings.Join(desc, ", "))
+	logger.Printf("已扫描到 %d 个项目（%s）", len(svc.Projects()), map[bool]string{true: "只读", false: "读写"}[*readOnly])
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

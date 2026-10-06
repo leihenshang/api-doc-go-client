@@ -53,6 +53,8 @@ frontend/e2e/
 │   req-body-highlight.spec.ts     JSON 体着色与高亮层对齐
 │   tree-dnd.spec.ts               集合树指针拖拽
 │   tree-guides.spec.ts            集合树连接线：缩进 / 祖先竖线延续 / └ 收线 / 横线落在行中线
+│   multi-root.spec.ts             多工作目录：多根并存 / 切换活动根 / 标签随根切换 / 跨目录搜索 / 跨根拖动（请求单搬、分组整棵搬、目标重名拦截）/ 启动恢复上限与「最近打开」补开
+│   mcp-allow.spec.ts             MCP 工作目录白名单：空白名单安全默认 / 加入目录 / 可写开关 / 移除
 │   createDnsRegions.spec.ts       @demo：打真实外部 https 接口，未设 E2E_DEMO_URL 即 skip
 ├─ fixtures/         集合种子（basic / bruno-sample；`__FIXTURE__`、`__TLS__` 由 fixture 运行期替换）
 ├─ helpers/

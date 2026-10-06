@@ -3,6 +3,7 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 // 工具层的常见错误（AI 读得懂的中文提示）。
 var (
 	errEmptyQuery      = errors.New("缺少 query：请给出要搜索的关键词")
-	errNoProjectLoaded = errors.New("当前没有已加载的项目：先用 list_projects 选一个项目打开，或用 get_project_modules 触发打开")
+	errNoProjectLoaded = errors.New("当前没有已加载的项目：先用 list_workspaces 查看可用工作目录并 use_workspace 选定，或用 list_projects 打开一个项目再搜")
 	errNeedName        = errors.New("缺少 name：创建请求必须给名称")
 	errEmptyDraft      = errors.New("没有可用的请求内容")
 	errNeedUID         = errors.New("缺少 uid：请用 search_requests 或 get_project_modules 找到目标请求")
@@ -21,6 +22,11 @@ var (
 )
 
 // Service 是 MCP 工具的语义实现（不依赖 SDK，便于单测与将来复用到 CLI）。
+//
+// 注意「默认工作目录」**不在这里**：use_workspace 选定后「本会话可省略 project」是**会话级**状态，
+// 由工具层按会话 id 保存（见 tools.go 的 toolSet.sel）。Service 只认显式传进来的 project，
+// 于是它保持无状态、可直接单测，也不会让多个 MCP 客户端（HTTP 下的多个 Mcp-Session-Id）
+// 互相改掉对方选定的目录。
 type Service struct {
 	reg *Registry
 }
@@ -30,6 +36,144 @@ func NewService(reg *Registry) *Service { return &Service{reg: reg} }
 
 // Reg 暴露底层 Registry（测试需要直接打开项目以填充统计；工具层不需要）。
 func (s *Service) Reg() *Registry { return s.reg }
+
+// resolve 解析项目：project 为空时用 use_workspace 选定的默认目标。
+func (s *Service) resolve(project string) (ProjectApp, *Entry, error) {
+	key, err := s.resolveKey(project)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.reg.App(key)
+}
+
+// resolveWrite 写操作的解析：额外要求目标工作目录是**可写**授权。
+func (s *Service) resolveWrite(project string) (ProjectApp, *Entry, error) {
+	key, err := s.resolveKey(project)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.reg.WriteApp(key)
+}
+
+// resolveKey 把 project 解析成项目标识；空 = 没指定（报错并给出可用项目提示）。
+func (s *Service) resolveKey(project string) (string, error) {
+	if k := strings.TrimSpace(project); k != "" {
+		return k, nil
+	}
+	return "", fmt.Errorf("未指定 project：请先 use_workspace 选定默认工作目录（选定后本会话可省略 project），或每次显式传 project。%s", s.workspaceHint())
+}
+
+// workspaceHint 可用项目提示（拼进报错里，AI 能照着改）。
+func (s *Service) workspaceHint() string {
+	entries := s.reg.Entries()
+	usable := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.skipped == "" {
+			usable = append(usable, fmt.Sprintf("%s（%s）", e.Name, e.Path))
+		}
+	}
+	if len(usable) > 0 {
+		return "可用项目：" + strings.Join(usable, "、")
+	}
+	if bad := s.reg.BadDirs(); len(bad) > 0 {
+		return "当前没有可用项目：授权目录不可用 " + strings.Join(bad, "、")
+	}
+	return "当前没有可用项目：客户端设置里的 MCP 工作目录白名单可能为空（安全默认 = 不授权任何目录）"
+}
+
+// WorkspaceItem list_workspaces 的输出项：一个授权工作目录及其中的项目。
+type WorkspaceItem struct {
+	// Path 工作目录绝对路径（可直接传给 use_workspace）
+	Path string `json:"path"`
+	// Name 目录基名（便于口头指代）
+	Name string `json:"name"`
+	// Writable 是否可写授权（false = 只读：写工具会被拒）
+	Writable bool `json:"writable"`
+	// Projects 该目录下的项目标识（可取 name/path/uid，直接当 project 传）
+	Projects []string `json:"projects,omitempty"`
+	// Selected 当前默认工作目录是否落在它里面
+	Selected bool `json:"selected,omitempty"`
+	// Error 目录不可用时的原因（不存在等）
+	Error string `json:"error,omitempty"`
+}
+
+// ListWorkspaces 列出授权的工作目录与其中的项目。
+// selected = 本次调用所属**会话**选定的默认目标（由工具层给出；单个 Service 不持有它）。
+func (s *Service) ListWorkspaces(selected string) []WorkspaceItem {
+	entries := s.reg.Entries()
+	out := make([]WorkspaceItem, 0, len(s.reg.Allow()))
+	for _, a := range s.reg.Allow() {
+		it := WorkspaceItem{Path: a.Path, Name: filepath.Base(a.Path), Writable: a.Writable}
+		if !isDir(a.Path) {
+			it.Error = "目录不存在或不是目录"
+			out = append(out, it)
+			continue
+		}
+		for _, e := range entries {
+			if e.skipped != "" || e.AllowRoot() != a.Path {
+				continue
+			}
+			it.Projects = append(it.Projects, e.Path)
+			// 默认目标命中：项目自己、或它的授权目录
+			if selected == e.Path || selected == a.Path || selected == e.Dir || selected == e.UID {
+				it.Selected = true
+			}
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// UseWorkspace 解析「工作目录路径」或「项目标识（name/path/uid）」，两者都必须在白名单内。
+//
+// 返回：该项工作目录（Selected 已标记）+ **要记住的项目标识**（第二个返回值）。
+// 谁来记、记多久由调用方决定 —— 工具层按会话 id 记，Service 不持有默认目标。
+func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) {
+	key := strings.TrimSpace(workspace)
+	if key == "" {
+		return WorkspaceItem{}, "", fmt.Errorf("缺少 workspace：请传 list_workspaces 返回的工作目录 path，或一个项目标识")
+	}
+	// ① 先按工作目录解析（授权目录集合里有它才算数）
+	if a, err := s.reg.allowFor(key, false); err == nil {
+		projects := []string{}
+		for _, e := range s.reg.Entries() {
+			if e.skipped == "" && e.AllowRoot() == a.Path {
+				projects = append(projects, e.Path)
+			}
+		}
+		switch len(projects) {
+		case 0:
+			return WorkspaceItem{}, "", fmt.Errorf("工作目录 %s 下没有可用项目（用 list_workspaces 查看）", a.Path)
+		case 1:
+			return s.workspaceItem(projects[0], a), projects[0], nil
+		default:
+			return WorkspaceItem{}, "", fmt.Errorf("工作目录 %s 下有多个项目：%s；请直接指定其中之一", a.Path, strings.Join(projects, "、"))
+		}
+	}
+	// ② 再按项目解析
+	e, err := s.reg.Find(key)
+	if err != nil {
+		return WorkspaceItem{}, "", err
+	}
+	if e.skipped != "" {
+		return WorkspaceItem{}, "", fmt.Errorf("项目 %q 不可用：%s", e.Path, e.skipped)
+	}
+	al, err := s.reg.allowFor(e.Dir, false)
+	if err != nil {
+		return WorkspaceItem{}, "", err
+	}
+	return s.workspaceItem(e.Path, al), e.Path, nil
+}
+
+// workspaceItem 组出「projectKey 所在工作目录」的输出项（Selected 按 projectKey 标记）。
+func (s *Service) workspaceItem(projectKey string, a *AllowDir) WorkspaceItem {
+	for _, it := range s.ListWorkspaces(projectKey) {
+		if it.Path == a.Path {
+			return it
+		}
+	}
+	return WorkspaceItem{Path: a.Path, Name: filepath.Base(a.Path), Writable: a.Writable}
+}
 
 // 默认输出裁剪：响应体 8 KiB、列表 50 条。AI 上下文有限，超出必须显式标注而不是静默丢弃。
 const (
@@ -225,7 +369,7 @@ func (s *Service) reload(project string) (*collection.CollectionInfo, error) {
 
 // Reload 重建项目索引（文件监听之外的显式刷新；测试与「外部改动后重读」用）。
 func (s *Service) Reload(project string) (*collection.CollectionInfo, error) {
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolve(project)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +420,7 @@ func (s *Service) SearchRequests(query, project string, limit int) ([]Match, int
 // （未加载的不会为了搜索而全部打开，那会为每个项目起一个文件监听）。
 func (s *Service) searchTargets(project string) (map[string]ProjectApp, error) {
 	if strings.TrimSpace(project) != "" {
-		a, _, err := s.reg.App(project)
+		a, _, err := s.resolve(project)
 		if err != nil {
 			return nil, err
 		}
@@ -429,7 +573,7 @@ type DetailOptions struct {
 
 // GetRequestDetail 接口详情：请求（含 headers/body/auth/grpc）+ 说明 + 已保存响应示例。
 func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*RequestDetail, error) {
-	a, e, err := s.reg.App(project)
+	a, e, err := s.resolve(project)
 	if err != nil {
 		return nil, err
 	}
@@ -498,7 +642,7 @@ func matchDoc(name, path, reqName, query string) bool {
 
 // CreateRequestInput create_request 的入参。
 type CreateRequestInput struct {
-	Project     string           `json:"project"`
+	Project     string           `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Folder      string           `json:"folder,omitempty"`
 	Name        string           `json:"name"`
 	Method      string           `json:"method,omitempty"`
@@ -515,7 +659,7 @@ type CreateRequestInput struct {
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
 func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, error) {
-	a, e, err := s.reg.App(in.Project)
+	a, e, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -574,7 +718,7 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 
 // CreateModule 创建模块（目录），parent 为空表示根目录下新建。
 func (s *Service) CreateModule(project, parent, name string) (string, error) {
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return "", err
 	}
@@ -594,7 +738,7 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
-	Project string           `json:"project"`
+	Project string           `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string           `json:"uid"`
 	Name    *string          `json:"name,omitempty"`
 	Method  *string          `json:"method,omitempty"`
@@ -611,7 +755,7 @@ type UpdateRequestInput struct {
 
 // UpdateRequest 局部更新；带冲突检测（磁盘被外部改过就拒写）。
 func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, error) {
-	a, _, err := s.reg.App(in.Project)
+	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -667,20 +811,19 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	return r, nil
 }
 
-// CreateProject 在项目根下新建项目（集合目录 + manifest）。
+// CreateProject 新建项目：目标必须是**授权且可写**的工作目录。
+//
+// root 为空时用第一个可写的授权目录。以前这里接受任意 root（临时建一个 registry 就在那儿建集合），
+// 等于把「能写哪里」交给调用方 —— 现在白名单外一律拒绝。
 func (s *Service) CreateProject(root, name, dirName string) (Project, error) {
 	if strings.TrimSpace(root) == "" {
-		root = s.reg.Root()
+		return s.reg.CreateProject(name, dirName)
 	}
-	if root != s.reg.Root() {
-		// 指定了别的根：临时建一个 registry 复用 CreateProject 逻辑
-		reg, err := NewRegistry(root, s.reg.NewAppFactory())
-		if err != nil {
-			return Project{}, err
-		}
-		return reg.CreateProject(name, dirName)
+	al, err := s.reg.allowFor(root, true)
+	if err != nil {
+		return Project{}, err
 	}
-	return s.reg.CreateProject(name, dirName)
+	return s.reg.CreateProjectIn(al.Path, name, dirName)
 }
 
 // hashOf 取请求文件的当前磁盘哈希（index 提供，失败返回空串=跳过冲突检测）。
@@ -699,7 +842,7 @@ func (s *Service) hashOf(a ProjectApp, uid string) (string, error) {
 
 // DeleteRequest 移除请求（进 .trash，可恢复）。
 func (s *Service) DeleteRequest(project, uid string) error {
-	a, _, err := s.reg.App(project)
+	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}
@@ -708,7 +851,7 @@ func (s *Service) DeleteRequest(project, uid string) error {
 
 // SendRequestInput send_request 的入参。
 type SendRequestInput struct {
-	Project string `json:"project"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid,omitempty"` // 与下面的临时请求字段二选一
 	// 临时请求（不落盘）：AI 只想试发一个地址时用
 	Method  string           `json:"method,omitempty"`
@@ -725,7 +868,7 @@ type SendRequestInput struct {
 
 // SendRequest 发送请求；saveExample 为真时把响应存为响应示例（客户端可回看/删除）。
 func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
-	a, _, err := s.reg.App(in.Project)
+	a, e, err := s.resolve(in.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -761,6 +904,10 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 		out.Body, out.Truncated, out.OriginalBytes = "", false, 0
 	}
 	if in.SaveExample == nil || *in.SaveExample {
+		// 只读授权目录不能写示例：发送本身允许（只读 / 镜像集合同样要能试打），落盘要拦
+		if e != nil && !e.Writable() {
+			return &out, fmt.Errorf("响应已返回，但工作目录 %s 是只读授权，示例未保存（需要保存请在客户端设置里把该目录改成可写）", e.AllowRoot())
+		}
 		// 只有集合内真实请求才存示例（临时请求没有文件可挂靠）
 		if !strings.HasPrefix(req.UID, "mcp-tmp") && req.UID != "" {
 			name := strings.TrimSpace(in.ExampleName)

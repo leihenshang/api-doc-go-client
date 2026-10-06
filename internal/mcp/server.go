@@ -22,8 +22,12 @@ const toolTimeout = 3 * time.Minute
 
 // Config 启动配置。
 type Config struct {
-	Root     string // 项目根目录
-	ReadOnly bool   // 只读模式：不注册写工具，send_request 不落盘
+	// Allow 授权的工作目录（白名单）：项目只能来自这些目录，写操作还要求该项 writable。
+	// 空 = 不授权任何目录（内嵌服务的「安全默认」：AI 读写不到任何集合）。
+	Allow []AllowDir
+	// Root 单根便捷写法（等价于 Allow=[{Root, writable}]）：-root 场景与既有测试用。
+	Root     string
+	ReadOnly bool // 只读模式：不注册写工具，send_request 不落盘
 	Logger   *log.Logger
 	// NewApp 构造项目级运行时（必填）：*app.App 满足 ProjectApp。
 	// 由调用方注入以避免 internal/mcp 与 internal/app 互相依赖。
@@ -32,7 +36,12 @@ type Config struct {
 
 // NewServer 装配 MCP 服务器（注册全部工具）。
 func NewServer(cfg Config) (*mcp.Server, *Service, error) {
-	reg, err := NewRegistry(cfg.Root, cfg.NewApp)
+	allow := cfg.Allow
+	if len(allow) == 0 && strings.TrimSpace(cfg.Root) != "" {
+		// 兼容单根写法：显式给了根目录就等于授权该目录（-root 的旧语义）
+		allow = []AllowDir{{Path: cfg.Root, Writable: true}}
+	}
+	reg, err := NewRegistryAllow(allow, cfg.NewApp)
 	if err != nil {
 		return nil, nil, err
 	}

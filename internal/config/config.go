@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -32,6 +33,10 @@ const (
 	defaultMCPPort = 8189
 	minMCPPort     = 1024
 	maxMCPPort     = 65535
+
+	// 启动恢复工作目录数量：默认 8，允许 1–32（每个根一个文件监听 + 一次索引扫描）。
+	defaultRestoreLimit = 8
+	maxRestoreLimit     = 32
 )
 
 // Settings 全局设置：请求级 settings 未覆盖时生效。
@@ -48,6 +53,11 @@ type Settings struct {
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
+	// RestoreLimit 启动时最多恢复几个工作目录。
+	//
+	// 每个打开的根都常驻一个 fsnotify 监听 + 一次索引扫描；Windows 上还会让该目录被占用（删不掉）。
+	// 超出上限的目录不静默丢：启动时如实提示，工具条「最近打开」里可随时补开。
+	RestoreLimit int `json:"restoreLimit"`
 	// MCP 客户端内嵌的 MCP 服务设置（供外部 AI 工具读写集合；见《MCP服务使用手册.md》）。
 	// 单独一个分组而不是塞进网络/本地 —— 它的生命周期与其它设置不同（要起停一个监听服务）。
 	MCP MCPConfig `json:"mcp"`
@@ -64,6 +74,18 @@ type MCPConfig struct {
 	// 带 Origin 的请求必须命中白名单才放行 —— MCP 规范的 DNS rebinding 防护；
 	// 非浏览器客户端（Claude Desktop / cursor / 命令行）不带 Origin，不受影响。
 	AllowOrigins []string `json:"allowOrigins"`
+	// Allow MCP 可访问的工作目录白名单（每条区分只读/可写）。
+	//
+	// 安全默认：为空 = 一个目录都不授权（AI 无法读写任何集合）；
+	// 需要用时在设置里显式添加。以前「项目根目录」由调用方给，等于把「能写哪里」交给了调用方。
+	Allow []MCPAllowDir `json:"allow,omitempty"`
+}
+
+// MCPAllowDir MCP 可访问的工作目录（白名单条目）。
+type MCPAllowDir struct {
+	Path string `json:"path"`
+	// Writable 是否允许写（新建/修改/删除）；false = 只读
+	Writable bool `json:"writable"`
 }
 
 const (
@@ -95,6 +117,7 @@ func Default() Settings {
 		ResponseLayout:  LayoutRight,
 		ResponseSize:    defaultRespSize,
 		Theme:           ThemeLight,
+		RestoreLimit:    defaultRestoreLimit,
 		MCP: MCPConfig{
 			Enabled:  false,
 			Addr:     defaultMCPAddr,
@@ -143,6 +166,13 @@ func (s Settings) Normalize() Settings {
 	if s.Theme != ThemeDark {
 		s.Theme = ThemeLight
 	}
+	// 恢复上限：未设置（旧配置没有该字段 = 0）回落默认，超过上限夹住
+	if s.RestoreLimit <= 0 {
+		s.RestoreLimit = def.RestoreLimit
+	}
+	if s.RestoreLimit > maxRestoreLimit {
+		s.RestoreLimit = maxRestoreLimit
+	}
 	s.MCP = s.MCP.normalize(def.MCP)
 	return s
 }
@@ -170,6 +200,33 @@ func (m MCPConfig) normalize(def MCPConfig) MCPConfig {
 		origins = append(origins, o)
 	}
 	m.AllowOrigins = origins // 空列表归一为 nil：否则 save/load 往返后 [] ≠ nil（DeepEqual 敏感）
+
+	// 工作目录白名单：绝对化、去尾分隔符、去重（Windows 忽略大小写）、丢弃空项
+	var allow []MCPAllowDir
+	seenDir := make(map[string]int, len(m.Allow))
+	for _, a := range m.Allow {
+		p := strings.TrimSpace(a.Path)
+		if p == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		p = filepath.Clean(p)
+		key := p
+		if runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		if i, ok := seenDir[key]; ok {
+			if a.Writable && !allow[i].Writable {
+				allow[i].Writable = true // 重复项取更宽松的权限
+			}
+			continue
+		}
+		seenDir[key] = len(allow)
+		allow = append(allow, MCPAllowDir{Path: p, Writable: a.Writable})
+	}
+	m.Allow = allow
 	return m
 }
 

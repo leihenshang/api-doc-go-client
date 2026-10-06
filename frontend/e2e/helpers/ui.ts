@@ -10,6 +10,14 @@ import { resetSettings } from './settings'
  */
 export async function openCollection(page: Page, app: AppFixture): Promise<void> {
   await resetSettings(app) // 先复位设置再加载页面，保证用例从默认状态开始
+  // 清掉「上次打开的工作目录」再进页面：应用启动会按它恢复多根，而 e2e 只想要
+  // newCollection 打开的那一个（同一 worker 的 localStorage 会跨用例残留）。
+  // 用 addInitScript：在页面脚本之前执行，应用启动时读到的就是空列表。
+  await page.addInitScript(() => {
+    localStorage.removeItem('client.dirs')
+    localStorage.removeItem('client.activeDir')
+    localStorage.removeItem('client.recentDirs') // 「最近打开」也要清：否则跨用例串味
+  })
   await page.goto(app.url)
   await reopenApp(page)
 }
@@ -37,6 +45,20 @@ export const treeRowByUid = (page: Page, uid: string): Locator =>
 export async function openRequest(page: Page, name: string): Promise<void> {
   await page.getByTestId('tree.row').filter({ hasText: name }).getByTestId('tree.row.name').click()
   await expect(page.getByTestId('req.url')).toBeVisible()
+}
+
+/**
+ * 树行拖动（指针事件，与 tree-dnd 同一套命中逻辑）：from → to 走真实鼠标轨迹。
+ * 先越过 4px 阈值进入拖动状态，再分步移到目标，最后松手。
+ */
+export async function dragRow(page: Page, from: Locator, to: Locator): Promise<void> {
+  const a = (await from.boundingBox())!
+  const b = (await to.boundingBox())!
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(a.x + a.width / 2 + 8, a.y + a.height / 2 + 8, { steps: 3 })
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 })
+  await page.mouse.up()
 }
 
 /** 请求栏：切换方法下拉并选中（naive NSelect 的选项挂在 body 上） */

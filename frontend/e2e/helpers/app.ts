@@ -27,8 +27,17 @@ export interface AppFixture {
   runDir: string
   /** 隔离的 XDG_CONFIG_HOME（可读 config.json 断言落盘） */
   configDir: string
-  /** 用种子新建一个集合目录并让 devserver 打开它（返回集合目录，可读盘断言） */
+  /**
+   * 用种子新建一个集合目录并让 devserver 打开它（返回集合目录，可读盘断言）。
+   *
+   * 语义：**本用例只保留这一个工作目录** —— devserver 是 worker 级复用（见文件头注释），
+   * 而 OpenCollection 现在是「追加根」（支持单树多根），所以这里会把该 worker 之前用例
+   * 留下的根关掉，避免上一个用例的集合与本次的种子同名请求在树里各出现一份。
+   * 需要多根的用例用 addCollection 再显式开一个。
+   */
   newCollection(seed?: SeedName): Promise<string>
+  /** 在当前用例里再打开一个工作目录（多根用例用；返回集合目录） */
+  addCollection(seed?: SeedName): Promise<string>
   /** 直接调 App 门面方法（等价于前端 IPC） */
   ipc<T = unknown>(method: string, ...args: unknown[]): Promise<T>
 }
@@ -141,6 +150,21 @@ export const test = base.extend<{ app: AppFixture }>({
           return payload.data as T
         },
         newCollection: async (seed: SeedName = 'basic'): Promise<string> => {
+          const dir = path.join(runDir, `collection-${++counter}-${seed}`)
+          cpSync(path.join(frontendDir, 'e2e', 'fixtures', seed), dir, { recursive: true })
+          replaceTokens(dir, { __FIXTURE__: fixtureUrl, __TLS__: tlsUrl })
+          await api.ipc('SetHeadlessDir', dir)
+          const opened = await api.ipc<{ dir: string }>('OpenCollection', dir)
+          // 关掉该 worker 里之前用例留下的根：OpenCollection 是「追加」语义，
+          // 不清理的话上一个用例的集合会一直挂在树上（同名请求会出现两份）。
+          // 按 root（工作目录标识）关，不能按集合 uid —— 拷贝出来的集合 uid 相同。
+          const list = await api.ipc<{ root: string; info: { dir: string } }[]>('ListCollections')
+          for (const s of list) {
+            if (s.info.dir !== opened?.dir) await api.ipc('CloseCollection', s.root)
+          }
+          return dir
+        },
+        addCollection: async (seed: SeedName = 'basic'): Promise<string> => {
           const dir = path.join(runDir, `collection-${++counter}-${seed}`)
           cpSync(path.join(frontendDir, 'e2e', 'fixtures', seed), dir, { recursive: true })
           replaceTokens(dir, { __FIXTURE__: fixtureUrl, __TLS__: tlsUrl })

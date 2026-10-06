@@ -57,9 +57,26 @@ const resolveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let draftsTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 会话现场按集合 uid 记忆（与 client.env.<uid> 同一套 localStorage）。 */
-const sessionKey = (collUid: string): string => `client.tabs.${collUid}`
+const sessionKey = (root: string): string => `client.tabs.${root}`
 /** 未保存草稿单独存一份：应用重启/切换集合后仍能找回（新建流程不写盘）。 */
-const draftsKey = (collUid: string): string => `client.drafts.${collUid}`
+const draftsKey = (root: string): string => `client.drafts.${root}`
+
+/**
+ * 旧版本按「集合 uid」存会话与草稿（client.tabs.<uid> / client.drafts.<uid>）。
+ * 新版按工作目录标识存：读一次旧键做迁移，写新键时顺手清掉旧键 ——
+ * 否则「新键被清空」之后会把早就丢弃的旧草稿又找回来。
+ */
+function legacyKey(kind: 'tabs' | 'drafts', collUid: string): string {
+  return `client.${kind}.${collUid}`
+}
+
+function legacyValue(kind: 'tabs' | 'drafts', collUid: string): string {
+  return collUid ? (localStorage.getItem(legacyKey(kind, collUid)) ?? '') : ''
+}
+
+function clearLegacyKey(kind: 'tabs' | 'drafts', collUid: string): void {
+  if (collUid) localStorage.removeItem(legacyKey(kind, collUid))
+}
 
 interface TabSession {
   uids: string[]
@@ -609,6 +626,50 @@ export const useTabsStore = defineStore('tabs', {
       const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
       return this.openDraft(copy, folder)
     },
+    /**
+     * 请求被移出当前工作目录（跨目录移动）后，把它从标签与会话里摘掉。
+     *
+     * 为什么不能只关标签：会话是**按根**存在 localStorage 里的，非活动根的那份也会记着这个 uid；
+     * 恢复时虽然会跳过已不存在的 uid，但顺手清掉更干净（也避免历史会话越来越长）。
+     */
+    forgetRequest(uid: string): void {
+      if (!uid) return
+      const tab = this.tabs.find((x) => x.uid === uid)
+      if (tab) void this.close(tab.key, { save: false }) // 文件已不在这个根里，别再写盘
+      const coll = useCollectionStore()
+      for (const r of coll.roots) {
+        try {
+          const raw = localStorage.getItem(sessionKey(r.root))
+          if (!raw) continue
+          const data = JSON.parse(raw) as TabSession
+          const uids = data.uids ?? []
+          if (!uids.includes(uid)) continue
+          localStorage.setItem(
+            sessionKey(r.root),
+            JSON.stringify({
+              uids: uids.filter((x) => x !== uid),
+              activeUid: data.activeUid === uid ? '' : data.activeUid,
+            }),
+          )
+        } catch {
+          // 忽略：会话清理失败不影响主流程
+        }
+      }
+    },
+    /**
+     * 切换工作目录（多根）：先把当前根的会话/草稿落盘，再切活动根并恢复目标根的会话。
+     *
+     * 必须统一走这里：标签是**按根分组**的（client.tabs.<root>），任何切根动作都要换一组标签；
+     * 之前只有「点根行」这条路径会换，点别根里的请求（ensureActive）只切了后端活动根，
+     * 结果是两个根的标签混在一起。
+     */
+    async switchRoot(root: string): Promise<void> {
+      const coll = useCollectionStore()
+      if (!root || root === coll.activeRoot) return
+      await this.reset()
+      await coll.setActive(root)
+      await this.restoreSession()
+    },
     /** 关闭集合（切换集合）时先落盘未保存改动，再清空内存会话（现场与草稿已单独落 localStorage）。 */
     async reset(): Promise<void> {
       await this.flushAll()
@@ -642,13 +703,15 @@ export const useTabsStore = defineStore('tabs', {
     /** 把所有未保存草稿写进 localStorage（没有草稿时清掉旧键）。 */
     saveDrafts(): void {
       const coll = useCollectionStore()
-      if (!coll.uid) return
+      // 会话与草稿按**工作目录**存（不是集合 uid）：同一份集合的拷贝 uid 相同、路径不同
+      if (!coll.activeRoot) return
       const drafts = this.tabs
         .filter((t) => t.draft)
         .map((t) => ({ request: t.request, folder: t.draftFolder }))
       try {
-        if (drafts.length) localStorage.setItem(draftsKey(coll.uid), JSON.stringify(drafts))
-        else localStorage.removeItem(draftsKey(coll.uid))
+        if (drafts.length) localStorage.setItem(draftsKey(coll.activeRoot), JSON.stringify(drafts))
+        else localStorage.removeItem(draftsKey(coll.activeRoot))
+        clearLegacyKey('drafts', coll.uid)
         this.draftsWarned = false
       } catch {
         // P2：localStorage 满 / 隐私模式下草稿写不进去 —— 不能静默（重启会丢草稿），提示一次
@@ -661,10 +724,11 @@ export const useTabsStore = defineStore('tabs', {
     /** 打开集合后恢复上次未保存的草稿（放最后，保持「草稿是最近打开的」直觉）。 */
     restoreDrafts(): void {
       const coll = useCollectionStore()
-      if (!coll.uid) return
+      if (!coll.activeRoot) return
       let raw = ''
       try {
-        raw = localStorage.getItem(draftsKey(coll.uid)) ?? ''
+        raw = localStorage.getItem(draftsKey(coll.activeRoot)) ?? ''
+        if (!raw) raw = legacyValue('drafts', coll.uid) // 旧版本按集合 uid 存，迁移一次
       } catch {
         return
       }
@@ -682,14 +746,15 @@ export const useTabsStore = defineStore('tabs', {
     /** 落盘 tab 现场（uid 列表 + 激活项）；草稿走 saveDrafts，不在这里重复。 */
     saveSession(): void {
       const coll = useCollectionStore()
-      if (!coll.uid) return
+      if (!coll.activeRoot) return
       const active = this.tabs.find((t) => t.key === this.activeKey)
       const data: TabSession = {
         uids: this.tabs.filter((t) => !t.draft).map((t) => t.uid),
         activeUid: active && !active.draft ? active.uid : '',
       }
       try {
-        localStorage.setItem(sessionKey(coll.uid), JSON.stringify(data))
+        localStorage.setItem(sessionKey(coll.activeRoot), JSON.stringify(data))
+        clearLegacyKey('tabs', coll.uid)
       } catch {
         // localStorage 满/隐私模式：忽略，不影响使用
       }
@@ -698,10 +763,11 @@ export const useTabsStore = defineStore('tabs', {
     /** 打开集合后恢复上次的 tab 现场；已删除的 uid 自动跳过。 */
     async restoreSession(): Promise<void> {
       const coll = useCollectionStore()
-      if (!coll.uid) return
+      if (!coll.activeRoot) return
       let raw = ''
       try {
-        raw = localStorage.getItem(sessionKey(coll.uid)) ?? ''
+        raw = localStorage.getItem(sessionKey(coll.activeRoot)) ?? ''
+        if (!raw) raw = legacyValue('tabs', coll.uid) // 旧版本按集合 uid 存，迁移一次
       } catch {
         return
       }

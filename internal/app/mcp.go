@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -45,30 +44,25 @@ func isLoopbackHost(addr string) bool {
 	return false
 }
 
-// parentDir 取父目录；取不到时返回空串（根目录）。
-func parentDir(p string) string {
-	if p == "" {
-		return ""
-	}
-	return filepath.Dir(p)
-}
-
 // MCPStatus 内嵌 MCP 服务的运行状态（设置页「MCP 服务」分区展示）。
 type MCPStatus struct {
-	Enabled   bool     `json:"enabled"`   // 设置里是否启用
-	Running   bool     `json:"running"`   // 此刻是否真的在监听
-	Addr      string   `json:"addr"`      // 监听地址（设置值）
-	Port      int      `json:"port"`      // 监听端口（设置值）
-	URL       string   `json:"url"`       // 端点 URL（运行中才有）
-	Health    string   `json:"health"`    // 健康检查地址（运行中才有）
-	Token     string   `json:"token"`     // Bearer 令牌（前端据此复制连接配置）
-	ReadOnly  bool     `json:"readOnly"`  // 只读模式：不注册创建/修改/删除类工具
-	Origins   []string `json:"origins"`   // 允许的浏览器来源（Origin 白名单）
-	Root      string   `json:"root"`      // 项目根目录（当前集合的父目录）
-	Projects  int      `json:"projects"`  // 可见项目数
-	CrossHost bool     `json:"crossHost"` // 监听非回环地址（跨主机 / WSL / 局域网）
-	Error     string   `json:"error"`     // 启动失败原因（端口占用等）；正常为空
-	Hint      string   `json:"hint"`      // 连接提示（WSL / 浏览器端 / 防火墙等）
+	Enabled  bool     `json:"enabled"`  // 设置里是否启用
+	Running  bool     `json:"running"`  // 此刻是否真的在监听
+	Addr     string   `json:"addr"`     // 监听地址（设置值）
+	Port     int      `json:"port"`     // 监听端口（设置值）
+	URL      string   `json:"url"`      // 端点 URL（运行中才有）
+	Health   string   `json:"health"`   // 健康检查地址（运行中才有）
+	Token    string   `json:"token"`    // Bearer 令牌（前端据此复制连接配置）
+	ReadOnly bool     `json:"readOnly"` // 只读模式：不注册创建/修改/删除类工具
+	Origins  []string `json:"origins"`  // 允许的浏览器来源（Origin 白名单）
+	// Allow MCP 可访问的工作目录白名单（路径 + 只读/可写）；空 = 不授权任何目录
+	Allow []config.MCPAllowDir `json:"allow,omitempty"`
+	// Root 展示用：第一个授权目录（空 = 白名单为空）
+	Root      string `json:"root"`
+	Projects  int    `json:"projects"`  // 可见项目数
+	CrossHost bool   `json:"crossHost"` // 监听非回环地址（跨主机 / WSL / 局域网）
+	Error     string `json:"error"`     // 启动失败原因（端口占用等）；正常为空
+	Hint      string `json:"hint"`      // 连接提示（WSL / 浏览器端 / 防火墙等）
 }
 
 // MCPRequest 一次「按设置启停」的入参（MCPRequest 由设置 + 当前集合推导）。
@@ -79,8 +73,10 @@ type MCPRequest struct {
 	Token        string
 	ReadOnly     bool
 	AllowOrigins []string
-	// Root 项目根目录：内嵌服务用「当前集合的父目录」，
-	// 这样「项目 = 含 opencollection.yml 的目录」语义与独立 mcpserver 一致。
+	// Allow 授权的工作目录白名单（来自设置）：内嵌服务只在这些目录里找项目。
+	// 空 = 不授权（AI 读写不到任何集合）—— 安全默认，需要时在设置里添加。
+	Allow []config.MCPAllowDir
+	// Root 单根便捷写法（旧字段，保留兼容：为空的 Allow + 非空 Root 等价于授权该目录）
 	Root string
 }
 
@@ -141,7 +137,7 @@ func (a *App) MCPStatusText() *MCPStatus {
 	}
 	st := &MCPStatus{
 		Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins,
+		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow,
 		CrossHost: !isLoopbackHost(cfg.Addr),
 	}
 	switch {
@@ -172,10 +168,6 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 	a.settings.MCP = cfg
 	persist := a.settings
 	backend := a.mcpBackend
-	root := ""
-	if a.coll != nil {
-		root = parentDir(a.coll.Dir)
-	}
 	a.mu.Unlock()
 
 	// 落盘放锁外（要做文件 IO）；失败不阻断服务启动，但要让用户看到
@@ -201,12 +193,12 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 		Token:        cfg.Token,
 		ReadOnly:     cfg.ReadOnly,
 		AllowOrigins: cfg.AllowOrigins,
-		Root:         root,
+		Allow:        cfg.Allow,
 	})
 	if err != nil {
 		st = &MCPStatus{
 			Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Root: root,
+			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow,
 			CrossHost: !isLoopbackHost(cfg.Addr),
 			Error:     err.Error(),
 		}
@@ -238,14 +230,13 @@ func (a *App) Shutdown(_ context.Context) {
 			close(a.signalQuit)
 		}
 	}
-	backend, coll := a.mcpBackend, a.coll
+	backend := a.mcpBackend
 	a.mu.Unlock()
 	if backend != nil {
 		backend.Stop() // 释放 MCP 监听端口
 	}
-	if coll != nil {
-		coll.StopWatch()
-	}
+	// 关掉所有已打开工作目录的监听与 Mock（多根并存：逐个收尾，别只收活动根）
+	a.closeAllCollections()
 }
 
 // watchSignals 处理 SIGINT / SIGTERM。

@@ -44,7 +44,7 @@ import Welcome from '@/components/Welcome.vue'
 import { api, onAppEvent } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { nextTheme, isDark } from '@/lib/theme'
-import { useCollectionStore } from '@/stores/collection'
+import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
@@ -128,7 +128,8 @@ const showMock = ref(false)
 const showSync = ref(false)
 const syncStatus = ref<SyncStatus | null>(null)
 let syncTimer: ReturnType<typeof setInterval> | null = null
-const lastDir = localStorage.getItem('client.lastDir') ?? ''
+/** 欢迎页展示用的「上次打开的目录」（多根：取最近恢复列表里的第一个）。 */
+const lastDir = savedRootDirs()[0] ?? ''
 
 // 界面缩放：作用在根元素上，弹层（teleport 到 body）也会一起缩放
 watchEffect(() => {
@@ -203,7 +204,41 @@ function startResize(e: PointerEvent): void {
   window.addEventListener('pointercancel', stop)
 }
 
-// ---- 打开 / 切换集合 ----
+// ---- 打开 / 切换工作目录（多根）----
+
+/** 恢复上限的兜底值：正常走设置项 `restoreLimit`（默认 8），设置没读到才用它。 */
+const MAX_RESTORE_ROOTS = 8
+
+/** 目录基名（跨平台：分隔符可能是 / 或 \）。 */
+function dirName(dir: string): string {
+  const parts = dir.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] ?? dir
+}
+
+/**
+ * 最近打开过、当前没打开的目录：启动恢复有数量上限（设置里的「启动恢复目录数」），
+ * 超出的不静默丢 —— 它们出现在工具条「最近打开」里，一点就开。
+ *
+ * 数据源是独立的 MRU 列表（`client.recentDirs`），不是「当前打开的根」：后者在恢复被截断时
+ * 只含恢复成功的那几个，用它就等于把没恢复的目录忘了；关掉某个根时也一样。
+ */
+const recentDirs = computed(() => {
+  const open = new Set(coll.roots.map((r) => r.info.dir.trim().toLowerCase()))
+  return savedRecentDirs()
+    .filter((d) => !open.has(d.trim().toLowerCase()))
+    .map((d) => ({ dir: d, name: dirName(d) }))
+})
+
+/** 按目录找已打开的根（Windows 上目录大小写不敏感）。 */
+function rootOfDir(dir: string): string {
+  const want = dir.trim().toLowerCase()
+  return coll.roots.find((r) => r.info.dir.trim().toLowerCase() === want)?.root ?? ''
+}
+
+/**
+ * 打开一个工作目录：追加为新的根并置为活动根，然后恢复该根的标签会话。
+ * （后端 OpenCollection 已经是「追加 + 幂等」，同一目录重复打开只会切成活动根。）
+ */
 async function openCollection(dir: string): Promise<void> {
   if (!dir) {
     try {
@@ -216,14 +251,98 @@ async function openCollection(dir: string): Promise<void> {
     message.warning(t('welcome.pickFailed'))
     return
   }
-  await tabs.reset() // 切换前把未保存改动落盘
+  await tabs.reset() // 切换前把当前根的未保存改动落盘
   try {
     await coll.open(dir)
-    // 恢复上次的 tab 现场（uid 仍在集合内才打开）
+    // 恢复该根的 tab 现场（uid 仍在集合内才打开）
     await tabs.restoreSession()
+    void refreshSyncStatus()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
+}
+
+/** 侧栏/工具条点击某个根：切成活动根，并把标签栏换成该根的会话。 */
+async function activateRoot(root: string): Promise<void> {
+  if (!root || root === coll.activeRoot) return
+  try {
+    await tabs.switchRoot(root) // 落盘当前根 → 切活动根 → 恢复目标根会话
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
+  void refreshSyncStatus()
+}
+
+/** 关闭一个工作目录（其它根不受影响）；关掉活动根时自动切到剩余的根。 */
+async function closeRoot(root: string): Promise<void> {
+  const wasActive = root === coll.activeRoot
+  if (wasActive) await tabs.reset()
+  try {
+    await coll.closeRoot(root)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
+  if (wasActive && coll.roots.length) await tabs.restoreSession()
+  void refreshSyncStatus()
+}
+
+/**
+ * 打开请求（命令面板跨目录搜索会带上 root）：
+ * 目标根不是活动根时先切过去 —— 页签按根分组，别把别根的请求开到当前组的标签栏里。
+ */
+async function openRequestInRoot(uid: string, root?: string): Promise<void> {
+  if (root && root !== coll.activeRoot) await activateRoot(root)
+  await tabs.openRequest(uid)
+}
+
+/** 重载某个根（外部改动 / 手工触发）：只刷新它的树，不动其它根。 */
+async function reloadRoot(root: string): Promise<void> {
+  try {
+    await coll.reloadRoot(root)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
+ * 启动恢复：按上次打开的目录列表逐个打开，并把上次的活动根设回活动。
+ * 单个目录失败（被删/无权限）只提示并跳过，不阻塞其它根。
+ *
+ * 只恢复前 `settings.restoreLimit` 个（默认 8）：每个根都常驻一个文件监听 + 一次索引扫描。
+ * 被截断的**不静默丢** —— 明确提示还剩几个，工具条「最近打开」里一点就能补开。
+ */
+async function restoreRoots(): Promise<void> {
+  const saved = savedRootDirs()
+  const limit = Math.max(1, settings.form.restoreLimit || MAX_RESTORE_ROOTS)
+  const dirs = saved.slice(0, limit)
+  const wantActive = savedActiveDir()
+  if (!dirs.length) return
+  if (saved.length > dirs.length) {
+    message.info(t('welcome.restoreTruncated', { n: dirs.length, m: saved.length - dirs.length }), {
+      duration: 8000,
+    })
+  }
+  let firstError = ''
+  for (const d of dirs) {
+    try {
+      await coll.open(d)
+    } catch (e) {
+      if (!firstError) firstError = `${d}: ${e instanceof Error ? e.message : String(e)}`
+    }
+  }
+  if (!coll.roots.length) {
+    if (firstError) message.error(t('welcome.restoreFailed', { msg: firstError }))
+    return
+  }
+  const active = rootOfDir(wantActive)
+  if (active && active !== coll.activeRoot) {
+    await coll.setActive(active)
+  }
+  await tabs.restoreSession()
+  void refreshSyncStatus()
+  if (firstError) message.warning(t('welcome.restoreFailed', { msg: firstError }), { duration: 8000 })
 }
 
 function pickEnv(name: string): void {
@@ -306,7 +425,7 @@ function onHotkey(e: KeyboardEvent): void {
 }
 
 onMounted(() => {
-  void settings.load()
+  const settingsReady = settings.load()
   window.addEventListener('keydown', onHotkey)
   // 关窗前 flush 未保存改动（防抖未触发的最后编辑）；新建草稿没有磁盘副本，同步补一份到 localStorage
   window.addEventListener('beforeunload', () => {
@@ -318,13 +437,19 @@ onMounted(() => {
   window.addEventListener('blur', () => {
     void tabs.flushAll()
   })
-  // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户
-  onAppEvent('collection:changed', () => onExternalChange())
+  // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户。
+  // 事件带 root：多根并存时只重载发生改动的那一根
+  onAppEvent('collection:changed', (payload) => {
+    const p = payload as { root?: string } | null
+    onExternalChange(typeof p?.root === 'string' ? p.root : '')
+  })
   // 同步状态轮询（状态栏）
   syncTimer = setInterval(() => {
     void refreshSyncStatus()
   }, 5000)
-  if (lastDir) void openCollection(lastDir)
+  // 恢复上次打开的工作目录（多根）；单个失败只提示，不阻塞其它根。
+  // 必须等设置读完再恢复：恢复上限在设置里，抢跑会拿到默认值，把超出上限的目录当成「不需要恢复」。
+  void settingsReady.then(() => restoreRoots())
 })
 
 onBeforeUnmount(() => {
@@ -353,8 +478,20 @@ async function refreshSyncStatus(): Promise<void> {
   }
 }
 
-function onExternalChange(): void {
+/**
+ * 外部改动（文件监听 / 同步）：事件带 root 时只处理那一根 ——
+ * 非活动根只需刷新它的树（当前根的标签与编辑状态与它无关），活动根才走「回填 / 标冲突」。
+ */
+function onExternalChange(root: string): void {
   void (async () => {
+    if (root && root !== coll.activeRoot) {
+      try {
+        await coll.reloadRoot(root)
+      } catch {
+        // 忽略：下次事件或手动重载再试
+      }
+      return
+    }
     await coll.reload() // 树 / 环境先跟上（watchLoop 已重建索引，hash 是新的）
     await tabs.refreshResolve()
     // G10 落地：干净页签回填磁盘内容；有未保存编辑的页签标冲突（冲突条给出两个出口）
@@ -667,6 +804,11 @@ watch(
           :dir="coll.dir"
           :envs="coll.info.envs"
           :current-env="coll.currentEnv"
+          :roots="coll.roots"
+          :active-root="coll.activeRoot"
+          :recent="recentDirs"
+          @activate="activateRoot"
+          @open-dir="openCollection"
           @open-other="openCollection('')"
           @reload="coll.reload()"
           @history="showHistory = true"
@@ -687,9 +829,12 @@ watch(
           <div class="body">
             <aside class="side">
               <sidebar
-                :tree="coll.tree"
-                :name="coll.name"
+                :roots="coll.roots"
+                :active-root="coll.activeRoot"
                 :active-uid="tabs.active?.uid ?? ''"
+                @activate="activateRoot"
+                @reload-root="reloadRoot"
+                @close-root="closeRoot"
                 @open="tabs.openRequest($event)"
                 @new-request="newDraft"
                 @new-grpc-request="newGrpcDraft"
@@ -771,7 +916,9 @@ watch(
         v-model:show="showPalette"
         :tree="coll.tree"
         :envs="coll.info?.envs ?? []"
-        @open-request="tabs.openRequest($event)"
+        :roots="coll.roots"
+        :active-root="coll.activeRoot"
+        @open-request="openRequestInRoot"
         @switch-env="pickEnv"
         @command="onCommand"
       />

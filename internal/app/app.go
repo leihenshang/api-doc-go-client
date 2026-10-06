@@ -23,7 +23,6 @@ import (
 	"api-doc-go-client/internal/history"
 	"api-doc-go-client/internal/index"
 	"api-doc-go-client/internal/mocksrv"
-	"api-doc-go-client/internal/proto"
 	"api-doc-go-client/internal/runner"
 	"api-doc-go-client/internal/script"
 	"api-doc-go-client/internal/syncengine"
@@ -39,28 +38,27 @@ import (
 type App struct {
 	ctx         context.Context
 	mu          sync.Mutex
-	coll        *collection.Collection
 	headlessDir string // devserver 模式：PickDirectory 直接返回该目录
 	settings    config.Settings
-	jar         *cookiejar.Jar // 惰性创建的 Cookie 罐
-	// sendCancels 按请求 uid 记录在途发送（指针身份用于避免旧请求结束时误删新请求）。
+	jar         *cookiejar.Jar // 惰性创建的 Cookie 罐（按域名存取，与集合无关）
+	// colls 已打开的工作目录（集合），键为 rootKey（规范化绝对路径）—— 多根并存的核心（见 multicoll.go）
+	colls map[string]*collEntry
+	// collOrder 打开顺序：侧栏根行的展示顺序（关闭某个根时保持其余顺序）
+	collOrder []string
+	// activeRoot 活动根的标识：所有集合级方法（不带 root 参数的那些）都作用于它
+	activeRoot string
+	// sendCancels 按「工作目录:请求 uid」记录在途发送（指针身份用于避免旧请求结束时误删新请求）；
+	// 带目录前缀是为了多根并存时不同目录里的同名 uid 不会互相取消。
 	sendCancels map[string]*inflightSend
 	// draftSends 未落盘草稿（uid 为空）的在途发送：它们共用不了 uid 键，
-	// 单列一份避免「发送草稿 A 把草稿 B 取消掉」。
+	// 单列一份避免「发送草稿 A 把草稿 B 取消掉」；每条记着自己的目录，取消时只动活动根的草稿。
 	draftSends []*inflightSend
-	// mock 本地 Mock 服务（H7）
-	mock *mocksrv.Server
-	// syncToken 当前会话的 PAT（不落盘）
-	syncToken string
-	// syncStatus 状态栏同步状态
-	syncStatus SyncStatus
+	// mock 本地 Mock 服务（H7）：同一时刻只服务一个根（mockRoot 记着是谁），换根启动会先停旧的
+	mock     *mocksrv.Server
+	mockRoot string
 	// eventSubs 浏览器态事件订阅（devserver 经 SSE 转发给前端；id 用于退订）
 	eventSubs   map[int]*eventSub
 	eventSubSeq int
-	// syncStop 定时同步停止信号
-	syncStop chan struct{}
-	// protoCache gRPC 定义编译缓存：显式失效（用户导入/更新定义时 Invalidate），不做文件监听
-	protoCache *proto.Cache
 	// mcpBackend 内嵌 MCP HTTP 服务实现（由 main/devserver 注入，见 internal/mcp/embed.go）
 	mcpBackend MCPBackend
 	// mcpStatus 内嵌 MCP 服务最近一次状态（设置页展示；避免前端自己拼）
@@ -70,13 +68,20 @@ type App struct {
 	signalQuit chan struct{}
 }
 
-// inflightSend 一次在途发送的取消句柄。
+// inflightSend 一次在途发送的取消句柄（带工作目录归属，见 sendCancels 的键说明）。
 type inflightSend struct {
 	cancel context.CancelFunc
+	root   string
+	uid    string
 }
 
 func NewApp() *App {
-	a := &App{settings: config.Default(), protoCache: proto.NewCache(), eventSubs: map[int]*eventSub{}}
+	a := &App{
+		settings:    config.Default(),
+		colls:       map[string]*collEntry{},
+		eventSubs:   map[int]*eventSub{},
+		sendCancels: map[string]*inflightSend{},
+	}
 	if s, err := config.Load(); err == nil {
 		a.settings = s
 	}
@@ -174,14 +179,7 @@ func windowFitsScreen(screenW, screenH int) bool {
 // SetHeadlessDir 供 devserver（无对话框环境）使用。
 func (a *App) SetHeadlessDir(dir string) { a.headlessDir = dir }
 
-func (a *App) requireCollection() (*collection.Collection, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.coll == nil {
-		return nil, errors.New("尚未打开集合目录")
-	}
-	return a.coll, nil
-}
+// requireCollection / collOf 见 multicoll.go：集合从集合表里按「活动根 / 指定 uid」解析。
 
 // PickDirectory 选择集合目录（桌面 = 系统对话框；devserver = 启动参数）。
 func (a *App) PickDirectory() (string, error) {
@@ -216,45 +214,99 @@ func (a *App) PickGrpcProtoFiles() ([]string, error) {
 	})
 }
 
-// OpenCollection 打开（不存在则初始化）集合并返回概要（树 + 环境）。
+// OpenCollection 打开（不存在则初始化）一个工作目录并置为活动根，返回概要（树 + 环境）。
+//
+// 多根并存后语义从「替换」改为「追加」：同一目录重复打开是**幂等**的（只置为活动根、
+// 不重复起监听、不重建索引），这样「恢复上次打开的目录」与「欢迎页再点一次」都安全。
 func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("目录为空")
 	}
+	root := rootKey(dir)
+
+	// 已经打开过同一目录：只置为活动根（幂等）
 	a.mu.Lock()
-	if a.coll != nil {
-		a.coll.StopWatch()
+	if e := a.colls[root]; e != nil {
+		a.activeRoot = root
+		exist := e.coll
+		mcpOn := a.settings.MCP.Enabled
+		a.mu.Unlock()
+		a.afterActiveChange(mcpOn)
+		// 概要可能是陈旧的（期间有外部改动）：重扫一次再返回，避免前端拿到旧树
+		return a.refreshInfo(exist)
 	}
 	a.mu.Unlock()
+
 	c, err := collection.Open(dir)
 	if err != nil {
 		return nil, err
 	}
+	// 集合自己也会规范化目录：以它的结果为准（软链接/相对路径写法可能不同）
+	key := rootKey(c.Dir)
+
 	a.mu.Lock()
-	// 换集合必须把本地 Mock 一起下线：它持有旧 collection 的引用，
-	// 否则之后 StartMock 会因为 a.mock != nil 而继续用旧集合匹配/回放。
-	oldMock := a.mock
-	a.mock = nil
-	a.coll = c
-	a.mu.Unlock()
-	if oldMock != nil {
-		_ = oldMock.Stop()
+	// 并发打开同一目录的兜底（两个入口同时点开）：被别人抢先就用它，把自己这份关掉
+	if e := a.colls[key]; e != nil {
+		a.activeRoot = key
+		dup := e.coll
+		mcpOn := a.settings.MCP.Enabled
+		a.mu.Unlock()
+		_ = c.Close() // 丢掉这份没人消费它的事件与索引句柄
+		a.afterActiveChange(mcpOn)
+		return a.refreshInfo(dup)
 	}
-	// 换集合即丢弃编译缓存：缓存按绝对路径存结果，跨集合复用没有意义（也避免同路径陈旧结果）
-	a.protoCache.Invalidate()
-	go a.watchLoop(c)
-	// MCP 服务的项目根是「集合的父目录」，换集合后要重建才能看到新项目
-	if a.settings.MCP.Enabled {
+	// 同一份集合的拷贝（清单 uid 相同、路径不同）已打开：索引按 uid 会落到同一个 sqlite 文件，
+	// 两边的搜索结果 / 同步哈希会互相污染，给后来者换一个区分用的索引键
+	uidTaken := false
+	for other, e := range a.colls {
+		if other != key && e.coll.UID == c.UID {
+			uidTaken = true
+			break
+		}
+	}
+	a.colls[key] = &collEntry{coll: c}
+	a.collOrder = append(a.collOrder, key)
+	a.activeRoot = key
+	mcpOn := a.settings.MCP.Enabled
+	a.mu.Unlock()
+
+	if uidTaken {
+		c.SetIndexKey(c.UID + "--" + shortHash(key))
+		_ = c.RebuildIndex() // 新键指向的索引文件是空的，先按磁盘重建一份
+	}
+	go a.watchLoop(c, key)
+	// MCP 服务的项目根由「活动集合的父目录」推导，新开目录后要重建服务才能看到新项目
+	if mcpOn {
 		a.applyMCP("")
 	}
-	return c.Info()
+	info, err := a.refreshInfo(c)
+	if err != nil {
+		// 列不出概要的根留着只会是坏状态：撤回登记，把原因如实回报
+		a.mu.Lock()
+		delete(a.colls, key)
+		a.collOrder = removeFromOrder(a.collOrder, key)
+		if a.activeRoot == key {
+			if n := len(a.collOrder); n > 0 {
+				a.activeRoot = a.collOrder[n-1]
+			} else {
+				a.activeRoot = ""
+			}
+		}
+		a.mu.Unlock()
+		_ = c.Close()
+		return nil, err
+	}
+	return info, nil
 }
 
-// watchLoop 把外部改动事件转发给前端（Wails EventsEmit；devserver 经 SubscribeEvents 的 SSE 转发）。
+// watchLoop 把某个工作目录的外部改动事件转发给前端（Wails EventsEmit；devserver 经 SubscribeEvents 的 SSE 转发）。
 //
-// 退出条件有两个：watcher 关闭信号（切换集合时 StopWatch）与事件通道关闭。
-// 只等事件通道会在切换集合后永久阻塞（通道不会被关闭），每个被换掉的集合都泄漏一个 goroutine。
-func (a *App) watchLoop(c *collection.Collection) {
+// 退出条件有两个：watcher 关闭信号（CloseCollection / Shutdown 时 StopWatch）与事件通道关闭。
+// 只等事件通道会在根被关掉后永久阻塞（通道不会被关闭），每个被关掉的根都泄漏一个 goroutine。
+//
+// 事件里必须带上工作目录标识（root）：多根并存时前端只重载「发生改动的那一根」，
+// 而不是把 N 个根全量重扫。
+func (a *App) watchLoop(c *collection.Collection, root string) {
 	ch := c.WatchEvents()
 	if ch == nil {
 		return
@@ -273,8 +325,10 @@ func (a *App) watchLoop(c *collection.Collection) {
 		}
 		a.mu.Lock()
 		ctx := a.ctx
-		still := a.coll == c
-		payload := map[string]any{"paths": ev.Paths}
+		// 该集合是否仍是已登记的根（root + 指针身份双保险）：被关掉的根不再上报
+		e := a.colls[root]
+		still := e != nil && e.coll == c
+		payload := map[string]any{"root": root, "paths": ev.Paths}
 		subs := make([]chan map[string]any, 0, len(a.eventSubs))
 		for _, s := range a.eventSubs {
 			subs = append(subs, s.ch)
@@ -285,6 +339,15 @@ func (a *App) watchLoop(c *collection.Collection) {
 		}
 		// 同步重建索引，保证搜索结果与磁盘一致
 		_ = c.RebuildIndex()
+		// 顺带刷新该根的概要缓存：前端收到事件后重列根行（ListCollections）就是最新的，
+		// 不必再为「看树」单独走一次全量扫描
+		if info, ierr := c.Info(); ierr == nil {
+			a.mu.Lock()
+			if cur := a.colls[root]; cur != nil && cur.coll == c {
+				cur.info = info
+			}
+			a.mu.Unlock()
+		}
 		if ctx != nil {
 			runtime.EventsEmit(ctx, "collection:changed", payload)
 		}
@@ -298,14 +361,10 @@ func (a *App) watchLoop(c *collection.Collection) {
 	}
 }
 
-// ReloadCollection 重新扫描集合（外部改动 / git 操作后）。
+// ReloadCollection 重新扫描**活动根**（外部改动 / git 操作后）。
+// 指定其它根用 ReloadCollectionOf(uid)。
 func (a *App) ReloadCollection() (*collection.CollectionInfo, error) {
-	c, err := a.requireCollection()
-	if err != nil {
-		return nil, err
-	}
-	_ = c.RebuildIndex()
-	return c.Info()
+	return a.ReloadCollectionOf("")
 }
 
 // SearchIndex 本地索引搜索（C1/H4）：按标题/URL/方法/路径模糊匹配。
@@ -332,25 +391,38 @@ func (a *App) RebuildIndex() error {
 
 // ---- 本地 Mock 服务（H7）----
 
-// StartMock 启动本地 Mock（port<=0 随机端口）。
+// StartMock 在**活动根**上启动本地 Mock（port<=0 随机端口）。
+//
+// 同一时刻只允许一个 Mock：它绑着某个集合的请求定义，若在 A 启动后切到 B 再启动，
+// 先把 A 那份停掉（端口/状态栏都只反映一个），避免「看起来在跑、匹配的却是另一个目录」。
 func (a *App) StartMock(port int) (*mocksrv.Status, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
 	}
+	root := rootKey(c.Dir)
 	a.mu.Lock()
+	var old *mocksrv.Server
+	if a.mock != nil && a.mockRoot != root {
+		old, a.mock, a.mockRoot = a.mock, nil, ""
+	}
 	if a.mock == nil {
 		a.mock = mocksrv.New(c)
+		a.mockRoot = root
 	}
 	m := a.mock
 	a.mu.Unlock()
+	if old != nil {
+		_ = old.Stop()
+	}
 	return m.Start(port)
 }
 
-// StopMock 停止本地 Mock。
+// StopMock 停止本地 Mock（无论它当前服务哪个根）。
 func (a *App) StopMock() error {
 	a.mu.Lock()
 	m := a.mock
+	a.mock, a.mockRoot = nil, ""
 	a.mu.Unlock()
 	if m == nil {
 		return nil
@@ -358,12 +430,12 @@ func (a *App) StopMock() error {
 	return m.Stop()
 }
 
-// MockStatus Mock 运行状态。
+// MockStatus Mock 运行状态：只反映「活动根」上的 Mock（属于别的根的实例不算在活动根头上）。
 func (a *App) MockStatus() *mocksrv.Status {
 	a.mu.Lock()
-	m := a.mock
+	m, root, active := a.mock, a.mockRoot, a.activeRoot
 	a.mu.Unlock()
-	if m == nil {
+	if m == nil || root != active {
 		return &mocksrv.Status{Running: false}
 	}
 	return m.Status()
@@ -420,9 +492,7 @@ func (a *App) SetSyncBind(serverURL string, projectID uint64, mode, token string
 	if err := syncengine.SaveBind(c.Dir, b); err != nil {
 		return nil, err
 	}
-	a.mu.Lock()
-	a.syncToken = token
-	a.mu.Unlock()
+	a.setSyncToken(c, token)
 	return &b, nil
 }
 
@@ -436,18 +506,24 @@ func (a *App) UnbindSync() error {
 	if err := syncengine.SaveBind(c.Dir, b); err != nil {
 		return err
 	}
-	a.mu.Lock()
-	a.syncToken = ""
-	a.mu.Unlock()
+	a.setSyncToken(c, "")
 	return nil
 }
 
-// RunSync 执行一轮同步（先 pull 后 push）。
+// RunSync 在**活动根**上执行一轮同步（先 pull 后 push）。
 func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
 	}
+	return a.runSyncFor(c, token)
+}
+
+// runSyncFor 对指定集合跑一轮同步。
+//
+// 为什么把集合当参数：定时同步的 goroutine 属于某个根，而活动根可能在它跑之前就切换了；
+// 若这里仍取「活动集合」，自动同步会打到用户刚切过去的另一个目录上。
+func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Report, error) {
 	b, err := syncengine.LoadBind(c.Dir)
 	if err != nil || !b.Linked {
 		return nil, errors.New("当前集合未关联服务端项目")
@@ -460,9 +536,7 @@ func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	}
 	tok := token
 	if tok == "" {
-		a.mu.Lock()
-		tok = a.syncToken
-		a.mu.Unlock()
+		tok = a.syncTokenOf(c)
 	}
 	if tok == "" {
 		return nil, errors.New("缺少访问令牌（PAT）")
@@ -470,9 +544,9 @@ func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	cli := syncengine.New(b.ServerURL, tok, syncengine.DeviceID())
 	eng := &syncengine.Engine{Coll: c, Bind: b, CLI: cli}
 
-	a.setSyncRunning(true)
+	a.setSyncRunning(c, true)
 	rep, err := eng.RunOne()
-	a.setSyncRunning(false)
+	a.setSyncRunning(c, false)
 
 	// 回写 cursor
 	b.Cursor = eng.Bind.Cursor
@@ -480,21 +554,23 @@ func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	// 同步后重建索引
 	_ = c.RebuildIndex()
 
-	// 记状态
-	a.mu.Lock()
-	if err != nil {
-		a.syncStatus.LastError = err.Error()
-	} else {
-		a.syncStatus.LastError = ""
-		a.syncStatus.LastSyncAt = time.Now().UnixMilli()
-		if rep != nil {
-			a.syncStatus.LastReport = rep
+	// 记状态（按集合各自记录，状态栏切到哪个根就看哪个根）
+	a.updateSyncStatus(c, func(st *SyncStatus) {
+		if err != nil {
+			st.LastError = err.Error()
+			return
 		}
-	}
+		st.LastError = ""
+		st.LastSyncAt = time.Now().UnixMilli()
+		if rep != nil {
+			st.LastReport = rep
+		}
+	})
+	a.mu.Lock()
 	ctx := a.ctx
 	a.mu.Unlock()
 	if ctx != nil && err == nil {
-		runtime.EventsEmit(ctx, "collection:changed", map[string]any{"paths": []string{"sync"}})
+		runtime.EventsEmit(ctx, "collection:changed", map[string]any{"root": rootKey(c.Dir), "paths": []string{"sync"}})
 	}
 	return rep, err
 }
@@ -514,7 +590,7 @@ type SyncStatus struct {
 	LastReport *syncengine.Report `json:"lastReport,omitempty"`
 }
 
-// GetSyncStatus 当前同步状态（供状态栏轮询）。
+// GetSyncStatus 活动根的同步状态（供状态栏轮询）。
 func (a *App) GetSyncStatus() *SyncStatus {
 	c, err := a.requireCollection()
 	if err != nil {
@@ -525,9 +601,7 @@ func (a *App) GetSyncStatus() *SyncStatus {
 	dirty, _ := c.DirtyNodesFast()
 	confs, _ := c.ListConflicts()
 
-	a.mu.Lock()
-	st := a.syncStatus
-	a.mu.Unlock()
+	st := a.syncStatusOf(c)
 
 	st.Linked = b.Linked
 	st.Mode = b.Mode
@@ -537,25 +611,35 @@ func (a *App) GetSyncStatus() *SyncStatus {
 	return &st
 }
 
-func (a *App) setSyncRunning(v bool) {
-	a.mu.Lock()
-	a.syncStatus.Running = v
-	a.mu.Unlock()
+// setSyncRunning 标记该集合是否正在同步（状态栏「同步中」）。
+func (a *App) setSyncRunning(c *collection.Collection, v bool) {
+	a.updateSyncStatus(c, func(st *SyncStatus) { st.Running = v })
 }
 
-// StartAutoSync 启动定时自动同步（mode=auto 时每 intervalSec 一轮）。
+// StartAutoSync 为**活动根**启动定时自动同步（mode=auto 时每 intervalSec 一轮）。
 // token 可为空（用会话里已存的）。
+//
+// 同一时刻只让活动根自动同步：启动时先把所有根的定时器停掉（含本根上一次的）。
+// 否则多根并存会变成 N 个定时器一起打服务端，切换根之后旧根还会在后台继续同步。
 func (a *App) StartAutoSync(intervalSec int) {
 	if intervalSec < 30 {
 		intervalSec = 120 // 默认 2 分钟
 	}
 	a.mu.Lock()
-	if a.syncStop != nil {
-		close(a.syncStop)
-		a.syncStop = nil
+	for _, e := range a.colls {
+		if e.syncStop != nil {
+			close(e.syncStop)
+			e.syncStop = nil
+		}
+	}
+	e := a.activeEntryLocked()
+	if e == nil {
+		a.mu.Unlock()
+		return
 	}
 	stop := make(chan struct{})
-	a.syncStop = stop
+	e.syncStop = stop
+	root := a.activeRoot
 	a.mu.Unlock()
 
 	go func() {
@@ -566,43 +650,43 @@ func (a *App) StartAutoSync(intervalSec int) {
 			case <-stop:
 				return
 			case <-t.C:
-				a.autoSyncOnce()
+				a.autoSyncOnce(root)
 			}
 		}
 	}()
 }
 
-// StopAutoSync 停止定时同步。
+// StopAutoSync 停止所有根的定时同步。
 func (a *App) StopAutoSync() {
 	a.mu.Lock()
-	if a.syncStop != nil {
-		close(a.syncStop)
-		a.syncStop = nil
+	for _, e := range a.colls {
+		if e.syncStop != nil {
+			close(e.syncStop)
+			e.syncStop = nil
+		}
 	}
 	a.mu.Unlock()
 }
 
-// autoSyncOnce 一轮自动同步：仅 auto 模式且已绑定、未在跑时执行。
-func (a *App) autoSyncOnce() {
-	a.mu.Lock()
-	running := a.syncStatus.Running
-	token := a.syncToken
-	a.mu.Unlock()
-	if running {
-		return
-	}
-	c, err := a.requireCollection()
+// autoSyncOnce 某个根的一轮自动同步：仅 auto 模式且已绑定、未在跑时执行。
+func (a *App) autoSyncOnce(root string) {
+	c, err := a.collOf(root)
 	if err != nil {
+		return // 该根已被关闭
+	}
+	st := a.syncStatusOf(c)
+	if st.Running {
 		return
 	}
 	b, err := syncengine.LoadBind(c.Dir)
 	if err != nil || !b.Linked || b.Mode != syncengine.ModeAuto {
 		return
 	}
+	token := a.syncTokenOf(c)
 	if token == "" {
 		return
 	}
-	_, _ = a.RunSync(token)
+	_, _ = a.runSyncFor(c, token)
 }
 
 // ListConflicts 列出 .conflicts/ 冲突副本（I4）。
@@ -685,13 +769,11 @@ func (a *App) SyncDocAssets(token string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	a.mu.Lock()
 	tok := token
 	if tok == "" {
-		tok = a.syncToken
+		tok = a.syncTokenOf(c)
 	}
 	b, _ := syncengine.LoadBind(c.Dir)
-	a.mu.Unlock()
 	if tok == "" || !b.Linked {
 		return 0, errors.New("未关联服务端或缺少令牌")
 	}
@@ -1157,10 +1239,11 @@ func (a *App) SendRequest(r *collection.Request, envName string) (*runner.Result
 	a.ensureJar()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// 在途发送按「工作目录 + 请求 uid」登记：多根并存时不同目录里出现同名 uid 也不会互相取消
 	it := &inflightSend{cancel: cancel}
-	a.registerSend(r.UID, it)
+	a.registerSend(a.activeRootID(), r.UID, it)
 	defer func() {
-		a.unregisterSend(r.UID, it)
+		a.unregisterSend(it)
 		cancel()
 	}()
 
@@ -1240,8 +1323,9 @@ func (a *App) executeRequest(ctx context.Context, r *collection.Request, vars ma
 	return runner.Send(ctx, *r, vars, a.sendOptions())
 }
 
-// registerSend 登记在途发送：同 uid 重发先取消上一次；uid 为空的草稿单独登记（互不取消）。
-func (a *App) registerSend(uid string, it *inflightSend) {
+// registerSend 登记在途发送：同一「工作目录 + 请求 uid」重发先取消上一次；uid 为空的草稿单独登记（互不取消）。
+func (a *App) registerSend(root, uid string, it *inflightSend) {
+	it.root, it.uid = root, uid
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if uid == "" {
@@ -1251,19 +1335,20 @@ func (a *App) registerSend(uid string, it *inflightSend) {
 	if a.sendCancels == nil {
 		a.sendCancels = map[string]*inflightSend{}
 	}
-	if prev, ok := a.sendCancels[uid]; ok {
+	key := sendKey(root, uid)
+	if prev, ok := a.sendCancels[key]; ok {
 		prev.cancel()
 	}
-	a.sendCancels[uid] = it
+	a.sendCancels[key] = it
 }
 
 // unregisterSend 发送结束时移除登记（指针身份比对：不误删同一 uid 的新一轮发送）。
-func (a *App) unregisterSend(uid string, it *inflightSend) {
+func (a *App) unregisterSend(it *inflightSend) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if uid != "" {
-		if a.sendCancels[uid] == it {
-			delete(a.sendCancels, uid)
+	if it.uid != "" {
+		if key := sendKey(it.root, it.uid); a.sendCancels[key] == it {
+			delete(a.sendCancels, key)
 		}
 		return
 	}
@@ -1275,15 +1360,39 @@ func (a *App) unregisterSend(uid string, it *inflightSend) {
 	}
 }
 
-// CancelSend 取消按 uid 标识的在途发送；uid 为空表示取消全部「未落盘草稿」的发送。
+// sendKey 在途发送登记键：工作目录标识 + 请求 uid（目录标识是路径，用 \n 分隔避免歧义）。
+func sendKey(root, uid string) string { return root + "\n" + uid }
+
+// CancelSend 取消按 uid 标识的在途发送；uid 为空表示取消活动根下「未落盘草稿」的发送。
+//
+// uid 非空时优先命中活动根，其次再在所有已打开的根里找（前端拿到的是请求 uid，
+// 可能来自非活动根）：按「目录+uid」登记、按 uid 匹配，既不会误取消别的目录里的同名 uid，
+// 也不会因为用户在这期间切了根而取消不掉。
 func (a *App) CancelSend(uid string) {
 	a.mu.Lock()
 	var targets []*inflightSend
 	if uid == "" {
-		targets, a.draftSends = a.draftSends, nil
-	} else if it, ok := a.sendCancels[uid]; ok {
+		keep := a.draftSends[:0]
+		for _, d := range a.draftSends {
+			if d.root == a.activeRoot {
+				targets = append(targets, d)
+			} else {
+				keep = append(keep, d)
+			}
+		}
+		a.draftSends = keep
+	} else if it, ok := a.sendCancels[sendKey(a.activeRoot, uid)]; ok {
+		// 优先取消活动根里的那一条：多根并存时两个目录完全可能有同名 uid（整目录拷贝）
 		targets = append(targets, it)
-		delete(a.sendCancels, uid)
+		delete(a.sendCancels, sendKey(a.activeRoot, uid))
+	} else {
+		suffix := "\n" + uid
+		for k, it := range a.sendCancels {
+			if strings.HasSuffix(k, suffix) {
+				targets = append(targets, it)
+				delete(a.sendCancels, k)
+			}
+		}
 	}
 	a.mu.Unlock()
 	for _, it := range targets {
@@ -1313,14 +1422,17 @@ func (a *App) ensureJar() {
 }
 
 // recordHistory 落一条历史：失败也记，便于回溯排查；带请求快照供原样重放。
+//
+// 条目带「所属工作目录」：多根并存后历史按目录隔离展示（切到哪个根只看哪个根的记录）。
 func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr error) {
 	a.mu.Lock()
 	limit := a.settings.HistoryLimit
+	root := a.activeRoot
 	a.mu.Unlock()
 
 	entry := history.Entry{
 		Time: time.Now().UnixMilli(), UID: r.UID, Name: r.Name,
-		Method: strings.ToUpper(r.Method), URL: r.URL,
+		Method: strings.ToUpper(r.Method), URL: r.URL, Root: root,
 	}
 	if snap, err := json.Marshal(r); err == nil {
 		entry.Request = snap
@@ -1336,8 +1448,9 @@ func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr e
 }
 
 // ReplayHistory 用历史里的请求快照原样重发（E22）；index 为 ListHistory 的下标。
+// 列表与 ListHistory 同源（都按活动根过滤），因此下标一一对应。
 func (a *App) ReplayHistory(index int, envName string) (*runner.Result, error) {
-	items, err := history.List(0)
+	items, err := history.List(0, a.activeRootID())
 	if err != nil {
 		return nil, err
 	}
@@ -1385,14 +1498,14 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	return nil
 }
 
-// ListHistory 最近的发送记录（新 → 旧）。
+// ListHistory 活动根最近的发送记录（新 → 旧）；升级前无归属的旧记录也一并展示。
 func (a *App) ListHistory(limit int) ([]history.Entry, error) {
-	return history.List(limit)
+	return history.List(limit, a.activeRootID())
 }
 
-// ClearHistory 清空发送历史。
+// ClearHistory 清空**活动根**的发送历史（其它工作目录的记录保留）。
 func (a *App) ClearHistory() error {
-	return history.Clear()
+	return history.Clear(a.activeRootID())
 }
 
 // ListCookies 当前 Cookie 罐内容。
