@@ -25,6 +25,12 @@ type Entry struct {
 	TimeMS int64  `json:"timeMs"`
 	Size   int    `json:"size"`
 	Error  string `json:"error,omitempty"`
+	// Root 该记录所属工作目录的标识（规范化绝对路径，与 App 侧的多根表同一套标识）。
+	// 为什么不用集合 uid：两个工作目录完全可能是同一份集合的拷贝（uid 相同，路径不同），
+	// 只有路径能区分它们。
+	// 历史是升级前就有的单文件，旧条目没有这个字段（omitempty）→ 视为「无归属」，
+	// 在任一目录下都可见（否则升级后旧历史会像凭空消失）。
+	Root string `json:"root,omitempty"`
 	// Request 发送时的草稿快照（JSON 的 collection.Request）；旧记录可为空
 	Request json.RawMessage `json:"request,omitempty"`
 }
@@ -53,14 +59,26 @@ func Append(e Entry, limit int) error {
 	return writeAll(items)
 }
 
+// belongs 该条目是否属于指定工作目录：条目自带的标识命中，或它是升级前的旧条目（无归属）。
+func belongs(e Entry, root string) bool {
+	if root == "" {
+		return true
+	}
+	return e.Root == "" || e.Root == root
+}
+
 // List 返回最近的记录（新 → 旧），limit<=0 时返回全部。
-func List(limit int) ([]Entry, error) {
+// root 非空时只返回该工作目录的记录（含升级前无归属的旧记录）。
+func List(limit int, root string) ([]Entry, error) {
 	items, err := readAll()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Entry, 0, len(items))
 	for i := len(items) - 1; i >= 0; i-- {
+		if !belongs(items[i], root) {
+			continue
+		}
 		out = append(out, items[i])
 		if limit > 0 && len(out) >= limit {
 			break
@@ -69,16 +87,22 @@ func List(limit int) ([]Entry, error) {
 	return out, nil
 }
 
-// Clear 清空历史。
-func Clear() error {
-	p, err := path()
+// Clear 清空历史：root 非空时只清该工作目录的记录（含无归属的旧记录），其余保留。
+func Clear(root string) error {
+	if root == "" {
+		return writeAll(nil)
+	}
+	items, err := readAll()
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("清空历史: %w", err)
+	keep := make([]Entry, 0, len(items))
+	for _, e := range items {
+		if !belongs(e, root) {
+			keep = append(keep, e)
+		}
 	}
-	return nil
+	return writeAll(keep)
 }
 
 func readAll() ([]Entry, error) {

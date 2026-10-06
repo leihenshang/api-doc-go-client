@@ -45,32 +45,42 @@ Claude Desktop 配置：
 
 ## 二、项目模型
 
+- **扫描范围 = 授权的工作目录白名单**（`Config.Allow`，每条区分只读/可写）：项目只能来自白名单目录自身
+  或它的一级子目录；白名单外的集合既扫不到、也定位不到、更不能新建项目。只读授权下写工具一律拒绝
+  （错误信息会说明「只读授权」），读工具照常可用。
+- **白名单为空 = 不授权任何目录**（安全默认）：服务照常装配，`list_workspaces` 如实回报「没有可用项目」。
+  内嵌服务在白名单为空时**不监听端口**（设置页给出「尚未授权任何工作目录」提示）。
+- **默认工作目录**：`use_workspace` 选定的目标会作为后续工具省略 `project` 时的兜底，且是**会话级**的 ——
+  HTTP 传输下每个客户端一个会话（各自一个 `Mcp-Session-Id`），各选各的、互不影响；stdio 与内嵌服务只有一个会话，
+  等价于「进程里只有一份」。实现上由工具层按会话 id 保存，`Service` 本身不持有默认目标（保持无状态、可单测）。
 - 一个项目 = 一个集合目录（含 `opencollection.yml`）。
 - 三种定位方式（优先级从高到低）：**uid → 目录基名 → 路径**；歧义时报错并列候选。入参统一叫 `project`。
 - **扫描只读清单**：`list_projects` 只解析 manifest（`collection.ReadMeta`），不建索引、不写盘、不起监听。
 - **懒加载**：首次访问某项目才 `OpenCollection` 并起该项目的 fsnotify 监听；`refresh=true` 重新扫描。
 - 读操作前 `ReloadCollection`（重扫 + 重建索引），因为扫描与索引是「打开时快照」。
 
-## 三、工具清单（16 个）
+## 三、工具清单（18 个）
 
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
+| `list_workspaces` | 授权的工作目录 + 其中项目 + 当前默认目标 | — |
+| `use_workspace` | 选定**本会话**的默认工作目录（选定后可省略 `project`） | `workspace` |
 | `list_projects` | 项目列表（模糊过滤/刷新） | `project?`、`refresh?` |
-| `get_project_modules` | 模块结构 + 每模块请求数 | `project`、`query?`、`includeRequests?` |
-| `get_request_detail` | 接口详情（请求/headers/docs/示例） | `project`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
+| `get_project_modules` | 模块结构 + 每模块请求数 | `project?`、`query?`、`includeRequests?` |
+| `get_request_detail` | 接口详情（请求/headers/docs/示例） | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
 | `search_requests` | 模糊搜索（可跨项目） | `query`、`project?`、`limit?` |
-| `create_request` | 创建请求（手填 / cURL / 复制） | `project`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
-| `create_module` | 创建模块（支持嵌套） | `project`、`name`、`parent?` |
+| `create_request` | 创建请求（手填 / cURL / 复制） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
+| `create_module` | 创建模块（支持嵌套） | `project?`、`name`、`parent?` |
 | `create_project` | 新建项目（目录 + manifest） | `name`、`dirName?`、`root?` |
-| `send_request` | 发送并可选保存示例 | `project`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
-| `update_request` | 局部修改 / 移动模块 | `project`、`uid`、各可选字段、`ifMatch?` |
-| `delete_request` | 移除请求（进 `.trash`） | `project`、`uid` |
-| `list_envs` | 环境与变量（敏感值掩码 + hash） | `project`、`query?` |
-| `create_env` | 新建环境（可带初始变量） | `project`、`name`、`vars?` |
-| `rename_env` | 环境改名 | `project`、`name`、`newName`、`ifMatch?` |
-| `delete_env` | 删除环境 | `project`、`name` |
-| `set_env_var` | 单条变量 upsert | `project`、`env`、`name`、`value`、`secret?`、`enabled?`、`ifMatch?` |
-| `delete_env_var` | 删一个变量 | `project`、`env`、`name`、`ifMatch?` |
+| `send_request` | 发送并可选保存示例 | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
+| `update_request` | 局部修改 / 移动模块 | `project?`、`uid`、各可选字段、`ifMatch?` |
+| `delete_request` | 移除请求（进 `.trash`） | `project?`、`uid` |
+| `list_envs` | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
+| `create_env` | 新建环境（可带初始变量） | `project?`、`name`、`vars?` |
+| `rename_env` | 环境改名 | `project?`、`name`、`newName`、`ifMatch?` |
+| `delete_env` | 删除环境 | `project?`、`name` |
+| `set_env_var` | 单条变量 upsert | `project?`、`env`、`name`、`value`、`secret?`、`enabled?`、`ifMatch?` |
+| `delete_env_var` | 删一个变量 | `project?`、`env`、`name`、`ifMatch?` |
 
 ## 四、模糊匹配（`fuzzy.go`，纯标准库）
 
@@ -115,6 +125,8 @@ Claude Desktop 配置：
 | 并发写 | 同项目写操作由 registry 锁串行化 |
 | 冲突保护 | 详情/搜索返回 `hash`；`update_request` 传 `ifMatch` 时磁盘被外部改动就拒写（不传则最后写者赢，与桌面端一致） |
 | 只读模式 | 不注册 `create_*`/`update_*`/`delete_*`；`send_request` 强制 `saveExample=false` |
+| 工作目录边界 | 只扫 / 只操作**白名单**目录（路径比较按绝对路径 + 软链复核，拒绝 `..` 逃逸）；`create_project` 只能在白名单内的可写目录里建（以前 `root` 参数可以指向任意路径 = 越权） |
+| 授权粒度 | 每条白名单独立只读/可写：只读授权下写工具直接拒绝，`send_request` 的示例也不落盘 |
 
 ## 八、客户端内嵌（设置 → MCP 服务）
 
@@ -127,7 +139,7 @@ Claude Desktop 配置：
 | 端口占用 | 先 `net.Listen` 探一下再 `ServeHTTP` | 把「端口被占用」变成同步错误返回设置页 |
 | 令牌 | 启用且为空时自动生成 32 位随机令牌并**落盘**；「重新生成」先落盘再重启 | 开了就有鉴权；不落盘会导致切主题/重启后令牌静默轮换、已连上的客户端 401 |
 | 默认值 | 不启用、回环、8189、**只读** | 内嵌服务最容易被随手暴露 |
-| 项目根 | 当前打开集合的**父目录** | 与独立 mcpserver 的「项目 = 含 manifest 的目录」语义一致 |
+| 项目根 | **可访问的工作目录白名单**（设置里逐条添加并勾选只读/可写） | 以前取「当前集合父目录」等于隐式授权一整棵目录树；现在由用户显式授权。白名单为空则服务不监听（安全默认），设置页有「加入当前打开目录」一键添加 |
 
 ## 九、分层
 

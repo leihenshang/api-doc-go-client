@@ -8,12 +8,14 @@ import {
   AddOutline,
   ChevronDownOutline,
   ChevronForwardOutline,
+  CloseOutline,
   ContractOutline,
   CreateOutline,
   ExpandOutline,
   FolderOpenOutline,
   GitNetworkOutline,
   MoveOutline,
+  RefreshOutline,
   Star,
   StarOutline,
   TerminalOutline,
@@ -25,29 +27,49 @@ import MethodTag from '@/components/MethodTag.vue'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
-import type { TreeNode } from '@/types'
+import type { CollectionSummary, TreeNode } from '@/types'
 
-const props = defineProps<{ tree: TreeNode[]; activeUid?: string; name: string }>()
+const props = defineProps<{
+  /** 已打开的工作目录（单树多根：每个根行下面挂自己的树） */
+  roots: CollectionSummary[]
+  /** 活动根的标识（集合级动作都作用于它） */
+  activeRoot: string
+  /** 活动页签对应的请求 uid（行选中态 + 自动展开/滚动） */
+  activeUid?: string
+}>()
 const emit = defineEmits<{
   open: [uid: string]
   'new-request': [folder: string]
   'new-grpc-request': [folder: string]
   'import-curl': [folder: string]
+  /** 点击某个根：把它切成活动根 */
+  activate: [root: string]
+  /** 重载某个工作目录 */
+  'reload-root': [root: string]
+  /** 关闭某个工作目录 */
+  'close-root': [root: string]
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
 const tabs = useTabsStore()
 
 const keyword = ref('')
+/** 分组折叠态（键 = 根 + 路径，见 folderKey） */
 const collapsed = ref(new Set<string>())
+/** 工作目录折叠态（每个根行上的箭头） */
+const collapsedRoots = ref(new Set<string>())
 const treeEl = ref<HTMLElement | null>(null)
-const editing = ref<{ uid: string; value: string } | null>(null)
-const adding = ref<{ parent: string } | null>(null)
+const editing = ref<{ root: string; uid: string; value: string } | null>(null)
+const adding = ref<{ root: string; parent: string } | null>(null)
 const addValue = ref('')
 const addInput = ref<InputInst | null>(null)
 
 interface Row {
-  node: TreeNode
+  /** 所属工作目录（根行的 root 就是它自己） */
+  root: string
+  /** 根行（工作目录标题）：没有 node，不参与层级连接线 */
+  isRoot: boolean
+  node: TreeNode | null
   depth: number
   /** 是否是父级（可见）子行里的最后一个：决定本行连接线画成 ├ 还是 └ */
   last: boolean
@@ -103,31 +125,47 @@ function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
   return out
 }
 
+/** 每个根的树（搜索时按关键字过滤：命中的请求保留其祖先分组）。 */
+function treeOf(root: CollectionSummary): TreeNode[] {
+  return searching.value ? filterTree(root.info.tree, keyword.value.trim().toLowerCase()) : root.info.tree
+}
+
+/** 分组折叠态按「根 + 路径」记：两个根里可能有同路径的分组（拷贝出来的集合）。 */
+function folderKey(root: string, path: string): string {
+  return `${root}\n${path}`
+}
+
 const rows = computed<Row[]>(() => {
-  const src = searching.value ? filterTree(props.tree, keyword.value.trim().toLowerCase()) : props.tree
   const out: Row[] = []
-  // H5：收藏的请求置顶展示（不改变磁盘顺序）
+  // H5：收藏的请求置顶展示（不改变磁盘顺序）；收藏按根隔离，置顶区只显示活动根的
   const favUids = coll.favSet
   const favRows: Row[] = []
   // lines 逐级下传：进入子层时把「本行还有后续兄弟」补进列尾，正好是子行的一列祖先竖线。
-  // 注意深度 0：挂在集合根下的分组，其祖先列是「集合根行」这一列 —— 根行不是树节点、不画线，
+  // 注意深度 0：挂在**根行**下的分组，其祖先列是根行这一列 —— 根行不是树节点、不画线，
   // 所以第一层下传空数组（否则 depth=1 行会在自己的列上多画一条竖线，├ 被画成满行）。
-  const walk = (nodes: TreeNode[], depth: number, lines: boolean[]): void => {
+  const walk = (root: string, nodes: TreeNode[], depth: number, lines: boolean[]): void => {
     nodes.forEach((n, i) => {
       const last = i === nodes.length - 1
-      out.push({ node: n, depth, last, lines })
-      if (n.type === 'folder' && n.children?.length && !isCollapsed(n.path)) {
-        walk(n.children, depth + 1, depth === 0 ? [] : [...lines, !last])
+      out.push({ root, isRoot: false, node: n, depth, last, lines })
+      if (n.type === 'folder' && n.children?.length && !isCollapsed(root, n.path)) {
+        walk(root, n.children, depth + 1, depth === 0 ? [] : [...lines, !last])
       }
     })
   }
-  walk(src, 0, [])
+  for (const r of props.roots) {
+    const tree = treeOf(r)
+    // 搜索时该根没有命中：整根隐藏（否则多根平铺会被一堆空根行淹没）
+    if (searching.value && tree.length === 0) continue
+    out.push({ root: r.root, isRoot: true, node: null, depth: -1, last: true, lines: [] })
+    if (collapsedRoots.value.has(r.root)) continue
+    walk(r.root, tree, 0, [])
+  }
   if (!searching.value && favUids.size) {
-    for (const r of out) {
-      if (r.node.type === 'request' && favUids.has(r.node.uid)) {
-        // 置顶区是平铺展示，不参与层级连接线
-        favRows.push({ node: r.node, depth: 0, last: true, lines: [] })
-      }
+    for (const row of out) {
+      if (row.isRoot || row.node?.type !== 'request' || !favUids.has(row.node.uid)) continue
+      if (row.root !== props.activeRoot) continue // 置顶区只对活动根（收藏本身按根隔离）
+      // 置顶区是平铺展示，不参与层级连接线
+      favRows.push({ ...row, depth: 0, last: true, lines: [] })
     }
     if (favRows.length) {
       // 收置顶区：在最前插入
@@ -140,60 +178,123 @@ const rows = computed<Row[]>(() => {
 /** 行内「新建子分组」输入行所属的父行（连接线要与目标层级对齐）。 */
 const addParentRow = computed(
   () =>
-    rows.value.find((r) => r.node.type === 'folder' && r.node.path === adding.value?.parent) ?? null,
+    rows.value.find(
+      (r) =>
+        !r.isRoot &&
+        r.node?.type === 'folder' &&
+        r.root === adding.value?.root &&
+        r.node.path === adding.value?.parent,
+    ) ?? null,
 )
 
-const allCollapsed = computed(() => {
-  const dirs: string[] = []
-  const walk = (nodes: TreeNode[]): void => {
-    for (const x of nodes) {
-      if (x.type === 'folder') {
-        dirs.push(x.path)
-        if (x.children) walk(x.children)
-      }
-    }
-  }
-  walk(props.tree)
-  return dirs.length > 0 && dirs.every((p) => collapsed.value.has(p))
-})
-
-function isCollapsed(path: string): boolean {
-  return !searching.value && collapsed.value.has(path)
+/** 根行的显示名 / 完整路径 / 只读态（模板里用，避免写一大串 find）。 */
+function rootName(root: string): string {
+  return props.roots.find((r) => r.root === root)?.info.name ?? ''
 }
 
-function toggle(path: string): void {
+function rootDir(root: string): string {
+  return props.roots.find((r) => r.root === root)?.info.dir ?? ''
+}
+
+function rootReadOnly(root: string): boolean {
+  return props.roots.find((r) => r.root === root)?.readOnly ?? false
+}
+
+/** 某个根的行数统计（根行上的「n 个请求」）。 */
+function requestCount(root: string): number {
+  const item = props.roots.find((r) => r.root === root)
+  if (!item) return 0
+  let n = 0
+  const walk = (nodes: TreeNode[]): void => {
+    for (const x of nodes) {
+      if (x.type === 'request') n++
+      else if (x.children) walk(x.children)
+    }
+  }
+  walk(item.info.tree)
+  return n
+}
+
+const allCollapsed = computed(() => {
+  if (!props.roots.length) return false
+  if (props.roots.some((r) => !collapsedRoots.value.has(r.root))) return false
+  const dirs: string[] = []
+  for (const r of props.roots) {
+    const walk = (nodes: TreeNode[]): void => {
+      for (const x of nodes) {
+        if (x.type === 'folder') {
+          dirs.push(folderKey(r.root, x.path))
+          if (x.children) walk(x.children)
+        }
+      }
+    }
+    walk(r.info.tree)
+  }
+  return dirs.every((k) => collapsed.value.has(k))
+})
+
+function isCollapsed(root: string, path: string): boolean {
+  return !searching.value && collapsed.value.has(folderKey(root, path))
+}
+
+function toggle(root: string, path: string): void {
+  const key = folderKey(root, path)
   const next = new Set(collapsed.value)
-  if (next.has(path)) next.delete(path)
-  else next.add(path)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
   collapsed.value = next
+}
+
+/** 折叠/展开单个工作目录（根行上的箭头）。 */
+function toggleRoot(root: string): void {
+  const next = new Set(collapsedRoots.value)
+  if (next.has(root)) next.delete(root)
+  else next.add(root)
+  collapsedRoots.value = next
 }
 
 function toggleAll(): void {
   if (allCollapsed.value) {
     collapsed.value = new Set()
+    collapsedRoots.value = new Set()
     return
   }
   const next = new Set<string>()
-  const walk = (nodes: TreeNode[]): void => {
-    for (const x of nodes) {
-      if (x.type === 'folder') {
-        next.add(x.path)
-        if (x.children) walk(x.children)
+  const roots = new Set<string>()
+  for (const r of props.roots) {
+    roots.add(r.root)
+    const walk = (nodes: TreeNode[]): void => {
+      for (const x of nodes) {
+        if (x.type === 'folder') {
+          next.add(folderKey(r.root, x.path))
+          if (x.children) walk(x.children)
+        }
       }
     }
+    walk(r.info.tree)
   }
-  walk(props.tree)
   collapsed.value = next
+  collapsedRoots.value = roots
 }
 
 function fail(e: unknown): void {
   message.error(e instanceof Error ? e.message : String(e))
 }
 
+/**
+ * 集合级动作（新建/重命名/删除/移动/打开）都由后端作用于**活动根**，
+ * 所以操作非活动根里的行之前，必须先把那一根切成活动根 ——
+ * 统一走 tabs.switchRoot：切根必须同时把标签组换过来（标签按根分组）。
+ */
+async function ensureActive(root: string): Promise<void> {
+  if (root && root !== coll.activeRoot) await tabs.switchRoot(root)
+}
+
 // ---- 行内重命名 ----
-function startRename(node: TreeNode): void {
+async function startRename(root: string, node: TreeNode): Promise<void> {
   adding.value = null
-  editing.value = { uid: node.uid, value: node.name }
+  await ensureActive(root) // 重命名是集合级写操作：先把这一根切成活动根
+  editing.value = { root, uid: node.uid, value: node.name }
 }
 
 async function submitRename(): Promise<void> {
@@ -203,9 +304,10 @@ async function submitRename(): Promise<void> {
   editing.value = null
   // 空名 / 未改动 = 取消，不触发保存
   if (!name) return
-  const node = findNode(props.tree, cur.uid)
+  const node = findNode(cur.root, cur.uid)
   if (!node || node.name === name) return
   try {
+    await ensureActive(cur.root)
     if (node.type === 'folder') await coll.renameFolder(cur.uid, name)
     else await coll.renameRequest(cur.uid, name)
   } catch (e) {
@@ -219,13 +321,15 @@ function setAddRef(el: unknown): void {
   addInput.value = (el as InputInst | null) ?? null
 }
 
-async function startAdd(parent: string): Promise<void> {
+async function startAdd(root: string, parent: string): Promise<void> {
   editing.value = null
   addValue.value = ''
-  adding.value = { parent }
+  await ensureActive(root)
+  adding.value = { root, parent }
   if (parent) {
+    const key = folderKey(root, parent)
     const next = new Set(collapsed.value)
-    next.delete(parent)
+    next.delete(key)
     collapsed.value = next
   }
   await nextTick()
@@ -245,6 +349,7 @@ async function submitAdd(): Promise<void> {
   adding.value = null
   addValue.value = ''
   try {
+    await ensureActive(cur.root)
     await coll.createFolder(cur.parent, name)
   } catch (e) {
     fail(e)
@@ -252,16 +357,18 @@ async function submitAdd(): Promise<void> {
 }
 
 // ---- 删除 ----
-async function removeFolder(node: TreeNode): Promise<void> {
+async function removeFolder(root: string, node: TreeNode): Promise<void> {
   try {
+    await ensureActive(root)
     await coll.deleteFolder(node.uid)
   } catch (e) {
     fail(e)
   }
 }
 
-async function removeRequest(node: TreeNode): Promise<void> {
+async function removeRequest(root: string, node: TreeNode): Promise<void> {
   try {
+    await ensureActive(root)
     await tabs.deleteRequest(node.uid)
     await coll.reload()
   } catch (e) {
@@ -269,11 +376,12 @@ async function removeRequest(node: TreeNode): Promise<void> {
   }
 }
 
-function onFolderMenu(node: TreeNode, key: string | number): void {
+async function onFolderMenu(root: string, node: TreeNode, key: string | number): Promise<void> {
+  await ensureActive(root)
   if (key === 'request') emit('new-request', node.path)
   else if (key === 'grpc') emit('new-grpc-request', node.path)
   else if (key === 'curl') emit('import-curl', node.path)
-  else void startAdd(node.path)
+  else void startAdd(root, node.path)
 }
 
 // ---- 拖动调整上级目录（自己实现，不用 HTML5 拖拽）----
@@ -285,11 +393,17 @@ function onFolderMenu(node: TreeNode, key: string | number): void {
 // 行为在 WebView2 / Chromium / Firefox 下一致，也不再依赖 dataTransfer。
 const DRAG_THRESHOLD = 4 // px：位移小于它算点击，不算拖动
 
-const dragNode = ref<TreeNode | null>(null)
+const dragNode = ref<{ root: string; node: TreeNode } | null>(null)
 /** 按下但还没越过阈值：等他动了才算拖动，避免影响正常点击打开请求 */
-const pending = ref<{ node: TreeNode; x: number; y: number } | null>(null)
-/** 当前指针下的放置目标；ok=false 表示非法（自己/后代），给「禁止」反馈而不是静默 */
-const dropHint = ref<{ uid: string; path: string; ok: boolean } | null>(null)
+const pending = ref<{ root: string; node: TreeNode; x: number; y: number } | null>(null)
+/** 当前指针下的放置目标；ok=false 表示非法（自己/后代/跨工作目录），给「禁止」反馈而不是静默 */
+const dropHint = ref<{
+  root: string
+  uid: string
+  path: string
+  ok: boolean
+  tip?: string
+} | null>(null)
 const dragging = computed(() => dragNode.value !== null)
 
 /** 搜索过滤时树是残缺的，这时不允许拖动（拖到看不见的分组会让人困惑） */
@@ -299,23 +413,25 @@ const dragEnabled = computed(() => !searching.value && editing.value === null)
 let suppressClick = false
 
 /**
- * 能否把 node 放进 destPath（空串 = 根）。
- * 规则：目标必须是分组或根；分组不能移入自己或自己的后代（会成环）。
+ * 能否把 node 放进 destRoot 里的 destPath（空串 = 该工作目录的根）。
+ * 规则：目标必须是分组或根；同根内分组不能移入自己或自己的后代（会成环）；
+ * 跨工作目录两种都能搬：请求单搬、分组连同其下子分组与请求整棵搬（目标侧重建 + 源进 .trash）。
  */
-function canDrop(node: TreeNode, destPath: string): boolean {
+function canDrop(node: TreeNode, dragRoot: string, destRoot: string, destPath: string): boolean {
+  if (dragRoot !== destRoot) return true
   if (node.type === 'folder' && destPath === node.path) return false
   if (node.type === 'folder' && destPath.startsWith(node.path + '/')) return false
   return true
 }
 
-function onRowPointerDown(node: TreeNode, ev: PointerEvent): void {
+function onRowPointerDown(root: string, node: TreeNode, ev: PointerEvent): void {
   if (!dragEnabled.value || ev.button !== 0) return
   // 只排除「行内操作控件」：展开箭头、悬停动作按钮、重命名输入框、下拉与链接。
   // 注意不能一刀切排除所有 button —— 请求/分组的名字本身就是个 <button class="rname">，
   // 一刀切会让整行都拖不动（实测就是这个原因导致鼠标拖起来毫无反应）。
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
-  pending.value = { node, x: ev.clientX, y: ev.clientY }
+  pending.value = { root, node, x: ev.clientX, y: ev.clientY }
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', cancelDrag)
@@ -330,16 +446,50 @@ function detachDragListeners(): void {
 }
 
 /** 指针所在位置对应的放置目标（用 elementFromPoint 命中行，不依赖事件冒泡顺序）。 */
-function hintAt(x: number, y: number): { uid: string; path: string; ok: boolean } | null {
-  const node = dragNode.value
-  if (!node) return null
+function hintAt(x: number, y: number): typeof dropHint.value {
+  const drag = dragNode.value
+  if (!drag) return null
   const el = document.elementFromPoint(x, y) as HTMLElement | null
   const row = el?.closest('[data-testid="tree.row"], [data-testid="tree.root"]') as HTMLElement | null
   if (!row) return null
-  if (row.dataset.testid === 'tree.root') return { uid: '__root__', path: '', ok: true }
-  if (row.dataset.kind !== 'folder') return null // 请求行不能当容器
-  const path = row.dataset.path ?? ''
-  return { uid: row.dataset.uid ?? '', path, ok: canDrop(node, path) }
+  const root = row.dataset.root ?? ''
+  const isRootRow = row.dataset.testid === 'tree.root'
+  if (!isRootRow && row.dataset.kind !== 'folder') return null // 请求行不能当容器
+  const path = isRootRow ? '' : (row.dataset.path ?? '')
+  // 跨根搬分组时目标下已有同名分组：后端会拒（CreateFolder 会把同名目录复用掉），
+  // 这里提前置灰并把原因写在落点提示上，别让用户拖完才吃一个报错
+  const tip =
+    drag.node.type === 'folder' && hasSameNamedFolder(root, path, drag.node.name)
+      ? t('tree.dupFolderHint', { name: drag.node.name })
+      : undefined
+  return {
+    root,
+    uid: isRootRow ? '__root__' : (row.dataset.uid ?? ''),
+    path,
+    ok: canDrop(drag.node, drag.root, root, path) && !tip,
+    tip,
+  }
+}
+
+/** 目标分组（空 = 该根的根）下是否已有同名分组。 */
+function hasSameNamedFolder(root: string, destPath: string, name: string): boolean {
+  const item = props.roots.find((r) => r.root === root)
+  if (!item) return false
+  const nodes = destPath ? (findFolderByPath(item.info.tree, destPath)?.children ?? []) : item.info.tree
+  return nodes.some((n) => n.type === 'folder' && n.name === name)
+}
+
+/** 在树里按相对路径找分组节点（跨根提示用；只看当前根之外的根时也走它）。 */
+function findFolderByPath(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const n of nodes) {
+    if (n.type !== 'folder') continue
+    if (n.path === path) return n
+    if (n.children) {
+      const hit = findFolderByPath(n.children, path)
+      if (hit) return hit
+    }
+  }
+  return null
 }
 
 function onPointerMove(ev: PointerEvent): void {
@@ -347,7 +497,7 @@ function onPointerMove(ev: PointerEvent): void {
   if (!p) return
   if (!dragNode.value) {
     if (Math.abs(ev.clientX - p.x) < DRAG_THRESHOLD && Math.abs(ev.clientY - p.y) < DRAG_THRESHOLD) return
-    dragNode.value = p.node
+    dragNode.value = { root: p.root, node: p.node }
   }
   ev.preventDefault() // 拖拽期间不选中文字
   dropHint.value = hintAt(ev.clientX, ev.clientY)
@@ -365,9 +515,9 @@ function cancelDrag(): void {
 }
 
 function onPointerUp(ev: PointerEvent): void {
-  const node = dragNode.value
-  const hint = node ? hintAt(ev.clientX, ev.clientY) : null
-  const dragged = node !== null
+  const drag = dragNode.value
+  const hint = drag ? hintAt(ev.clientX, ev.clientY) : null
+  const dragged = drag !== null
   detachDragListeners()
   pending.value = null
   dragNode.value = null
@@ -375,27 +525,56 @@ function onPointerUp(ev: PointerEvent): void {
   if (!dragged) return // 只是点击：交给 click 处理
   suppressClick = true
   setTimeout(() => (suppressClick = false), 0)
-  if (node && hint?.ok) void performMove(node, hint.path)
+  if (drag && hint?.ok) void performMove(drag.root, drag.node, hint.root, hint.path)
 }
 
-/** 行点击：请求行打开对应页签（拖动刚结束的那次点击忽略）。 */
-function onRowClick(node: TreeNode): void {
+/**
+ * 行点击：请求行打开对应页签（拖动刚结束的那次点击忽略）。
+ * 点的是非活动根里的行时，先把那一根切成活动根 —— 页签是按根分组的，
+ * 打开别根的请求必须落到它自己那一组里。
+ */
+function onRowClick(root: string, node: TreeNode): void {
   if (editing.value || suppressClick) return
-  if (node.type === 'request') emit('open', node.uid)
+  if (node.type !== 'request') return
+  if (root && root !== coll.activeRoot) {
+    void ensureActive(root).then(() => emit('open', node.uid))
+    return
+  }
+  emit('open', node.uid)
 }
 
-/** 执行移动：拖到分组（或根，path 为空串）。 */
-async function performMove(node: TreeNode, destPath: string): Promise<void> {
-  if (!canDrop(node, destPath)) return
+/** 执行移动：同目录改上级；跨目录则把请求 / 分组整棵搬到另一个工作目录。 */
+async function performMove(
+  root: string,
+  node: TreeNode,
+  destRoot: string,
+  destPath: string,
+): Promise<void> {
+  if (!canDrop(node, root, destRoot, destPath)) return
   // 已经在目标位置就不动（避免无意义的写盘与提示）
-  if (node.path === destPath) return
+  if (root === destRoot && node.path === destPath) return
   try {
+    if (root !== destRoot) {
+      // 跨工作目录：目标侧重建（新 uid/路径）+ 源进 .trash；分组连同子分组与请求整棵搬
+      if (node.type === 'folder') {
+        const moved = await coll.moveFolderTo(root, node.uid, destRoot, destPath)
+        // 源根里这些请求已经不在这个目录了，对应标签一并摘掉（否则打开就是空壳）
+        for (const uid of moved) tabs.forgetRequest(uid)
+      } else {
+        await coll.moveRequestTo(root, node.uid, destRoot, destPath)
+        tabs.forgetRequest(node.uid)
+      }
+      message.success(t('tree.movedToDir', { name: rootName(destRoot) }))
+      return
+    }
+    await ensureActive(root)
     if (node.type === 'folder') await coll.moveFolder(node.uid, destPath)
     else await coll.moveRequest(node.uid, destPath)
     // 目标分组若是折叠的会自动展开，否则用户看不到「移动成功了」
-    if (destPath && collapsed.value.has(destPath)) {
+    const key = folderKey(root, destPath)
+    if (destPath && collapsed.value.has(key)) {
       const next = new Set(collapsed.value)
-      next.delete(destPath)
+      next.delete(key)
       collapsed.value = next
     }
     // 已打开的页签要同步路径（面包屑与后续保存都靠它）
@@ -407,27 +586,34 @@ async function performMove(node: TreeNode, destPath: string): Promise<void> {
 }
 
 // ---- 移动到目标分组 ----
-const moving = ref<{ node: TreeNode; dest: string } | null>(null)
+const moving = ref<{ root: string; node: TreeNode; dest: string } | null>(null)
 
-function startMove(node: TreeNode): void {
-  // 默认目标：根（空串）；分组不能移入自己或后代（后端也会拒）
-  moving.value = { node, dest: '' }
+async function startMove(root: string, node: TreeNode): Promise<void> {
+  await ensureActive(root)
+  // 默认目标：该根的根（空串）；分组不能移入自己或后代（后端也会拒）
+  moving.value = { root, node, dest: '' }
 }
 
 const destOptions = computed(() => {
   const out: { label: string; value: string }[] = [{ label: t('tree.moveRoot'), value: '' }]
+  const root = moving.value?.root ?? coll.activeRoot
+  const item = props.roots.find((r) => r.root === root)
+  if (!item) return out
   const walk = (nodes: TreeNode[]): void => {
     for (const n of nodes) {
       if (n.type !== 'folder') continue
       // 分组移动时排除自己与后代
-      if (moving.value?.node.type === 'folder' && (n.uid === moving.value.node.uid || n.path.startsWith(moving.value.node.path + '/'))) {
+      if (
+        moving.value?.node.type === 'folder' &&
+        (n.uid === moving.value.node.uid || n.path.startsWith(moving.value.node.path + '/'))
+      ) {
         continue
       }
       out.push({ label: n.name, value: n.path })
       if (n.children) walk(n.children)
     }
   }
-  walk(props.tree)
+  walk(item.info.tree)
   return out
 })
 
@@ -436,6 +622,7 @@ async function submitMove(): Promise<void> {
   if (!cur) return
   moving.value = null
   try {
+    await ensureActive(cur.root)
     if (cur.node.type === 'folder') await coll.moveFolder(cur.node.uid, cur.dest)
     else await coll.moveRequest(cur.node.uid, cur.dest)
   } catch (e) {
@@ -443,18 +630,24 @@ async function submitMove(): Promise<void> {
   }
 }
 
-function findNode(nodes: TreeNode[], uid: string): TreeNode | null {
+/** 在指定根的树里按 uid 找节点。 */
+function findNode(root: string, uid: string): TreeNode | null {
+  const item = props.roots.find((r) => r.root === root)
+  return item ? searchNode(item.info.tree, uid) : null
+}
+
+function searchNode(nodes: TreeNode[], uid: string): TreeNode | null {
   for (const n of nodes) {
     if (n.uid === uid && (n.type === 'folder' || n.type === 'request')) return n
     if (n.children) {
-      const hit = findNode(n.children, uid)
+      const hit = searchNode(n.children, uid)
       if (hit) return hit
     }
   }
   return null
 }
 
-// 某节点的祖先分组路径（用于把当前选中的请求自动展开到可见）
+// 某节点的祖先分组路径（用于把当前选中的请求自动展开到可见）；只在该根的树里找
 function ancestorPaths(nodes: TreeNode[], uid: string, trail: string[] = []): string[] | null {
   for (const n of nodes) {
     if (n.uid === uid) return trail
@@ -467,20 +660,43 @@ function ancestorPaths(nodes: TreeNode[], uid: string, trail: string[] = []): st
   return null
 }
 
-// tab 切换 → 集合树同步选中：展开祖先分组并滚动到可见位置
+/**
+ * 滚动到指定根里的某一行。
+ * 不能用属性选择器拼 root：Windows 路径里有反斜杠 / 冒号，CSS 转义很容易踩坑，
+ * 直接按数据集比对最稳。
+ */
+function scrollToRow(root: string, uid: string): void {
+  const list = treeEl.value?.querySelectorAll('[data-uid]') ?? []
+  for (const el of Array.from(list)) {
+    if (el.getAttribute('data-root') === root && el.getAttribute('data-uid') === uid) {
+      el.scrollIntoView({ block: 'nearest' })
+      return
+    }
+  }
+}
+
+// tab 切换 → 集合树同步选中：展开（该根 / 祖先分组）并滚动到可见位置
 watch(
   () => props.activeUid,
   async (uid) => {
     if (!uid) return
-    const trail = ancestorPaths(props.tree, uid)
-    if (trail?.some((p) => collapsed.value.has(p))) {
+    const root = coll.activeRoot
+    const item = props.roots.find((r) => r.root === root)
+    if (!item) return
+    const trail = ancestorPaths(item.info.tree, uid)
+    const unfoldRoot = collapsedRoots.value.has(root)
+    const folded = (trail ?? []).filter((p) => collapsed.value.has(folderKey(root, p)))
+    if (unfoldRoot || folded.length) {
+      const roots = new Set(collapsedRoots.value)
+      roots.delete(root)
       const next = new Set(collapsed.value)
-      for (const p of trail) next.delete(p)
+      for (const p of folded) next.delete(folderKey(root, p))
+      collapsedRoots.value = roots
       collapsed.value = next
       await nextTick()
     }
     // 搜索过滤后该行可能不在可视行里，静默跳过
-    treeEl.value?.querySelector(`[data-uid="${uid}"]`)?.scrollIntoView({ block: 'nearest' })
+    scrollToRow(root, uid)
   },
   { immediate: true },
 )
@@ -495,7 +711,7 @@ watch(
           <n-icon :component="allCollapsed ? ExpandOutline : ContractOutline" />
         </template>
       </n-button>
-      <n-button quaternary size="tiny" :title="t('tree.newFolder')" @click="startAdd('')">
+      <n-button quaternary size="tiny" :title="t('tree.newFolder')" data-testid="tree.newFolder" @click="startAdd(coll.activeRoot, '')">
         <template #icon><n-icon :component="FolderOpenOutline" /></template>
       </n-button>
       <!-- 新建：下拉区分协议（HTTP / gRPC），两者都开「未落盘草稿」tab -->
@@ -514,162 +730,205 @@ watch(
     </div>
 
     <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">
-      <!-- 集合根行：既是标题，也是「移回根目录」的放置目标（拖动时高亮） -->
-      <div
-        class="row root"
-        :class="{ 'drop-ok': dragging && dropHint?.uid === '__root__' && dropHint.ok }"
-        :style="{ paddingLeft: '8px' }"
-        data-testid="tree.root"
-        :data-path="''"
-      >
-        <span class="rname coll-name" :title="name">{{ name }}</span>
-        <span class="badge">{{ t('local.badge') }}</span>
-        <span v-if="dragging" class="drop-tip">{{ t('tree.dropRoot') }}</span>
-      </div>
-
-      <div v-if="adding && adding.parent === ''" class="row" :style="{ paddingLeft: `${8 + INDENT}px` }">
-        <n-input
-          :ref="setAddRef"
-          v-model:value="addValue"
-          size="tiny"
-          :placeholder="t('tree.folderName')"
-          @keyup.enter="submitAdd"
-          @blur="submitAdd"
-          @keyup.esc="adding = null"
-        />
-      </div>
-
       <div v-if="!rows.length && !adding" class="empty muted">{{ t('sidebar.empty') }}</div>
 
-      <template v-for="row in rows" :key="row.node.type + row.node.path">
+      <template v-for="row in rows" :key="row.isRoot ? `root:${row.root}` : `${row.root}|${row.node?.path}`">
+        <!-- 工作目录根行：既是该根的标题，也是「移回该根顶层」的放置目标（拖动时高亮） -->
         <div
-          class="row"
+          v-if="row.isRoot"
+          class="row root"
           :class="{
-            folder: row.node.type === 'folder',
-            on: row.node.uid === props.activeUid,
-            clickable: row.node.type === 'request',
-            dragging: dragNode?.uid === row.node.uid,
-            'drop-ok': dropHint?.uid === row.node.uid && dropHint.ok,
-            'drop-bad': dropHint?.uid === row.node.uid && !dropHint.ok,
+            on: row.root === props.activeRoot,
+            'root-active': row.root === props.activeRoot,
+            'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.ok,
+            'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && !dropHint.ok,
           }"
-          :data-uid="row.node.uid"
-          :data-kind="row.node.type"
-          :data-path="row.node.path"
-          data-testid="tree.row"
-          :aria-current="row.node.uid === props.activeUid ? 'true' : undefined"
-          :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
-          @click="onRowClick(row.node)"
-          @pointerdown="onRowPointerDown(row.node, $event)"
+          :style="{ paddingLeft: '8px' }"
+          :data-root="row.root"
+          :data-path="''"
+          data-testid="tree.root"
+          @click="emit('activate', row.root)"
         >
-          <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局） -->
-          <span v-if="row.depth > 0" class="guides" aria-hidden="true" data-testid="tree.row.guides">
-            <span
-              v-for="(cont, i) in row.lines"
-              :key="`l${i}`"
-              class="gl"
-              :class="{ on: cont }"
-              :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
+          <button class="caret" data-testid="tree.root.caret" :title="t('tree.expandAll')" @click.stop="toggleRoot(row.root)">
+            <n-icon
+              :component="collapsedRoots.has(row.root) ? ChevronForwardOutline : ChevronDownOutline"
+              :size="13"
             />
-            <span
-              class="gl own"
-              :class="{ last: row.last }"
-              :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }"
-            />
-            <span class="gl stub" :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
-          </span>
-          <template v-if="row.node.type === 'folder'">
-            <button
-              class="caret"
-              data-testid="tree.row.caret"
-              :title="t('tree.expandAll')"
-              @click="toggle(row.node.path)"
-            >
-              <n-icon
-                :component="isCollapsed(row.node.path) ? ChevronForwardOutline : ChevronDownOutline"
-                :size="13"
-              />
+          </button>
+          <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
+          <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
+          <span v-else class="badge">{{ t('local.badge') }}</span>
+          <span class="cnt" :title="t('tree.reqCount', { n: requestCount(row.root) })">{{ requestCount(row.root) }}</span>
+          <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot') }}</span>
+          <span class="actions">
+            <button class="act" type="button" data-testid="tree.root.reload" :title="t('tree.reloadDir')" @click.stop="emit('reload-root', row.root)">
+              <n-icon :component="RefreshOutline" :size="13" />
             </button>
-            <n-input
-              v-if="editing?.uid === row.node.uid"
-              v-model:value="editing.value"
-              size="tiny"
-              class="rename"
-              @keyup.enter="submitRename"
-              @blur="submitRename"
-              @keyup.esc="editing = null"
-            />
-            <span v-else class="fname" data-testid="tree.row.name">{{ row.node.name }}</span>
-            <span class="actions">
-              <n-dropdown trigger="click" placement="bottom-start" :options="folderMenu" @select="onFolderMenu(row.node, $event)">
-                <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
-                <button class="act" type="button" data-testid="tree.row.plus" :title="t('tree.new')">
-                  <n-icon :component="AddOutline" :size="13" />
+            <n-popconfirm @positive-click="emit('close-root', row.root)">
+              <template #trigger>
+                <button class="act danger" type="button" data-testid="tree.root.close" :title="t('tree.closeDir')" @click.stop>
+                  <n-icon :component="CloseOutline" :size="13" />
                 </button>
-              </n-dropdown>
-              <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
-                <n-icon :component="CreateOutline" :size="13" />
-              </button>
-              <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.node)">
-                <n-icon :component="MoveOutline" :size="13" />
-              </button>
-              <n-popconfirm @positive-click="removeFolder(row.node)">
-                <template #trigger>
-                  <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')" @click.stop>
-                    <n-icon :component="TrashOutline" :size="13" />
-                  </button>
-                </template>
-                {{ t('tree.confirmDelFolder', { name: row.node.name }) }}
-              </n-popconfirm>
-            </span>
-          </template>
-
-          <template v-else>
-            <method-tag :method="row.node.method ?? 'GET'" />
-            <n-input
-              v-if="editing?.uid === row.node.uid"
-              v-model:value="editing.value"
-              size="tiny"
-              class="rename"
-              @keyup.enter="submitRename"
-              @blur="submitRename"
-              @keyup.esc="editing = null"
-            />
-            <button v-else class="rname" data-testid="tree.row.name" :title="row.node.name">
-              {{ row.node.name }}
-            </button>
-            <span class="actions">
-              <button
-                class="act"
-                type="button"
-                data-testid="tree.row.fav"
-                :title="coll.isFav(row.node.uid) ? t('tree.unfav') : t('tree.fav')"
-                @click.stop="coll.toggleFav(row.node.uid)"
-              >
-                <n-icon :component="coll.isFav(row.node.uid) ? Star : StarOutline" :size="13" />
-              </button>
-              <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.node)">
-                <n-icon :component="CreateOutline" :size="13" />
-              </button>
-              <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.node)">
-                <n-icon :component="MoveOutline" :size="13" />
-              </button>
-              <n-popconfirm @positive-click="removeRequest(row.node)">
-                <template #trigger>
-                  <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')" @click.stop>
-                    <n-icon :component="TrashOutline" :size="13" />
-                  </button>
-                </template>
-                {{ t('tree.confirmDelRequest', { name: row.node.name }) }}
-              </n-popconfirm>
-            </span>
-          </template>
+              </template>
+              {{ t('tree.confirmCloseDir', { name: rootName(row.root) }) }}
+            </n-popconfirm>
+          </span>
         </div>
 
+        <!-- 该根顶层的「新建分组」输入行 -->
         <div
-          v-if="adding && adding.parent === row.node.path && row.node.type === 'folder'"
+          v-else-if="adding && adding.root === row.root && adding.parent === ''"
           class="row"
-          :style="{ paddingLeft: 8 + (row.depth + 2) * INDENT + 'px' }"
+          :style="{ paddingLeft: `${8 + INDENT}px` }"
         >
+          <n-input
+            :ref="setAddRef"
+            v-model:value="addValue"
+            size="tiny"
+            :placeholder="t('tree.folderName')"
+            @keyup.enter="submitAdd"
+            @blur="submitAdd"
+            @keyup.esc="adding = null"
+          />
+        </div>
+
+        <template v-else>
+          <div
+            class="row"
+            :class="{
+              folder: row.node?.type === 'folder',
+              on: row.node?.uid === props.activeUid && row.root === props.activeRoot,
+              clickable: row.node?.type === 'request',
+              dim: row.root !== props.activeRoot,
+              dragging: dragNode?.root === row.root && dragNode?.node.uid === row.node?.uid,
+              'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
+              'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && !dropHint.ok,
+            }"
+            :data-root="row.root"
+            :data-uid="row.node?.uid"
+            :data-kind="row.node?.type"
+            :data-path="row.node?.path"
+            data-testid="tree.row"
+            :aria-current="row.node?.uid === props.activeUid && row.root === props.activeRoot ? 'true' : undefined"
+            :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
+            @click="onRowClick(row.root, row.node!)"
+            @pointerdown="onRowPointerDown(row.root, row.node!, $event)"
+          >
+            <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局） -->
+            <span v-if="row.depth > 0" class="guides" aria-hidden="true" data-testid="tree.row.guides">
+              <span
+                v-for="(cont, i) in row.lines"
+                :key="`l${i}`"
+                class="gl"
+                :class="{ on: cont }"
+                :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
+              />
+              <span
+                class="gl own"
+                :class="{ last: row.last }"
+                :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }"
+              />
+              <span class="gl stub" :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
+            </span>
+            <template v-if="row.node!.type === 'folder'">
+              <button
+                class="caret"
+                data-testid="tree.row.caret"
+                :title="t('tree.expandAll')"
+                @click="toggle(row.root, row.node!.path)"
+              >
+                <n-icon
+                  :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
+                  :size="13"
+                />
+              </button>
+              <n-input
+                v-if="editing?.root === row.root && editing?.uid === row.node!.uid"
+                v-model:value="editing.value"
+                size="tiny"
+                class="rename"
+                @keyup.enter="submitRename"
+                @blur="submitRename"
+                @keyup.esc="editing = null"
+              />
+              <span v-else class="fname" data-testid="tree.row.name">{{ row.node!.name }}</span>
+              <span class="actions">
+                <n-dropdown
+                  trigger="click"
+                  placement="bottom-start"
+                  :options="folderMenu"
+                  @select="onFolderMenu(row.root, row.node!, $event)"
+                >
+                  <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
+                  <button class="act" type="button" data-testid="tree.row.plus" :title="t('tree.new')">
+                    <n-icon :component="AddOutline" :size="13" />
+                  </button>
+                </n-dropdown>
+                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.root, row.node!)">
+                  <n-icon :component="CreateOutline" :size="13" />
+                </button>
+                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.root, row.node!)">
+                  <n-icon :component="MoveOutline" :size="13" />
+                </button>
+                <n-popconfirm @positive-click="removeFolder(row.root, row.node!)">
+                  <template #trigger>
+                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')" @click.stop>
+                      <n-icon :component="TrashOutline" :size="13" />
+                    </button>
+                  </template>
+                  {{ t('tree.confirmDelFolder', { name: row.node!.name }) }}
+                </n-popconfirm>
+              </span>
+            </template>
+
+            <template v-else>
+              <method-tag :method="row.node!.method ?? 'GET'" />
+              <n-input
+                v-if="editing?.root === row.root && editing?.uid === row.node!.uid"
+                v-model:value="editing.value"
+                size="tiny"
+                class="rename"
+                @keyup.enter="submitRename"
+                @blur="submitRename"
+                @keyup.esc="editing = null"
+              />
+              <button v-else class="rname" data-testid="tree.row.name" :title="row.node!.name">
+                {{ row.node!.name }}
+              </button>
+              <span class="actions">
+                <button
+                  class="act"
+                  type="button"
+                  data-testid="tree.row.fav"
+                  :title="coll.isFav(row.node!.uid) ? t('tree.unfav') : t('tree.fav')"
+                  @click.stop="coll.toggleFav(row.node!.uid)"
+                >
+                  <n-icon :component="coll.isFav(row.node!.uid) ? Star : StarOutline" :size="13" />
+                </button>
+                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.root, row.node!)">
+                  <n-icon :component="CreateOutline" :size="13" />
+                </button>
+                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.root, row.node!)">
+                  <n-icon :component="MoveOutline" :size="13" />
+                </button>
+                <n-popconfirm @positive-click="removeRequest(row.root, row.node!)">
+                  <template #trigger>
+                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')" @click.stop>
+                      <n-icon :component="TrashOutline" :size="13" />
+                    </button>
+                  </template>
+                  {{ t('tree.confirmDelRequest', { name: row.node!.name }) }}
+                </n-popconfirm>
+              </span>
+            </template>
+          </div>
+
+          <!-- 该分组下的「新建子分组」输入行 -->
+          <div
+            v-if="adding && adding.root === row.root && adding.parent === row.node!.path && row.node!.type === 'folder'"
+            class="row"
+            :style="{ paddingLeft: 8 + (row.depth + 2) * INDENT + 'px' }"
+          >
           <!-- 输入行是该分组的子行：接上它那一列（还有后续兄弟则竖线继续），自己是 └ -->
           <span v-if="addParentRow" class="guides" aria-hidden="true">
             <span
@@ -692,16 +951,17 @@ watch(
             />
             <span class="gl stub" :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
           </span>
-          <n-input
-            :ref="setAddRef"
-            v-model:value="addValue"
-            size="tiny"
-            :placeholder="t('tree.subFolderName')"
-            @keyup.enter="submitAdd"
-            @blur="submitAdd"
-            @keyup.esc="adding = null"
-          />
-        </div>
+            <n-input
+              :ref="setAddRef"
+              v-model:value="addValue"
+              size="tiny"
+              :placeholder="t('tree.subFolderName')"
+              @keyup.enter="submitAdd"
+              @blur="submitAdd"
+              @keyup.esc="adding = null"
+            />
+          </div>
+        </template>
       </template>
     </div>
 
@@ -961,6 +1221,38 @@ watch(
   color: var(--app-accent-dark);
   flex: 0 0 auto;
   margin-left: 2px;
+}
+
+/* 只读工作目录（同步镜像）：警示色徽章，提醒写操作会被拒 */
+.badge-ro {
+  background: var(--app-warn-tint);
+  color: var(--app-warn);
+}
+
+/* 根行上的请求数 */
+.cnt {
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--app-chip);
+  color: var(--app-muted);
+  flex: 0 0 auto;
+}
+
+/* 非活动根：整棵树降低对比度，让当前工作目录更突出（仍可读、可操作） */
+.row.dim > .fname,
+.row.dim > .rname {
+  color: var(--app-muted);
+}
+
+/* 活动根：左侧强调条 + 名称加重，一眼看出「集合级操作会落到谁身上」 */
+.row.root.root-active {
+  box-shadow: inset 2px 0 0 var(--app-accent);
+}
+
+.row.root.root-active .coll-name {
+  color: var(--app-accent-dark);
 }
 
 .caret {

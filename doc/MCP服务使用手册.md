@@ -35,6 +35,10 @@
 
 ### 1. 准备项目根目录
 
+先把要交给 AI 的目录**授权**给它（白名单）：`-allow-writable D:\collections`（可写）或
+`-allow D:\collections`（只读）；客户端内嵌服务在「设置 → MCP 服务 → 可访问的工作目录」里添加。
+**白名单之外一律拒绝**（读不到、也写不了）；没授权任何目录时客户端内嵌服务不会启动。
+
 「项目」= 一个集合目录 = **含 `opencollection.yml` 的目录**。把若干集合放进同一个父目录：
 
 ```
@@ -70,7 +74,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
-| `-root` | ✅ | 项目根目录，其下含 `opencollection.yml` 的子目录即项目 |
+| `-allow` | ❌ | 授权的工作目录（逗号分隔，**只读**）：目录自身或其一级子目录含 `opencollection.yml` 即算项目 |
+| `-allow-writable` | ❌ | 授权且**可写**的工作目录（逗号分隔）；写工具只在可写授权里生效 |
+| `-root` | ❌ | **旧写法**：等价于 `-allow-writable` 传同一个目录（保留兼容） |
 | `-http` | ❌ | 留空 = 只走 stdio；给地址（如 `127.0.0.1:8189`）则**同时**提供 streamable HTTP（路径 `/mcp`）。只给端口（`:8189`）按**回环**处理，跨主机必须写 `0.0.0.0:8189` |
 | `-http-token` | ❌ | HTTP 的 Bearer 令牌。**监听非回环地址时必须给**（不给直接拒绝启动，避免把集合暴露给同网段任意进程） |
 | `-http-allow-origin` | ❌ | 允许的浏览器来源（Origin），逗号分隔，`*` = 任意。仅浏览器端客户端需要，同时是 DNS rebinding 防护 |
@@ -81,7 +87,11 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ## 三、项目模型（搞懂三条就够用）
 
-1. **一个项目 = 一个集合目录**，由 `-root` 扫描得到；目录变化后用 `list_projects` 的 `refresh: true` 重扫。
+0. **只有被授权的工作目录（白名单）可见**：`-allow` / `-allow-writable`，或客户端设置里的白名单。
+   白名单为空 = 没有任何项目 —— 这是安全默认，不是故障。先用 `list_workspaces` 看授权了什么，
+   再用 `use_workspace` 选定默认目标（之后各工具的 `project` 都可以省略）。这个默认目标是**按会话**的：
+   同一次连接里选定即可，多个客户端（HTTP 下多个会话）互不影响。
+1. **一个项目 = 一个集合目录**，由授权目录扫描得到；目录变化后用 `list_projects` 的 `refresh: true` 重扫。
 2. **三种方式指定项目**（入参都叫 `project`）：**uid** → **目录名/集合名** → **路径**（绝对或相对 `-root`）。写错会报错并列出候选。
 3. **懒加载**：启动只扫目录（只读 manifest，不改动项目），第一次访问某项目才真正打开。因此
    `search_requests` 不带 `project` 时**只搜「已加载」的项目** —— 新项目先 `get_project_modules` 或
@@ -91,18 +101,26 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ## 四、工具详解
 
-> 下表「参数」列均为 JSON 字段名；标 ✅ 的是必填。
+> 下表「参数」列均为 JSON 字段名；标 ✅ 的是必填。`project?` 表示**可省略**：
+> 省略时用 `use_workspace` 选定的**本会话**默认工作目录（没选过则报错并提示）。
+
+### 4.0 `list_workspaces` / `use_workspace`
+
+- `list_workspaces`：列出**授权的工作目录**（含只读/可写）、其中项目与当前默认目标；AI 拿不到项目时先看它。
+- `use_workspace`：选定默认工作目录（传工作目录 path，或项目标识：名称/路径/uid）。选定后其余工具的
+  `project` 都可省略（**按会话生效**：同一次连接内有效，不会改到别的客户端）；不在白名单内会直接拒绝。
+  未选定且未传 `project` 时，工具会报错并提示用 `use_workspace` 或显式传 `project`。
 
 ### 4.1 `list_projects`
 `project?`（按名/路径模糊过滤）、`refresh?`（重新扫描 `-root`）。
 返回每个项目的 `路径/名称/uid/请求数/模块数/环境列表`；不可用目录带跳过原因。统计在**首次访问该项目后**才有值（懒加载）。
 
 ### 4.2 `get_project_modules`
-`project` ✅、`query?`（过滤模块名与模块下请求名/方法/路径）、`includeRequests?`（附带请求清单含 uid）。
+`project?`、`query?`（过滤模块名与模块下请求名/方法/路径）、`includeRequests?`（附带请求清单含 uid）。
 返回模块树 + 每模块请求数/子模块数；根目录下的请求归到 `(根目录)`。
 
 ### 4.3 `get_request_detail`
-`project` ✅、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）。
+`project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）。
 返回 method/url/params/headers/body/auth/settings/grpc + 请求内 `docs` + 关联的 `docs/*.md` + **已保存响应示例列表**
 + **`hash`**（演示为前 12 位）——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
 
@@ -124,21 +142,21 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 `bodyType` 取 `none`/`raw`/`form`；返回落盘后的 `uid` 与 `path`。
 
 ### 4.6 `create_module` / `create_project`
-- `create_module`：`project` ✅ + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
+- `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
 - `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（留空 = `-root`）。建完 `list_projects` 立刻可见。
 
 ### 4.7 `send_request`
-`project` ✅ +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 true）、
+`project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 true）、
 `exampleName?`（默认 `"{状态码} 响应"`）、`includeBody?`（不传 = 返回体）、`maxBodyBytes?`。
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
 ### 4.8 `update_request`
-`project` ✅、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`headers`/`body`/`auth`/`docs`，`folder` 移动到别的模块。
+`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`headers`/`body`/`auth`/`docs`，`folder` 移动到别的模块。
 `ifMatch` 传详情里的 `hash`（12 位前缀即可，服务端按 git 风格前缀比对，≥8 位有效）→ 磁盘文件在此期间被外部改动就
 **拒绝写入**；**不传 = 最后写者赢**（与桌面端一致）。改名会自动同步文件名。
 
 ### 4.9 `delete_request`
-`project` ✅ + `uid` ✅。文件**移入集合的 `.trash/`**（带时间戳），不会真正删除。
+`project?` + `uid` ✅。文件**移入集合的 `.trash/`**（带时间戳），不会真正删除。
 误删恢复：把文件从 `.trash/` 挪回原位并 `list_projects(refresh: true)`。
 
 ### 4.10 环境变量工具（6 个）
@@ -147,12 +165,12 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `list_envs` | `project` ✅、`query?` | 列出环境与变量；`query` 对环境名与变量名都过滤；每个环境带 `hash` |
-| `create_env` | `project` ✅、`name` ✅、`vars[]?` | 新建环境（重名报错，不覆盖）。每条变量 `{name,value,secret,enabled}`，**`enabled` 不传 = 启用** |
-| `rename_env` | `project` ✅、`name` ✅、`newName` ✅、`ifMatch?` | 两个文件一起搬，旧文件进 `.trash`；目标名被占用报错；**只改大小写（`dev`→`DEV`）被拒绝** |
-| `delete_env` | `project` ✅、`name` ✅ | 删环境（两个文件进 `.trash`）；环境不存在报错 |
-| `set_env_var` | `project` ✅、`env` ✅、`name` ✅、`value` ✅、`secret?`、`enabled?`、`ifMatch?` | 按名 upsert，只改这一条；`enabled: false` 可停用（新增变量也认） |
-| `delete_env_var` | `project` ✅、`env` ✅、`name` ✅、`ifMatch?` | 变量不存在报错 |
+| `list_envs` | `project?`、`query?` | 列出环境与变量；`query` 对环境名与变量名都过滤；每个环境带 `hash` |
+| `create_env` | `project?`、`name` ✅、`vars[]?` | 新建环境（重名报错，不覆盖）。每条变量 `{name,value,secret,enabled}`，**`enabled` 不传 = 启用** |
+| `rename_env` | `project?`、`name` ✅、`newName` ✅、`ifMatch?` | 两个文件一起搬，旧文件进 `.trash`；目标名被占用报错；**只改大小写（`dev`→`DEV`）被拒绝** |
+| `delete_env` | `project?`、`name` ✅ | 删环境（两个文件进 `.trash`）；环境不存在报错 |
+| `set_env_var` | `project?`、`env` ✅、`name` ✅、`value` ✅、`secret?`、`enabled?`、`ifMatch?` | 按名 upsert，只改这一条；`enabled: false` 可停用（新增变量也认） |
+| `delete_env_var` | `project?`、`env` ✅、`name` ✅、`ifMatch?` | 变量不存在报错 |
 
 **名字规则**（服务端强校验）：环境名只允许字母/数字/`-`/`_`，且**判重大小写不敏感**（`DEV` = `dev`，因为环境名就是
 文件名）；变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`（否则 `{{name}}` 引用不到）。

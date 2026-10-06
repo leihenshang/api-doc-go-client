@@ -11,6 +11,8 @@ import {mocksrv} from '../models';
 import {runner} from '../models';
 import {index} from '../models';
 
+export function ActiveCollection():Promise<string>;
+
 export function ApplyMCPSettings():Promise<app.MCPStatus>;
 
 export function CancelSend(arg1:string):Promise<void>;
@@ -18,6 +20,8 @@ export function CancelSend(arg1:string):Promise<void>;
 export function ClearCookies():Promise<void>;
 
 export function ClearHistory():Promise<void>;
+
+export function CloseCollection(arg1:string):Promise<void>;
 
 export function CreateDoc(arg1:string):Promise<collection.DocEntry>;
 
@@ -38,6 +42,8 @@ export function DeleteFolder(arg1:string):Promise<void>;
 export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
+
+export function EnvFileHash(arg1:string):Promise<string>;
 
 export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 
@@ -63,6 +69,8 @@ export function ImportCollection(arg1:string,arg2:string,arg3:string):Promise<co
 
 export function ImportGrpcProtos(arg1:Array<string>,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
 
+export function ListCollections():Promise<Array<app.CollectionSummary>>;
+
 export function ListConflicts():Promise<Array<collection.ConflictItem>>;
 
 export function ListCookies():Promise<Array<cookiejar.Info>>;
@@ -85,7 +93,11 @@ export function MockStatus():Promise<mocksrv.Status>;
 
 export function MoveFolder(arg1:string,arg2:string):Promise<void>;
 
+export function MoveFolderToCollection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<string>>;
+
 export function MoveRequest(arg1:string,arg2:string):Promise<void>;
+
+export function MoveRequestToCollection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function OpenCollection(arg1:string):Promise<collection.CollectionInfo>;
 
@@ -109,7 +121,11 @@ export function RegenerateMCPToken():Promise<app.MCPStatus>;
 
 export function ReloadCollection():Promise<collection.CollectionInfo>;
 
+export function ReloadCollectionOf(arg1:string):Promise<collection.CollectionInfo>;
+
 export function RemoveGrpcProto(arg1:string):Promise<void>;
+
+export function RenameEnv(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RenameFolder(arg1:string,arg2:string):Promise<void>;
 
@@ -127,6 +143,8 @@ export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
 
 export function SaveEnv(arg1:collection.Env):Promise<void>;
 
+export function SaveEnvChecked(arg1:collection.Env,arg2:string):Promise<void>;
+
 export function SaveRequest(arg1:collection.Request):Promise<void>;
 
 export function SaveResponseBody(arg1:string,arg2:boolean,arg3:string):Promise<string>;
@@ -138,6 +156,8 @@ export function SaveSettings(arg1:config.Settings):Promise<void>;
 export function SearchIndex(arg1:string,arg2:number):Promise<Array<index.Node>>;
 
 export function SendRequest(arg1:collection.Request,arg2:string):Promise<runner.Result>;
+
+export function SetActiveCollection(arg1:string):Promise<void>;
 
 export function SetGrpcDefault(arg1:string,arg2:Array<string>):Promise<void>;
 

@@ -242,3 +242,49 @@ func renderEnvs(project string, envs []EnvEntry) string {
 	sb.WriteString("写变量前建议把上面的 hash 作为 if_match 传回：环境是整份重写，不带校验会覆盖期间的其它改动。")
 	return sb.String()
 }
+
+// renderWorkspaces list_workspaces 的输出：授权的工作目录 + 其中的项目 + 当前默认目标。
+func renderWorkspaces(items []WorkspaceItem, selected string) string {
+	var sb strings.Builder
+	sb.WriteString("MCP 可访问的工作目录（客户端设置里的白名单）：\n")
+	if len(items) == 0 {
+		sb.WriteString("- （空）当前未授权任何工作目录：AI 无法读写集合。请在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加目录。\n")
+		return sb.String()
+	}
+	for _, it := range items {
+		perm := "只读"
+		if it.Writable {
+			perm = "可写"
+		}
+		mark := ""
+		if it.Selected {
+			mark = "  ← 当前默认"
+		}
+		fmt.Fprintf(&sb, "- %s（%s，%s）%s\n", it.Path, it.Name, perm, mark)
+		if it.Error != "" {
+			fmt.Fprintf(&sb, "    不可用：%s\n", it.Error)
+			continue
+		}
+		if len(it.Projects) == 0 {
+			sb.WriteString("    目录下没有项目（集合需要含 opencollection.yml）\n")
+			continue
+		}
+		fmt.Fprintf(&sb, "    项目：%s\n", strings.Join(it.Projects, "、"))
+	}
+	if selected == "" {
+		sb.WriteString("尚未选定默认工作目录：调用 use_workspace 选定后，其余工具的 project 参数即可省略。\n")
+	} else {
+		fmt.Fprintf(&sb, "当前默认目标：%s（其余工具可省略 project）\n", selected)
+	}
+	return sb.String()
+}
+
+// renderWorkspaceSelected use_workspace 的结果。
+func renderWorkspaceSelected(it WorkspaceItem, selected string) string {
+	perm := "只读"
+	if it.Writable {
+		perm = "可写"
+	}
+	return fmt.Sprintf("已选定默认工作目录：%s（%s，%s）\n后续工具可以省略 project 参数（仍可显式指定）。当前默认目标：%s",
+		it.Path, it.Name, perm, selected)
+}

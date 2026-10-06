@@ -49,7 +49,8 @@ func (a *App) ImportGrpcProtos(files []string, imports []string) (*GrpcSchemaInf
 	if err != nil {
 		return nil, err
 	}
-	a.protoCache.Invalidate()
+	// 只失效该集合的编译缓存（按集合隔离，避免把其它根的缓存一起清掉）
+	a.protoCacheOf(c).Invalidate()
 	// 3) 按集合内路径重新解析（返回给界面的路径必须是集合内相对路径）
 	rels := make([]string, 0, len(infos))
 	for _, item := range infos {
@@ -76,7 +77,7 @@ func (a *App) RemoveGrpcProto(rel string) error {
 	if err := c.RemoveProto(rel); err != nil {
 		return err
 	}
-	a.protoCache.Invalidate()
+	a.protoCacheOf(c).Invalidate()
 	return nil
 }
 
@@ -237,7 +238,7 @@ func (a *App) compileCollectionProtos(c *collection.Collection, rels []string, i
 		return nil, err
 	}
 	importPaths := a.importPaths(c, imports)
-	res, err := a.protoCache.Compile(context.Background(), files, importPaths)
+	res, err := a.protoCacheOf(c).Compile(context.Background(), files, importPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +380,7 @@ func (a *App) compileResolved(c *collection.Collection, protoRel string, imports
 	if err != nil {
 		return nil, err
 	}
-	return a.protoCache.Compile(context.Background(), files, a.importPaths(c, imports))
+	return a.protoCacheOf(c).Compile(context.Background(), files, a.importPaths(c, imports))
 }
 
 // toRunnerTLS 共享包 TLS 设置 → 执行器设置。

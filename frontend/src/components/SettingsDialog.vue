@@ -5,7 +5,9 @@ import { CodeSlashOutline, ColorPaletteOutline, FolderOpenOutline, GlobeOutline 
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
+import { message } from '@/lib/notice'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
+import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPStatus, Settings } from '@/types'
 
@@ -13,6 +15,7 @@ const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [v: boolean]; saved: [] }>()
 const { t, locale } = useI18n()
 const settings = useSettingsStore()
+const coll = useCollectionStore()
 
 const form = ref<Settings>({ ...settings.form })
 const error = ref('')
@@ -60,6 +63,43 @@ const originsText = computed({
 })
 
 /** 换令牌：后端落盘 + 重启服务，随后刷新状态。 */
+/** 添加一个授权工作目录（系统目录选择）。默认**只读**：需要写时在行内勾「可写」。 */
+async function addAllowDir(): Promise<void> {
+  try {
+    const dir = await api.pickDirectory()
+    if (!dir) return
+    if (form.value.mcp.allow.some((a) => a.path === dir)) {
+      message.info(t('settings.mcpAllowDup'))
+      return
+    }
+    form.value.mcp.allow.push({ path: dir, writable: false })
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** 把当前打开的工作目录一键加入白名单（多根时全部加入）。 */
+function addCurrentRoot(): void {
+  let added = 0
+  for (const r of coll.roots) {
+    const dir = r.info.dir
+    if (!dir || form.value.mcp.allow.some((a) => a.path === dir)) continue
+    form.value.mcp.allow.push({ path: dir, writable: false })
+    added++
+  }
+  if (!added) message.info(t('settings.mcpAllowDup'))
+}
+
+/** 移除一条授权目录（保存后由后端重启 MCP 服务生效）。 */
+function removeAllowDir(i: number): void {
+  form.value.mcp.allow.splice(i, 1)
+}
+
+/** 切换某条授权目录的可写开关（保存后生效）。 */
+function setAllowWritable(i: number, v: boolean): void {
+  form.value.mcp.allow[i].writable = v
+}
+
 async function regenerateToken(): Promise<void> {
   mcpBusy.value = true
   error.value = ''
@@ -310,6 +350,25 @@ function close(): void {
         <n-input-number v-model:value="form.historyLimit" size="small" :min="10" :max="5000" class="num" />
       </div>
 
+      <!-- 多工作目录：启动恢复上限 + 当前占用的监听数（每个根一个文件监听，Windows 上会占住目录） -->
+      <div class="row">
+        <span class="lbl">{{ t('settings.restoreLimit') }}</span>
+        <n-input-number
+          v-model:value="form.restoreLimit"
+          size="small"
+          :min="1"
+          :max="32"
+          class="num"
+          data-testid="settings.restoreLimit"
+        />
+      </div>
+      <p class="hint muted">{{ t('settings.restoreLimitHint') }}</p>
+      <div class="row">
+        <span class="lbl">{{ t('settings.openRoots') }}</span>
+        <span class="muted" data-testid="settings.openRoots">{{ coll.roots.length }}</span>
+      </div>
+      <p class="hint muted">{{ t('settings.openRootsHint') }}</p>
+
         </div>
 
         <!-- 分区四：MCP 服务。生命周期与其它设置不同 —— 它要起停一个真实的监听端口，
@@ -350,6 +409,51 @@ function close(): void {
         </n-checkbox>
       </div>
       <p class="hint muted">{{ t('settings.mcpReadOnlyHint') }}</p>
+
+      <!-- 可访问的工作目录白名单：MCP 只能在这些目录（或其一级子目录）里读写。
+           空 = 不授权任何目录（安全默认）：AI 会说「没有可用项目」，这里给足提示与一键加入。 -->
+      <div class="row">
+        <span class="lbl">{{ t('settings.mcpAllow') }}</span>
+        <span class="sp" />
+        <n-button size="tiny" tertiary :disabled="!form.mcp.enabled" data-testid="settings.mcpAllowAdd" @click="addAllowDir">
+          {{ t('settings.mcpAllowAdd') }}
+        </n-button>
+        <n-button
+          size="tiny"
+          tertiary
+          :disabled="!form.mcp.enabled || !coll.roots.length"
+          data-testid="settings.mcpAllowCurrent"
+          @click="addCurrentRoot"
+        >
+          {{ t('settings.mcpAllowCurrent') }}
+        </n-button>
+      </div>
+      <div v-if="form.mcp.allow.length" class="dirs" data-testid="settings.mcpAllowList">
+        <div v-for="(a, i) in form.mcp.allow" :key="a.path" class="dir" data-testid="settings.mcpAllowItem">
+          <span class="mono p" :title="a.path">{{ a.path }}</span>
+          <n-checkbox
+            :checked="a.writable"
+            :disabled="!form.mcp.enabled"
+            size="small"
+            data-testid="settings.mcpAllowWritable"
+            @update:checked="(v: boolean) => setAllowWritable(i, v)"
+          >
+            {{ t('settings.mcpAllowWritable') }}
+          </n-checkbox>
+          <button
+            class="x"
+            type="button"
+            :title="t('settings.mcpAllowRemove')"
+            data-testid="settings.mcpAllowRemove"
+            @click="removeAllowDir(i)"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <p v-else class="hint muted" data-testid="settings.mcpAllowEmpty">{{ t('settings.mcpAllowEmpty') }}</p>
+      <p class="hint muted">{{ t('settings.mcpAllowHint') }}</p>
+
       <div class="row">
         <span class="lbl">{{ t('settings.mcpOrigins') }}</span>
         <n-input
@@ -394,6 +498,9 @@ function close(): void {
           {{ t('settings.mcpCopy') }}
         </n-button>
       </div>
+      <p v-if="mcp?.running" class="hint muted" data-testid="settings.mcpAllowEffective">
+        {{ t('settings.mcpAllowEffective', { n: mcp.allow?.length ?? 0, dir: mcp.allow?.[0]?.path ?? '-' }) }}
+      </p>
       <p v-if="mcp?.hint" class="hint muted">{{ mcp.hint }}</p>
         </div>
       </div>
@@ -409,6 +516,48 @@ function close(): void {
 </template>
 
 <style scoped>
+/* 白名单行：等宽路径 + 可写开关 + 删除 */
+.dirs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+
+.dir {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+}
+
+.dir .p {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  color: var(--app-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dir .x {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--app-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.dir .x:hover {
+  background: var(--app-danger-tint);
+  color: var(--app-danger);
+}
+
 /* 两栏：左侧竖向分区菜单 + 右侧当前分区的内容 */
 .cols {
   display: flex;

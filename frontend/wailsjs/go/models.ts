@@ -1,5 +1,47 @@
 export namespace app {
 	
+	export class CollectionSummary {
+	    root: string;
+	    info?: collection.CollectionInfo;
+	    active: boolean;
+	    readOnly: boolean;
+	    linked: boolean;
+	    mocking: boolean;
+	    mockPort?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollectionSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.root = source["root"];
+	        this.info = this.convertValues(source["info"], collection.CollectionInfo);
+	        this.active = source["active"];
+	        this.readOnly = source["readOnly"];
+	        this.linked = source["linked"];
+	        this.mocking = source["mocking"];
+	        this.mockPort = source["mockPort"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class GrpcDefaultInfo {
 	    proto: string;
 	    imports: string[];
@@ -60,6 +102,7 @@ export namespace app {
 	    token: string;
 	    readOnly: boolean;
 	    origins: string[];
+	    allow?: config.MCPAllowDir[];
 	    root: string;
 	    projects: number;
 	    crossHost: boolean;
@@ -81,12 +124,31 @@ export namespace app {
 	        this.token = source["token"];
 	        this.readOnly = source["readOnly"];
 	        this.origins = source["origins"];
+	        this.allow = this.convertValues(source["allow"], config.MCPAllowDir);
 	        this.root = source["root"];
 	        this.projects = source["projects"];
 	        this.crossHost = source["crossHost"];
 	        this.error = source["error"];
 	        this.hint = source["hint"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ResolveResult {
 	    text: string;
@@ -770,6 +832,20 @@ export namespace collection {
 
 export namespace config {
 	
+	export class MCPAllowDir {
+	    path: string;
+	    writable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPAllowDir(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.writable = source["writable"];
+	    }
+	}
 	export class MCPConfig {
 	    enabled: boolean;
 	    addr: string;
@@ -777,6 +853,7 @@ export namespace config {
 	    token: string;
 	    readOnly: boolean;
 	    allowOrigins: string[];
+	    allow?: MCPAllowDir[];
 	
 	    static createFrom(source: any = {}) {
 	        return new MCPConfig(source);
@@ -790,7 +867,26 @@ export namespace config {
 	        this.token = source["token"];
 	        this.readOnly = source["readOnly"];
 	        this.allowOrigins = source["allowOrigins"];
+	        this.allow = this.convertValues(source["allow"], MCPAllowDir);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Settings {
 	    insecureSsl: boolean;
@@ -805,6 +901,7 @@ export namespace config {
 	    theme: string;
 	    proxyUrl: string;
 	    autoSave: boolean;
+	    restoreLimit: number;
 	    mcp: MCPConfig;
 	
 	    static createFrom(source: any = {}) {
@@ -825,6 +922,7 @@ export namespace config {
 	        this.theme = source["theme"];
 	        this.proxyUrl = source["proxyUrl"];
 	        this.autoSave = source["autoSave"];
+	        this.restoreLimit = source["restoreLimit"];
 	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
 	    }
 	
@@ -886,6 +984,7 @@ export namespace history {
 	    timeMs: number;
 	    size: number;
 	    error?: string;
+	    root?: string;
 	    request?: number[];
 	
 	    static createFrom(source: any = {}) {
@@ -903,6 +1002,7 @@ export namespace history {
 	        this.timeMs = source["timeMs"];
 	        this.size = source["size"];
 	        this.error = source["error"];
+	        this.root = source["root"];
 	        this.request = source["request"];
 	    }
 	}
@@ -1066,6 +1166,9 @@ export namespace runner {
 	    contentType: string;
 	    binary: boolean;
 	    headers: collection.KV[];
+	    truncated?: boolean;
+	    fullSize?: number;
+	    warnings?: string[];
 	    trailers?: collection.KV[];
 	    body: string;
 	    script?: any;
@@ -1085,6 +1188,9 @@ export namespace runner {
 	        this.contentType = source["contentType"];
 	        this.binary = source["binary"];
 	        this.headers = this.convertValues(source["headers"], collection.KV);
+	        this.truncated = source["truncated"];
+	        this.fullSize = source["fullSize"];
+	        this.warnings = source["warnings"];
 	        this.trailers = this.convertValues(source["trailers"], collection.KV);
 	        this.body = source["body"];
 	        this.script = source["script"];

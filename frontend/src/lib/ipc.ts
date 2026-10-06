@@ -4,6 +4,7 @@
 // 两态走同一套 App 方法，前端无感知。
 import type {
   CollectionInfo,
+  CollectionSummary,
   ConflictItem,
   CookieInfo,
   DocEntry,
@@ -139,6 +140,11 @@ function normalizeInfo(info: CollectionInfo): CollectionInfo {
   }
 }
 
+/** 多根概要：树的形状与 CollectionInfo 一致，这里逐项归一化（null 树会让渲染层炸）。 */
+function normalizeSummaries(list: CollectionSummary[] | null): CollectionSummary[] {
+  return (list ?? []).map((s) => ({ ...s, info: normalizeInfo(s.info) }))
+}
+
 function normalizeSend(res: SendResult): SendResult {
   return { ...res, headers: res.headers ?? [], warnings: res.warnings ?? [] }
 }
@@ -162,7 +168,18 @@ function normalizeExample(ex: ResponseExample): ResponseExample {
 export const api = {
   pickDirectory: () => call<string>('PickDirectory'),
   pickFile: () => call<string>('PickFile'),
+  /** 打开工作目录（多根：追加并置为活动根；同一目录重复打开是幂等的）。 */
   openCollection: (dir: string) => call<CollectionInfo>('OpenCollection', dir).then(normalizeInfo),
+  /** 全部已打开的工作目录（按打开顺序），用于侧栏单树多根。 */
+  listCollections: () => call<CollectionSummary[] | null>('ListCollections').then(normalizeSummaries),
+  /** 当前活动根的标识（空串 = 未打开任何目录）。 */
+  activeCollection: () => call<string>('ActiveCollection'),
+  /** 切换活动根（集合级动作都作用于活动根）。 */
+  setActiveCollection: (root: string) => call<null>('SetActiveCollection', root),
+  /** 关闭一个工作目录（其它根不受影响）。 */
+  closeCollection: (root: string) => call<null>('CloseCollection', root),
+  /** 重载指定工作目录（外部改动 / git 操作后）；不传 = 活动根。 */
+  reloadCollectionOf: (root = '') => call<CollectionInfo>('ReloadCollectionOf', root).then(normalizeInfo),
   reload: () => call<CollectionInfo>('ReloadCollection').then(normalizeInfo),
   createRequest: (folder: string, name: string, method: string) =>
     call<RequestDoc>('CreateRequest', folder, name, method).then(normalizeRequest),
@@ -204,6 +221,15 @@ export const api = {
   renameRequest: (uid: string, name: string) => call<null>('RenameRequest', uid, name),
   moveRequest: (uid: string, destFolder: string) => call<null>('MoveRequest', uid, destFolder),
   moveFolder: (uid: string, destParent: string) => call<null>('MoveFolder', uid, destParent),
+  /** 跨工作目录移动请求：目标侧重建（新 uid/路径），源文件进源集合 .trash；返回新 uid。 */
+  moveRequestToCollection: (srcRoot: string, uid: string, destRoot: string, destFolder: string) =>
+    call<string>('MoveRequestToCollection', srcRoot, uid, destRoot, destFolder),
+  /**
+   * 跨工作目录移动分组（连同其下子分组与请求）：目标侧整棵重建，源分组进源集合 .trash。
+   * 返回**被搬走的源请求 uid**（界面据此清掉源根里已失效的标签）。
+   */
+  moveFolderToCollection: (srcRoot: string, uid: string, destRoot: string, destParent: string) =>
+    call<string[]>('MoveFolderToCollection', srcRoot, uid, destRoot, destParent),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
   deleteEnv: (name: string) => call<null>('DeleteEnv', name),

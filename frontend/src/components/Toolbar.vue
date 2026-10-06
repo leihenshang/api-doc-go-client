@@ -3,6 +3,7 @@
 // 2026-10-03 起并入标题栏（TitleBar 的默认插槽），不再独占一行 —— testid 沿用 toolbar.* 保持兼容。
 import { NIcon, NDropdown } from 'naive-ui'
 import {
+  CheckmarkOutline,
   ChevronDownOutline,
   CloudDownloadOutline,
   CloudUploadOutline,
@@ -18,9 +19,20 @@ import {
 import { computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EnvPicker from '@/components/EnvPicker.vue'
-import type { Env } from '@/types'
+import type { CollectionSummary, Env } from '@/types'
 
-const { name, envs, currentEnv } = defineProps<{ name: string; dir: string; envs: Env[]; currentEnv: string }>()
+const props = defineProps<{
+  name: string
+  dir: string
+  envs: Env[]
+  currentEnv: string
+  /** 已打开的工作目录（多根：菜单里可以直接切换活动根） */
+  roots: CollectionSummary[]
+  activeRoot: string
+  /** 最近打开过、当前没打开的目录（启动恢复有上限，超出的从这里一键补开） */
+  recent: { dir: string; name: string }[]
+}>()
+const { name, envs, currentEnv } = props
 const emit = defineEmits<{
   'open-other': []
   reload: []
@@ -33,27 +45,67 @@ const emit = defineEmits<{
   export: [format: 'markdown' | 'html']
   mock: []
   sync: []
+  /** 切换活动根（多根并存） */
+  activate: [root: string]
   'update:currentEnv': [v: string]
+  /** 打开一个「最近打开过、当前没打开」的工作目录 */
+  'open-dir': [dir: string]
 }>()
 
 const { t } = useI18n()
 
+/** 「工作目录」分组：列出已打开的根，当前根打勾；点其它根即切过去。 */
+const workspaceOptions = computed(() =>
+  props.roots.map((r) => ({
+    key: `root:${r.root}`,
+    label: r.readOnly ? `${r.info.name}（${t('tree.readOnly')}）` : r.info.name,
+    icon: r.root === props.activeRoot ? () => h(NIcon, { component: CheckmarkOutline }) : undefined,
+  })),
+)
+
+/**
+ * 「最近打开」分组：上次打开过、这次没恢复的目录（启动恢复有数量上限，超出的不静默丢）。
+ * 只列目录名，点一下就打开 —— 否则用户得重新去系统对话框里翻。
+ */
+const recentOptions = computed(() =>
+  props.recent.map((r) => ({
+    key: `dir:${r.dir}`,
+    label: r.name,
+    // 同名目录不少见：把完整路径放进 title，悬停可分辨
+    title: r.dir,
+  })),
+)
+
 const menu = computed(() => [
+  ...(workspaceOptions.value.length
+    ? [{ type: 'group' as const, key: 'ws', label: t('toolbar.workspaces'), children: workspaceOptions.value }]
+    : []),
+  ...(recentOptions.value.length
+    ? [{ type: 'group' as const, key: 'recent', label: t('toolbar.recentDirs'), children: recentOptions.value }]
+    : []),
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
   { key: 'reload', label: t('toolbar.reload'), icon: () => h(NIcon, { component: RefreshOutline }) },
-  { key: 'd1', type: 'divider' },
+  { key: 'd1', type: 'divider' as const },
   { key: 'sync', label: t('sync.title'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'import', label: t('import.title'), icon: () => h(NIcon, { component: CloudDownloadOutline }) },
   { key: 'export-md', label: t('export.markdown'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'export-html', label: t('export.html'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'mock', label: t('mock.title'), icon: () => h(NIcon, { component: PlayOutline }) },
-  { key: 'd2', type: 'divider' },
+  { key: 'd2', type: 'divider' as const },
   { key: 'history', label: t('history.title'), icon: () => h(NIcon, { component: TimeOutline }) },
   { key: 'cookies', label: t('cookies.title'), icon: () => h(NIcon, { component: LockClosedOutline }) },
   { key: 'settings', label: t('settings.title'), icon: () => h(NIcon, { component: SettingsOutline }) },
 ])
 
 function onMenu(key: string | number): void {
+  if (typeof key === 'string' && key.startsWith('root:')) {
+    emit('activate', key.slice('root:'.length))
+    return
+  }
+  if (typeof key === 'string' && key.startsWith('dir:')) {
+    emit('open-dir', key.slice('dir:'.length))
+    return
+  }
   if (key === 'open') emit('open-other')
   else if (key === 'reload') emit('reload')
   else if (key === 'history') emit('history')

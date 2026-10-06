@@ -19,8 +19,10 @@ const DEFAULTS: Settings = {
   theme: ThemeLight,
   proxyUrl: '',
   autoSave: false,
+  restoreLimit: 8,
   // 内嵌 MCP 服务默认不启用、只监听本机、只读（与 Go 侧 config.Default() 一致）
-  mcp: { enabled: false, addr: '127.0.0.1', port: 8189, token: '', readOnly: true, allowOrigins: [] },
+  // allow = MCP 可访问的工作目录白名单（空 = 不授权任何目录，安全默认）
+  mcp: { enabled: false, addr: '127.0.0.1', port: 8189, token: '', readOnly: true, allowOrigins: [], allow: [] },
 }
 
 export const useSettingsStore = defineStore('settings', {
@@ -41,7 +43,10 @@ export const useSettingsStore = defineStore('settings', {
   actions: {
     async load(): Promise<void> {
       try {
-        this.form = { ...DEFAULTS, ...(await api.getSettings()) }
+        const loaded = { ...DEFAULTS, ...(await api.getSettings()) }
+        // 旧配置没有白名单字段：补空数组（UI 会直接读写它，undefined 会炸）
+        loaded.mcp = { ...DEFAULTS.mcp, ...(loaded.mcp ?? {}), allow: loaded.mcp?.allow ?? [] }
+        this.form = loaded
       } catch {
         this.form = { ...DEFAULTS }
       }

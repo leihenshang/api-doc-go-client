@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"api-doc-go-client/internal/app"
+	"api-doc-go-client/internal/config"
 )
 
 // embedStopTimeout 停服等待上限（ServeHTTP 收到 ctx 取消后做优雅关闭）。
@@ -31,6 +32,15 @@ type embedBackend struct {
 	newApp NewAppFunc
 }
 
+// toAllowDirs 把设置里的白名单转成 MCP 层的类型（两层各自定义，避免 config 反向依赖 mcp）。
+func toAllowDirs(list []config.MCPAllowDir) []AllowDir {
+	out := make([]AllowDir, 0, len(list))
+	for _, a := range list {
+		out = append(out, AllowDir{Path: a.Path, Writable: a.Writable})
+	}
+	return NormalizeAllow(out)
+}
+
 // NewBackend 构造内嵌 MCP 服务实现。logger 为 nil 时丢弃日志。
 func NewBackend(logger *log.Logger) app.MCPBackend {
 	if logger == nil {
@@ -44,6 +54,7 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 	// 先停旧实例：地址/端口/只读变更后旧监听必须下线
 	b.Stop()
 
+	allow := toAllowDirs(req.Allow)
 	st := &app.MCPStatus{
 		Enabled:   req.Enabled,
 		Addr:      req.Addr,
@@ -51,15 +62,21 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 		Token:     req.Token,
 		ReadOnly:  req.ReadOnly,
 		Origins:   req.AllowOrigins,
-		Root:      req.Root,
+		Allow:     req.Allow,
 		CrossHost: !IsLoopbackAddr(req.Addr),
+	}
+	if len(allow) > 0 {
+		st.Root = allow[0].Path // 展示用：第一个授权目录
 	}
 	switch {
 	case !req.Enabled:
 		st.Hint = "MCP 服务未启用"
 		return st, nil
-	case req.Root == "":
-		st.Error = "尚未打开集合：先在客户端里打开一个集合目录"
+	case len(allow) == 0:
+		// 安全默认：白名单为空 = 不授权任何目录。服务照常启动（AI 能拿到明确提示），
+		// 但读写不到任何集合 —— 需要用时就到设置里添加工作目录。
+		st.Running = false
+		st.Hint = "尚未授权任何工作目录：AI 目前无法访问集合。请在「设置 → MCP 服务 → 可访问的工作目录」里添加。"
 		return st, nil
 	}
 	addr := net.JoinHostPort(req.Addr, strconv.Itoa(req.Port))
@@ -74,7 +91,7 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 	_ = ln.Close()
 
 	srv, svc, err := NewServer(Config{
-		Root:     req.Root,
+		Allow:    allow,
 		ReadOnly: req.ReadOnly,
 		Logger:   b.logger,
 		NewApp:   b.newApp,

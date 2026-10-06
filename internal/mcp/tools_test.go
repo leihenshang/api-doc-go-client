@@ -23,6 +23,8 @@ func TestRegisterToolsAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		// 工作目录（白名单 + 默认目标）：AI 先看能访问哪些目录、再选定默认目标
+		"list_workspaces", "use_workspace",
 		"list_projects", "get_project_modules", "get_request_detail", "search_requests",
 		"create_request", "create_module", "create_project", "send_request", "update_request", "delete_request",
 		// 环境变量管理：1 个读 + 5 个写

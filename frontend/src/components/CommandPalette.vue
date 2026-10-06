@@ -18,7 +18,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
-import type { Env, TreeNode } from '@/types'
+import type { CollectionSummary, Env, TreeNode } from '@/types'
 
 type Scope = 'all' | 'request' | 'env' | 'command'
 type Kind = Exclude<Scope, 'all'>
@@ -30,12 +30,24 @@ interface Item {
   method?: string
   path: string
   icon?: Component
+  /** 请求所属工作目录（跨目录搜索时用来路由与标注） */
+  root?: string
+  /** 请求所属集合名（跨目录搜索时的标注；本目录搜索为空） */
+  coll?: string
 }
 
-const props = defineProps<{ show: boolean; tree: TreeNode[]; envs: Env[] }>()
+const props = defineProps<{
+  show: boolean
+  tree: TreeNode[]
+  envs: Env[]
+  /** 已打开的工作目录（多根：搜索可以跨目录） */
+  roots: CollectionSummary[]
+  activeRoot: string
+}>()
 const emit = defineEmits<{
   'update:show': [v: boolean]
-  'open-request': [uid: string]
+  /** 打开请求；root 非空且不是活动根时，接收方应先切根再打开 */
+  'open-request': [uid: string, root?: string]
   'switch-env': [name: string]
   command: [key: string]
 }>()
@@ -44,6 +56,8 @@ const { t } = useI18n()
 
 const keyword = ref('')
 const scope = ref<Scope>('all')
+/** 目录作用域：本目录 = 只看活动根；所有目录 = 合并所有已打开的工作目录 */
+const dirScope = ref<'current' | 'all'>('current')
 const cursor = ref(0)
 const inputEl = ref<InputInst | null>(null)
 const listEl = ref<HTMLElement | null>(null)
@@ -54,6 +68,14 @@ const scopes = computed<{ key: Scope; label: string }[]>(() => [
   { key: 'env', label: t('palette.envs') },
   { key: 'command', label: t('palette.commands') },
 ])
+
+const dirScopes = computed<{ key: 'current' | 'all'; label: string }[]>(() => [
+  { key: 'current', label: t('palette.scopeCurrent') },
+  { key: 'all', label: t('palette.scopeAll') },
+])
+
+/** 跨目录搜索只在「确实开了多个根」时才有意义。 */
+const crossRootAvailable = computed(() => props.roots.length > 1)
 
 const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'open-dir', labelKey: 'palette.openDir', icon: FolderOpenOutline },
@@ -68,10 +90,15 @@ const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'export-html', labelKey: 'export.html', icon: FolderOpenOutline },
 ]
 
-function collectRequests(nodes: TreeNode[], trail: string[], out: Item[]): void {
+function collectRequests(
+  nodes: TreeNode[],
+  trail: string[],
+  out: Item[],
+  meta: { root: string; coll?: string },
+): void {
   for (const n of nodes) {
     if (n.type === 'folder') {
-      collectRequests(n.children ?? [], [...trail, n.name], out)
+      collectRequests(n.children ?? [], [...trail, n.name], out, meta)
       continue
     }
     out.push({
@@ -80,13 +107,23 @@ function collectRequests(nodes: TreeNode[], trail: string[], out: Item[]): void 
       label: n.name,
       method: n.method ?? 'GET',
       path: trail.join(' / '),
+      root: meta.root,
+      coll: meta.coll,
     })
   }
 }
 
 const items = computed<Item[]>(() => {
   const out: Item[] = []
-  collectRequests(props.tree, [], out)
+  const cross = dirScope.value === 'all' && crossRootAvailable.value
+  if (cross) {
+    // 所有目录：逐个根收集请求，并标注所属集合（同名请求靠这个区分）
+    for (const r of props.roots) {
+      collectRequests(r.info.tree, [], out, { root: r.root, coll: r.info.name })
+    }
+  } else {
+    collectRequests(props.tree, [], out, { root: props.activeRoot })
+  }
   out.push(
     ...props.envs.map((e) => ({
       id: e.name,
@@ -123,6 +160,7 @@ watch(
     if (!v) return
     keyword.value = ''
     scope.value = 'all'
+    dirScope.value = 'current' // 默认只看当前工作目录；要看全部时手动切
     cursor.value = 0
     await nextTick()
     inputEl.value?.focus()
@@ -134,7 +172,7 @@ function close(): void {
 }
 
 function activate(item: Item): void {
-  if (item.kind === 'request') emit('open-request', item.id)
+  if (item.kind === 'request') emit('open-request', item.id, item.root)
   else if (item.kind === 'env') emit('switch-env', item.id)
   else emit('command', item.id)
   close()
@@ -215,6 +253,19 @@ function setInput(el: unknown): void {
         >
           {{ s.label }}
         </button>
+        <!-- 目录作用域：多根并存时才能切到「所有目录」（单根时没有意义） -->
+        <span v-if="crossRootAvailable" class="sp" />
+        <button
+          v-for="d in crossRootAvailable ? dirScopes : []"
+          :key="'dir-' + d.key"
+          class="chip chip-dir"
+          :class="{ on: dirScope === d.key }"
+          type="button"
+          data-testid="palette.dirScope"
+          @click="dirScope = d.key"
+        >
+          {{ d.label }}
+        </button>
       </div>
 
       <div ref="listEl" class="list">
@@ -232,6 +283,8 @@ function setInput(el: unknown): void {
           <method-tag v-if="it.kind === 'request'" :method="it.method ?? 'GET'" filled />
           <n-icon v-else :component="it.kind === 'env' ? ServerOutline : (it.icon ?? SearchOutline)" :size="15" class="ii" />
           <span class="lb">{{ it.label }}</span>
+          <!-- 跨目录搜索：标注请求所属的工作目录，避免同名请求分不清 -->
+          <span v-if="it.coll" class="dir" data-testid="palette.itemDir">{{ it.coll }}</span>
           <span class="pa">{{ it.path }}</span>
         </button>
         <div v-if="!filtered.length" class="none">{{ t('palette.empty') }}</div>
@@ -306,6 +359,35 @@ kbd {
 .chip.on {
   background: var(--app-accent);
   color: var(--app-on-accent);
+}
+
+/* 「所有目录」作用域靠右放，和内容筛选分开 */
+.sp {
+  flex: 1 1 auto;
+}
+
+.chip-dir {
+  background: transparent;
+  border: 1px solid var(--app-border);
+}
+
+.chip-dir.on {
+  border-color: var(--app-accent);
+}
+
+/* 跨目录结果里的所属目录徽章 */
+.dir {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--app-chip);
+  color: var(--app-muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .list {

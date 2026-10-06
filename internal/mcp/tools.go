@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -13,6 +14,47 @@ import (
 type toolSet struct {
 	svc      *Service
 	readOnly bool // 只读模式：不注册写工具，send_request 强制不落盘
+
+	// mu/sel 每个 MCP 会话选定的默认工作目录（use_workspace 的结果），key = 会话 id。
+	// 为什么要按会话：HTTP 传输下同一个进程会同时服务多个客户端（各自带 Mcp-Session-Id），
+	// 进程级单例会变成「A 选了目录，B 的默认目标跟着变」—— 谁都不该改别人的选择。
+	// stdio 与内嵌服务只有一个会话，等价于「进程里只有一份」；拿不到会话标识时用空串兜底。
+	mu  sync.Mutex
+	sel map[string]string
+}
+
+// sessionID 本次工具调用所属的会话标识（拿不到时返回空串 = 进程级那一份）。
+func sessionID(req *mcp.CallToolRequest) string {
+	if req == nil || req.Session == nil {
+		return ""
+	}
+	return req.Session.ID()
+}
+
+// workspace 本会话选定的默认工作目录（空 = 未选定）。
+func (ts *toolSet) workspace(req *mcp.CallToolRequest) string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.sel[sessionID(req)]
+}
+
+// rememberWorkspace 记住本会话选定的默认工作目录。
+func (ts *toolSet) rememberWorkspace(req *mcp.CallToolRequest, key string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if ts.sel == nil {
+		ts.sel = map[string]string{}
+	}
+	ts.sel[sessionID(req)] = key
+}
+
+// proj 工具入参 project 为空时补上本会话选定的默认目标；没选定就原样返回空，
+// 由 Service 报错并提示「先 use_workspace」。
+func (ts *toolSet) proj(req *mcp.CallToolRequest, project string) string {
+	if strings.TrimSpace(project) != "" {
+		return project
+	}
+	return ts.workspace(req)
 }
 
 // RegisterTools 把全部工具注册到 server。
@@ -30,8 +72,16 @@ func RegisterTools(server *mcp.Server, svc *Service, readOnly bool) {
 
 func (ts *toolSet) registerReadTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_workspaces",
+		Description: "列出 MCP 可访问的工作目录（客户端授权的白名单）与其中的项目、当前默认目标。白名单为空时 AI 无法读写任何集合 —— 需要时请让用户在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加。",
+	}, ts.listWorkspaces)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "use_workspace",
+		Description: "选定默认工作目录：选定后其余工具的 project 参数即可省略。workspace 传 list_workspaces 返回的工作目录 path，或一个项目标识（名称/路径/uid）；不在白名单内会直接拒绝。",
+	}, ts.useWorkspace)
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。返回名称、路径、uid、请求数/模块数/环境列表。",
+		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。范围仅限客户端授权的 MCP 工作目录（见 list_workspaces）。返回名称、路径、uid、请求数/模块数/环境列表。",
 	}, ts.listProjects)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_project_modules",
@@ -51,6 +101,34 @@ func (ts *toolSet) registerReadTools(server *mcp.Server) {
 	}, ts.listEnvs)
 }
 
+// ---- 工作目录（白名单 + 默认目标）----
+
+// listWorkspacesIn list_workspaces 无入参。
+type listWorkspacesIn struct{}
+
+func (ts *toolSet) listWorkspaces(_ context.Context, req *mcp.CallToolRequest, _ listWorkspacesIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		sel := ts.workspace(req) // 默认目标是会话级的：只标本会话选的那个
+		return renderWorkspaces(ts.svc.ListWorkspaces(sel), sel), nil
+	})
+}
+
+// useWorkspaceIn use_workspace 的入参。
+type useWorkspaceIn struct {
+	Workspace string `json:"workspace" jsonschema:"工作目录 path（list_workspaces 返回）或项目标识（名称/路径/uid）；必须在客户端授权的白名单内"`
+}
+
+func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in useWorkspaceIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		it, key, err := ts.svc.UseWorkspace(in.Workspace)
+		if err != nil {
+			return "", err
+		}
+		ts.rememberWorkspace(req, key) // 只改本会话的默认目标
+		return renderWorkspaceSelected(it, key), nil
+	})
+}
+
 func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_request",
@@ -62,7 +140,7 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	}, ts.createModule)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
-		Description: "在项目根目录下新建一个项目（集合目录 + manifest），建完即可用 list_projects 看到。",
+		Description: "在**授权且可写**的工作目录下新建一个项目（集合目录 + manifest），建完即可用 list_projects 看到。dir 必须是白名单内的可写目录，留空时用第一个可写目录；白名单外一律拒绝。",
 	}, ts.createProject)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_request",
@@ -114,6 +192,7 @@ func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
 			in.SaveExample = &no
 		}
 		return ts.wrap(func() (string, error) {
+			in.Project = ts.proj(req, in.Project)
 			out, err := ts.svc.SendRequest(in)
 			if err != nil {
 				return "", err
@@ -162,13 +241,14 @@ func (ts *toolSet) listProjects(ctx context.Context, req *mcp.CallToolRequest, i
 
 // getModulesIn get_project_modules 的入参。
 type getModulesIn struct {
-	Project         string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project         string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Query           string `json:"query,omitempty" jsonschema:"对模块名与请求名/方法/路径做模糊过滤"`
 	IncludeRequests bool   `json:"includeRequests,omitempty" jsonschema:"true = 附带每个模块下的请求清单"`
 }
 
 func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolRequest, in getModulesIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		res, err := ts.svc.GetProjectModules(in.Project, in.Query, in.IncludeRequests)
 		if err != nil {
 			return "", err
@@ -194,7 +274,7 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 
 // getDetailIn get_request_detail 的入参。
 type getDetailIn struct {
-	Project      string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project      string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID          string `json:"uid" jsonschema:"接口 uid（用 search_requests 或 get_project_modules 获取）"`
 	Query        string `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
 	IncludeBody  bool   `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
@@ -203,6 +283,7 @@ type getDetailIn struct {
 
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		d, err := ts.svc.GetRequestDetail(in.Project, in.UID, DetailOptions{
 			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query,
 		})
@@ -241,13 +322,14 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 
 // createModuleIn create_module 的入参。
 type createModuleIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Name    string `json:"name" jsonschema:"模块名"`
 	Parent  string `json:"parent,omitempty" jsonschema:"父模块路径；留空 = 项目根"`
 }
 
 func (ts *toolSet) createModule(ctx context.Context, req *mcp.CallToolRequest, in createModuleIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		path, err := ts.svc.CreateModule(in.Project, in.Parent, in.Name)
 		if err != nil {
 			return "", err
@@ -278,6 +360,7 @@ type createRequestArg = CreateRequestInput
 
 func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, in createRequestArg) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		r, err := ts.svc.CreateRequest(in)
 		if err != nil {
 			return "", err
@@ -291,6 +374,7 @@ type updateArg = UpdateRequestInput
 
 func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, in updateArg) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		r, err := ts.svc.UpdateRequest(in)
 		if err != nil {
 			return "", err
@@ -301,12 +385,13 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 
 // deleteIn delete_request 的入参。
 type deleteIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid" jsonschema:"要移除的接口 uid"`
 }
 
 func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
 			return "", err
 		}
@@ -318,12 +403,13 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 
 // listEnvsIn list_envs 的入参。
 type listEnvsIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Query   string `json:"query,omitempty" jsonschema:"按环境名 / 变量名模糊过滤；留空返回全部"`
 }
 
 func (ts *toolSet) listEnvs(ctx context.Context, req *mcp.CallToolRequest, in listEnvsIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		envs, err := ts.svc.ListEnvs(in.Project, in.Query)
 		if err != nil {
 			return "", err
@@ -334,7 +420,7 @@ func (ts *toolSet) listEnvs(ctx context.Context, req *mcp.CallToolRequest, in li
 
 // renameEnvIn rename_env 的入参。
 type renameEnvIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Name    string `json:"name" jsonschema:"当前环境名"`
 	NewName string `json:"newName" jsonschema:"新环境名（只允许字母、数字、- 与 _；不能与现有名重复，也不允许只改大小写）"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
@@ -342,6 +428,7 @@ type renameEnvIn struct {
 
 func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in renameEnvIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		env, err := ts.svc.RenameEnv(in.Project, in.Name, in.NewName, in.IfMatch)
 		if err != nil {
 			return "", err
@@ -353,12 +440,13 @@ func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in r
 
 // deleteEnvIn delete_env 的入参。
 type deleteEnvIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Name    string `json:"name" jsonschema:"要删除的环境名"`
 }
 
 func (ts *toolSet) deleteEnv(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		if err := ts.svc.DeleteEnv(in.Project, in.Name); err != nil {
 			return "", err
 		}
@@ -368,6 +456,7 @@ func (ts *toolSet) deleteEnv(ctx context.Context, req *mcp.CallToolRequest, in d
 
 func (ts *toolSet) createEnv(ctx context.Context, req *mcp.CallToolRequest, in CreateEnvInput) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		env, err := ts.svc.CreateEnv(in)
 		if err != nil {
 			return "", err
@@ -379,6 +468,7 @@ func (ts *toolSet) createEnv(ctx context.Context, req *mcp.CallToolRequest, in C
 
 func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in SetEnvVarInput) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		v, err := ts.svc.SetEnvVar(in)
 		if err != nil {
 			return "", err
@@ -400,7 +490,7 @@ func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in S
 
 // deleteEnvVarIn delete_env_var 的入参。
 type deleteEnvVarIn struct {
-	Project string `json:"project" jsonschema:"项目路径、名称或 uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Env     string `json:"env" jsonschema:"所属环境名"`
 	Name    string `json:"name" jsonschema:"要删除的变量名"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
@@ -408,6 +498,7 @@ type deleteEnvVarIn struct {
 
 func (ts *toolSet) deleteEnvVar(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvVarIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
 		if err := ts.svc.DeleteEnvVar(in.Project, in.Env, in.Name, in.IfMatch); err != nil {
 			return "", err
 		}

@@ -41,8 +41,10 @@ type Collection struct {
 	Dir  string // 绝对路径
 	UID  string
 	Name string
-	idx  *index.DB      // 本地 SQLite 索引（C1）；惰性打开
-	w    *watch.Watcher // 外部改动监听（D1）；惰性启动
+	idx  *index.DB // 本地 SQLite 索引（C1）；惰性打开
+	// indexKey 索引文件名用的键，空 = 用 UID（见 SetIndexKey：多根并存时同 uid 的拷贝目录要区分开）
+	indexKey string
+	w        *watch.Watcher // 外部改动监听（D1）；惰性启动
 	// grpcDefault 集合级默认 gRPC 定义（清单里的 grpc 段，P8）；nil = 未配置。
 	// 只有在内存里保留它，writeManifest 才不会把清单里的这一段写丢。
 	grpcDefault *share.GRPCDefault
@@ -153,6 +155,16 @@ func (c *Collection) StopWatch() {
 	}
 }
 
+// Close 释放集合占用的资源：停止文件监听并关闭索引句柄；可重复调用。
+//
+// 为什么要显式关闭：索引是常驻的 sqlite 句柄，Windows 上被句柄占住的文件删不掉 ——
+// 关闭一个工作目录（多根并存）或退出应用时不释放，用户删目录 / 测试清理临时目录都会失败。
+// 关闭后再用会自动重开（ensureIndex），所以调用方不必关心后续是否还会访问。
+func (c *Collection) Close() error {
+	c.StopWatch()
+	return c.closeIndex()
+}
+
 // ignoreWrite 自写回环：写盘前短暂屏蔽对该相对路径的监听。
 // 拿不到写入内容时用它（窗口内一律忽略）。
 func (c *Collection) ignoreWrite(rel string) {
@@ -176,12 +188,42 @@ func (c *Collection) ignoreWriteContent(rel string, content []byte) {
 // UID 来自集合清单（不可信输入），必须转成安全文件名后才能拼路径：否则
 // `meta.uid: ../../x` 会把 sqlite 建到配置目录之外（MkdirAll + 建表 = 越界写盘）。
 func (c *Collection) indexPath() string {
-	name := safeIndexName(c.UID) + ".sqlite"
+	key := c.UID
+	if c.indexKey != "" {
+		key = c.indexKey
+	}
+	name := safeIndexName(key) + ".sqlite"
 	base, err := config.Dir()
 	if err != nil {
 		return filepath.Join(c.Dir, ".index.sqlite")
 	}
 	return filepath.Join(base, "index", name)
+}
+
+// SetIndexKey 覆盖索引文件用的键（默认用集合 uid）。
+//
+// 为什么需要：索引按「集合 uid」落一个 sqlite 文件，而两个工作目录完全可能是同一份集合的
+// 拷贝（uid 相同、路径不同）—— 共用同一个索引文件会让两边的搜索结果 / 同步哈希互相污染。
+// App 在多根并存时检测到 uid 撞车，就给后打开的那个根换一个区分用的键。
+//
+// 调用后索引句柄会关闭（键变了，旧句柄指向的文件已经不对），下次访问会自动按新键重开；
+// 调用方通常紧接着重建一次索引，避免读到旧键留下的行。
+func (c *Collection) SetIndexKey(key string) {
+	if key == c.indexKey {
+		return
+	}
+	c.indexKey = key
+	_ = c.closeIndex()
+}
+
+// closeIndex 关闭索引句柄（文件保留）；返回关闭错误。
+func (c *Collection) closeIndex() error {
+	if c.idx == nil {
+		return nil
+	}
+	err := c.idx.Close()
+	c.idx = nil
+	return err
 }
 
 // indexNameAllowed 索引文件名的合法字符（与 uuid 的字符集一致）。
