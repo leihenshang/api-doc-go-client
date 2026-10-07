@@ -32,7 +32,9 @@ const props = defineProps<{
   /** 最近打开过、当前没打开的目录（启动恢复有上限，超出的从这里一键补开） */
   recent: { dir: string; name: string }[]
 }>()
-const { name, envs, currentEnv } = props
+// 注意：不要写 `const { name, envs, currentEnv } = props` —— 解构 props 会丢掉响应性，
+// 环境列表变了（新建/改名/删除环境）下拉仍是首次渲染时的那份，看起来就像「切不过去」。
+// 模板里一律用 props.xxx 取值。
 const emit = defineEmits<{
   'open-other': []
   reload: []
@@ -124,14 +126,14 @@ function onMenu(key: string | number): void {
     <n-dropdown trigger="click" :options="menu" @select="onMenu">
       <button class="coll" type="button" data-testid="toolbar.collection" :title="t('toolbar.switchCollection')">
         <n-icon :component="LayersOutline" :size="15" class="ci" />
-        <span class="nm">{{ name }}</span>
+        <span class="nm">{{ props.name }}</span>
         <n-icon :component="ChevronDownOutline" :size="12" class="ar" />
       </button>
     </n-dropdown>
 
     <env-picker
-      :envs="envs"
-      :model-value="currentEnv"
+      :envs="props.envs"
+      :model-value="props.currentEnv"
       @update:model-value="emit('update:currentEnv', $event)"
       @manage="emit('manage-env')"
     />

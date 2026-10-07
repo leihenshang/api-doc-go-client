@@ -53,6 +53,8 @@ async function save(): Promise<void> {
   // 变量值变了要重算地址栏解析，否则「替换后 / 变量提示」仍是旧值，看起来像没保存成功
   emit('saved')
   message.success(t('env.saved', { name: working.value.name }))
+  // 保存即收工：弹窗自动关掉（结果已经由上面的 toast 说明，不用再手动关一次）
+  close()
 }
 
 async function addEnv(): Promise<void> {
