@@ -43,7 +43,7 @@ e2e 相关模式属耗时检查，仅在明确需要时执行：
 frontend/e2e/
 ├─ cases/            用例（按功能域分文件，标题前缀功能点编号）
 │   regression-exec.spec.ts        §5-1/2：证书策略、重定向、超时、状态码、响应形态、Cookie、认证、multipart
-│   regression-collection.spec.ts  §5-3/4/5/16：round-trip、自写回环、树操作、参数表与 Bulk Edit
+│   regression-collection.spec.ts  §5-3/4/5/16：round-trip、自写回环、树操作（含点分组名折展）、参数表与 Bulk Edit
 │   regression-response.spec.ts    §5-17：响应字段只追加、保存响应示例
 │   regression-shell.spec.ts       §5-6/8/9/10/11/12/13/14/15：外壳、字体、弹窗、分栏、命令面板
 │   regression-theme.spec.ts       §5-18/19/7：主题、圆角/遮罩、语言、Markdown 转义
@@ -52,7 +52,7 @@ frontend/e2e/
 │   response-save-vars.spec.ts     保存▾ 菜单与字段表变量书签
 │   req-body-highlight.spec.ts     JSON 体着色与高亮层对齐
 │   tree-dnd.spec.ts               集合树指针拖拽
-│   tree-guides.spec.ts            集合树连接线：缩进 / 祖先竖线延续 / └ 收线 / 横线落在行中线
+│   tree-guides.spec.ts            集合树连接线：缩进 / 祖先竖线延续 / └ 收线 / 横线落在行中线 / 根行接出线与深度 0 同列 / 集合字号层级
 │   multi-root.spec.ts             多工作目录：多根并存 / 切换活动根 / 标签随根切换 / 跨目录搜索 / 跨根拖动（请求单搬、分组整棵搬、目标重名拦截）/ 启动恢复上限与「最近打开」补开
 │   mcp-allow.spec.ts             MCP 工作目录白名单：空白名单安全默认 / 加入目录 / 可写开关 / 移除
 │   createDnsRegions.spec.ts       @demo：打真实外部 https 接口，未设 E2E_DEMO_URL 即 skip

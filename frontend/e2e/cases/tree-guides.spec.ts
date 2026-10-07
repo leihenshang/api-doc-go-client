@@ -70,9 +70,27 @@ test('[B16] 集合树连接线：深度缩进 / 祖先竖线延续 / └ 收线 
   seedNested(dir)
   await openCollection(page, app)
 
-  // 深度 0（集合根直挂的分组）：不画连接线（根行是标题行，不是树节点）
-  await expect(guides(page, API_UID)).toHaveCount(0)
-  await expect(guides(page, EMPTY_UID)).toHaveCount(0)
+  // 深度 0（集合根直挂的分组）：也有连接线 —— 它那一列正好是根行展开图标的圆心，
+  // 由根行自己向下接出（.gl.root-down），于是「集合 → 顶层条目」连成一条完整的分支。
+  await expect(guides(page, API_UID)).toHaveCount(1)
+  await expect(ancestors(page, API_UID)).toHaveCount(0)
+  await expect(own(page, API_UID)).not.toHaveClass(/last/) // api 后面还有 empty
+  await expect(own(page, EMPTY_UID)).toHaveClass(/last/)
+  expect(await offsetLeft(own(page, API_UID))).toBe(GUIDE_OFFSET)
+  expect(await offsetLeft(stub(page, API_UID))).toBe(GUIDE_OFFSET)
+
+  // 根行的接出线：从行中线落到行底（与第一层子行的竖线对接），收起根后缩回不画
+  const rootGuides = page.locator('[data-testid="tree.root.guides"]')
+  await expect(rootGuides).toHaveCount(1)
+  const rootRow = (await page.getByTestId('tree.root').boundingBox())!
+  const rootDown = (await rootGuides.locator('.gl.root-down').boundingBox())!
+  expect(rootDown.height).toBeCloseTo(rootRow.height / 2, 0)
+  expect(Math.abs(rootDown.y + rootDown.height - (rootRow.y + rootRow.height))).toBeLessThanOrEqual(1)
+  await page.getByTestId('tree.root.caret').click() // 收起该根
+  await expect(treeRowByUid(page, API_UID)).toHaveCount(0)
+  await expect(rootGuides).toHaveCount(0)
+  await page.getByTestId('tree.root.caret').click() // 展开回来
+  await expect(rootGuides).toHaveCount(1)
 
   // 深度 1：只有本行一列；ping 后面还有 pong → ├（竖线满行高），pong 是末行 → └
   await expect(ancestors(page, PING_UID)).toHaveCount(0)
@@ -131,6 +149,7 @@ test('[B16] 集合树连接线：深度缩进 / 祖先竖线延续 / └ 收线 
 test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名同字号同基线', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   seedNested(dir)
+  await app.addCollection('bruno-sample') // 第二个根：用于对比「活动根 / 非活动根」的字号与强调
   await openCollection(page, app)
 
   // ① 竖线列 = 某一层分组的展开图标圆心（不是按钮左边缘）：这样线是从图标里垂下来的。
@@ -141,6 +160,11 @@ test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名�
   const sameColumn = (lineX: number, caretX: number, label: string): void => {
     expect(Math.abs(lineX - caretX), `${label}：竖线 ${lineX} / 图标圆心 ${caretX}`).toBeLessThanOrEqual(1)
   }
+  // 深度 0 的那一列 = **根行**展开图标的圆心；根行的接出线也在同一列（连线才算接上）
+  const basicRootRow = page.getByTestId('tree.root').filter({ hasText: 'e2e-basic' })
+  const basicCaret = basicRootRow.locator('.caret svg')
+  sameColumn(await lineLeftX(own(page, API_UID)), await midX(basicCaret), 'api 列=根行图标')
+  sameColumn(await lineLeftX(basicRootRow.locator('.gl.root-down')), await midX(basicCaret), '根行接出线')
   // deep / sibling 是 sub 的子行：它们的列落在 sub 的展开图标圆心
   sameColumn(await lineLeftX(own(page, DEEP_UID)), await caretCenterX(SUB_UID), 'deep')
   sameColumn(await lineLeftX(own(page, SIBLING_UID)), await caretCenterX(SUB_UID), 'sibling')
@@ -171,4 +195,14 @@ test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名�
   const row = (await treeRowByUid(page, PING_UID).boundingBox())!
   const tagBox = (await tag.boundingBox())!
   expect(Math.abs(tagBox.y + tagBox.height / 2 - (row.y + row.height / 2))).toBeLessThanOrEqual(2)
+
+  // ③ 集合目录字号：比树里的条目大一档；**被选中的那个集合再大一档**（点一下就换过去）。
+  //    注意旧实现里 `.coll-name` 的 14px 被 `.row > .rname` 的 12.5px 盖掉了 —— 这里断言真实生效值。
+  const px = async (loc: Locator): Promise<number> => parseFloat(await fontOf(loc))
+  const basicName = basicRootRow.locator('.coll-name')
+  expect(await px(basicName)).toBeGreaterThan(await px(name))
+  const idleSize = await px(basicName)
+  await basicRootRow.click() // 切成活动根
+  await expect(basicRootRow).toHaveClass(/root-active/)
+  expect(await px(basicName)).toBeGreaterThan(idleSize)
 })

@@ -78,6 +78,8 @@ interface Row {
    * 祖先还有后续兄弟才需要把竖线延伸下来，否则那一列是空的。
    */
   lines: boolean[]
+  /** 置顶收藏区（平铺展示，不是集合根的子行）：不参与连接线 */
+  pinned?: boolean
 }
 
 const INDENT = 16
@@ -135,6 +137,18 @@ function folderKey(root: string, path: string): string {
   return `${root}\n${path}`
 }
 
+/**
+ * 根行下方有没有可见内容（子行，或正在输入的「新建分组」行）。
+ * 决定根行要不要从展开图标向下接一条连接线：收起 / 空集合时不画，
+ * 否则会留下一截悬空的竖线。
+ */
+function rootHasVisibleKids(root: string): boolean {
+  if (collapsedRoots.value.has(root)) return false
+  if (adding.value?.root === root && adding.value.parent === '') return true
+  const item = props.roots.find((r) => r.root === root)
+  return !!item && treeOf(item).length > 0
+}
+
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
   // H5：收藏的请求置顶展示（不改变磁盘顺序）；收藏按根隔离，置顶区只显示活动根的
@@ -165,7 +179,7 @@ const rows = computed<Row[]>(() => {
       if (row.isRoot || row.node?.type !== 'request' || !favUids.has(row.node.uid)) continue
       if (row.root !== props.activeRoot) continue // 置顶区只对活动根（收藏本身按根隔离）
       // 置顶区是平铺展示，不参与层级连接线
-      favRows.push({ ...row, depth: 0, last: true, lines: [] })
+      favRows.push({ ...row, depth: 0, last: true, lines: [], pinned: true })
     }
     if (favRows.length) {
       // 收置顶区：在最前插入
@@ -529,12 +543,20 @@ function onPointerUp(ev: PointerEvent): void {
 }
 
 /**
- * 行点击：请求行打开对应页签（拖动刚结束的那次点击忽略）。
- * 点的是非活动根里的行时，先把那一根切成活动根 —— 页签是按根分组的，
- * 打开别根的请求必须落到它自己那一组里。
+ * 点击树里的行：请求行打开对应页签（拖动刚结束的那次点击忽略）；分组行折叠/展开。
+ *
+ * 分组行点**名字**也能折展（不必非去点那个小箭头）—— 文件管理器里就是这样，只认箭头的命中区太小。
+ * 行内控件（箭头 / 下拉 / 操作按钮 / 重命名输入框）自己处理点击，这里要放行，否则点「+」建子项时会顺带折展一次。
+ * 点的是非活动根里的请求时，先把那一根切成活动根 —— 页签是按根分组的。
  */
-function onRowClick(root: string, node: TreeNode): void {
+function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
   if (editing.value || suppressClick) return
+  const el = ev.target as HTMLElement | null
+  if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
+  if (node.type === 'folder') {
+    toggle(root, node.path)
+    return
+  }
   if (node.type !== 'request') return
   if (root && root !== coll.activeRoot) {
     void ensureActive(root).then(() => emit('open', node.uid))
@@ -734,8 +756,8 @@ watch(
 
       <template v-for="row in rows" :key="row.isRoot ? `root:${row.root}` : `${row.root}|${row.node?.path}`">
         <!-- 工作目录根行：既是该根的标题，也是「移回该根顶层」的放置目标（拖动时高亮） -->
+        <template v-if="row.isRoot">
         <div
-          v-if="row.isRoot"
           class="row root"
           :class="{
             on: row.root === props.activeRoot,
@@ -749,6 +771,15 @@ watch(
           data-testid="tree.root"
           @click="emit('activate', row.root)"
         >
+          <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
+          <span
+            v-if="rootHasVisibleKids(row.root)"
+            class="guides"
+            aria-hidden="true"
+            data-testid="tree.root.guides"
+          >
+            <span class="gl root-down" :style="{ left: GUIDE_OFFSET + 'px' }" />
+          </span>
           <button class="caret" data-testid="tree.root.caret" :title="t('tree.expandAll')" @click.stop="toggleRoot(row.root)">
             <n-icon
               :component="collapsedRoots.has(row.root) ? ChevronForwardOutline : ChevronDownOutline"
@@ -775,12 +806,22 @@ watch(
           </span>
         </div>
 
-        <!-- 该根顶层的「新建分组」输入行 -->
+        <!-- 该根顶层的「新建分组」输入行：它是根的子行，所以与子行同缩进、同连接线。
+             注意挂在根行分支里（不是 v-else-if）：挂外面时「任意一行」都能匹配，会渲染出多个输入框。 -->
         <div
-          v-else-if="adding && adding.root === row.root && adding.parent === ''"
+          v-if="adding && adding.root === row.root && adding.parent === ''"
           class="row"
           :style="{ paddingLeft: `${8 + INDENT}px` }"
         >
+          <span class="guides" aria-hidden="true">
+            <!-- 输入行排在子行最前：后面还有子行就是 ├，集合本来为空才是 └ -->
+            <span
+              class="gl own"
+              :class="{ last: !rootHasVisibleKids(row.root) }"
+              :style="{ left: GUIDE_OFFSET + 'px' }"
+            />
+            <span class="gl stub" :style="{ left: GUIDE_OFFSET + 'px' }" />
+          </span>
           <n-input
             :ref="setAddRef"
             v-model:value="addValue"
@@ -791,6 +832,7 @@ watch(
             @keyup.esc="adding = null"
           />
         </div>
+        </template>
 
         <template v-else>
           <div
@@ -811,11 +853,18 @@ watch(
             data-testid="tree.row"
             :aria-current="row.node?.uid === props.activeUid && row.root === props.activeRoot ? 'true' : undefined"
             :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
-            @click="onRowClick(row.root, row.node!)"
+            @click="onRowClick(row.root, row.node!, $event)"
             @pointerdown="onRowPointerDown(row.root, row.node!, $event)"
           >
-            <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局） -->
-            <span v-if="row.depth > 0" class="guides" aria-hidden="true" data-testid="tree.row.guides">
+            <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局）。
+                 深度 0（直接挂在集合根下的分组/请求）也要画：它的那一列就是根行展开图标的圆心，
+                 由根行自己向下接出（见 .gl.root-down），于是「集合 → 顶层条目」连成一条。 -->
+            <span
+              v-if="row.depth >= 0 && !row.pinned"
+              class="guides"
+              aria-hidden="true"
+              data-testid="tree.row.guides"
+            >
               <span
                 v-for="(cont, i) in row.lines"
                 :key="`l${i}`"
@@ -831,11 +880,14 @@ watch(
               <span class="gl stub" :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
             </span>
             <template v-if="row.node!.type === 'folder'">
+              <!-- 必须 .stop：不用它的话，箭头自己的折展会先把图标节点换掉，
+                   同一个 click 冒泡到行时 ev.target 已是脱离 DOM 的旧节点 → 行里「排除 .caret」判不出来
+                   → 又折展一次，等于没反应（实测）。 -->
               <button
                 class="caret"
                 data-testid="tree.row.caret"
                 :title="t('tree.expandAll')"
-                @click="toggle(row.root, row.node!.path)"
+                @click.stop="toggle(row.root, row.node!.path)"
               >
                 <n-icon
                   :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
@@ -1163,6 +1215,14 @@ watch(
   border-radius: 1px;
 }
 
+/* 根行向下的接出线：从行中线（也就是展开图标的圆心高度）落到行底，
+   正好与第一层子行那一列的竖线接上 —— 「集合 → 顶层条目」连成一条。 */
+.gl.root-down {
+  top: 50%;
+  bottom: 0;
+  background: var(--app-guide);
+}
+
 .row:hover {
   background: var(--app-row-hover);
 }
@@ -1205,8 +1265,15 @@ watch(
   flex: 0 0 auto;
 }
 
-.coll-name {
-  font-size: 14px;
+/* 集合根行：行高略高、字号比树里的条目大一档，层级一眼可辨。
+   选择器必须写成 `.row.root > .coll-name`：`.row > .rname`（同为两个类）也命中根行的名字，
+   两者同在时按后出现的算 —— 只写 `.coll-name` 的话 15px 会被 12.5px 盖掉（旧代码的 14px 就是这么失效的）。 */
+.row.root {
+  min-height: 30px;
+}
+
+.row.root > .coll-name {
+  font-size: 15px;
   font-weight: 700;
   color: var(--app-text);
 }
@@ -1246,12 +1313,14 @@ watch(
   color: var(--app-muted);
 }
 
-/* 活动根：左侧强调条 + 名称加重，一眼看出「集合级操作会落到谁身上」 */
+/* 活动根：底色 + 左侧强调条 + 名称再大一档，一眼看出「集合级操作会落到谁身上」 */
 .row.root.root-active {
+  background: var(--app-info-tint);
   box-shadow: inset 2px 0 0 var(--app-accent);
 }
 
-.row.root.root-active .coll-name {
+.row.root.root-active > .coll-name {
+  font-size: 16px;
   color: var(--app-accent-dark);
 }
 
