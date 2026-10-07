@@ -140,3 +140,36 @@ test.describe('集合文件层与会话', () => {
     expect(postTint).toBe(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--app-method-post-tint').trim()))
   })
 })
+
+test('[B4] 点分组名即可折叠/展开（不必非点小箭头），行内控件不误触发', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+
+  const api = treeRowByUid(page, API_UID)
+  const ping = treeRowByUid(page, PING_UID)
+  await expect(ping).toBeVisible() // 默认展开
+
+  // 点名字折叠 → 子行消失；再点一下恢复
+  await api.getByTestId('tree.row.name').click()
+  await expect(ping).toHaveCount(0)
+  await api.getByTestId('tree.row.name').click()
+  await expect(ping).toBeVisible()
+
+  // 箭头仍然是另一条路；点它不会因为冒泡再折展一次（否则等于没反应）
+  await api.getByTestId('tree.row.caret').click()
+  await expect(ping).toHaveCount(0)
+  await api.getByTestId('tree.row.caret').click()
+  await expect(ping).toBeVisible()
+
+  // 行内控件（重命名按钮 / 「+」下拉）自己处理点击：不应顺带把分组折起来或展开
+  await hoverAndClick(api, 'tree.row.rename')
+  await expect(api.locator('input')).toBeVisible()
+  await expect(ping).toBeVisible()
+  await api.locator('input').press('Escape') // 退出行内改名（焦点得在输入框上，快捷键才吃得到）
+  await expect(api.getByTestId('tree.row.name')).toBeVisible()
+  await expect(ping).toBeVisible()
+
+  // 请求行的名字照旧是「打开请求」，不是折展
+  await treeRowByUid(page, PING_UID).locator('.rname').click()
+  await expect(page.getByTestId('tab.item').filter({ hasText: 'ping' })).toBeVisible()
+})
