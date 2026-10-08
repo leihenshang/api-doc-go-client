@@ -3,8 +3,8 @@
 // 使 {{变量}} 显示为主色底纹；input 保留真实光标与选区。
 // 变量取值不再单独占一行展示（原「替换后」预览行已移除），改为鼠标悬停在变量上时给出：
 // 已定义 → 显示取值（敏感变量只显示掩码）；未定义 → 提示去「环境设置…」里补；内置变量 → 说明发送时生成。
-import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { computed, nextTick, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{
   modelValue: string
@@ -15,6 +15,8 @@ const props = defineProps<{
   missing?: string[]
   /** 敏感变量名：提示里只显示掩码 */
   secrets?: string[]
+  /** 变量自动提示候选（当前环境变量名等）；不传则禁用自动提示 */
+  suggestions?: string[]
 }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string] }>()
 const { t } = useI18n()
@@ -48,6 +50,103 @@ const wrap = ref<HTMLElement | null>(null)
 const el = ref<HTMLInputElement | null>(null)
 const tip = ref<Tip | null>(null)
 
+// ---- 变量自动提示（输入 {{ 前缀后弹出候选，Tab 录入）----
+// 候选 = 使用方传入的环境变量名 + 内置动态变量；不传 suggestions 则整体禁用。
+const BUILTIN_NAMES = ['$uuid', '$timestamp', '$isoTimestamp', '$randomInt']
+const sugOpen = ref(false)
+const sugs = ref<string[]>([])
+const sugHi = ref(0)
+/** 当前 open `{{` 后变量名的起点（用于替换补全） */
+let sugOpenIdx = -1
+
+const suggestPool = computed<string[]>(() => {
+  const set = new Set<string>(props.suggestions ?? [])
+  for (const n of BUILTIN_NAMES) set.add(n)
+  return Array.from(set)
+})
+
+/** 根据文本与光标位置判定当前是否处于一个 open `{{…` 内，若是则返回已输入变量名前缀（可能为空串）。 */
+function varPrefixAt(text: string, sel: number): string | null {
+  const head = text.slice(0, sel)
+  const openCount = (head.match(/\{\{/g) ?? []).length
+  const closeCount = (head.match(/\}\}/g) ?? []).length
+  if (openCount <= closeCount) return null // 不在 open 花括号内
+  // 取光标左侧最近的一段「{{ + 空白 + 变量名前缀」；只输入到 {{（或后随空白）记为空前缀，也弹候选
+  const m = /(\{\{\s*)?([A-Za-z_$][A-Za-z0-9_]*)?$/.exec(head)
+  const prefix = m?.[2] ?? ''
+  sugOpenIdx = sel - prefix.length // 变量名起点 = 紧跟 open {{ 之后
+  return prefix
+}
+
+function openSuggest(): void {
+  const input = el.value
+  if (!input || !(props.suggestions?.length)) return
+  // 用实时 input 值（prop 在 emit 后异步更新，会滞后一个渲染）
+  const prefix = varPrefixAt(input.value || '', input.selectionStart ?? 0)
+  if (prefix === null) {
+    sugOpen.value = false
+    return
+  }
+  const lower = prefix.toLowerCase()
+  const list = suggestPool.value.filter((n) => n.toLowerCase().startsWith(lower))
+  if (!list.length) {
+    sugOpen.value = false
+    return
+  }
+  sugs.value = list
+  sugHi.value = sugOpen.value ? Math.min(sugHi.value, list.length - 1) : 0
+  sugOpen.value = true
+}
+
+async function applySuggestion(): Promise<void> {
+  const input = el.value
+  if (!input || !sugOpen.value || !sugs.value[sugHi.value]) return
+  const name = sugs.value[sugHi.value]
+  const sel = input.selectionStart ?? 0
+  const v = input.value
+  // 在应用时按当前光标重新定位 open `{{` 后的变量名起点（方向键可能移动过光标）
+  if (varPrefixAt(v, sel) === null) {
+    sugOpen.value = false
+    return
+  }
+  const start = sugOpenIdx
+  sugOpen.value = false
+  if (start < 0 || start > sel) return
+  // 光标后若有一段同变量名的残余并以 `}}` 结尾（用户把名字打完、又移回中间），整段吞掉、不再补闭合
+  const rest = v.slice(sel)
+  const closePos = rest.indexOf('}}')
+  const hadClose = closePos >= 0 && /^[A-Za-z_$][A-Za-z0-9_]*$/.test(rest.slice(0, closePos))
+  const end = hadClose ? sel + closePos : sel
+  // 替换 [start, end) 后立刻补闭合 `}}`，再把原光标之后的文本（如 /test）接在闭合符后面：{{name}}/test
+  const next = v.slice(0, start) + name + (hadClose ? '' : '}}') + v.slice(end)
+  emit('update:modelValue', next)
+  const caret = start + name.length
+  await nextTick()
+  input.focus()
+  input.setSelectionRange(caret, caret)
+}
+
+function onKeydown(e: KeyboardEvent): void {
+  if (!sugOpen.value) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    sugHi.value = (sugHi.value + 1) % sugs.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    sugHi.value = (sugHi.value - 1 + sugs.value.length) % sugs.value.length
+  } else if (e.key === 'Tab' || e.key === 'Enter') {
+    e.preventDefault()
+    void applySuggestion()
+  } else if (e.key === 'Escape') {
+    sugOpen.value = false
+  }
+}
+
+function onBlur(): void {
+  sugOpen.value = false
+  tip.value = null
+}
+
 const parts = computed<Part[]>(() => {
   const out: Part[] = []
   const re = /\{\{[^{}]*\}\}/g
@@ -71,6 +170,7 @@ function sync(): void {
 function onInput(e: Event): void {
   emit('update:modelValue', (e.target as HTMLInputElement).value)
   tip.value = null
+  openSuggest()
   sync()
 }
 
@@ -148,8 +248,28 @@ function onLeave(): void {
         @scroll="sync"
         @mousemove="onMove"
         @mouseleave="onLeave"
-        @blur="onLeave"
+        @blur="onBlur"
+        @keydown="onKeydown"
       />
+    </div>
+
+    <!-- 变量自动提示浮层：光标落在 {{… 内时给出候选，Tab/Enter 录入 -->
+    <div
+      v-if="sugOpen"
+      class="sug mono"
+      data-testid="var.suggest"
+    >
+      <div
+        v-for="(s, i) in sugs"
+        :key="s"
+        class="sug-item"
+        :class="{ on: i === sugHi }"
+        data-testid="var.suggest.item"
+        @mouseenter="sugHi = i"
+        @mousedown.prevent="applySuggestion"
+      >
+        {{ s }}
+      </div>
     </div>
 
     <div v-if="tip" class="tip mono" :style="{ left: `${tip.left}px` }" data-testid="req.varTip">
@@ -258,6 +378,40 @@ function onLeave(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+
+/* 变量自动提示浮层：定位在输入框下方，可溢出输入框（.vw 不裁切） */
+.sug {
+  position: absolute;
+  top: calc(var(--vi-h, 28px) + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 160px;
+  max-width: min(320px, 100%);
+  max-height: 200px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  box-shadow: var(--app-shadow-sm, 0 4px 12px rgb(0 0 0 / 12%));
+}
+
+.sug-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--app-text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sug-item.on,
+.sug-item:hover {
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
 }
 
 .tip b {

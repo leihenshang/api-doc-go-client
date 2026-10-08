@@ -251,6 +251,7 @@ export default {
     newRequest: 'New request',
     newFolder: 'New folder',
     newSubFolder: 'New subfolder',
+    more: 'Collection actions',
     folderName: 'Folder name',
     subFolderName: 'Subfolder name',
     rename: 'Rename',

@@ -7,8 +7,8 @@
 //
 // 两层必须严格重叠：同一字体（--app-mono）、同字号/行高/内边距/换行规则，否则光标会落在
 // 字形上（VarInput 里踩过：两层字体不一致时同一串文本宽度差 48px，光标与文字错位）。
-import { computed, ref } from 'vue'
-import { highlightJson } from '@/lib/jsonHighlight'
+import { highlightJson } from '@/lib/jsonHighlight';
+import { computed, nextTick, ref } from 'vue';
 
 const props = defineProps<{
   modelValue: string
@@ -19,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [v: string]; input: [] }>()
 
 const hl = ref<HTMLElement | null>(null)
+const ta = ref<HTMLTextAreaElement | null>(null)
 const parts = computed(() => highlightJson(props.modelValue))
 
 function onInput(ev: Event): void {
@@ -26,13 +27,65 @@ function onInput(ev: Event): void {
   emit('input')
 }
 
+/** 回落一个新值并把光标放到指定位置（配合受控 v-model）。 */
+function commit(next: string, caret: number): void {
+  emit('update:modelValue', next)
+  emit('input')
+  void nextTick().then(() => {
+    const el2 = ta.value
+    if (!el2) return
+    el2.focus()
+    el2.setSelectionRange(caret, caret)
+  })
+}
+
+// 配对的开放/闭合字符表：`{`/`[`/`"` 自动补闭合并把光标居中；再输闭合符或碰到已闭合则跳过。
+// JSON 只处理这三对（用户已确认不含单引号/圆括号）。
+const PAIR: Record<string, [string, string]> = {
+  '{': ['{', '}'],
+  '[': ['[', ']'],
+  ']': ['[', ']'],
+  '}': ['{', '}'],
+  '"': ['"', '"'],
+}
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  const pair = PAIR[e.key]
+  if (!pair) return
+  const el2 = ta.value
+  if (!el2) return
+  const s = el2.selectionStart
+  const en = el2.selectionEnd
+  const v = props.modelValue
+  const [open, close] = pair
+  // 有选区：用「open + 选中 + close」包裹
+  if (en > s) {
+    e.preventDefault()
+    commit(v.slice(0, s) + open + v.slice(s, en) + close + v.slice(en), s + open.length)
+    return
+  }
+  // 无选区：光标后已是闭合符（typed over）→ 只右移光标，不重复自补
+  if (v[s] === close) {
+    e.preventDefault()
+    el2.setSelectionRange(s + 1, s + 1)
+    return
+  }
+  // 输入的是开放符 → 补「开放 + 闭合」并把光标放中间
+  if (e.key === '{' || e.key === '[' || e.key === '"') {
+    e.preventDefault()
+    commit(v.slice(0, s) + open + close + v.slice(s), s + open.length)
+  }
+  // 其余（单独补闭合符且光标后没有闭合）→ 放行默认输入单个字符
+}
+
 /** 滚动同步：textarea 负责滚动，高亮层跟随（否则两层会错位）。 */
 function sync(ev: Event): void {
-  const ta = ev.target as HTMLTextAreaElement
-  const el = hl.value
-  if (!el) return
-  el.scrollTop = ta.scrollTop
-  el.scrollLeft = ta.scrollLeft
+  const t = ev.target as HTMLTextAreaElement
+  const el2 = hl.value
+  if (!el2) return
+  el2.scrollTop = t.scrollTop
+  el2.scrollLeft = t.scrollLeft
 }
 </script>
 
@@ -45,12 +98,14 @@ function sync(ev: Event): void {
       <span v-if="!modelValue" class="ph">{{ props.placeholder }}</span>
     </div>
     <textarea
+      ref="ta"
       class="ta mono"
       :value="props.modelValue"
       spellcheck="false"
       autocomplete="off"
       data-testid="req.bodyRaw"
       @input="onInput"
+      @keydown="onKeydown"
       @scroll="sync"
     />
   </div>
