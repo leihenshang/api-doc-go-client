@@ -9,7 +9,7 @@ type (
 	Body            = share.Body
 	Auth            = share.Auth
 	RequestSettings = share.RequestSettings
-	Var             = share.Var
+	Var             = share.EnvVar
 	Node            = share.Node
 
 	requestFile = share.RequestFile // 请求文件（磁盘）
