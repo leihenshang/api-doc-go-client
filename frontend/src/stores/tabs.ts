@@ -4,14 +4,14 @@
 //   - 自动保存（防抖 800ms，关闭 tab / 失焦 / 发送前 flush）；
 //   - URL 预览与变量告警独立防抖（300ms）；
 //   - 新建请求先开「未落盘草稿」tab（draft=true）：不写盘、不自动保存，关闭时由 UI 提示保存 + 选分组。
-import { defineStore } from 'pinia'
 import { i18n } from '@/i18n'
-import { api } from '@/lib/ipc'
 import { grpcSendBlocker } from '@/lib/grpc'
+import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { GrpcSchema, RequestDoc, ResolveResult, SendResult } from '@/types'
+import { defineStore } from 'pinia'
 
 export interface Tab {
   key: string
@@ -394,6 +394,11 @@ export const useTabsStore = defineStore('tabs', {
       }
       // P0：冲突未解决前不再尝试写盘（界面横幅提供「重新加载 / 另存为副本」）
       if (tab.conflict) return
+      // 防假冲突：编辑触发的自动保存可能仍在在途（tab.saving）。并发 flush 会在「索引已更新、
+      // baseHash 尚未回写」的中间态做比对 —— baseHash 只在保存成功后才更新，同一 uid 在途期间
+      // 再跑一次比较必然对不上，会把**本方正在进行的保存**误判成外部改动 → 假冲突（Windows 上
+      // 慢 I/O 更容易踩到）。在途的那次保存完成后会刷新 baseHash，改动由后续的防抖保存继续。
+      if (tab.saving) return
       await this.refreshHashes()
       const disk = this.hashes[tab.uid] ?? ''
       if (tab.baseHash && disk && disk !== tab.baseHash) {
@@ -403,9 +408,13 @@ export const useTabsStore = defineStore('tabs', {
       }
       tab.saving = true
       this.savingCount++
+      // 快照本次落盘内容：保存期间用户又改动了的话，落盘的是旧内容，下面对比后保持脏并让
+      // 后续的防抖保存接手，避免「写进了旧内容却把脏标记清掉」悄悄丢编辑。
+      const snapshot = JSON.stringify(tab.request)
       try {
         await api.saveRequest({ ...tab.request, expectHash: tab.baseHash || undefined })
-        tab.dirty = false
+        const editedAgain = JSON.stringify(tab.request) !== snapshot
+        tab.dirty = editedAgain
         tab.grpcError = ''
         // Go 侧写盘后已把索引 hash 更新为新值，这里取回来作为下一次比对的基准
         await this.refreshHashes()
@@ -414,8 +423,10 @@ export const useTabsStore = defineStore('tabs', {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (msg.includes('[conflict]')) {
-          tab.conflict = true // Go 侧比对哈希发现磁盘被改：拒写
-          message.warning(i18n.global.t('conflict.detected'))
+          // Go 侧比对哈希发现磁盘被改：拒写。已处于冲突态就不再重复弹 toast（避免连保存拒写时堆叠）。
+          const already = tab.conflict
+          tab.conflict = true
+          if (!already) message.warning(i18n.global.t('conflict.detected'))
           return
         }
         // 同一条错误只提示一次（自动保存会反复触发），Schema 分段常驻展示这次失败原因
@@ -458,6 +469,10 @@ export const useTabsStore = defineStore('tabs', {
       let conflicts = 0
       for (const tab of this.tabs) {
         if (tab.draft || !tab.uid) continue
+        // 本方保存可能在途：索引已更新、baseHash 尚未回写（flush 只在保存成功后刷 baseHash）。
+        // 若此时按「索引≠baseHash」判冲突，就把正在进行的本方保存误判成外部改动 → 假冲突。
+        // 与 flush 的 `if (tab.saving) return` 对齐，同一 uid 在途期间跳过这次同步。
+        if (tab.saving) continue
         const cur = this.hashes[tab.uid] ?? ''
         if (!cur || !tab.baseHash || cur === tab.baseHash) continue
         if (tab.dirty) {

@@ -167,9 +167,13 @@ func (c *Collection) Close() error {
 
 // ignoreWrite 自写回环：写盘前短暂屏蔽对该相对路径的监听。
 // 拿不到写入内容时用它（窗口内一律忽略）。
+//
+// 窗口取 1.5s：Windows 上 fsnotify 的事件投递延迟常超过 1s，400ms 会让「本方刚写入」的事件
+// 在窗口过期后才到达，泄漏成外部改动并触发假冲突（编辑未保存时尤为明显）。内容指纹版
+// （ignoreWriteContent）只忽略「内容仍等于我方写入」的事件，多加时长不会误吞真正的并发改动。
 func (c *Collection) ignoreWrite(rel string) {
 	if c.w != nil {
-		c.w.Ignore(rel, 400*time.Millisecond)
+		c.w.Ignore(rel, 1500*time.Millisecond)
 	}
 }
 
@@ -177,7 +181,7 @@ func (c *Collection) ignoreWrite(rel string) {
 // 才忽略；同一窗口里别人改的内容照常上报（否则别人的改动会被静默吞掉）。
 func (c *Collection) ignoreWriteContent(rel string, content []byte) {
 	if c.w != nil {
-		c.w.IgnoreWrite(rel, sha256Hex(content), 400*time.Millisecond)
+		c.w.IgnoreWrite(rel, sha256Hex(content), 1500*time.Millisecond)
 	}
 }
 
