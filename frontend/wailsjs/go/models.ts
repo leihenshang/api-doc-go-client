@@ -297,14 +297,14 @@ export namespace collection {
 		    return a;
 		}
 	}
-	export class Var {
+	export class EnvVar {
 	    name: string;
 	    value: string;
 	    enabled: boolean;
 	    secret: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new Var(source);
+	        return new EnvVar(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -317,7 +317,7 @@ export namespace collection {
 	}
 	export class Env {
 	    name: string;
-	    vars: Var[];
+	    vars: EnvVar[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Env(source);
@@ -326,7 +326,7 @@ export namespace collection {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
-	        this.vars = this.convertValues(source["vars"], Var);
+	        this.vars = this.convertValues(source["vars"], EnvVar);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -467,6 +467,7 @@ export namespace collection {
 	        this.icon = source["icon"];
 	    }
 	}
+	
 	
 	export class ExampleRequest {
 	    method: string;
@@ -824,7 +825,6 @@ export namespace collection {
 		    return a;
 		}
 	}
-	
 	
 	
 
