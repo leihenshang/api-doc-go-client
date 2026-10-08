@@ -2,32 +2,32 @@
 // 集合树：根行（集合名 + 本地徽章）→ 分组 / 请求；底部为「本地存储」说明卡（design-spec §2）。
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
-import { NButton, NDropdown, NIcon, NInput, NModal, NPopconfirm, NSelect } from 'naive-ui'
-import type { InputInst } from 'naive-ui'
-import {
-  AddOutline,
-  ChevronDownOutline,
-  ChevronForwardOutline,
-  CloseOutline,
-  ContractOutline,
-  CreateOutline,
-  ExpandOutline,
-  FolderOpenOutline,
-  GitNetworkOutline,
-  MoveOutline,
-  RefreshOutline,
-  Star,
-  StarOutline,
-  TerminalOutline,
-  TrashOutline,
-} from '@vicons/ionicons5'
-import { computed, h, nextTick, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
+import {
+    AddOutline,
+    ChevronDownOutline,
+    ChevronForwardOutline,
+    CloseOutline,
+    ContractOutline,
+    CreateOutline,
+    ExpandOutline,
+    FolderOpenOutline,
+    GitNetworkOutline,
+    MoveOutline,
+    RefreshOutline,
+    Star,
+    StarOutline,
+    TerminalOutline,
+    TrashOutline
+} from '@vicons/ionicons5'
+import type { InputInst } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NInput, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { computed, h, nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   /** 已打开的工作目录（单树多根：每个根行下面挂自己的树） */
@@ -98,15 +98,31 @@ const folderMenu = computed(() => [
   { key: 'folder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
 ])
 
-/** 工具栏「＋」的下拉：选协议后开对应的未落盘草稿（G1.1）。 */
-const newMenu = computed(() => [
-  { key: 'http', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
+/** 集合标题 “···” 下拉：集合级动作统一入口（展开/收起、新建分组/请求、导入 curl、重载、关闭）。 */
+const rootMenu = computed(() => [
+  {
+    key: 'all',
+    label: allCollapsed.value ? t('tree.expandAll') : t('tree.collapseAll'),
+    icon: () => h(NIcon, { component: allCollapsed.value ? ExpandOutline : ContractOutline }),
+  },
+  { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
+  { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
   { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
+  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
+  { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }) },
+  { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }) },
 ])
 
-function onNewMenu(key: string | number): void {
-  if (key === 'grpc') emit('new-grpc-request', '')
-  else emit('new-request', '')
+/** 集合级动作先切到被点击的工作目录（写操作作用于它），再分发各分支。 */
+async function onRootMenu(root: string, key: string | number): Promise<void> {
+  await ensureActive(root)
+  if (key === 'all') toggleAll()
+  else if (key === 'folder') void startAdd(root, '')
+  else if (key === 'req') emit('new-request', '')
+  else if (key === 'grpc') emit('new-grpc-request', '')
+  else if (key === 'curl') emit('import-curl', '')
+  else if (key === 'reload') emit('reload-root', root)
+  else if (key === 'close' && confirm(t('tree.confirmCloseDir', { name: rootName(root) }))) emit('close-root', root)
 }
 
 const searching = computed(() => keyword.value.trim() !== '')
@@ -212,21 +228,6 @@ function rootDir(root: string): string {
 
 function rootReadOnly(root: string): boolean {
   return props.roots.find((r) => r.root === root)?.readOnly ?? false
-}
-
-/** 某个根的行数统计（根行上的「n 个请求」）。 */
-function requestCount(root: string): number {
-  const item = props.roots.find((r) => r.root === root)
-  if (!item) return 0
-  let n = 0
-  const walk = (nodes: TreeNode[]): void => {
-    for (const x of nodes) {
-      if (x.type === 'request') n++
-      else if (x.children) walk(x.children)
-    }
-  }
-  walk(item.info.tree)
-  return n
 }
 
 const allCollapsed = computed(() => {
@@ -726,27 +727,6 @@ watch(
 
 <template>
   <div class="sidebar">
-    <div class="head">
-      <span class="sp" />
-      <n-button quaternary size="tiny" :title="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')" @click="toggleAll">
-        <template #icon>
-          <n-icon :component="allCollapsed ? ExpandOutline : ContractOutline" />
-        </template>
-      </n-button>
-      <n-button quaternary size="tiny" :title="t('tree.newFolder')" data-testid="tree.newFolder" @click="startAdd(coll.activeRoot, '')">
-        <template #icon><n-icon :component="FolderOpenOutline" /></template>
-      </n-button>
-      <!-- 新建：下拉区分协议（HTTP / gRPC），两者都开「未落盘草稿」tab -->
-      <n-dropdown trigger="click" placement="bottom-end" :options="newMenu" @select="onNewMenu">
-        <n-button quaternary size="tiny" :title="t('tree.newRequest')" data-testid="tree.new">
-          <template #icon><n-icon :component="AddOutline" /></template>
-        </n-button>
-      </n-dropdown>
-      <n-button quaternary size="tiny" :title="t('curl.title')" data-testid="tree.importCurl" @click="emit('import-curl', '')">
-        <template #icon><n-icon :component="TerminalOutline" /></template>
-      </n-button>
-    </div>
-
     <div class="search">
       <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')" />
     </div>
@@ -789,20 +769,14 @@ watch(
           <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
           <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
           <span v-else class="badge">{{ t('local.badge') }}</span>
-          <span class="cnt" :title="t('tree.reqCount', { n: requestCount(row.root) })">{{ requestCount(row.root) }}</span>
           <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot') }}</span>
           <span class="actions">
-            <button class="act" type="button" data-testid="tree.root.reload" :title="t('tree.reloadDir')" @click.stop="emit('reload-root', row.root)">
-              <n-icon :component="RefreshOutline" :size="13" />
-            </button>
-            <n-popconfirm @positive-click="emit('close-root', row.root)">
-              <template #trigger>
-                <button class="act danger" type="button" data-testid="tree.root.close" :title="t('tree.closeDir')" @click.stop>
-                  <n-icon :component="CloseOutline" :size="13" />
-                </button>
-              </template>
-              {{ t('tree.confirmCloseDir', { name: rootName(row.root) }) }}
-            </n-popconfirm>
+            <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu" @select="onRootMenu(row.root, $event)">
+              <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
+              <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')" aria-label="···">
+                ···
+              </button>
+            </n-dropdown>
           </span>
         </div>
 
@@ -1073,17 +1047,6 @@ watch(
   overflow: hidden;
 }
 
-.head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 6px 0;
-}
-
-.sp {
-  flex: 1 1 auto;
-}
-
 .search {
   padding: 0 8px 6px 10px;
 }
@@ -1274,7 +1237,7 @@ watch(
 
 .row.root > .coll-name {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--app-text);
 }
 
@@ -1294,17 +1257,6 @@ watch(
 .badge-ro {
   background: var(--app-warn-tint);
   color: var(--app-warn);
-}
-
-/* 根行上的请求数 */
-.cnt {
-  font-size: 10px;
-  line-height: 15px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--app-chip);
-  color: var(--app-muted);
-  flex: 0 0 auto;
 }
 
 /* 非活动根：整棵树降低对比度，让当前工作目录更突出（仍可读、可操作） */
@@ -1375,6 +1327,11 @@ watch(
 }
 
 .row:hover .actions {
+  display: inline-flex;
+}
+
+/* 集合根行的「···」常驻显示（不用悬停才出现） */
+.row.root .actions {
   display: inline-flex;
 }
 

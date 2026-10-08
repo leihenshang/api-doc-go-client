@@ -1,29 +1,29 @@
 <script setup lang="ts">
 // 请求栏（design-spec §2 地址栏）：HTTP 是「方法选择器（语义色）+ URL」，gRPC 是
 // 「协议徽标 + 服务/方法选择器 + 服务地址」（G1.3）；右侧统一是 格式化 / 生成代码 / Send。
-import { NIcon, NSelect } from 'naive-ui'
-import type { SelectOption } from 'naive-ui'
-import { computed, h, type VNode } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { OptionsOutline, CodeOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
 import MethodTag from '@/components/MethodTag.vue'
 import VarInput from '@/components/VarInput.vue'
 import {
-  grpcMethodFullName,
-  grpcOf,
-  grpcSendBlocker,
-  grpcServiceShort,
-  grpcStreamKey,
-  isGrpc,
-  splitGrpcMethod,
+    grpcMethodFullName,
+    grpcOf,
+    grpcSendBlocker,
+    grpcServiceShort,
+    grpcStreamKey,
+    isGrpc,
+    splitGrpcMethod,
 } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { methodColor, methodTint } from '@/lib/method'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
-import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
+import { useTabsStore } from '@/stores/tabs'
 import type { GrpcMethodInfo, RequestDoc } from '@/types'
+import { CodeOutline, OptionsOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
+import type { SelectOption } from 'naive-ui'
+import { NIcon, NSelect } from 'naive-ui'
+import { computed, h, type VNode } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
 const emit = defineEmits<{ codegen: [] }>()
@@ -96,6 +96,9 @@ const secretNames = computed(() => {
   const env = coll.info?.envs.find((e) => e.name === coll.currentEnv)
   return env?.vars.filter((v) => v.secret).map((v) => v.name) ?? []
 })
+
+// 变量自动提示候选：当前环境全部变量名 + 内置动态变量（二者在 VarInput 内部已去重排序）。
+const varSuggestions = computed(() => coll.currentEnvVarNames)
 
 // 下拉与已选值均按方法着色
 function renderMethod(option: SelectOption): VNode {
@@ -183,6 +186,7 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
           :vars="tab.resolve?.values ?? {}"
           :missing="tab.resolve?.missing ?? []"
           :secrets="secretNames"
+          :suggestions="varSuggestions"
           @update:model-value="touch"
         />
       </template>
@@ -202,6 +206,7 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
           :vars="tab.resolve?.values ?? {}"
           :missing="tab.resolve?.missing ?? []"
           :secrets="secretNames"
+          :suggestions="varSuggestions"
           @update:model-value="touch"
           @paste="onUrlPaste"
         />

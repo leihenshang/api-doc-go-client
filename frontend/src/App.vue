@@ -1,35 +1,14 @@
 <script setup lang="ts">
 // 根组件（AppShell，design-spec §2）：标题栏 → 工具栏 → 三栏主体（侧栏 / 标签+请求+响应）→ 状态栏。
 // 请求区与响应区的位置由全局设置 responseLayout 决定，占比由分隔条拖动调整（松手落盘）。
-import {
-  NButton,
-  NConfigProvider,
-  NForm,
-  NFormItem,
-  NInput,
-  NModal,
-  NSelect,
-  NSpin,
-  darkTheme,
-  dateEnUS,
-  dateZhCN,
-  enUS,
-  zhCN,
-} from 'naive-ui'
-import type { GlobalThemeOverrides } from 'naive-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { NIcon } from 'naive-ui'
-import { WarningOutline } from '@vicons/ionicons5'
-import CommandPalette from '@/components/CommandPalette.vue'
 import CodeGenDialog from '@/components/CodeGenDialog.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
 import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import EnvManager from '@/components/EnvManager.vue'
+import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
 import MockDialog from '@/components/MockDialog.vue'
-import SyncDialog from '@/components/SyncDialog.vue'
-import HistoryDialog from '@/components/HistoryDialog.vue'
 import Overview from '@/components/Overview.vue'
 import RequestBar from '@/components/RequestBar.vue'
 import RequestEditor from '@/components/RequestEditor.vue'
@@ -37,18 +16,39 @@ import ResponsePanel from '@/components/ResponsePanel.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import SyncDialog from '@/components/SyncDialog.vue'
 import TabBar from '@/components/TabBar.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api, onAppEvent } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { nextTheme, isDark } from '@/lib/theme'
+import { isDark, nextTheme } from '@/lib/theme'
 import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
-import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
+import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { RequestDoc, SyncStatus, TreeNode } from '@/types'
+import { WarningOutline } from '@vicons/ionicons5'
+import type { GlobalThemeOverrides } from 'naive-ui'
+import {
+    NButton,
+    NConfigProvider,
+    NForm,
+    NFormItem,
+    NIcon,
+    NInput,
+    NModal,
+    NSelect,
+    NSpin,
+    darkTheme,
+    dateEnUS,
+    dateZhCN,
+    enUS,
+    zhCN,
+} from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const coll = useCollectionStore()
 const tabs = useTabsStore()
@@ -262,14 +262,35 @@ async function openCollection(dir: string): Promise<void> {
   }
 }
 
+/**
+ * 工作区切换的「保持旧详情」缓冲：switchRoot 会先清空标签再做 I/O，期间 tabs.active 变 null，
+ * 若直接走 v-else 会闪一下 Overview。这里在切换期间把上一个请求详情留在屏幕，等新会话就绪再淡入 ——
+ * 视觉上就是一次平滑过渡，不会先跳到概览页。
+ */
+const switchingRoot = ref(false)
+const stuckActive = ref<Tab | null>(null)
+watch(
+  () => tabs.active,
+  (t) => {
+    if (t) stuckActive.value = t
+  },
+  { immediate: true },
+)
+/** 详情区实际渲染的页签：有活动页签用它；切根瞬间没有活动页签时沿用上一个（避免闪概览）。 */
+const detailTab = computed(() => tabs.active ?? (switchingRoot.value ? stuckActive.value : null))
+
 /** 侧栏/工具条点击某个根：切成活动根，并把标签栏换成该根的会话。 */
 async function activateRoot(root: string): Promise<void> {
   if (!root || root === coll.activeRoot) return
+  if (switchingRoot.value) return // 正在切换中，忽略重复点击
+  switchingRoot.value = true
   try {
     await tabs.switchRoot(root) // 落盘当前根 → 切活动根 → 恢复目标根会话
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
     return
+  } finally {
+    switchingRoot.value = false
   }
   void refreshSyncStatus()
 }
@@ -854,40 +875,42 @@ watch(
                 @command="onTabCommand"
               />
 
-              <div v-if="tabs.active" class="detail">
-                <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的两个出口 -->
-                <div v-if="tabs.active.conflict" class="conflict-bar" data-testid="req.conflict">
-                  <n-icon :component="WarningOutline" :size="14" />
-                  <span class="ct">{{ t('conflict.bar') }}</span>
-                  <button class="cb" type="button" data-testid="conflict.reload" @click="tabs.reloadFromDisk(tabs.active.key)">
-                    {{ t('conflict.reload') }}
-                  </button>
-                  <button class="cb strong" type="button" data-testid="conflict.copy" @click="tabs.saveAsCopy(tabs.active.key)">
-                    {{ t('conflict.saveCopy') }}
-                  </button>
+              <transition name="rb-fade" mode="out-in">
+                <div v-if="detailTab" :key="detailTab.key" class="detail">
+                  <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的两个出口 -->
+                  <div v-if="detailTab.conflict" class="conflict-bar" data-testid="req.conflict">
+                    <n-icon :component="WarningOutline" :size="14" />
+                    <span class="ct">{{ t('conflict.bar') }}</span>
+                    <button class="cb" type="button" data-testid="conflict.reload" @click="tabs.reloadFromDisk(detailTab.key)">
+                      {{ t('conflict.reload') }}
+                    </button>
+                    <button class="cb strong" type="button" data-testid="conflict.copy" @click="tabs.saveAsCopy(detailTab.key)">
+                      {{ t('conflict.saveCopy') }}
+                    </button>
+                  </div>
+                  <request-bar :tab="detailTab" @codegen="showCodegen = true" />
+                  <div ref="workEl" class="work" :class="settings.responseLayout">
+                    <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
+                      <request-editor :tab="detailTab" />
+                    </section>
+
+                    <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
+                    <div
+                      class="splitter"
+                      role="separator"
+                      :title="t('editor.resizeHint')"
+                      :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
+                      @pointerdown="startResize"
+                    />
+
+                    <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
+                      <response-panel :tab="detailTab" />
+                    </section>
+                  </div>
                 </div>
-                <request-bar :tab="tabs.active" @codegen="showCodegen = true" />
-                <div ref="workEl" class="work" :class="settings.responseLayout">
-                  <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
-                    <request-editor :tab="tabs.active" />
-                  </section>
 
-                  <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
-                  <div
-                    class="splitter"
-                    role="separator"
-                    :title="t('editor.resizeHint')"
-                    :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
-                    @pointerdown="startResize"
-                  />
-
-                  <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
-                    <response-panel :tab="tabs.active" />
-                  </section>
-                </div>
-              </div>
-
-              <overview v-else :info="coll.info" @new-request="newDraft()" />
+                <overview v-else :info="coll.info" @new-request="newDraft()" />
+              </transition>
             </main>
           </div>
 
@@ -1041,6 +1064,17 @@ watch(
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* 请求详情 / 概览页之间切换（含切工作区）的淡入淡出，避免硬切造成「闪一下」 */
+.rb-fade-enter-active,
+.rb-fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.rb-fade-enter-from,
+.rb-fade-leave-to {
+  opacity: 0;
 }
 
 .work {

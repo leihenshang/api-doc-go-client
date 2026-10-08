@@ -102,6 +102,12 @@ export const useCollectionStore = defineStore('collection', {
     dir: (state): string => activeOf(state)?.info.dir ?? '',
     tree: (state): TreeNode[] => activeOf(state)?.info.tree ?? [],
     envNames: (state): string[] => activeOf(state)?.info.envs.map((e) => e.name) ?? [],
+    /** 当前活动集合·所处环境的全部变量名（VarInput 自动提示的候选来源之一）。 */
+    currentEnvVarNames: (state): string[] => {
+      const info = activeOf(state)?.info
+      const env = info?.envs.find((e) => e.name === state.currentEnv)
+      return env?.vars.map((v) => v.name) ?? []
+    },
     favSet: (state): Set<string> => new Set(state.favorites),
     /** mirror 模式只读：仅当活动根已关联且 mode=mirror 时才禁编辑。 */
     isReadOnly: (state): boolean => activeOf(state)?.readOnly ?? state.syncMode === 'mirror',

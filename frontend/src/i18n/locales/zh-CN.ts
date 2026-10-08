@@ -251,6 +251,7 @@ export default {
     newRequest: '新建请求',
     newFolder: '新建分组',
     newSubFolder: '新建子分组',
+    more: '集合操作',
     folderName: '分组名称',
     subFolderName: '子分组名称',
     rename: '重命名',
