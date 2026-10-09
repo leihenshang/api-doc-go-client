@@ -241,16 +241,9 @@ function close(): void {
     <div class="cols">
       <!-- 左侧竖向菜单：按设置类型分区，右侧只显示当前分区 -->
       <nav class="nav" :aria-label="t('settings.title')">
-        <button
-          v-for="sec in sections"
-          :key="sec.key"
-          class="nav-item"
-          :class="{ on: active === sec.key }"
-          type="button"
-          :data-testid="`settings.nav.${sec.key}`"
-          :aria-current="active === sec.key"
-          @click="active = sec.key"
-        >
+        <button v-for="sec in sections" :key="sec.key" class="nav-item" :class="{ on: active === sec.key }"
+          type="button" :data-testid="`settings.nav.${sec.key}`" :aria-current="active === sec.key"
+          @click="active = sec.key">
           <n-icon :component="sec.icon" :size="15" />
           <span>{{ sec.label }}</span>
         </button>
@@ -262,48 +255,32 @@ function close(): void {
 
         <!-- 分区一：界面 -->
         <div v-show="active === 'appearance'" class="pane" data-testid="settings.pane.appearance">
-      <div class="row">
-        <span class="lbl">{{ t('settings.language') }}</span>
-        <n-select
-          :value="locale"
-          :options="langOptions"
-          size="small"
-          class="num"
-          data-testid="settings.lang"
-          @update:value="pickLang"
-        />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.theme') }}</span>
-        <n-select
-          :value="form.theme"
-          :options="themeOptions"
-          size="small"
-          class="num"
-          data-testid="settings.theme"
-          @update:value="pickTheme"
-        />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.uiScale') }}</span>
-        <n-select v-model:value="form.uiScale" :options="scaleOptions" size="small" class="num" data-testid="settings.scale" />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.responseLayout') }}</span>
-        <n-select
-          v-model:value="form.responseLayout"
-          :options="layoutOptions"
-          size="small"
-          class="num"
-          data-testid="settings.layout"
-        />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.autoSave') }}</span>
-        <n-checkbox v-model:checked="form.autoSave" data-testid="settings.autoSave">
-          <span class="hint">{{ t('settings.autoSaveHint') }}</span>
-        </n-checkbox>
-      </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.language') }}</span>
+            <n-select :value="locale" :options="langOptions" size="small" class="num" data-testid="settings.lang"
+              @update:value="pickLang" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.theme') }}</span>
+            <n-select :value="form.theme" :options="themeOptions" size="small" class="num" data-testid="settings.theme"
+              @update:value="pickTheme" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.uiScale') }}</span>
+            <n-select v-model:value="form.uiScale" :options="scaleOptions" size="small" class="num"
+              data-testid="settings.scale" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.responseLayout') }}</span>
+            <n-select v-model:value="form.responseLayout" :options="layoutOptions" size="small" class="num"
+              data-testid="settings.layout" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.autoSave') }}</span>
+            <n-checkbox v-model:checked="form.autoSave" data-testid="settings.autoSave">
+              <span class="hint">{{ t('settings.autoSaveHint') }}</span>
+            </n-checkbox>
+          </div>
 
         </div>
 
@@ -311,48 +288,30 @@ function close(): void {
         <div v-show="active === 'network'" class="pane" data-testid="settings.pane.network">
           <div class="row">
             <n-checkbox v-model:checked="form.insecureSsl" data-testid="settings.insecureSsl">
-          {{ t('settings.insecureSsl') }}
-        </n-checkbox>
-      </div>
-      <p class="hint muted">{{ t('settings.insecureSslHint') }}</p>
-      <div class="row">
-        <span class="lbl">{{ t('settings.timeout') }}</span>
-        <n-input-number
-          v-model:value="form.timeoutSec"
-          size="small"
-          :min="1"
-          :max="600"
-          class="num"
-          data-testid="settings.timeout"
-        />
-      </div>
-      <div class="row">
-        <n-checkbox v-model:checked="form.followRedirects" data-testid="settings.followRedirects">
-          {{ t('settings.followRedirects') }}
-        </n-checkbox>
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.maxRedirects') }}</span>
-        <n-input-number
-          v-model:value="form.maxRedirects"
-          size="small"
-          :min="1"
-          :max="50"
-          :disabled="!form.followRedirects"
-          class="num"
-          data-testid="settings.maxRedirects"
-        />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.proxy') }}</span>
-        <n-input
-          v-model:value="form.proxyUrl"
-          size="small"
-          class="num"
-          data-testid="settings.proxy"
-          :placeholder="t('settings.proxyPlaceholder')"
-        />
-      </div>
+              {{ t('settings.insecureSsl') }}
+            </n-checkbox>
+          </div>
+          <p class="hint muted">{{ t('settings.insecureSslHint') }}</p>
+          <div class="row">
+            <span class="lbl">{{ t('settings.timeout') }}</span>
+            <n-input-number v-model:value="form.timeoutSec" size="small" :min="1" :max="600" class="num"
+              data-testid="settings.timeout" />
+          </div>
+          <div class="row">
+            <n-checkbox v-model:checked="form.followRedirects" data-testid="settings.followRedirects">
+              {{ t('settings.followRedirects') }}
+            </n-checkbox>
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.maxRedirects') }}</span>
+            <n-input-number v-model:value="form.maxRedirects" size="small" :min="1" :max="50"
+              :disabled="!form.followRedirects" class="num" data-testid="settings.maxRedirects" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.proxy') }}</span>
+            <n-input v-model:value="form.proxyUrl" size="small" class="num" data-testid="settings.proxy"
+              :placeholder="t('settings.proxyPlaceholder')" />
+          </div>
 
         </div>
 
@@ -360,39 +319,33 @@ function close(): void {
         <div v-show="active === 'local'" class="pane" data-testid="settings.pane.local">
           <div class="row">
             <n-checkbox v-model:checked="form.persistCookies" data-testid="settings.persistCookies">
-          {{ t('settings.persistCookies') }}
-        </n-checkbox>
-        <span class="sp" />
-        <n-popconfirm @positive-click="clearCookies">
-          <template #trigger>
-            <n-button size="tiny" tertiary>{{ t('settings.clearCookies') }}</n-button>
-          </template>
-          {{ t('common.confirm') }}？
-        </n-popconfirm>
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.historyLimit') }}</span>
-        <n-input-number v-model:value="form.historyLimit" size="small" :min="10" :max="5000" class="num" />
-      </div>
+              {{ t('settings.persistCookies') }}
+            </n-checkbox>
+            <span class="sp" />
+            <n-popconfirm @positive-click="clearCookies">
+              <template #trigger>
+                <n-button size="tiny" tertiary>{{ t('settings.clearCookies') }}</n-button>
+              </template>
+              {{ t('common.confirm') }}？
+            </n-popconfirm>
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.historyLimit') }}</span>
+            <n-input-number v-model:value="form.historyLimit" size="small" :min="10" :max="5000" class="num" />
+          </div>
 
-      <!-- 多工作目录：启动恢复上限 + 当前占用的监听数（每个根一个文件监听，Windows 上会占住目录） -->
-      <div class="row">
-        <span class="lbl">{{ t('settings.restoreLimit') }}</span>
-        <n-input-number
-          v-model:value="form.restoreLimit"
-          size="small"
-          :min="1"
-          :max="32"
-          class="num"
-          data-testid="settings.restoreLimit"
-        />
-      </div>
-      <p class="hint muted">{{ t('settings.restoreLimitHint') }}</p>
-      <div class="row">
-        <span class="lbl">{{ t('settings.openRoots') }}</span>
-        <span class="muted" data-testid="settings.openRoots">{{ coll.roots.length }}</span>
-      </div>
-      <p class="hint muted">{{ t('settings.openRootsHint') }}</p>
+          <!-- 多工作目录：启动恢复上限 + 当前占用的监听数（每个根一个文件监听，Windows 上会占住目录） -->
+          <div class="row">
+            <span class="lbl">{{ t('settings.restoreLimit') }}</span>
+            <n-input-number v-model:value="form.restoreLimit" size="small" :min="1" :max="32" class="num"
+              data-testid="settings.restoreLimit" />
+          </div>
+          <p class="hint muted">{{ t('settings.restoreLimitHint') }}</p>
+          <div class="row">
+            <span class="lbl">{{ t('settings.openRoots') }}</span>
+            <span class="muted" data-testid="settings.openRoots">{{ coll.roots.length }}</span>
+          </div>
+          <p class="hint muted">{{ t('settings.openRootsHint') }}</p>
 
         </div>
 
@@ -412,35 +365,19 @@ function close(): void {
           <div class="block">
             <div class="row">
               <span class="lbl">{{ t('settings.mcpAddr') }}</span>
-              <n-input
-                v-model:value="form.mcp.addr"
-                size="small"
-                class="grow"
-                :disabled="!form.mcp.enabled"
-                data-testid="settings.mcpAddr"
-                :placeholder="t('settings.mcpAddrPlaceholder')"
-              />
+              <n-input v-model:value="form.mcp.addr" size="small" class="grow" :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpAddr" :placeholder="t('settings.mcpAddrPlaceholder')" />
               <span class="lbl port-lbl">{{ t('settings.mcpPort') }}</span>
-              <n-input
-                v-model:value="portText"
-                size="small"
-                class="port"
-                :disabled="!form.mcp.enabled"
-                :maxlength="5"
-                data-testid="settings.mcpPort"
-                :placeholder="t('settings.mcpPortPlaceholder')"
-              />
+              <n-input v-model:value="portText" size="small" class="port" :disabled="!form.mcp.enabled" :maxlength="5"
+                data-testid="settings.mcpPort" :placeholder="t('settings.mcpPortPlaceholder')" />
             </div>
           </div>
 
           <!-- 只读模式：决定所有工作区是否可写（含下方各工作区的「可写」开关） -->
           <div class="block">
             <div class="row">
-              <n-checkbox
-                v-model:checked="form.mcp.readOnly"
-                :disabled="!form.mcp.enabled"
-                data-testid="settings.mcpReadOnly"
-              >
+              <n-checkbox v-model:checked="form.mcp.readOnly" :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpReadOnly">
                 {{ t('settings.mcpReadOnly') }}
               </n-checkbox>
             </div>
@@ -455,22 +392,14 @@ function close(): void {
             </div>
             <div v-if="coll.roots.length" class="dirs" data-testid="settings.mcpAllowList">
               <div v-for="r in coll.roots" :key="r.info.dir" class="dir" data-testid="settings.mcpAllowItem">
-                <n-checkbox
-                  :checked="isAllow(r.info.dir)"
-                  :disabled="!form.mcp.enabled"
-                  size="small"
-                  data-testid="settings.mcpAllowCheck"
-                  @update:checked="(v: boolean) => toggleAllow(r.info.dir, v)"
-                >
+                <n-checkbox :checked="isAllow(r.info.dir)" :disabled="!form.mcp.enabled" size="small"
+                  data-testid="settings.mcpAllowCheck" @update:checked="(v: boolean) => toggleAllow(r.info.dir, v)">
                   <span class="mono p" :title="r.info.dir">{{ r.info.dir }}</span>
                 </n-checkbox>
-                <n-checkbox
-                  :checked="writableOf(r.info.dir)"
-                  :disabled="!form.mcp.enabled || form.mcp.readOnly || !isAllow(r.info.dir)"
-                  size="small"
+                <n-checkbox :checked="writableOf(r.info.dir)"
+                  :disabled="!form.mcp.enabled || form.mcp.readOnly || !isAllow(r.info.dir)" size="small"
                   data-testid="settings.mcpAllowWritable"
-                  @update:checked="(v: boolean) => setAllowWritable(r.info.dir, v)"
-                >
+                  @update:checked="(v: boolean) => setAllowWritable(r.info.dir, v)">
                   {{ t('settings.mcpAllowWritable') }}
                 </n-checkbox>
               </div>
@@ -482,14 +411,8 @@ function close(): void {
           <div class="block">
             <div class="row">
               <span class="lbl">{{ t('settings.mcpOrigins') }}</span>
-              <n-input
-                v-model:value="originsText"
-                size="small"
-                class="grow"
-                :disabled="!form.mcp.enabled"
-                data-testid="settings.mcpOrigins"
-                :placeholder="t('settings.mcpOriginsPlaceholder')"
-              />
+              <n-input v-model:value="originsText" size="small" class="grow" :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpOrigins" :placeholder="t('settings.mcpOriginsPlaceholder')" />
             </div>
           </div>
 
@@ -497,22 +420,10 @@ function close(): void {
           <div class="block">
             <div class="row">
               <span class="lbl">{{ t('settings.mcpToken') }}</span>
-              <n-input
-                :value="form.mcp.token"
-                size="small"
-                class="grow mono"
-                readonly
-                data-testid="settings.mcpToken"
-                :placeholder="t('settings.mcpTokenPlaceholder')"
-              />
-              <n-button
-                size="tiny"
-                tertiary
-                :disabled="!form.mcp.enabled"
-                :loading="mcpBusy"
-                data-testid="settings.mcpTokenRegen"
-                @click="regenerateToken"
-              >
+              <n-input :value="form.mcp.token" size="small" class="grow mono" readonly data-testid="settings.mcpToken"
+                :placeholder="t('settings.mcpTokenPlaceholder')" />
+              <n-button size="tiny" tertiary :disabled="!form.mcp.enabled" :loading="mcpBusy"
+                data-testid="settings.mcpTokenRegen" @click="regenerateToken">
                 {{ t('settings.mcpTokenRegen') }}
               </n-button>
             </div>
@@ -683,12 +594,12 @@ function close(): void {
   width: 130px;
 }
 
-/* 端口数字框：地址行里固定窄宽，避免挤占地址宽度 */
+/* 端口数字框：地址行里固定宽度，足够完整显示 5 位端口 */
 .port {
-  width: 92px;
+  width: 150px;
 }
 
-/* MCP 配置示例：只读等宽块，内容可横向/纵向滚动、可整块选中复制 */
+/* MCP 配置示例：只读等宽块，高度放宽避免默认出现纵向滚动条，内容仍可整块选中复制 */
 .ex {
   margin: 0;
   padding: 8px 10px;
@@ -700,7 +611,7 @@ function close(): void {
   border-radius: 6px;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 180px;
+  max-height: none;
   overflow: auto;
 }
 
