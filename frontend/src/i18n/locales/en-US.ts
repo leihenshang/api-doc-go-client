@@ -10,6 +10,7 @@ export default {
   common: {
     cancel: 'Cancel',
     save: 'Save',
+    saved: 'Saved',
     delete: 'Delete',
     close: 'Close',
     confirm: 'Confirm',
@@ -256,6 +257,7 @@ export default {
     downloaded: 'Saved to {path}',
     edit: 'Edit',
     view: 'Preview',
+    noDoc: 'No document yet, click "Edit" to start writing',
     desc: 'Description',
     uri: 'Request URI',
     method: 'HTTP Method',
@@ -436,6 +438,7 @@ export default {
     envHint: 'Edit environments',
     closeTab: 'Close current tab',
     save: 'Save now',
+    saveHint: 'Save current request',
     undo: 'Undo',
     redo: 'Redo',
     empty: 'No requests in this collection yet',

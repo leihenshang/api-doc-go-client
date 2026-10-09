@@ -221,6 +221,9 @@ function toggleDocsEditing(): void {
   docsEditing.value = !docsEditing.value
 }
 
+/** 预览态是否已有内容：为空时展示空态提示，避免整块空白。 */
+const hasDoc = computed(() => (docs.value ?? '').trim().length > 0)
+
 /** 生成并覆写 Docs：请求示例取 curl 代码；响应字段取该请求已存档的字段表；
  *  响应示例从已保存示例里挑最新一个 JSON 体（否则省略响应节）。成功不提示，失败才提示。 */
 async function genDocs(): Promise<void> {
@@ -491,8 +494,13 @@ watch(
         </div>
         <md-editor v-if="docsEditing" v-model="docs" :language="mdLanguage" :theme="mdTheme"
           :preview-theme="mdPreviewTheme" class="md-edit" />
-        <md-preview v-else :model-value="docs" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"
-          class="md-preview" />
+        <template v-else>
+          <md-preview v-if="hasDoc" :model-value="docs" :language="mdLanguage" :theme="mdTheme"
+            :preview-theme="mdPreviewTheme" class="md-preview" />
+          <div v-else class="docs-empty">
+            <p>{{ t('docs.noDoc') }}</p>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -656,14 +664,32 @@ watch(
   min-height: 0;
 }
 
-/* 只读预览：撑满并滚动在自身容器内 */
+/* 只读预览：撑满并滚动在自身容器内；给最小高度兜底，避免 flex 高度塌陷时预览整体消失 */
 .docs-pane .md-preview {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   overflow: auto;
   border: 1px solid var(--app-border);
   border-radius: 6px;
   padding: 12px 16px;
+}
+
+/* 预览态没有内容时的空态提示 */
+.docs-pane .docs-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--app-border);
+  border-radius: 6px;
+  min-height: 160px;
+}
+
+.docs-pane .docs-empty p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-muted);
 }
 
 /* Docs 区（尤其左右布局区间较窄时）顶部工具栏允许换行，避免右侧按钮被截断 */

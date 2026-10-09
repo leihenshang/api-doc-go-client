@@ -902,7 +902,7 @@ watch(
                       {{ t('conflict.saveCopy') }}
                     </button>
                   </div>
-                  <request-bar :tab="detailTab" @codegen="showCodegen = true" />
+                  <request-bar :tab="detailTab" @codegen="showCodegen = true" @save="saveActiveNow" />
                   <div ref="workEl" class="work" :class="settings.responseLayout">
                     <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
                       <request-editor :tab="detailTab" />
