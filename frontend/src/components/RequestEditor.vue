@@ -215,6 +215,12 @@ const docs = computed({
 // ---- Docs 区「生成接口文档」----
 const isHttpReq = computed(() => !isGrpcReq.value)
 
+/** Docs 默认只读预览；仅当用户主动点「编辑」才进入编辑态。 */
+const docsEditing = ref(false)
+function toggleDocsEditing(): void {
+  docsEditing.value = !docsEditing.value
+}
+
 /** 生成并覆写 Docs：请求示例取 curl 代码；响应字段取该请求已存档的字段表；
  *  响应示例从已保存示例里挑最新一个 JSON 体（否则省略响应节）。成功不提示，失败才提示。 */
 async function genDocs(): Promise<void> {
@@ -470,16 +476,23 @@ watch(
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
       </div>
       <div v-else class="docs-pane">
-        <div v-if="isHttpReq" class="docs-bar">
-          <button class="gin" type="button" data-testid="docs.gen" :disabled="readonly" @click="genDocs">
-            {{ t('docs.gen') }}
+        <div class="docs-bar">
+          <button class="gin" type="button" data-testid="docs.edit" @click="toggleDocsEditing">
+            {{ docsEditing ? t('docs.view') : t('docs.edit') }}
           </button>
-          <button class="gin" type="button" data-testid="docs.download" @click="downloadDoc">
-            {{ t('docs.download') }}
-          </button>
+          <template v-if="isHttpReq">
+            <button class="gin" type="button" data-testid="docs.gen" :disabled="readonly" @click="genDocs">
+              {{ t('docs.gen') }}
+            </button>
+            <button class="gin" type="button" data-testid="docs.download" @click="downloadDoc">
+              {{ t('docs.download') }}
+            </button>
+          </template>
         </div>
-        <md-editor v-model="docs" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"
-          class="md-edit" />
+        <md-editor v-if="docsEditing" v-model="docs" :language="mdLanguage" :theme="mdTheme"
+          :preview-theme="mdPreviewTheme" class="md-edit" />
+        <md-preview v-else :model-value="docs" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"
+          class="md-preview" />
       </div>
     </div>
   </div>
@@ -641,6 +654,16 @@ watch(
 .docs-pane .md-edit {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* 只读预览：撑满并滚动在自身容器内 */
+.docs-pane .md-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 12px 16px;
 }
 
 /* Docs 区（尤其左右布局区间较窄时）顶部工具栏允许换行，避免右侧按钮被截断 */
