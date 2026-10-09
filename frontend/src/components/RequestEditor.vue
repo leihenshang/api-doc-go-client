@@ -1,25 +1,29 @@
 <script setup lang="ts">
 // 请求设置区（design-spec §2 请求面板）：Params / Body / Headers / Auth / Docs。
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
-import { NCheckbox, NInput, NSelect } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
-import { MdEditor } from 'md-editor-v3'
-import 'md-editor-v3/lib/preview.css'
-import 'md-editor-v3/lib/style.css'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
 import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
+import { buildApiDoc } from '@/lib/genDocs'
 import { isGrpc } from '@/lib/grpc'
+import { api } from '@/lib/ipc'
+import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
+import { message } from '@/lib/notice'
+import { loadFields } from '@/lib/responseFields'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
-import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
+import { useTabsStore } from '@/stores/tabs'
 import type { Auth } from '@/types'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/preview.css'
+import 'md-editor-v3/lib/style.css'
+import { NCheckbox, NInput, NSelect } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
 const tabs = useTabsStore()
@@ -208,6 +212,54 @@ const docs = computed({
   },
 })
 
+// ---- Docs 区「生成接口文档」----
+const isHttpReq = computed(() => !isGrpcReq.value)
+
+/** 生成并覆写 Docs：请求示例取 curl 代码；响应字段取该请求已存档的字段表；
+ *  响应示例从已保存示例里挑最新一个 JSON 体（否则省略响应节）。成功不提示，失败才提示。 */
+async function genDocs(): Promise<void> {
+  try {
+    const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
+    const fields = loadFields(props.tab.uid)
+    const examples = await api.listResponseExamples(props.tab.uid)
+    const ex = examples.find((e) => !e.response.binary && /^[{[]/.test((e.response.body ?? '').trim()))
+    docs.value = buildApiDoc({
+      request: props.tab.request,
+      curl,
+      fields,
+      exampleBody: ex?.response.body ?? '',
+      labels: {
+        desc: t('docs.desc'),
+        uri: t('docs.uri'),
+        method: t('docs.method'),
+        headers: t('docs.headers'),
+        params: t('docs.params'),
+        reqExample: t('docs.reqExample'),
+        resFields: t('docs.resFields'),
+        resExample: t('docs.resExample'),
+        note: t('docs.note'),
+        colName: t('docs.colName'),
+        colType: t('docs.colType'),
+        colDesc: t('docs.colDesc'),
+        colRequired: t('docs.colRequired'),
+      },
+    })
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** 下载 Docs：把当前 Docs 内容经原生保存对话框落盘为 .md（复用 SaveResponseBody 的写盘能力）。 */
+async function downloadDoc(): Promise<void> {
+  try {
+    const safeName = (props.tab.request.name || 'request').replace(/[\\/:*?"<>|]/g, '_')
+    const path = await api.saveResponseBody(`${safeName}.md`, false, docs.value)
+    if (path) message.success(t('docs.downloaded', { path }))
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 // md-editor 自带明暗两套配色；暗色下用 github 预览主题（默认主题在深底上对比度不足）
 const mdTheme = computed(() => (isDark.value ? 'dark' : 'light'))
@@ -300,16 +352,8 @@ watch(
 <template>
   <div class="editor">
     <div class="seg">
-      <button
-        v-for="s in segments"
-        :key="s.key"
-        class="seg-tab"
-        :class="{ on: seg === s.key }"
-        type="button"
-        data-testid="req.tab"
-        :data-seg="s.key"
-        @click="seg = s.key"
-      >
+      <button v-for="s in segments" :key="s.key" class="seg-tab" :class="{ on: seg === s.key }" type="button"
+        data-testid="req.tab" :data-seg="s.key" @click="seg = s.key">
         {{ s.label }}<span v-if="s.dot" class="badge" />
       </button>
     </div>
@@ -323,18 +367,10 @@ watch(
       <grpc-metadata-pane v-else-if="isGrpcReq && seg === 'metadata'" :tab="tab" />
       <!-- gRPC：连接与选项（明文/TLS、超时、压缩） -->
       <grpc-options-pane v-else-if="isGrpcReq && seg === 'options'" :tab="tab" />
-      <key-value-table
-        v-else-if="seg === 'params'"
-        :rows="tab.request.params"
-        :label="t('editor.query')"
-        @change="onParamsChange"
-      />
-      <key-value-table
-        v-else-if="seg === 'headers'"
-        :rows="tab.request.headers"
-        :label="t('editor.headers')"
-        @change="touch"
-      />
+      <key-value-table v-else-if="seg === 'params'" :rows="tab.request.params" :label="t('editor.query')"
+        @change="onParamsChange" />
+      <key-value-table v-else-if="seg === 'headers'" :rows="tab.request.headers" :label="t('editor.headers')"
+        @change="touch" />
       <div v-else-if="seg === 'auth'" class="auth-pane">
         <div class="arow">
           <span class="lbl">{{ t('auth.type') }}</span>
@@ -347,13 +383,8 @@ watch(
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.password') }}</span>
-            <n-input
-              v-model:value="auth.password"
-              size="small"
-              type="password"
-              show-password-on="click"
-              @input="touch"
-            />
+            <n-input v-model:value="auth.password" size="small" type="password" show-password-on="click"
+              @input="touch" />
           </div>
         </template>
         <template v-else-if="authType === 'bearer'">
@@ -373,26 +404,21 @@ watch(
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.in') }}</span>
-            <n-select v-model:value="auth.in" :options="authInOptions" size="small" class="atype" @update:value="touch" />
+            <n-select v-model:value="auth.in" :options="authInOptions" size="small" class="atype"
+              @update:value="touch" />
           </div>
         </template>
       </div>
       <template v-else-if="seg === 'body'">
         <div class="body-pane">
           <div class="brow">
-            <n-select
-              :value="bodyType"
-              :options="[
-                { label: t('editor.bodyNone'), value: 'none' },
-                { label: t('editor.bodyJson'), value: 'json' },
-                { label: t('editor.bodyText'), value: 'text' },
-                { label: t('editor.bodyForm'), value: 'form' },
-                { label: t('editor.bodyMultipart'), value: 'multipart' },
-              ]"
-              size="small"
-              class="btype"
-              @update:value="bodyType = $event"
-            />
+            <n-select :value="bodyType" :options="[
+              { label: t('editor.bodyNone'), value: 'none' },
+              { label: t('editor.bodyJson'), value: 'json' },
+              { label: t('editor.bodyText'), value: 'text' },
+              { label: t('editor.bodyForm'), value: 'form' },
+              { label: t('editor.bodyMultipart'), value: 'multipart' },
+            ]" size="small" class="btype" @update:value="bodyType = $event" />
             <button v-if="bodyType === 'json'" class="fmt" type="button" @click="formatJson">
               {{ t('editor.formatJson') }}
             </button>
@@ -402,37 +428,23 @@ watch(
           </div>
           <!-- JSON 走带语法着色的编辑器（透明 textarea 叠高亮层，编辑行为不变）；
                纯文本仍用原来的输入框，不引入没必要的着色。 -->
-          <json-body-editor
-            v-if="bodyType === 'json'"
-            v-model="tab.request.body.raw"
-            :rows="12"
-            :placeholder="t('editor.rawPlaceholder')"
-            @input="touch"
-          />
-          <n-input
-            v-else-if="bodyType === 'text'"
-            v-model:value="tab.request.body.raw"
-            type="textarea"
-            :rows="12"
-            class="mono raw"
-            :placeholder="t('editor.rawPlaceholder')"
-            @input="touch"
-          />
-          <key-value-table
-            v-else-if="bodyType === 'form' || bodyType === 'multipart'"
-            :rows="tab.request.body.form"
+          <json-body-editor v-if="bodyType === 'json'" v-model="tab.request.body.raw" :rows="12"
+            :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          <n-input v-else-if="bodyType === 'text'" v-model:value="tab.request.body.raw" type="textarea" :rows="12"
+            class="mono raw" :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          <key-value-table v-else-if="bodyType === 'form' || bodyType === 'multipart'" :rows="tab.request.body.form"
             :label="bodyType === 'form' ? t('editor.bodyForm') : t('editor.bodyMultipart')"
-            :show-type="bodyType === 'multipart'"
-            @change="touch"
-          />
+            :show-type="bodyType === 'multipart'" @change="touch" />
         </div>
       </template>
       <div v-else-if="seg === 'vars'" class="script-pane">
         <p class="hint">{{ t('editor.varsHint') }}</p>
         <div v-for="(v, i) in varsPre" :key="i" class="srow" data-testid="vars.row">
           <n-checkbox v-model:checked="v.enabled" size="small" @update:checked="touch" />
-          <n-input v-model:value="v.name" size="small" :placeholder="t('editor.colName')" data-testid="vars.name" @input="touch" />
-          <n-input v-model:value="v.value" size="small" :placeholder="t('editor.colValue')" data-testid="vars.value" @input="touch" />
+          <n-input v-model:value="v.name" size="small" :placeholder="t('editor.colName')" data-testid="vars.name"
+            @input="touch" />
+          <n-input v-model:value="v.value" size="small" :placeholder="t('editor.colValue')" data-testid="vars.value"
+            @input="touch" />
           <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('vars', i)">×</button>
         </div>
         <button class="link" type="button" data-testid="vars.add" @click="addVar">{{ t('editor.addRow') }}</button>
@@ -440,43 +452,35 @@ watch(
       <div v-else-if="seg === 'script'" class="script-pane">
         <p class="hint">{{ t('editor.scriptHint') }}</p>
         <div class="slb">{{ t('editor.scriptPre') }}</div>
-        <n-input
-          :value="scriptPre"
-          type="textarea"
-          :rows="6"
-          class="mono raw"
-          data-testid="script.pre"
-          :placeholder="t('editor.scriptPrePlaceholder')"
-          @update:value="(v: string) => (scriptPre = v)"
-        />
+        <n-input :value="scriptPre" type="textarea" :rows="6" class="mono raw" data-testid="script.pre"
+          :placeholder="t('editor.scriptPrePlaceholder')" @update:value="(v: string) => (scriptPre = v)" />
         <div class="slb">{{ t('editor.scriptPost') }}</div>
-        <n-input
-          :value="scriptPost"
-          type="textarea"
-          :rows="6"
-          class="mono raw"
-          data-testid="script.post"
-          :placeholder="t('editor.scriptPostPlaceholder')"
-          @update:value="(v: string) => (scriptPost = v)"
-        />
+        <n-input :value="scriptPost" type="textarea" :rows="6" class="mono raw" data-testid="script.post"
+          :placeholder="t('editor.scriptPostPlaceholder')" @update:value="(v: string) => (scriptPost = v)" />
       </div>
       <div v-else-if="seg === 'tests'" class="script-pane">
         <p class="hint">{{ t('editor.testsHint') }}</p>
         <div v-for="(a, i) in asserts" :key="i" class="srow" data-testid="assert.row">
-          <n-input v-model:value="a.name" size="small" :placeholder="t('editor.colDesc')" class="aname" data-testid="assert.name" @input="touch" />
-          <n-input v-model:value="a.expr" size="small" class="mono" :placeholder="t('editor.assertExpr')" data-testid="assert.expr" @input="touch" />
+          <n-input v-model:value="a.name" size="small" :placeholder="t('editor.colDesc')" class="aname"
+            data-testid="assert.name" @input="touch" />
+          <n-input v-model:value="a.expr" size="small" class="mono" :placeholder="t('editor.assertExpr')"
+            data-testid="assert.expr" @input="touch" />
           <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('asserts', i)">×</button>
         </div>
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
       </div>
-      <md-editor
-        v-else
-        v-model="docs"
-        :language="mdLanguage"
-        :theme="mdTheme"
-        :preview-theme="mdPreviewTheme"
-        class="md-edit"
-      />
+      <div v-else class="docs-pane">
+        <div v-if="isHttpReq" class="docs-bar">
+          <button class="gin" type="button" data-testid="docs.gen" :disabled="readonly" @click="genDocs">
+            {{ t('docs.gen') }}
+          </button>
+          <button class="gin" type="button" data-testid="docs.download" @click="downloadDoc">
+            {{ t('docs.download') }}
+          </button>
+        </div>
+        <md-editor v-model="docs" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"
+          class="md-edit" />
+      </div>
     </div>
   </div>
 </template>
@@ -616,6 +620,52 @@ watch(
 .md-edit {
   flex: 1 1 auto;
   min-height: 340px;
+}
+
+/* Docs 区：顶部工具条（「生成接口文档」）+ 编辑器纵向撑满 */
+.docs-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.docs-bar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.docs-pane .md-edit {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Docs 区（尤其左右布局区间较窄时）顶部工具栏允许换行，避免右侧按钮被截断 */
+.docs-pane :deep(.md-editor-toolbar) {
+  flex-wrap: wrap;
+}
+
+.gin {
+  border: 1px solid var(--app-accent-tint);
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.gin:hover:not(:disabled) {
+  border-color: var(--app-accent);
+}
+
+.gin:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .script-pane {
