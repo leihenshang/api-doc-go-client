@@ -254,6 +254,8 @@ export default {
     gen: '生成接口文档',
     download: '下载',
     downloaded: '已保存到 {path}',
+    edit: '编辑',
+    view: '预览',
     desc: '简要描述',
     uri: '请求URI',
     method: '请求方式',

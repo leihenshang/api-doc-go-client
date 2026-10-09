@@ -254,6 +254,8 @@ export default {
     gen: 'Generate API doc',
     download: 'Download',
     downloaded: 'Saved to {path}',
+    edit: 'Edit',
+    view: 'Preview',
     desc: 'Description',
     uri: 'Request URI',
     method: 'HTTP Method',
