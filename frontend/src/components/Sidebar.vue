@@ -1237,7 +1237,6 @@ watch(
 
 .row.root > .coll-name {
   font-size: 15px;
-  font-weight: 500;
   color: var(--app-text);
 }
 
