@@ -232,42 +232,22 @@ function onLeave(): void {
 
 <template>
   <div ref="wrap" class="vw">
-    <div class="vi" :class="{ 'has-miss': (missing?.length ?? 0) > 0 }" @click="focus">
+    <div class="vi" :class="{ 'has-miss': (missing?.length ?? 0) > 0, 'has-suffix': !!$slots.suffix }" @click="focus">
       <div ref="hl" class="hl mono" aria-hidden="true">
         <span v-for="(p, i) in parts" :key="i" :class="p.cls" :data-name="p.name || undefined">{{ p.text }}</span>
         <span v-if="!modelValue" class="ph">{{ placeholder }}</span>
       </div>
-      <input
-        ref="el"
-        v-bind="$attrs"
-        class="in mono"
-        :value="modelValue"
-        spellcheck="false"
-        autocomplete="off"
-        @input="onInput"
-        @scroll="sync"
-        @mousemove="onMove"
-        @mouseleave="onLeave"
-        @blur="onBlur"
-        @keydown="onKeydown"
-      />
+      <input ref="el" v-bind="$attrs" class="in mono" :value="modelValue" spellcheck="false" autocomplete="off"
+        @input="onInput" @scroll="sync" @mousemove="onMove" @mouseleave="onLeave" @blur="onBlur" @keydown="onKeydown" />
+      <span v-if="$slots.suffix" class="suffix">
+        <slot name="suffix" />
+      </span>
     </div>
 
     <!-- 变量自动提示浮层：光标落在 {{… 内时给出候选，Tab/Enter 录入 -->
-    <div
-      v-if="sugOpen"
-      class="sug mono"
-      data-testid="var.suggest"
-    >
-      <div
-        v-for="(s, i) in sugs"
-        :key="s"
-        class="sug-item"
-        :class="{ on: i === sugHi }"
-        data-testid="var.suggest.item"
-        @mouseenter="sugHi = i"
-        @mousedown.prevent="applySuggestion"
-      >
+    <div v-if="sugOpen" class="sug mono" data-testid="var.suggest">
+      <div v-for="(s, i) in sugs" :key="s" class="sug-item" :class="{ on: i === sugHi }" data-testid="var.suggest.item"
+        @mouseenter="sugHi = i" @mousedown.prevent="applySuggestion">
         {{ s }}
       </div>
     </div>
@@ -312,6 +292,48 @@ function onLeave(): void {
 /* 有未定义变量时描边给一点警告色，具体是哪个变量由悬停提示说明 */
 .vi.has-miss {
   border-color: var(--app-warn);
+}
+
+/* 右侧内嵌动作（例如「保存」图标）：给文本层让出右端，避免被盖住 */
+.vi.has-suffix .hl,
+.vi.has-suffix .in {
+  padding-right: 44px;
+}
+
+.suffix {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  z-index: 2;
+}
+
+.suffix :deep(button) {
+  border: 1px solid var(--app-border);
+  background: var(--app-bg2);
+  border-radius: 6px;
+  padding: 3px 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--app-accent);
+  line-height: 0;
+}
+
+.suffix :deep(button:not(:disabled):hover) {
+  border-color: var(--app-accent);
+  background: var(--app-accent-tint);
+}
+
+.suffix :deep(button:disabled) {
+  cursor: default;
+  color: var(--app-border);
+  border-color: transparent;
+  background: transparent;
 }
 
 .hl,

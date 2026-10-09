@@ -20,6 +20,7 @@ import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { GrpcMethodInfo, RequestDoc } from '@/types'
 import {
+  ArchiveOutline,
   BrushOutline,
   CloudDownloadOutline,
   CloudUploadOutline,
@@ -33,7 +34,7 @@ import { computed, h, ref, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
-const emit = defineEmits<{ codegen: [] }>()
+const emit = defineEmits<{ codegen: []; save: [] }>()
 const tabs = useTabsStore()
 const coll = useCollectionStore()
 const { t } = useI18n()
@@ -260,14 +261,28 @@ async function copyExport(): Promise<void> {
           @update:value="setGrpcMethod" />
         <var-input v-model="grpc.target" data-testid="req.url" :placeholder="t('grpc.targetPlaceholder')"
           :vars="tab.resolve?.values ?? {}" :missing="tab.resolve?.missing ?? []" :secrets="secretNames"
-          :suggestions="varSuggestions" @update:model-value="touch" />
+          :suggestions="varSuggestions" @update:model-value="touch">
+          <template #suffix>
+            <button class="url-save" type="button" data-testid="req.save" :disabled="!tab.dirty || coll.isReadOnly"
+              :title="tab.dirty ? t('editor.saveHint') : t('common.saved')" @click="emit('save')">
+              <n-icon :component="ArchiveOutline" :size="15" />
+            </button>
+          </template>
+        </var-input>
       </template>
       <template v-else>
         <n-select v-model:value="tab.request.method" :options="methods" :render-label="renderMethod" class="method"
           data-testid="req.method" @update:value="touch" />
         <var-input v-model="tab.request.url" data-testid="req.url" :placeholder="t('editor.urlPlaceholder')"
           :vars="tab.resolve?.values ?? {}" :missing="tab.resolve?.missing ?? []" :secrets="secretNames"
-          :suggestions="varSuggestions" @update:model-value="touch" @paste="onUrlPaste" />
+          :suggestions="varSuggestions" @update:model-value="touch" @paste="onUrlPaste">
+          <template #suffix>
+            <button class="url-save" type="button" data-testid="req.save" :disabled="!tab.dirty || coll.isReadOnly"
+              :title="tab.dirty ? t('editor.saveHint') : t('common.saved')" @click="emit('save')">
+              <n-icon :component="ArchiveOutline" :size="15" />
+            </button>
+          </template>
+        </var-input>
       </template>
       <n-dropdown trigger="click" placement="bottom-start" :options="moreItems" @select="onMore">
         <button class="icon-btn" type="button" data-testid="req.more" :title="t('common.more')" aria-label="more">

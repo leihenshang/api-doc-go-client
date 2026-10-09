@@ -10,6 +10,7 @@ export default {
   common: {
     cancel: '取消',
     save: '保存',
+    saved: '已保存',
     delete: '删除',
     close: '关闭',
     confirm: '确认',
@@ -256,6 +257,7 @@ export default {
     downloaded: '已保存到 {path}',
     edit: '编辑',
     view: '预览',
+    noDoc: '暂无文档，点击「编辑」开始编写',
     desc: '简要描述',
     uri: '请求URI',
     method: '请求方式',
@@ -437,6 +439,7 @@ export default {
     envHint: '编辑环境',
     closeTab: '关闭当前页签',
     save: '立即保存',
+    saveHint: '保存当前请求',
     undo: '撤销',
     redo: '重做',
     empty: '集合内还没有请求',
