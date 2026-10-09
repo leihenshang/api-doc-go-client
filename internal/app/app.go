@@ -66,6 +66,9 @@ type App struct {
 	// signalQuit 通知「外部已在收尾」（wails dev 的 Ctrl+C 会先打到 CLI 再到我们），
 	// 让信号处理器不必自己重复退出
 	signalQuit chan struct{}
+	// quitAllowed 前端已确认退出（Alt+F4 / 系统关闭时先被 WindowShouldClose 拦截，
+	// 前端弹「保存并退出」确认后置 true 再调 Quit，避免直接 Quit 再次触发关闭而循环）
+	quitAllowed bool
 }
 
 // inflightSend 一次在途发送的取消句柄（带工作目录归属，见 sendCancels 的键说明）。
@@ -147,6 +150,30 @@ func (a *App) DomReady(ctx context.Context) {
 	a.ctx = ctx
 	a.fitInitialWindow(ctx)
 	runtime.WindowShow(ctx)
+}
+
+// SetQuitAllowed 前端在确认退出后调用：把关闭守卫放行（见 WindowShouldClose 注释）。
+func (a *App) SetQuitAllowed(allowed bool) {
+	a.mu.Lock()
+	a.quitAllowed = allowed
+	a.mu.Unlock()
+}
+
+// OnBeforeClose 拦截系统关闭（Alt+F4 / 任务栏 / 系统关闭），让前端先确认未保存改动。
+// 返回 true = 阻止关闭；false = 放行。
+//
+// 与 OnShutdown 的配合：前端确认退出后先调 SetQuitAllowed(true) 再 Quit()。
+// 之所以需要这个守卫：避免「前端调 Quit() 时若某些平台仍触发关闭回调」造成反复拦截/确认的循环。
+func (a *App) OnBeforeClose(ctx context.Context) bool {
+	a.mu.Lock()
+	allowed := a.quitAllowed
+	a.quitAllowed = false
+	a.mu.Unlock()
+	if allowed {
+		return false
+	}
+	runtime.EventsEmit(ctx, "app:close-requested", nil)
+	return true
 }
 
 // fitInitialWindow 按主屏可用范围决定初始尺寸：放得下 = 首选尺寸居中，放不下 = 最大化。

@@ -310,6 +310,10 @@ export function SetMCPBackend(arg1) {
   return window['go']['app']['App']['SetMCPBackend'](arg1);
 }
 
+export function SetQuitAllowed(arg1) {
+  return window['go']['app']['App']['SetQuitAllowed'](arg1);
+}
+
 export function SetSyncBind(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['SetSyncBind'](arg1, arg2, arg3, arg4);
 }
