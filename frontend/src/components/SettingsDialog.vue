@@ -1,15 +1,14 @@
 <script setup lang="ts">
 // 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
-import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
-import { CodeSlashOutline, ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
-import { computed, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
-import { message } from '@/lib/notice'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPStatus, Settings } from '@/types'
+import { CodeSlashOutline, ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
+import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [v: boolean]; saved: [] }>()
@@ -62,42 +61,41 @@ const originsText = computed({
   },
 })
 
-/** 换令牌：后端落盘 + 重启服务，随后刷新状态。 */
-/** 添加一个授权工作目录（系统目录选择）。默认**只读**：需要写时在行内勾「可写」。 */
-async function addAllowDir(): Promise<void> {
-  try {
-    const dir = await api.pickDirectory()
-    if (!dir) return
-    if (form.value.mcp.allow.some((a) => a.path === dir)) {
-      message.info(t('settings.mcpAllowDup'))
-      return
-    }
-    form.value.mcp.allow.push({ path: dir, writable: false })
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
+/** 端口用文本输入承载，落盘时转成数字；非法输入按 0 处理。 */
+const portText = computed({
+  get: () => String(form.value.mcp.port),
+  set: (v: string) => {
+    const n = Number.parseInt(v, 10)
+    form.value.mcp.port = Number.isNaN(n) ? 0 : n
+  },
+})
+
+// ---------- MCP 可访问工作区：直接列出客户端当前加载的所有工作区，勾选授权 ----------
+
+/** 该目录是否已授权（进入白名单）。 */
+function isAllow(dir: string): boolean {
+  return form.value.mcp.allow.some((a) => a.path === dir)
 }
 
-/** 把当前打开的工作目录一键加入白名单（多根时全部加入）。 */
-function addCurrentRoot(): void {
-  let added = 0
-  for (const r of coll.roots) {
-    const dir = r.info.dir
-    if (!dir || form.value.mcp.allow.some((a) => a.path === dir)) continue
-    form.value.mcp.allow.push({ path: dir, writable: false })
-    added++
-  }
-  if (!added) message.info(t('settings.mcpAllowDup'))
+/** 该目录当前的可写标记（未授权时为 false）。 */
+function writableOf(dir: string): boolean {
+  return form.value.mcp.allow.find((a) => a.path === dir)?.writable ?? false
 }
 
-/** 移除一条授权目录（保存后由后端重启 MCP 服务生效）。 */
-function removeAllowDir(i: number): void {
-  form.value.mcp.allow.splice(i, 1)
+/** 勾选 = 授权该工作区（加入白名单），默认可写；取消勾选 = 移除授权。 */
+function toggleAllow(dir: string, v: boolean): void {
+  if (v) {
+    if (!isAllow(dir)) form.value.mcp.allow.push({ path: dir, writable: true })
+  } else {
+    const i = form.value.mcp.allow.findIndex((a) => a.path === dir)
+    if (i >= 0) form.value.mcp.allow.splice(i, 1)
+  }
 }
 
 /** 切换某条授权目录的可写开关（保存后生效）。 */
-function setAllowWritable(i: number, v: boolean): void {
-  form.value.mcp.allow[i].writable = v
+function setAllowWritable(dir: string, v: boolean): void {
+  const a = form.value.mcp.allow.find((x) => x.path === dir)
+  if (a) a.writable = v
 }
 
 async function regenerateToken(): Promise<void> {
@@ -114,12 +112,29 @@ async function regenerateToken(): Promise<void> {
   }
 }
 
-/** 复制连接配置（含 URL 与令牌），方便直接粘到 AI 工具的 MCP 配置里。 */
-async function copyEndpoint(): Promise<void> {
-  if (!mcp.value?.url) return
-  const text = `${mcp.value.url}\nAuthorization: Bearer ${mcp.value.token}`
+/** 生成一份可直接粘贴到 MCP 客户端（Claude Code / Cursor 等）的 mcpServers 配置示例。 */
+function mcpExample(): string {
+  const url = mcp.value?.url ?? ''
+  const token = mcp.value?.token ?? ''
+  return JSON.stringify(
+    {
+      mcpServers: {
+        apidoc: {
+          type: 'http',
+          url,
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    },
+    null,
+    2,
+  )
+}
+
+/** 一键复制 MCP 配置示例。 */
+async function copyExample(): Promise<void> {
   try {
-    await navigator.clipboard.writeText(text)
+    await navigator.clipboard.writeText(mcpExample())
     notice.value = t('settings.mcpCopied')
   } catch {
     error.value = t('settings.mcpCopyFailed')
@@ -143,11 +158,6 @@ const layoutOptions = computed(() => [
 const themeOptions = computed(() => [
   { label: t('settings.themeLight'), value: ThemeLight },
   { label: t('settings.themeDark'), value: ThemeDark },
-])
-// 监听地址只给三种：回环（默认）/ 全网卡（跨主机）/ 指定局域网 IP
-const mcpAddrOptions = computed(() => [
-  { label: t('settings.mcpAddrLocal'), value: '127.0.0.1' },
-  { label: t('settings.mcpAddrAll'), value: '0.0.0.0' },
 ])
 
 watch(
@@ -180,20 +190,35 @@ async function pickTheme(v: ThemeMode): Promise<void> {
   }
 }
 
-async function save(): Promise<void> {
+/** 保存：写盘 + 重拉 MCP 状态。返回是否成功（供「保存」/「保存并应用」复用）。 */
+async function doSave(): Promise<boolean> {
   saving.value = true
   error.value = ''
+  let ok = false
   try {
     await settings.save({ ...form.value })
     // MCP 分区改动要重启内嵌服务，后端已自动应用，这里拉最新状态回显
     await loadMCP()
     emit('saved')
-    emit('update:show', false)
+    ok = true
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     saving.value = false
   }
+  return ok
+}
+
+/** 保存并关闭设置窗口。 */
+function save(): void {
+  void (async () => {
+    if (await doSave()) emit('update:show', false)
+  })()
+}
+
+/** 保存并应用（不关闭窗口）：适合边改边验证的设置项。 */
+function saveApply(): void {
+  void doSave()
 }
 
 async function clearCookies(): Promise<void> {
@@ -374,141 +399,149 @@ function close(): void {
         <!-- 分区四：MCP 服务。生命周期与其它设置不同 —— 它要起停一个真实的监听端口，
              保存后由后端立即应用（地址/端口/令牌/只读/开关）。 -->
         <div v-show="active === 'mcp'" class="pane" data-testid="settings.pane.mcp">
-          <div class="row">
-            <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
-          {{ t('settings.mcpEnabled') }}
-        </n-checkbox>
-      </div>
-      <p class="hint muted">{{ t('settings.mcpEnabledHint') }}</p>
-      <div class="row">
-        <span class="lbl">{{ t('settings.mcpAddr') }}</span>
-        <n-select
-          v-model:value="form.mcp.addr"
-          :options="mcpAddrOptions"
-          size="small"
-          class="num"
-          data-testid="settings.mcpAddr"
-        />
-        <n-input-number
-          v-model:value="form.mcp.port"
-          size="small"
-          :min="1024"
-          :max="65535"
-          :disabled="!form.mcp.enabled"
-          data-testid="settings.mcpPort"
-        />
-      </div>
-      <p class="hint muted">{{ t('settings.mcpAddrHint') }}</p>
-      <div class="row">
-        <n-checkbox
-          v-model:checked="form.mcp.readOnly"
-          :disabled="!form.mcp.enabled"
-          data-testid="settings.mcpReadOnly"
-        >
-          {{ t('settings.mcpReadOnly') }}
-        </n-checkbox>
-      </div>
-      <p class="hint muted">{{ t('settings.mcpReadOnlyHint') }}</p>
+          <!-- 启用服务 -->
+          <div class="block">
+            <div class="row">
+              <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
+                {{ t('settings.mcpEnabled') }}
+              </n-checkbox>
+            </div>
+          </div>
 
-      <!-- 可访问的工作目录白名单：MCP 只能在这些目录（或其一级子目录）里读写。
-           空 = 不授权任何目录（安全默认）：AI 会说「没有可用项目」，这里给足提示与一键加入。 -->
-      <div class="row">
-        <span class="lbl">{{ t('settings.mcpAllow') }}</span>
-        <span class="sp" />
-        <n-button size="tiny" tertiary :disabled="!form.mcp.enabled" data-testid="settings.mcpAllowAdd" @click="addAllowDir">
-          {{ t('settings.mcpAllowAdd') }}
-        </n-button>
-        <n-button
-          size="tiny"
-          tertiary
-          :disabled="!form.mcp.enabled || !coll.roots.length"
-          data-testid="settings.mcpAllowCurrent"
-          @click="addCurrentRoot"
-        >
-          {{ t('settings.mcpAllowCurrent') }}
-        </n-button>
-      </div>
-      <div v-if="form.mcp.allow.length" class="dirs" data-testid="settings.mcpAllowList">
-        <div v-for="(a, i) in form.mcp.allow" :key="a.path" class="dir" data-testid="settings.mcpAllowItem">
-          <span class="mono p" :title="a.path">{{ a.path }}</span>
-          <n-checkbox
-            :checked="a.writable"
-            :disabled="!form.mcp.enabled"
-            size="small"
-            data-testid="settings.mcpAllowWritable"
-            @update:checked="(v: boolean) => setAllowWritable(i, v)"
-          >
-            {{ t('settings.mcpAllowWritable') }}
-          </n-checkbox>
-          <button
-            class="x"
-            type="button"
-            :title="t('settings.mcpAllowRemove')"
-            data-testid="settings.mcpAllowRemove"
-            @click="removeAllowDir(i)"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-      <p v-else class="hint muted" data-testid="settings.mcpAllowEmpty">{{ t('settings.mcpAllowEmpty') }}</p>
-      <p class="hint muted">{{ t('settings.mcpAllowHint') }}</p>
+          <!-- 监听地址：地址 + 端口 两个输入框 -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpAddr') }}</span>
+              <n-input
+                v-model:value="form.mcp.addr"
+                size="small"
+                class="grow"
+                :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpAddr"
+                :placeholder="t('settings.mcpAddrPlaceholder')"
+              />
+              <span class="lbl port-lbl">{{ t('settings.mcpPort') }}</span>
+              <n-input
+                v-model:value="portText"
+                size="small"
+                class="port"
+                :disabled="!form.mcp.enabled"
+                :maxlength="5"
+                data-testid="settings.mcpPort"
+                :placeholder="t('settings.mcpPortPlaceholder')"
+              />
+            </div>
+          </div>
 
-      <div class="row">
-        <span class="lbl">{{ t('settings.mcpOrigins') }}</span>
-        <n-input
-          v-model:value="originsText"
-          size="small"
-          class="grow"
-          :disabled="!form.mcp.enabled"
-          data-testid="settings.mcpOrigins"
-          :placeholder="t('settings.mcpOriginsPlaceholder')"
-        />
-      </div>
-      <div class="row">
-        <span class="lbl">{{ t('settings.mcpToken') }}</span>
-        <n-input
-          :value="form.mcp.token"
-          size="small"
-          class="grow mono"
-          readonly
-          data-testid="settings.mcpToken"
-          :placeholder="t('settings.mcpTokenPlaceholder')"
-        />
-        <n-button
-          size="tiny"
-          tertiary
-          :disabled="!form.mcp.enabled"
-          :loading="mcpBusy"
-          data-testid="settings.mcpTokenRegen"
-          @click="regenerateToken"
-        >
-          {{ t('settings.mcpTokenRegen') }}
-        </n-button>
-      </div>
-      <p v-if="mcp?.running" class="ok" data-testid="settings.mcpRunning">
-        {{ t('settings.mcpRunning', { url: mcp.url, projects: mcp.projects }) }}
-      </p>
-      <p v-else-if="mcp?.error" class="err" data-testid="settings.mcpError">{{ mcp.error }}</p>
-      <div v-if="mcp?.running" class="row">
-        <span class="lbl">{{ t('settings.mcpEndpoint') }}</span>
-        <span class="val mono">{{ mcp.url }}</span>
-        <span class="sp" />
-        <n-button size="tiny" tertiary data-testid="settings.mcpCopy" @click="copyEndpoint">
-          {{ t('settings.mcpCopy') }}
-        </n-button>
-      </div>
-      <p v-if="mcp?.running" class="hint muted" data-testid="settings.mcpAllowEffective">
-        {{ t('settings.mcpAllowEffective', { n: mcp.allow?.length ?? 0, dir: mcp.allow?.[0]?.path ?? '-' }) }}
-      </p>
-      <p v-if="mcp?.hint" class="hint muted">{{ mcp.hint }}</p>
+          <!-- 只读模式：决定所有工作区是否可写（含下方各工作区的「可写」开关） -->
+          <div class="block">
+            <div class="row">
+              <n-checkbox
+                v-model:checked="form.mcp.readOnly"
+                :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpReadOnly"
+              >
+                {{ t('settings.mcpReadOnly') }}
+              </n-checkbox>
+            </div>
+          </div>
+
+          <!-- 可访问的工作区：直接列出客户端当前加载的所有工作区，勾选授权；默认可写，可写与否受「只读模式」控制。 -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpAllow') }}</span>
+              <span class="sp" />
+              <span class="muted">{{ t('settings.mcpAllowCount', { n: form.mcp.allow.length }) }}</span>
+            </div>
+            <div v-if="coll.roots.length" class="dirs" data-testid="settings.mcpAllowList">
+              <div v-for="r in coll.roots" :key="r.info.dir" class="dir" data-testid="settings.mcpAllowItem">
+                <n-checkbox
+                  :checked="isAllow(r.info.dir)"
+                  :disabled="!form.mcp.enabled"
+                  size="small"
+                  data-testid="settings.mcpAllowCheck"
+                  @update:checked="(v: boolean) => toggleAllow(r.info.dir, v)"
+                >
+                  <span class="mono p" :title="r.info.dir">{{ r.info.dir }}</span>
+                </n-checkbox>
+                <n-checkbox
+                  :checked="writableOf(r.info.dir)"
+                  :disabled="!form.mcp.enabled || form.mcp.readOnly || !isAllow(r.info.dir)"
+                  size="small"
+                  data-testid="settings.mcpAllowWritable"
+                  @update:checked="(v: boolean) => setAllowWritable(r.info.dir, v)"
+                >
+                  {{ t('settings.mcpAllowWritable') }}
+                </n-checkbox>
+              </div>
+            </div>
+            <p v-else class="hint muted" data-testid="settings.mcpAllowEmpty">{{ t('settings.mcpAllowEmpty') }}</p>
+          </div>
+
+          <!-- 来源白名单 -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpOrigins') }}</span>
+              <n-input
+                v-model:value="originsText"
+                size="small"
+                class="grow"
+                :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpOrigins"
+                :placeholder="t('settings.mcpOriginsPlaceholder')"
+              />
+            </div>
+          </div>
+
+          <!-- 访问令牌 -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpToken') }}</span>
+              <n-input
+                :value="form.mcp.token"
+                size="small"
+                class="grow mono"
+                readonly
+                data-testid="settings.mcpToken"
+                :placeholder="t('settings.mcpTokenPlaceholder')"
+              />
+              <n-button
+                size="tiny"
+                tertiary
+                :disabled="!form.mcp.enabled"
+                :loading="mcpBusy"
+                data-testid="settings.mcpTokenRegen"
+                @click="regenerateToken"
+              >
+                {{ t('settings.mcpTokenRegen') }}
+              </n-button>
+            </div>
+          </div>
+
+          <!-- 运行状态 + 配置示例 -->
+          <div class="block">
+            <p v-if="mcp?.running" class="ok" data-testid="settings.mcpRunning">
+              {{ t('settings.mcpRunning', { url: mcp.url, projects: mcp.projects }) }}
+            </p>
+            <p v-else-if="mcp?.error" class="err" data-testid="settings.mcpError">{{ mcp.error }}</p>
+            <div v-if="mcp?.running" class="row">
+              <span class="lbl">{{ t('settings.mcpExample') }}</span>
+              <span class="sp" />
+              <n-button size="tiny" tertiary data-testid="settings.mcpCopyExample" @click="copyExample">
+                {{ t('settings.mcpCopyExample') }}
+              </n-button>
+            </div>
+            <pre v-if="mcp?.running" class="ex mono" data-testid="settings.mcpExample">{{ mcpExample() }}</pre>
+          </div>
         </div>
       </div>
     </div>
 
     <template #footer>
       <div class="ft">
+        <span class="sp" />
         <n-button size="small" @click="close">{{ t('common.cancel') }}</n-button>
+        <n-button size="small" :loading="saving" @click="saveApply">{{ t('settings.saveApply') }}</n-button>
         <n-button size="small" type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
       </div>
     </template>
@@ -625,6 +658,22 @@ function close(): void {
   gap: 10px;
 }
 
+/* 设置分组块：加边框与留白，让每个设置块界限清晰 */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-panel);
+}
+
+.port-lbl {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .lbl {
   font-size: 13px;
   width: 130px;
@@ -632,6 +681,27 @@ function close(): void {
 
 .num {
   width: 130px;
+}
+
+/* 端口数字框：地址行里固定窄宽，避免挤占地址宽度 */
+.port {
+  width: 92px;
+}
+
+/* MCP 配置示例：只读等宽块，内容可横向/纵向滚动、可整块选中复制 */
+.ex {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-2);
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
 }
 
 .grow {

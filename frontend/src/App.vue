@@ -23,6 +23,7 @@ import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api, onAppEvent } from '@/lib/ipc'
 import { message } from '@/lib/notice'
+import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
 import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
@@ -472,6 +473,10 @@ onMounted(() => {
   onAppEvent('collection:changed', (payload) => {
     const p = payload as { root?: string } | null
     onExternalChange(typeof p?.root === 'string' ? p.root : '')
+  })
+  // Alt+F4 / 系统关闭被 Go 侧 WindowShouldClose 拦截后通知：前端做退出确认（与标题栏关闭一致）
+  onAppEvent('app:close-requested', () => {
+    requestQuit()
   })
   // 同步状态轮询（状态栏）
   syncTimer = setInterval(() => {

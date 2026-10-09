@@ -165,6 +165,8 @@ export function SetHeadlessDir(arg1:string):Promise<void>;
 
 export function SetMCPBackend(arg1:app.MCPBackend):Promise<void>;
 
+export function SetQuitAllowed(arg1:boolean):Promise<void>;
+
 export function SetSyncBind(arg1:string,arg2:number,arg3:string,arg4:string):Promise<syncengine.BindInfo>;
 
 export function StartAutoSync(arg1:number):Promise<void>;

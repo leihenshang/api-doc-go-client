@@ -81,7 +81,11 @@ export function onAppEvent(name: string, handler: (payload: unknown) => void): v
 export const windowCtl = {
   minimise: (): void => void wailsApp()?.WindowMinimise(),
   toggleMaximise: (): void => void wailsApp()?.WindowToggleMaximise(),
-  quit: (): void => void wailsApp()?.Quit(),
+  // 先放行关闭守卫（见 Go 侧 WindowShouldClose）再 Quit，避免程序化退出被 Alt+F4 拦截逻辑挡住
+  quit: async (): Promise<void> => {
+    await wailsApp()?.SetQuitAllowed(true)
+    await wailsApp()?.Quit()
+  },
   isMaximised: async (): Promise<boolean> => (await wailsApp()?.WindowIsMaximised()) === true,
 }
 

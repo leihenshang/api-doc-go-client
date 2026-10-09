@@ -46,6 +46,8 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        core.Startup,
 		OnDomReady:       core.DomReady,
+		// Alt+F4 / 系统关闭先拦截：前端确认未保存改动后再放行（见 app.OnBeforeClose）
+		OnBeforeClose: core.OnBeforeClose,
 		// 退出前收尾：停内嵌 MCP 服务（释放端口）与集合监听。
 		// wails dev 的 Ctrl+C 打到应用时也走这里（见 internal/app 的 watchSignals 注释）。
 		OnShutdown: core.Shutdown,
