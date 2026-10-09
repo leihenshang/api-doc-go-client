@@ -1,16 +1,16 @@
 <script setup lang="ts">
 // 请求栏（design-spec §2 地址栏）：HTTP 是「方法选择器（语义色）+ URL」，gRPC 是
-// 「协议徽标 + 服务/方法选择器 + 服务地址」（G1.3）；右侧统一是 格式化 / 生成代码 / Send。
+// 「协议徽标 + 服务/方法选择器 + 服务地址」（G1.3）；右侧统一是「···」菜单 / Send。
 import MethodTag from '@/components/MethodTag.vue'
 import VarInput from '@/components/VarInput.vue'
 import {
-    grpcMethodFullName,
-    grpcOf,
-    grpcSendBlocker,
-    grpcServiceShort,
-    grpcStreamKey,
-    isGrpc,
-    splitGrpcMethod,
+  grpcMethodFullName,
+  grpcOf,
+  grpcSendBlocker,
+  grpcServiceShort,
+  grpcStreamKey,
+  isGrpc,
+  splitGrpcMethod,
 } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { methodColor, methodTint } from '@/lib/method'
@@ -19,10 +19,17 @@ import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { GrpcMethodInfo, RequestDoc } from '@/types'
-import { CodeOutline, OptionsOutline, SendOutline, SyncOutline } from '@vicons/ionicons5'
-import type { SelectOption } from 'naive-ui'
-import { NIcon, NSelect } from 'naive-ui'
-import { computed, h, type VNode } from 'vue'
+import {
+  BrushOutline,
+  CloudDownloadOutline,
+  CloudUploadOutline,
+  CodeSlashOutline,
+  SendOutline,
+  SyncOutline
+} from '@vicons/ionicons5'
+import type { DropdownOption, SelectOption } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NInput, NModal, NSelect } from 'naive-ui'
+import { computed, h, ref, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -153,10 +160,89 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
   try {
     const doc = await api.parseCurl(text)
     applyCurl(doc)
-    message.success(t('editor.curlPasted', { method: doc.method, url: doc.url }))
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
   }
+}
+
+// ---- URL 栏右侧「···」菜单：格式化 / 导入导出 CURL / 生成代码 ----
+const isHttpReq = computed(() => !isGrpcReq.value)
+
+/** 菜单项：curl 的导入 / 导出只在 HTTP 请求下有意义；gRPC 只保留生成代码 + 格式化。 */
+const moreItems = computed<DropdownOption[]>(() => {
+  const items: DropdownOption[] = []
+  if (isHttpReq.value) {
+    items.push({
+      key: 'import-curl',
+      label: t('curl.importCurrent'),
+      icon: () => h(NIcon, { component: CloudDownloadOutline }),
+    })
+    items.push({
+      key: 'export-curl',
+      label: t('curl.export'),
+      icon: () => h(NIcon, { component: CloudUploadOutline }),
+    })
+  }
+  items.push({
+    key: 'codegen',
+    label: t('codegen.title'),
+    icon: () => h(NIcon, { component: CodeSlashOutline }),
+  })
+  items.push({
+    key: 'format',
+    label: t('editor.formatUrl'),
+    icon: () => h(NIcon, { component: BrushOutline }),
+  })
+  return items
+})
+
+const showImport = ref(false)
+const showExport = ref(false)
+const importText = ref('')
+const exportCurl = ref('')
+const busy = ref(false)
+
+function onMore(key: string): void {
+  if (key === 'codegen') emit('codegen')
+  else if (key === 'format') formatUrl()
+  else if (key === 'import-curl') {
+    importText.value = ''
+    showImport.value = true
+  } else if (key === 'export-curl') {
+    showExport.value = true
+    void loadExportCurl()
+  }
+}
+
+/** 导出 CURL：直接复用代码生成（curl 语言），拿到可执行命令文本给弹窗展示 + 复制。 */
+async function loadExportCurl(): Promise<void> {
+  exportCurl.value = ''
+  try {
+    exportCurl.value = await api.generateCode('curl', coll.currentEnv, props.tab.request)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** 导入 CURL：解析后覆盖当前请求的全部信息（方法/URL/参数/请求头/请求体/认证）。 */
+async function doImportCurl(): Promise<void> {
+  if (!importText.value.trim()) return
+  busy.value = true
+  try {
+    const doc = await api.parseCurl(importText.value)
+    applyCurl(doc)
+    showImport.value = false
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function copyExport(): Promise<void> {
+  if (!exportCurl.value) return
+  await navigator.clipboard.writeText(exportCurl.value)
+  message.success(t('common.copied'))
 }
 </script>
 
@@ -167,85 +253,62 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
       <template v-if="isGrpcReq">
         <method-tag method="GRPC" class="proto" data-testid="req.grpcBadge" />
         <!-- 未选方法时给 null：naive 用空串会当成「已选中」而吃掉 placeholder -->
-        <n-select
-          :value="grpcMethodValue || null"
-          :options="grpcMethodOptions"
-          class="gmethod"
-          filterable
-          clearable
+        <n-select :value="grpcMethodValue || null" :options="grpcMethodOptions" class="gmethod" filterable clearable
           :disabled="!grpcMethodOptions.length"
           :placeholder="grpcMethodOptions.length ? t('grpc.pickMethod') : t('grpc.needProto')"
-          :title="grpcMethodOptions.length ? '' : t('grpc.block.proto')"
-          data-testid="req.grpcMethod"
-          @update:value="setGrpcMethod"
-        />
-        <var-input
-          v-model="grpc.target"
-          data-testid="req.url"
-          :placeholder="t('grpc.targetPlaceholder')"
-          :vars="tab.resolve?.values ?? {}"
-          :missing="tab.resolve?.missing ?? []"
-          :secrets="secretNames"
-          :suggestions="varSuggestions"
-          @update:model-value="touch"
-        />
+          :title="grpcMethodOptions.length ? '' : t('grpc.block.proto')" data-testid="req.grpcMethod"
+          @update:value="setGrpcMethod" />
+        <var-input v-model="grpc.target" data-testid="req.url" :placeholder="t('grpc.targetPlaceholder')"
+          :vars="tab.resolve?.values ?? {}" :missing="tab.resolve?.missing ?? []" :secrets="secretNames"
+          :suggestions="varSuggestions" @update:model-value="touch" />
       </template>
       <template v-else>
-        <n-select
-          v-model:value="tab.request.method"
-          :options="methods"
-          :render-label="renderMethod"
-          class="method"
-          data-testid="req.method"
-          @update:value="touch"
-        />
-        <var-input
-          v-model="tab.request.url"
-          data-testid="req.url"
-          :placeholder="t('editor.urlPlaceholder')"
-          :vars="tab.resolve?.values ?? {}"
-          :missing="tab.resolve?.missing ?? []"
-          :secrets="secretNames"
-          :suggestions="varSuggestions"
-          @update:model-value="touch"
-          @paste="onUrlPaste"
-        />
+        <n-select v-model:value="tab.request.method" :options="methods" :render-label="renderMethod" class="method"
+          data-testid="req.method" @update:value="touch" />
+        <var-input v-model="tab.request.url" data-testid="req.url" :placeholder="t('editor.urlPlaceholder')"
+          :vars="tab.resolve?.values ?? {}" :missing="tab.resolve?.missing ?? []" :secrets="secretNames"
+          :suggestions="varSuggestions" @update:model-value="touch" @paste="onUrlPaste" />
       </template>
-      <button class="icon-btn" type="button" data-testid="req.format" :title="t('editor.formatUrl')" @click="formatUrl">
-        <n-icon :component="OptionsOutline" :size="16" />
-      </button>
-      <!-- 生成代码：HTTP 是 curl/fetch/axios/go/python，gRPC 是 grpcurl（Go 侧按协议分派，G11.5） -->
-      <button
-        class="icon-btn"
-        type="button"
-        data-testid="req.codegen"
-        :title="t('codegen.title')"
-        @click="emit('codegen')"
-      >
-        <n-icon :component="CodeOutline" :size="16" />
-      </button>
-      <button
-        class="send"
-        type="button"
-        data-testid="req.send"
+      <n-dropdown trigger="click" placement="bottom-start" :options="moreItems" @select="onMore">
+        <button class="icon-btn" type="button" data-testid="req.more" :title="t('common.more')" aria-label="more">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
+      </n-dropdown>
+      <button class="send" type="button" data-testid="req.send"
         :disabled="tab.sending || coll.isReadOnly || !!sendBlocker"
-        :title="coll.isReadOnly ? t('sync.mirrorReadonly') : sendBlocker ? t(sendBlocker) : ''"
-        @click="send"
-      >
+        :title="coll.isReadOnly ? t('sync.mirrorReadonly') : sendBlocker ? t(sendBlocker) : ''" @click="send">
         <n-icon :component="tab.sending ? SyncOutline : SendOutline" :size="15" :class="{ spin: tab.sending }" />
         <span>{{ tab.sending ? t('editor.sending') : t('editor.send') }}</span>
       </button>
-      <button
-        v-if="tab.sending"
-        class="cancel"
-        type="button"
-        data-testid="req.cancel"
-        :title="t('editor.cancelSend')"
-        @click="cancel"
-      >
+      <button v-if="tab.sending" class="cancel" type="button" data-testid="req.cancel" :title="t('editor.cancelSend')"
+        @click="cancel">
         {{ t('editor.cancelSend') }}
       </button>
     </div>
+
+    <!-- 导入 CURL：解析后覆盖当前请求的所有信息 -->
+    <n-modal v-model:show="showImport" preset="card" :title="t('curl.importCurrent')" style="width: 560px"
+      data-testid="req.importCurl">
+      <n-input v-model:value="importText" type="textarea" :rows="6" :placeholder="t('curl.placeholder')"
+        data-testid="req.importCurlText" @keydown.enter.exact.prevent="doImportCurl" />
+      <template #footer>
+        <n-button size="small" :loading="busy" data-testid="req.importCurlOk" @click="doImportCurl">
+          {{ t('common.confirm') }}
+        </n-button>
+      </template>
+    </n-modal>
+
+    <!-- 导出 CURL：弹出可编辑的可执行命令，一键复制 -->
+    <n-modal v-model:show="showExport" preset="card" :title="t('curl.export')" style="width: 660px"
+      data-testid="req.exportCurl">
+      <div class="export-hd">
+        <n-button size="small" :disabled="!exportCurl" data-testid="req.exportCurlCopy" @click="copyExport">
+          {{ t('common.copy') }}
+        </n-button>
+      </div>
+      <n-input v-model:value="exportCurl" type="textarea" class="curl-out mono" :autosize="{ minRows: 6, maxRows: 20 }"
+        data-testid="req.exportCurlBody" :placeholder="t('codegen.empty')" />
+    </n-modal>
   </div>
 </template>
 
@@ -267,7 +330,7 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
 }
 
 .method {
-  width: 110px;
+  width: 88px;
   flex: 0 0 auto;
 }
 
@@ -349,6 +412,21 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
   cursor: pointer;
 }
 
+/* 「···」菜单触发器：三个横向圆点（用 CSS 绘制，任何字体下都稳定显示） */
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+}
+
+.dots i {
+  display: block;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .icon-btn:hover {
   border-color: var(--app-accent);
   color: var(--app-accent);
@@ -389,13 +467,28 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
   font-family: inherit;
   font-weight: 600;
   font-size: 13px;
-  padding:0 14px;
+  padding: 0 14px;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .cancel:hover {
   border-color: var(--app-danger, #d03050);
+}
+
+/* 导出 CURL 弹窗：右上角复制按钮 + 等宽可编辑内容（n-input 文本域，等宽字体打在内部 textarea 上） */
+.export-hd {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.curl-out :deep(textarea) {
+  font-family: var(--app-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .spin {
@@ -407,5 +500,4 @@ async function onUrlPaste(e: ClipboardEvent): Promise<void> {
     transform: rotate(360deg);
   }
 }
-
 </style>
