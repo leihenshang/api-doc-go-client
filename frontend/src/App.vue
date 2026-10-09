@@ -251,7 +251,10 @@ async function openCollection(dir: string): Promise<void> {
     message.warning(t('welcome.pickFailed'))
     return
   }
-  await tabs.reset() // 切换前把当前根的未保存改动落盘
+  // 手动保存模式下打开新集合不强制落盘：先确认未保存改动（与切换工作区一致）
+  const mode = await tabs.confirmLeaveUnsaved()
+  if (mode === 'cancel') return
+  await tabs.reset(mode === 'save')
   try {
     await coll.open(dir)
     // 恢复该根的 tab 现场（uid 仍在集合内才打开）
@@ -298,7 +301,12 @@ async function activateRoot(root: string): Promise<void> {
 /** 关闭一个工作目录（其它根不受影响）；关掉活动根时自动切到剩余的根。 */
 async function closeRoot(root: string): Promise<void> {
   const wasActive = root === coll.activeRoot
-  if (wasActive) await tabs.reset()
+  if (wasActive) {
+    // 手动保存模式下关闭活动根同样先确认未保存改动（与切换工作区一致）
+    const mode = await tabs.confirmLeaveUnsaved()
+    if (mode === 'cancel') return
+    await tabs.reset(mode === 'save')
+  }
   try {
     await coll.closeRoot(root)
   } catch (e) {
@@ -448,15 +456,16 @@ function onHotkey(e: KeyboardEvent): void {
 onMounted(() => {
   const settingsReady = settings.load()
   window.addEventListener('keydown', onHotkey)
-  // 关窗前 flush 未保存改动（防抖未触发的最后编辑）；新建草稿没有磁盘副本，同步补一份到 localStorage
+  // 关窗前 flush 未保存改动（自动保存模式下补上防抖未触发的最后编辑）；
+  // 手动保存模式下不写盘（未保存改动本就该显式保存留档）；新建草稿没有磁盘副本，始终同步一份到 localStorage
   window.addEventListener('beforeunload', () => {
-    void tabs.flushAll()
+    if (settings.autoSave) void tabs.flushAll()
     tabs.saveDrafts()
   })
-  // P1：窗口失焦即落盘（手动保存模式下这是唯一的隐式写盘点），
-  // 把「编辑完没保存就切走/关窗」的丢失窗口从防抖时长压到接近零
+  // 窗口失焦：自动保存模式下立即落盘（把「编辑完没保存就切走/关窗」的丢失窗口从防抖时长压到接近零）；
+  // 手动保存模式下不落盘 —— 否则切走/失焦就把改动静默写盘，既违背手动保存预期，也可能触发假冲突
   window.addEventListener('blur', () => {
-    void tabs.flushAll()
+    if (settings.autoSave) void tabs.flushAll()
   })
   // 外部改动（D1/D2 + G10）：干净 tab 自动重载；脏 tab 不覆盖，提示用户。
   // 事件带 root：多根并存时只重载发生改动的那一根

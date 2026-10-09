@@ -6,12 +6,16 @@
 // （runtime 里 flags.deferDragToMouseMove = true），静止双击不会进入系统移动循环，
 // 所以这里能正常收到 dblclick，直接调 WindowToggleMaximise 即可 —— 注意这不是「真全屏」，
 // 行为与系统标题栏一致（占满工作区，不盖任务栏）。
-import { NIcon } from 'naive-ui'
+import { i18n } from '@/i18n'
+import { hasWailsRuntime, windowCtl } from '@/lib/ipc'
+import { dialog } from '@/lib/notice'
+import { isDark } from '@/lib/theme'
+import { useSettingsStore } from '@/stores/settings'
+import { useTabsStore } from '@/stores/tabs'
 import { CloseOutline, CopyOutline, MoonOutline, RemoveOutline, SquareOutline, SunnyOutline } from '@vicons/ionicons5'
+import { NIcon } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { hasWailsRuntime, windowCtl } from '@/lib/ipc'
-import { isDark } from '@/lib/theme'
 
 // layout 为 null 表示当前没有打开的请求（没有「请求 / 响应」可排布），此时不渲染这组按钮
 const props = defineProps<{ dark: boolean; layout?: 'right' | 'bottom' | null }>()
@@ -53,6 +57,41 @@ function onTitleDblClick(e: MouseEvent): void {
   if (!customChrome) return
   if ((e.target as HTMLElement | null)?.closest('button')) return
   void toggleMax()
+}
+
+/**
+ * 退出确认（手动保存模式）：有关未保存改动时先问一句，避免直接退掉丢改动。
+ * 自动保存模式 / 无未保存改动直接退出。选「保存并退出」先把改动落盘再退。
+ * （Alt+F4 / 任务栏退出由系统直接关窗，不走这里；主入口是自定义标题栏的关闭按钮。）
+ */
+function requestQuit(): void {
+  const settings = useSettingsStore()
+  const quitNow = (): void => void windowCtl.quit()
+  if (settings.autoSave) {
+    quitNow()
+    return
+  }
+  const tabs = useTabsStore()
+  const savable = tabs.tabs.filter((x) => !x.draft && x.uid && x.dirty && !x.conflict)
+  if (!savable.length) {
+    quitNow()
+    return
+  }
+  const d = dialog.warning({
+    title: i18n.global.t('confirm.quitTitle'),
+    content: i18n.global.t('confirm.quitUnsaved', { n: savable.length }),
+    positiveText: i18n.global.t('common.saveAndQuit'),
+    negativeText: i18n.global.t('common.quitWithoutSaving'),
+    onPositiveClick: () => {
+      // 先落盘再退出；退出后对话框随之销毁，无需处理返回值
+      void (async () => {
+        await useTabsStore().flushAll()
+        quitNow()
+      })()
+    },
+    onNegativeClick: () => quitNow(),
+  })
+  void d
 }
 
 // 拖动改变窗口大小 / 系统快捷键最大化时也会触发 resize，借它兜住状态同步
@@ -137,7 +176,7 @@ onBeforeUnmount(() => {
       <button class="wc" type="button" data-testid="titlebar.max" :title="t('app.maximise')" @click="toggleMax">
         <n-icon :component="maximised ? CopyOutline : SquareOutline" :size="12" />
       </button>
-      <button class="wc danger" type="button" data-testid="titlebar.close" :title="t('app.close')" @click="windowCtl.quit()">
+      <button class="wc danger" type="button" data-testid="titlebar.close" :title="t('app.close')" @click="requestQuit()">
         <n-icon :component="CloseOutline" :size="15" />
       </button>
     </div>

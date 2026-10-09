@@ -7,7 +7,7 @@
 import { i18n } from '@/i18n'
 import { grpcSendBlocker } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
-import { message } from '@/lib/notice'
+import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { GrpcSchema, RequestDoc, ResolveResult, SendResult } from '@/types'
@@ -565,7 +565,9 @@ export const useTabsStore = defineStore('tabs', {
         return
       }
       const coll = useCollectionStore()
-      await this.flush(key)
+      // 手动保存模式下发送前不落盘：改动只在 Ctrl+S / 显式保存时写入文件，
+      // 避免「改完就点发送」把未保存内容偷偷写盘（与 autoSave 关闭的预期一致）。
+      if (useSettingsStore().autoSave) await this.flush(key)
       tab.sending = true
       tab.error = ''
       try {
@@ -681,13 +683,50 @@ export const useTabsStore = defineStore('tabs', {
     async switchRoot(root: string): Promise<void> {
       const coll = useCollectionStore()
       if (!root || root === coll.activeRoot) return
-      await this.reset()
+      // 手动保存模式下：切换工作区不强制落盘，先询问未保存改动怎么处理（避免无提示写盘 + 假冲突）
+      const mode = await this.confirmLeaveUnsaved()
+      if (mode === 'cancel') return
+      await this.reset(mode === 'save')
       await coll.setActive(root)
       await this.restoreSession()
     },
-    /** 关闭集合（切换集合）时先落盘未保存改动，再清空内存会话（现场与草稿已单独落 localStorage）。 */
-    async reset(): Promise<void> {
-      await this.flushAll()
+    /**
+     * 切换工作区前的未保存改动确认：
+     *  - 开启了自动保存：改动本就已落盘，无需询问，直接全量 flush；
+     *  - 没有可保存的未保存页签（草稿/无 uid/已冲突）：正常切换；
+     *  - 手动保存且有未保存改动：弹窗三选 —— 保存并切换 / 放弃更改 / 取消。
+     */
+    async confirmLeaveUnsaved(): Promise<'save' | 'discard' | 'cancel'> {
+      const settings = useSettingsStore()
+      if (settings.autoSave) return 'save'
+      // 只统计「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘、
+      // 冲突页签已挂横幅且 flush 会跳过 —— 都不该触发保存询问。
+      const savable = this.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict)
+      if (!savable.length) return 'save'
+      return new Promise((resolve) => {
+        const d = dialog.warning({
+          title: i18n.global.t('confirm.unsavedTitle'),
+          content: i18n.global.t('confirm.unsavedSwitch', { n: savable.length }),
+          positiveText: i18n.global.t('common.saveAndSwitch'),
+          negativeText: i18n.global.t('common.discardChanges'),
+          onPositiveClick: () => resolve('save'),
+          onNegativeClick: () => resolve('discard'),
+          onClose: () => resolve('cancel'),
+          onMaskClick: () => resolve('cancel'),
+        })
+        // onMaskClick 返回 false 时断开「点遮罩关闭」可能会触发 onClose 二次 resolve；
+        // Promise 只取首次，无需额外处理。变量 d 仅用于保持引用，避免被 GC。
+        void d
+      })
+    },
+    /**
+     * 关闭集合 / 切换集合时清空内存会话。
+     *  - flush=true（默认）：先落盘未保存改动（自动保存模式/手动显式「保存并切换」）；
+     *  - flush=false：放弃未保存的内存改动，直接清空（调用方已确认）。
+     * 现场与草稿已单独落 localStorage。
+     */
+    async reset(flush = true): Promise<void> {
+      if (flush) await this.flushAll()
       // 先把草稿落 localStorage 再清空：挂起的防抖保存会被下面的 clearTimeout 取消，
       // 不补这一下就会丢掉「切换集合前最后一段草稿编辑」。
       this.saveDrafts()

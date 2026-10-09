@@ -21,6 +21,10 @@ export default {
     sep: ' · ',
     tableEdit: '表格编辑',
     bulkEdit: '批量编辑',
+    saveAndSwitch: '保存并切换',
+    discardChanges: '放弃更改',
+    saveAndQuit: '保存并退出',
+    quitWithoutSaving: '退出不保存',
   },
   welcome: {
     title: 'api-doc-go',
@@ -614,5 +618,11 @@ export default {
     unsavedHint: '「{name}」有未保存的修改，关闭页签前要保存吗？',
     unsavedBatch: '批量关闭：第 {i}/{n} 个',
     saveAndClose: '保存并关闭',
+  },
+  confirm: {
+    unsavedTitle: '有未保存的修改',
+    unsavedSwitch: '切换工作区前，{n} 个请求页签还有未保存的修改，要怎么处理？',
+    quitTitle: '有未保存的修改',
+    quitUnsaved: '退出前，{n} 个请求页签还有未保存的修改，要怎么处理？',
   },
 }

@@ -21,6 +21,10 @@ export default {
     sep: ' · ',
     tableEdit: 'Table edit',
     bulkEdit: 'Bulk Edit',
+    saveAndSwitch: 'Save and switch',
+    discardChanges: 'Discard changes',
+    saveAndQuit: 'Save and quit',
+    quitWithoutSaving: 'Quit without saving',
   },
   welcome: {
     title: 'api-doc-go',
@@ -613,5 +617,11 @@ export default {
     unsavedHint: '“{name}” has unsaved changes. Save before closing the tab?',
     unsavedBatch: 'Closing tabs: {i} of {n}',
     saveAndClose: 'Save and close',
+  },
+  confirm: {
+    unsavedTitle: 'Unsaved changes',
+    unsavedSwitch: 'Before switching workspaces, {n} request tab(s) have unsaved changes. How do you want to proceed?',
+    quitTitle: 'Unsaved changes',
+    quitUnsaved: 'Before quitting, {n} request tab(s) have unsaved changes. How do you want to proceed?',
   },
 }
