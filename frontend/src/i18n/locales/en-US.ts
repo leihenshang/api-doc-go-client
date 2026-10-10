@@ -642,6 +642,7 @@ export default {
     reqName: 'Request name',
     folder: 'Folder',
     folderRoot: 'Root',
+    folderPlaceholder: 'Select a folder (root by default)',
     method: 'Method',
     saveDraftTitle: 'Save request',
     saveDraftHint: 'This request is new and not saved yet: give it a name, pick a folder and save, or discard it.',
