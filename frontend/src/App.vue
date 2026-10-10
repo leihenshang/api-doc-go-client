@@ -280,6 +280,23 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * 关闭标签时跳过详情区 rb-fade 过渡 —— 关闭是"移除"，fade 让视觉感觉拖泥带水；
+ * 但切换激活、新建、根切换这些"进场/换场"动作仍保留过渡。
+ */
+const skipDetailTransition = ref(false)
+async function withoutDetailTransition<T>(fn: () => T | Promise<T>): Promise<T> {
+  skipDetailTransition.value = true
+  try {
+    return await fn()
+  } finally {
+    // 等 detailTab 重渲染完成（transition 的 name 已切换为空）再恢复
+    await nextTick()
+    skipDetailTransition.value = false
+  }
+}
+
 /** 详情区实际渲染的页签：有活动页签用它；切根瞬间没有活动页签时沿用上一个（避免闪概览）。 */
 const detailTab = computed(() => tabs.active ?? (switchingRoot.value ? stuckActive.value : null))
 
@@ -665,19 +682,19 @@ async function closeOne(key: string, seq: { i: number; n: number } | null = null
     return false // 保存框由对话框的保存/丢弃按钮控制关闭，这里不阻塞批量流程（草稿逐个处理）
   }
   if (!tab.dirty) {
-    await tabs.close(key)
+    await withoutDetailTransition(() => tabs.close(key))
     return true
   }
   const choice = await askClose(tab, seq)
   if (choice === 'cancel') return false
   if (choice === 'discard') {
-    await tabs.closeDiscard(key)
+    await withoutDetailTransition(() => tabs.closeDiscard(key))
     return true
   }
   // 保存并关闭：写盘被拒（冲突 / 只读 / 磁盘错误）时页签留着，原因由 flush 自己提示
   await tabs.flush(key)
   if (tab.dirty || tab.conflict) return false
-  await tabs.close(key)
+  await withoutDetailTransition(() => tabs.close(key))
   return true
 }
 
@@ -722,7 +739,7 @@ async function closeManySequential(keys: string[]): Promise<void> {
       for (const k of remainingDrafts) {
         const tab = tabs.tabs.find((t) => t.key === k)
         if (!tab) continue
-        await tabs.close(k) // 草稿直接 close = 丢弃（没有磁盘副本，无需 closeDiscard）
+        await withoutDetailTransition(() => tabs.close(k)) // 草稿直接 close = 丢弃（没有磁盘副本，无需 closeDiscard）
         closed++
       }
     } else {
@@ -823,7 +840,7 @@ async function confirmSaveDraft(): Promise<void> {
     await tabs.saveDraft(tab.key, folder, name)
     const keepOpen = draftSaveOnly.value
     closeDraftDialog()
-    if (!keepOpen) await tabs.close(tab.key)
+    if (!keepOpen) await withoutDetailTransition(() => tabs.close(tab.key))
     message.success(t('prompt.draftSaved', { name }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -836,7 +853,7 @@ async function confirmSaveDraft(): Promise<void> {
 async function discardDraft(): Promise<void> {
   const tab = draftTab.value
   closeDraftDialog()
-  if (tab) await tabs.discardDraft(tab.key)
+  if (tab) await withoutDetailTransition(() => tabs.discardDraft(tab.key))
 }
 
 function envSaved(): void {
@@ -911,7 +928,7 @@ watch(
                 @select-overview="tabs.setActive('')" @close="requestClose($event)" @new="newDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)" @command="onTabCommand" />
 
-              <transition name="rb-fade" mode="out-in">
+              <transition :name="skipDetailTransition ? '' : 'rb-fade'" mode="out-in">
                 <div v-if="detailTab" :key="detailTab.key" class="detail">
                   <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的两个出口 -->
                   <div v-if="detailTab.conflict" class="conflict-bar" data-testid="req.conflict">
