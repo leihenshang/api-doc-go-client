@@ -33,20 +33,20 @@ import type { RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import {
-    NButton,
-    NConfigProvider,
-    NForm,
-    NFormItem,
-    NIcon,
-    NInput,
-    NModal,
-    NSelect,
-    NSpin,
-    darkTheme,
-    dateEnUS,
-    dateZhCN,
-    enUS,
-    zhCN,
+  NButton,
+  NConfigProvider,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NModal,
+  NSelect,
+  NSpin,
+  darkTheme,
+  dateEnUS,
+  dateZhCN,
+  enUS,
+  zhCN,
 } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -817,77 +817,35 @@ watch(
 </script>
 
 <template>
-  <n-config-provider
-    :locale="naiveLocale"
-    :date-locale="naiveDateLocale"
-    :theme="naiveTheme"
-    :theme-overrides="themeOverrides"
-  >
+  <n-config-provider :locale="naiveLocale" :date-locale="naiveDateLocale" :theme="naiveTheme"
+    :theme-overrides="themeOverrides">
     <div class="app">
       <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区（主题切换也放这里，未打开集合时也可用） -->
       <!-- 布局切换跟着「有没有打开的请求」走：没有请求时该按钮组不渲染 -->
-      <title-bar
-        :dark="settings.isDark"
-        :layout="tabs.active ? settings.responseLayout : null"
-        @toggle-theme="toggleTheme"
-        @set-layout="setLayout"
-      >
+      <title-bar :dark="settings.isDark" :layout="tabs.active ? settings.responseLayout : null"
+        @toggle-theme="toggleTheme" @set-layout="setLayout">
         <!-- 集合 / 环境 / 本地搜索并入标题栏（原先独占一行的工具栏） -->
-        <toolbar
-          v-if="coll.ready && coll.info"
-          :name="coll.name"
-          :dir="coll.dir"
-          :envs="coll.info.envs"
-          :current-env="coll.currentEnv"
-          :roots="coll.roots"
-          :active-root="coll.activeRoot"
-          :recent="recentDirs"
-          @activate="activateRoot"
-          @open-dir="openCollection"
-          @open-other="openCollection('')"
-          @reload="coll.reload()"
-          @history="showHistory = true"
-          @cookies="showCookies = true"
-          @settings="showSettings = true"
-          @palette="showPalette = true"
-          @manage-env="showEnvManager = true"
-          @import="showImport = true"
-          @export="exportDoc($event)"
-          @mock="showMock = true"
-          @sync="showSync = true"
-          @update:currentEnv="pickEnv"
-        />
+        <toolbar v-if="coll.ready && coll.info" :name="coll.name" :dir="coll.dir" :envs="coll.info.envs"
+          :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
+          @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')" @reload="coll.reload()"
+          @palette="showPalette = true" @manage-env="showEnvManager = true" @import="showImport = true"
+          @export="exportDoc($event)" @mock="showMock = true" @sync="showSync = true" @update:currentEnv="pickEnv" />
       </title-bar>
 
       <n-spin :show="coll.loading">
         <template v-if="coll.ready && coll.info">
           <div class="body">
             <aside class="side">
-              <sidebar
-                :roots="coll.roots"
-                :active-root="coll.activeRoot"
-                :active-uid="tabs.active?.uid ?? ''"
-                @activate="activateRoot"
-                @reload-root="reloadRoot"
-                @close-root="closeRoot"
-                @open="tabs.openRequest($event)"
-                @new-request="newDraft"
-                @new-grpc-request="newGrpcDraft"
-                @import-curl="openCurl"
-              />
+              <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
+                @activate="activateRoot" @reload-root="reloadRoot" @close-root="closeRoot"
+                @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
+                @import-curl="openCurl" />
             </aside>
 
             <main class="main">
-              <tab-bar
-                :tabs="tabs.tabs"
-                :active-key="tabs.activeKey"
-                @select="tabs.setActive($event)"
-                @select-overview="tabs.setActive('')"
-                @close="requestClose($event)"
-                @new="newDraft()"
-                @reorder="(from: number, to: number) => tabs.reorder(from, to)"
-                @command="onTabCommand"
-              />
+              <tab-bar :tabs="tabs.tabs" :active-key="tabs.activeKey" @select="tabs.setActive($event)"
+                @select-overview="tabs.setActive('')" @close="requestClose($event)" @new="newDraft()"
+                @reorder="(from: number, to: number) => tabs.reorder(from, to)" @command="onTabCommand" />
 
               <transition name="rb-fade" mode="out-in">
                 <div v-if="detailTab" :key="detailTab.key" class="detail">
@@ -895,10 +853,12 @@ watch(
                   <div v-if="detailTab.conflict" class="conflict-bar" data-testid="req.conflict">
                     <n-icon :component="WarningOutline" :size="14" />
                     <span class="ct">{{ t('conflict.bar') }}</span>
-                    <button class="cb" type="button" data-testid="conflict.reload" @click="tabs.reloadFromDisk(detailTab.key)">
+                    <button class="cb" type="button" data-testid="conflict.reload"
+                      @click="tabs.reloadFromDisk(detailTab.key)">
                       {{ t('conflict.reload') }}
                     </button>
-                    <button class="cb strong" type="button" data-testid="conflict.copy" @click="tabs.saveAsCopy(detailTab.key)">
+                    <button class="cb strong" type="button" data-testid="conflict.copy"
+                      @click="tabs.saveAsCopy(detailTab.key)">
                       {{ t('conflict.saveCopy') }}
                     </button>
                   </div>
@@ -909,13 +869,9 @@ watch(
                     </section>
 
                     <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
-                    <div
-                      class="splitter"
-                      role="separator"
-                      :title="t('editor.resizeHint')"
+                    <div class="splitter" role="separator" :title="t('editor.resizeHint')"
                       :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
-                      @pointerdown="startResize"
-                    />
+                      @pointerdown="startResize" />
 
                     <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
                       <response-panel :tab="detailTab" />
@@ -928,14 +884,9 @@ watch(
             </main>
           </div>
 
-          <status-bar
-            :requests="requestCount"
-            :envs="coll.info.envs.length"
-            :sync="syncStatus"
-            :saving-count="tabs.savingCount"
-            :last-saved-at="tabs.lastSavedAt"
-            @open-sync="showSync = true"
-          />
+          <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus"
+            :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="showSync = true"
+            @history="showHistory = true" @cookies="showCookies = true" @settings="showSettings = true" />
         </template>
 
         <welcome v-else :last-dir="lastDir" @open="openCollection" />
@@ -949,49 +900,33 @@ watch(
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
       <sync-dialog v-model:show="showSync" @synced="onSynced" />
-      <command-palette
-        v-model:show="showPalette"
-        :tree="coll.tree"
-        :envs="coll.info?.envs ?? []"
-        :roots="coll.roots"
-        :active-root="coll.activeRoot"
-        @open-request="openRequestInRoot"
-        @switch-env="pickEnv"
-        @command="onCommand"
-      />
+      <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
+        :active-root="coll.activeRoot" @open-request="openRequestInRoot" @switch-env="pickEnv" @command="onCommand" />
 
       <!-- 导入 cURL：粘贴命令 → 解析预览 → 开成未落盘草稿 tab -->
       <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
 
       <!-- 未保存的新建请求：关闭时（可丢弃）或 Ctrl+S 时（只保存）在这里问名称与分组 -->
-      <n-modal
-        :show="draftTab !== null"
-        preset="card"
-        :title="t('prompt.saveDraftTitle')"
-        style="width: 460px"
-        @update:show="(v: boolean) => (v ? undefined : closeDraftDialog())"
-      >
+      <n-modal :show="draftTab !== null" preset="card" :title="t('prompt.saveDraftTitle')" style="width: 460px"
+        @update:show="(v: boolean) => (v ? undefined : closeDraftDialog())">
         <p class="draft-hint">{{ t(draftSaveOnly ? 'prompt.saveOnlyHint' : 'prompt.saveDraftHint') }}</p>
         <n-form label-placement="left" label-width="86">
           <n-form-item :label="t('prompt.reqName')">
             <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
-            <n-select v-model:value="draftForm.folder" :options="folderOptions" tag filterable data-testid="draft.folder" />
+            <n-select v-model:value="draftForm.folder" :options="folderOptions" tag filterable
+              data-testid="draft.folder" />
           </n-form-item>
         </n-form>
         <template #footer>
           <div class="modal-ft">
-            <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel') }}</n-button>
-            <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{ t('prompt.discard') }}</n-button>
-            <n-button
-              size="small"
-              type="primary"
-              :disabled="!draftForm.name.trim()"
-              :loading="savingDraft"
-              data-testid="draft.save"
-              @click="confirmSaveDraft"
-            >
+            <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
+            }}</n-button>
+            <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{
+              t('prompt.discard') }}</n-button>
+            <n-button size="small" type="primary" :disabled="!draftForm.name.trim()" :loading="savingDraft"
+              data-testid="draft.save" @click="confirmSaveDraft">
               {{ t('common.save') }}
             </n-button>
           </div>
@@ -999,13 +934,8 @@ watch(
       </n-modal>
 
       <!-- 已落盘请求有未保存改动：关页签前问一句，别静默写盘（批量关闭时按页签顺序逐个弹） -->
-      <n-modal
-        :show="closeAskTab !== null"
-        preset="card"
-        :title="t('prompt.unsavedTitle')"
-        style="width: 420px"
-        @update:show="(v: boolean) => (v ? undefined : answerClose('cancel'))"
-      >
+      <n-modal :show="closeAskTab !== null" preset="card" :title="t('prompt.unsavedTitle')" style="width: 420px"
+        @update:show="(v: boolean) => (v ? undefined : answerClose('cancel'))">
         <p v-if="closeAskSeq" class="draft-hint" data-testid="closeask.seq">
           {{ t('prompt.unsavedBatch', { i: closeAskSeq.i, n: closeAskSeq.n }) }}
         </p>
@@ -1058,7 +988,7 @@ watch(
 }
 
 .side {
-  width: 260px;
+  width: var(--app-side-w);
   flex: 0 0 auto;
   border-right: 1px solid var(--app-border);
   overflow: hidden;

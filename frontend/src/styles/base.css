@@ -119,6 +119,8 @@ body.dragging.row * {
   /* 外壳固定尺寸（design-spec §2） */
   --app-titlebar-h: 44px;
   --app-statusbar-h: 28px;
+  /* 侧栏宽度：标题栏的工具组按它右缘对齐下方请求标签栏（见 TitleBar 的 .left） */
+  --app-side-w: 260px;
   /* 窗口外框圆角（轻微）：外壳按此裁切，圆角外透出桌面背景 */
   --app-radius-window: 10px;
 }

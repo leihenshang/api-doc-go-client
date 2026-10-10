@@ -2,8 +2,9 @@
 // 纯函数：章节标题 / 表头文案由调用方传入当前语言的实际文案（labels），本文件不依赖 i18n。
 // 结构对齐约定（参考采集文档）：
 //   简要描述 → 请求URI → 请求方式 → 请求头 → 请求参数 → 请求示例 → 响应字段 → 响应示例 → 备注。
-// 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数为「参数名|必选|类型|说明」（必选/类型留空待手填），
-// 响应字段为「参数名|类型|说明」（无必选列）；header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}。
+// 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数/响应字段均为「参数名|必选|类型|说明」，
+// 必选默认填「是」，类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
+// 且「请求URI」只保留路径（查询串交由「请求参数」表体现）。
 import type { FieldRow } from '@/lib/responseFields'
 import type { RequestDoc } from '@/types'
 
@@ -22,7 +23,11 @@ export interface ApiDocLabels {
   colType: string // 类型
   colDesc: string // 说明
   colRequired: string // 必选
+  requiredYes: string // 必选列默认值（是 / Yes）
 }
+
+/** 类型列留空时的默认值（JSON 类型名，不随语言变化）。 */
+const DEFAULT_TYPE = 'string'
 
 export interface ApiDocInput {
   request: RequestDoc
@@ -52,6 +57,11 @@ function maskHost(url: string): string {
   return auth ? `{{host}}${url.slice(auth.length)}` : url
 }
 
+/** 只保留 URL 的路径部分：去掉查询串与锚点（查询参数交由「请求参数」表体现）。 */
+function urlPathOnly(url: string): string {
+  return url.replace(/[?#].*$/, '')
+}
+
 export function buildApiDoc(input: ApiDocInput): string {
   const { request: r, curl, fields, exampleBody, labels: L } = input
   const out: string[] = []
@@ -60,9 +70,9 @@ export function buildApiDoc(input: ApiDocInput): string {
   const title = r.name || r.url
   if (title) out.push(`## ${L.desc}`, `- ${title}`, '')
 
-  // 请求URI
+  // 请求URI（只留路径，查询参数由下方「请求参数」表体现）
   const rawUrl = r.grpc ? (r.grpc.target ?? '') : (r.url ?? '')
-  const urlLine = maskHost(rawUrl)
+  const urlLine = maskHost(urlPathOnly(rawUrl))
   if (urlLine) out.push(`## ${L.uri}`, `- ${urlLine}`, '')
 
   // 请求方式
@@ -76,12 +86,13 @@ export function buildApiDoc(input: ApiDocInput): string {
     out.push('')
   }
 
-  // 请求参数及说明（query 参数；只列启用且有名字的行）。无类型数据，「类型」列留空待手填。
+  // 请求参数及说明（query 参数；只列启用且有名字的行）。必选默认「是」，类型默认 string。
   const params = r.params.filter((p) => p.enabled && p.name.trim())
   if (params.length) {
     const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
     out.push(`## ${L.params}`, `| ${hdr} |`, '| --- | --- | --- | --- |')
-    for (const p of params) out.push(`| ${esc(p.name)} |  |  | ${esc(p.description ?? '')} |`)
+    for (const p of params)
+      out.push(`| ${esc(p.name)} | ${L.requiredYes} | ${DEFAULT_TYPE} | ${esc(p.description ?? '')} |`)
     out.push('')
   }
 
@@ -92,11 +103,12 @@ export function buildApiDoc(input: ApiDocInput): string {
     out.push(`## ${L.reqExample}`, '', '```shell', curlOut.trimEnd(), '```', '')
   }
 
-  // 响应字段（参数名=字段路径、类型=f.type、说明=f.meaning；必选列留空待手填）
+  // 响应字段（参数名=字段路径、类型=f.type（空则 string）、说明=f.meaning；必选默认「是」）
   if (fields.length) {
     const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
     out.push(`## ${L.resFields}`, `| ${hdr} |`, '| --- | --- | --- | --- |')
-    for (const f of fields) out.push(`| ${esc(f.path)} |  | ${esc(f.type)} | ${esc(f.meaning)} |`)
+    for (const f of fields)
+      out.push(`| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.meaning)} |`)
     out.push('')
   }
 

@@ -271,6 +271,7 @@ export default {
     colType: '类型',
     colDesc: '说明',
     colRequired: '必选',
+    requiredYes: '是',
   },
   tree: {
     expandAll: '全部展开',

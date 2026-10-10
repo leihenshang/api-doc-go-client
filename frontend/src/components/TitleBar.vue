@@ -81,15 +81,21 @@ onBeforeUnmount(() => {
 
 <template>
   <header class="titlebar" data-testid="titlebar" @dblclick="onTitleDblClick">
-    <!-- 应用图标（design/icon/api-color.svg，内联以便暗色主题单独调色；favicon 与 exe 图标同源） -->
-    <span class="logo" aria-hidden="true">
-      <svg viewBox="0 0 1039 1024" width="15" height="15">
-        <path class="plug" :fill="plugDark" d="M1027.699678 11.803508a40.631696 40.631696 0 0 0-57.453218 0.203158L878.459459 104.403143c-101.802714-98.023966-264.370129-96.540909-364.324101 4.063169l-109.380525 110.132212a40.631696 40.631696 0 0 0 0.203158 57.453218l351.586065 349.229426a40.631696 40.631696 0 0 0 28.62503 11.803508h0.142211a40.631696 40.631696 0 0 0 28.685977-12.006666l109.380525-110.111896c96.236172-96.886279 100.177446-251.20546 12.189509-352.825332L1027.9841 69.256726a40.631696 40.631696 0 0 0-0.284422-57.453218zM865.721423 457.716054l-80.73518 81.263392L491.036239 247.061027l80.755496-81.263392a178.637251 178.637251 0 0 1 252.343147-0.853266l40.631696 40.46917a178.637251 178.637251 0 0 1 0.954845 252.302515z" />
-        <path :fill="plugBlue" d="M572.543421 686.127133l62.613443-62.979129a40.631696 40.631696 0 0 0-57.656376-57.270375l-62.633759 62.979128-111.838743-111.087056 62.633759-62.979129a40.631696 40.631696 0 0 0-57.656377-57.250059l-62.633759 62.979128-62.207126-61.800809a40.631696 40.631696 0 0 0-57.473534 0.203158l-109.380525 110.111896a260.449171 260.449171 0 0 0-12.189509 352.825332L11.805702 954.722958a40.631696 40.631696 0 1 0 57.656376 57.270376l91.787001-92.396477a257.767479 257.767479 0 0 0 180.059361 72.324419h0.914213a258.011269 258.011269 0 0 0 183.370843-76.42822l109.380526-110.111896a40.631696 40.631696 0 0 0-0.203159-57.473534z m-104.626617 172.095548a177.093247 177.093247 0 0 1-125.958257 52.435203H341.30844a177.093247 177.093247 0 0 1-125.714467-51.581938l-25.943338-25.740179-14.810253-14.607095a179.043568 179.043568 0 0 1-0.853266-252.343147l80.73518-81.263392 293.929688 291.938735z" />
-      </svg>
-    </span>
-    <span class="brand">{{ t('app.brand') }}</span>
-    <span class="ver mono">{{ VERSION }}</span>
+    <!-- 左侧标识区固定到「侧栏宽度」：使后面的插槽（集合/环境/搜索）正好从侧栏右缘起排，
+         与下方请求标签栏左缘对齐 -->
+    <div class="left">
+      <!-- 应用图标（design/icon/api-color.svg，内联以便暗色主题单独调色；favicon 与 exe 图标同源） -->
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 1039 1024" width="15" height="15">
+          <path class="plug" :fill="plugDark"
+            d="M1027.699678 11.803508a40.631696 40.631696 0 0 0-57.453218 0.203158L878.459459 104.403143c-101.802714-98.023966-264.370129-96.540909-364.324101 4.063169l-109.380525 110.132212a40.631696 40.631696 0 0 0 0.203158 57.453218l351.586065 349.229426a40.631696 40.631696 0 0 0 28.62503 11.803508h0.142211a40.631696 40.631696 0 0 0 28.685977-12.006666l109.380525-110.111896c96.236172-96.886279 100.177446-251.20546 12.189509-352.825332L1027.9841 69.256726a40.631696 40.631696 0 0 0-0.284422-57.453218zM865.721423 457.716054l-80.73518 81.263392L491.036239 247.061027l80.755496-81.263392a178.637251 178.637251 0 0 1 252.343147-0.853266l40.631696 40.46917a178.637251 178.637251 0 0 1 0.954845 252.302515z" />
+          <path :fill="plugBlue"
+            d="M572.543421 686.127133l62.613443-62.979129a40.631696 40.631696 0 0 0-57.656376-57.270375l-62.633759 62.979128-111.838743-111.087056 62.633759-62.979129a40.631696 40.631696 0 0 0-57.656377-57.250059l-62.633759 62.979128-62.207126-61.800809a40.631696 40.631696 0 0 0-57.473534 0.203158l-109.380525 110.111896a260.449171 260.449171 0 0 0-12.189509 352.825332L11.805702 954.722958a40.631696 40.631696 0 1 0 57.656376 57.270376l91.787001-92.396477a257.767479 257.767479 0 0 0 180.059361 72.324419h0.914213a258.011269 258.011269 0 0 0 183.370843-76.42822l109.380526-110.111896a40.631696 40.631696 0 0 0-0.203159-57.473534z m-104.626617 172.095548a177.093247 177.093247 0 0 1-125.958257 52.435203H341.30844a177.093247 177.093247 0 0 1-125.714467-51.581938l-25.943338-25.740179-14.810253-14.607095a179.043568 179.043568 0 0 1-0.853266-252.343147l80.73518-81.263392 293.929688 291.938735z" />
+        </svg>
+      </span>
+      <span class="brand">{{ t('app.brand') }}</span>
+      <span class="ver mono">{{ VERSION }}</span>
+    </div>
     <!-- 中间插槽：集合切换 / 环境切换 / 本地搜索（原先独占一行的工具栏，2026-10-03 并入标题栏） -->
     <slot />
     <span class="sp" />
@@ -97,27 +103,15 @@ onBeforeUnmount(() => {
     <!-- 响应区排列（左：请求响应左右 / 右：上下）：原先挂在分栏中缝的胶囊里，
          挪到标题栏与主题按钮相邻，省掉中缝的视觉占位 -->
     <div v-if="layout" class="layouts" role="group" :aria-label="t('settings.responseLayout')">
-      <button
-        class="lay"
-        :class="{ on: layout === 'right' }"
-        type="button"
-        data-testid="titlebar.layoutRight"
-        :title="t('editor.layoutHorizontal')"
-        @click="emit('set-layout', 'right')"
-      >
+      <button class="lay" :class="{ on: layout === 'right' }" type="button" data-testid="titlebar.layoutRight"
+        :title="t('editor.layoutHorizontal')" @click="emit('set-layout', 'right')">
         <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
           <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
           <line x1="7" y1="0.6" x2="7" y2="11.4" stroke="currentColor" />
         </svg>
       </button>
-      <button
-        class="lay"
-        :class="{ on: layout === 'bottom' }"
-        type="button"
-        data-testid="titlebar.layoutBottom"
-        :title="t('editor.layoutVertical')"
-        @click="emit('set-layout', 'bottom')"
-      >
+      <button class="lay" :class="{ on: layout === 'bottom' }" type="button" data-testid="titlebar.layoutBottom"
+        :title="t('editor.layoutVertical')" @click="emit('set-layout', 'bottom')">
         <svg viewBox="0 0 14 12" width="14" height="12" aria-hidden="true">
           <rect x="0.6" y="0.6" width="12.8" height="10.8" rx="1.6" fill="none" stroke="currentColor" />
           <line x1="0.6" y1="6" x2="13.4" y2="6" stroke="currentColor" />
@@ -125,25 +119,21 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <button
-      class="theme"
-      type="button"
-      data-testid="titlebar.theme"
-      :title="themeHint"
-      :aria-label="themeHint"
-      @click="emit('toggle-theme')"
-    >
+    <button class="theme" type="button" data-testid="titlebar.theme" :title="themeHint" :aria-label="themeHint"
+      @click="emit('toggle-theme')">
       <n-icon :component="dark ? SunnyOutline : MoonOutline" :size="15" />
     </button>
 
     <div v-if="customChrome" class="win">
-      <button class="wc" type="button" data-testid="titlebar.min" :title="t('app.minimise')" @click="windowCtl.minimise()">
+      <button class="wc" type="button" data-testid="titlebar.min" :title="t('app.minimise')"
+        @click="windowCtl.minimise()">
         <n-icon :component="RemoveOutline" :size="15" />
       </button>
       <button class="wc" type="button" data-testid="titlebar.max" :title="t('app.maximise')" @click="toggleMax">
         <n-icon :component="maximised ? CopyOutline : SquareOutline" :size="12" />
       </button>
-      <button class="wc danger" type="button" data-testid="titlebar.close" :title="t('app.close')" @click="requestQuit()">
+      <button class="wc danger" type="button" data-testid="titlebar.close" :title="t('app.close')"
+        @click="requestQuit()">
         <n-icon :component="CloseOutline" :size="15" />
       </button>
     </div>
@@ -157,12 +147,25 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 6px 0 13px;
+  padding: 0 6px 0 0;
   background: var(--app-bg);
   border-bottom: 1px solid var(--app-border);
   user-select: none;
   /* Wails 无边框拖动：属性会向下继承，交互元素需显式 no-drag */
   --wails-draggable: drag;
+}
+
+/* 左侧标识区：宽度锁定为「侧栏宽度 - 标题栏 gap」，抵消 gap 后插槽正好从侧栏右缘（x=--app-side-w）
+   开始排布，与下方请求标签栏左缘对齐。侧栏宽度见 base.css 的 --app-side-w。 */
+.left {
+  flex: 0 0 auto;
+  width: calc(var(--app-side-w) - 7px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 13px;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .logo {

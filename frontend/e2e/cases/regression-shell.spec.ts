@@ -114,8 +114,7 @@ test.describe('外壳、布局与命令面板', () => {
       await page.keyboard.press('Escape')
       await expect(page.getByTestId('settings.theme')).toBeHidden()
 
-      await page.getByTestId('toolbar.collection').click()
-      await page.locator('.n-dropdown-option').filter({ hasText: t('history.title') }).click()
+      await page.getByTestId('statusbar.history').click()
       expect(await layout(page), `${tag}: 历史弹窗不应改变布局`).toEqual(base)
       await page.keyboard.press('Escape')
       await expect(page.locator('.n-modal').filter({ hasText: t('history.title') })).toBeHidden()

@@ -88,10 +88,9 @@ export async function send(page: Page): Promise<void> {
 export const settingsModal = (page: Page): Locator =>
   page.locator('.n-modal').filter({ has: page.getByTestId('settings.theme') })
 
-/** 工具栏 → 全局设置：打开设置弹窗 */
+/** 底栏 → 全局设置：打开设置弹窗 */
 export async function openSettings(page: Page): Promise<void> {
-  await page.getByTestId('toolbar.collection').click()
-  await page.locator('.n-dropdown-option').filter({ hasText: t('settings.title') }).click()
+  await page.getByTestId('statusbar.settings').click()
   await expect(page.getByTestId('settings.theme')).toBeVisible()
 }
 

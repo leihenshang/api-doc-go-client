@@ -53,8 +53,7 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
   test('[H3] Cookie 管理：列表 + 单条删除', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)
-    await page.getByTestId('toolbar.collection').click()
-    await page.locator('.n-dropdown-option').filter({ hasText: t('cookies.title') }).click()
+    await page.getByTestId('statusbar.cookies').click()
     await expect(page.locator('.n-modal').filter({ hasText: t('cookies.title') })).toBeVisible()
     // 空罐：空态可见；清空按钮在
     await expect(page.getByTestId('cookies.clear')).toBeVisible()

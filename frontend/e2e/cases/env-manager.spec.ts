@@ -14,12 +14,12 @@ test('[F1/F3] 环境下拉：新建的环境立刻可选、选中即切换；保
   await app.newCollection('basic')
   await openCollection(page, app)
 
-  const sel = page.locator('.toolbar .sel')
+  const sel = page.getByTestId('env.select')
   const modal = page.locator('.n-modal').filter({ hasText: t('env.title') })
 
   // 下拉最后一项是「环境设置…」，选中即打开管理弹窗
   await sel.click()
-  await page.locator('.n-base-select-option').filter({ hasText: t('env.manage') }).click()
+  await page.locator('.n-dropdown-option').filter({ hasText: t('env.manage') }).click()
   await expect(modal).toBeVisible()
 
   // 新建环境 env-2 → 给它加一条变量 → 保存
@@ -36,7 +36,7 @@ test('[F1/F3] 环境下拉：新建的环境立刻可选、选中即切换；保
 
   // ① 下拉里要立刻出现刚建的环境（解构 props 的旧实现这里只有 dev）
   await sel.click()
-  const opt = page.locator('.n-base-select-option').filter({ hasText: 'env-2' })
+  const opt = page.locator('.n-dropdown-option').filter({ hasText: 'env-2' })
   await expect(opt).toBeVisible()
   await opt.click()
 
