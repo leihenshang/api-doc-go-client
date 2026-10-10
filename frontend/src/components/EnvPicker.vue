@@ -4,7 +4,7 @@
 import type { Env } from '@/types'
 import { CheckmarkOutline, ChevronDownOutline, GlobeOutline, SettingsOutline } from '@vicons/ionicons5'
 import type { DropdownOption } from 'naive-ui'
-import { NIcon } from 'naive-ui'
+import { NDropdown, NIcon } from 'naive-ui'
 import { computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 

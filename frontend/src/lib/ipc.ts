@@ -236,6 +236,8 @@ export const api = {
     call<string[]>('MoveFolderToCollection', srcRoot, uid, destRoot, destParent),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
+  /** 给环境改名：两个文件（主文件 + secrets）一起搬，旧文件进 .trash */
+  renameEnv: (oldName: string, newName: string) => call<null>('RenameEnv', oldName, newName, ''),
   deleteEnv: (name: string) => call<null>('DeleteEnv', name),
   send: (r: RequestDoc, envName: string) => call<SendResult>('SendRequest', r, envName).then(normalizeSend),
   cancelSend: (uid: string) => call<null>('CancelSend', uid),

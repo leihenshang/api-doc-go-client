@@ -620,6 +620,7 @@ export default {
     enabled: '启用',
     saveHint: '敏感值的明文保存在 environments/<环境>.secrets.yml（已加入 .gitignore）',
     deleteEnv: '删除环境',
+    deleteConfirm: '确定删除环境「{name}」？',
     saved: '已保存环境「{name}」',
     noEnvs: '尚无环境，点击「新建环境」',
     manage: '环境设置…',

@@ -1066,7 +1066,7 @@ func (c *Collection) EnvFileHash(name string) string {
 // 不一致直接返回带 conflictMarker 的错误且**不落盘**，避免覆盖别人的改动。
 func (c *Collection) SaveEnvChecked(env Env, expectHash string) error {
 	if !validEnvName(env.Name) {
-		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
+		return fmt.Errorf("环境名只能包含中文、字母、数字与 - _ ( ) . 等字符")
 	}
 	if expectHash != "" {
 		mainP, _ := c.envPaths(env.Name)
@@ -1081,7 +1081,7 @@ func (c *Collection) SaveEnvChecked(env Env, expectHash string) error {
 // saveEnv 真正落盘（调用方已做完名字与冲突校验）。
 func (c *Collection) saveEnv(env Env) error {
 	if !validEnvName(env.Name) {
-		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
+		return fmt.Errorf("环境名只能包含中文、字母、数字与 - _ ( ) . 等字符")
 	}
 	if err := os.MkdirAll(filepath.Join(c.Dir, "environments"), 0o755); err != nil {
 		return err
@@ -1125,7 +1125,7 @@ func (c *Collection) saveEnv(env Env) error {
 //	③ 环境的两个文件必须同时搬，只有这一层知道它们的布局。
 func (c *Collection) RenameEnv(oldName, newName, expectHash string) error {
 	if !validEnvName(oldName) || !validEnvName(newName) {
-		return fmt.Errorf("环境名只能包含字母、数字、- 与 _")
+		return fmt.Errorf("环境名只能包含中文、字母、数字与 - _ ( ) . 等字符")
 	}
 	oldMain, _ := c.envPaths(oldName)
 	newMain, _ := c.envPaths(newName)
