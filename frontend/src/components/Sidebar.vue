@@ -847,7 +847,8 @@ watch(
               <!-- 必须 .stop：不用它的话，箭头自己的折展会先把图标节点换掉，
                    同一个 click 冒泡到行时 ev.target 已是脱离 DOM 的旧节点 → 行里「排除 .caret」判不出来
                    → 又折展一次，等于没反应（实测）。 -->
-              <button class="caret" data-testid="tree.row.caret" :title="t('tree.expandAll')"
+              <!-- 没有下级（子分组 / 请求都为空）的目录不画展开图标：它无可展开，与叶子一致 -->
+              <button v-if="!!row.node!.children?.length" class="caret" data-testid="tree.row.caret" :title="t('tree.expandAll')"
                 @click.stop="toggle(row.root, row.node!.path)">
                 <n-icon :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
                   :size="13" />
