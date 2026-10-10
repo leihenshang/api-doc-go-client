@@ -294,6 +294,13 @@ export const useCollectionStore = defineStore('collection', {
       await this.reload()
       if (this.envNames.includes(env.name)) this.setEnv(env.name)
     },
+    /** 给环境改名（两个文件一起搬）；当前选中的正是旧名时跟着切到新名。 */
+    async renameEnv(oldName: string, newName: string): Promise<void> {
+      if (oldName === newName) return
+      await api.renameEnv(oldName, newName)
+      await this.reload()
+      if (this.currentEnv === oldName) this.setEnv(newName)
+    },
     async deleteEnv(name: string): Promise<void> {
       await api.deleteEnv(name)
       await this.reload()

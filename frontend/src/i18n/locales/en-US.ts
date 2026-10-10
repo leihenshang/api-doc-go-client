@@ -619,6 +619,7 @@ export default {
     enabled: 'Enabled',
     saveHint: 'Secret values are stored in environments/<env>.secrets.yml (git-ignored)',
     deleteEnv: 'Delete environment',
+    deleteConfirm: 'Delete environment “{name}”?',
     saved: 'Saved environment “{name}”',
     noEnvs: 'No environment yet — click “New environment”',
     manage: 'Manage environments…',
