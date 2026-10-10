@@ -335,6 +335,15 @@ async function reloadRoot(root: string): Promise<void> {
   }
 }
 
+/** 在系统文件管理器中打开某个根对应的工作目录（不切活动根、不改页签）。 */
+async function revealRoot(root: string): Promise<void> {
+  try {
+    await api.revealInFolder(root)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 /**
  * 启动恢复：按上次打开的目录列表逐个打开，并把上次的活动根设回活动。
  * 单个目录失败（被删/无权限）只提示并跳过，不阻塞其它根。
@@ -883,7 +892,7 @@ watch(
           <div class="body">
             <aside class="side">
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
-                @activate="activateRoot" @reload-root="reloadRoot" @close-root="closeRoot"
+                @activate="activateRoot" @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
                 @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
                 @import-curl="openCurl" />
             </aside>

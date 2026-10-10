@@ -254,6 +254,10 @@ export function ResolveText(arg1, arg2) {
   return window['go']['app']['App']['ResolveText'](arg1, arg2);
 }
 
+export function RevealInFolder(arg1) {
+  return window['go']['app']['App']['RevealInFolder'](arg1);
+}
+
 export function RunSync(arg1) {
   return window['go']['app']['App']['RunSync'](arg1);
 }

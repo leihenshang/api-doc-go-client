@@ -8,21 +8,22 @@ import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
 import {
-    AddOutline,
-    ChevronDownOutline,
-    ChevronForwardOutline,
-    CloseOutline,
-    ContractOutline,
-    CreateOutline,
-    ExpandOutline,
-    FolderOpenOutline,
-    GitNetworkOutline,
-    MoveOutline,
-    RefreshOutline,
-    Star,
-    StarOutline,
-    TerminalOutline,
-    TrashOutline
+  AddOutline,
+  ChevronDownOutline,
+  ChevronForwardOutline,
+  CloseOutline,
+  ContractOutline,
+  CreateOutline,
+  ExpandOutline,
+  FolderOpenOutline,
+  GitNetworkOutline,
+  MoveOutline,
+  OpenOutline,
+  RefreshOutline,
+  Star,
+  StarOutline,
+  TerminalOutline,
+  TrashOutline
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
 import { NButton, NDropdown, NIcon, NInput, NModal, NPopconfirm, NSelect } from 'naive-ui'
@@ -46,6 +47,8 @@ const emit = defineEmits<{
   activate: [root: string]
   /** 重载某个工作目录 */
   'reload-root': [root: string]
+  /** 在系统文件管理器中打开某个工作目录 */
+  'reveal-root': [root: string]
   /** 关闭某个工作目录 */
   'close-root': [root: string]
 }>()
@@ -109,12 +112,19 @@ const rootMenu = computed(() => [
   { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
   { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
   { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
+  { type: 'divider', key: 'd1' },
+  { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }) },
   { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }) },
   { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }) },
 ])
 
 /** 集合级动作先切到被点击的工作目录（写操作作用于它），再分发各分支。 */
 async function onRootMenu(root: string, key: string | number): Promise<void> {
+  // 只读动作（打开所在目录）作用于被点击的根本身：不切活动根，避免连带切换页签组
+  if (key === 'reveal') {
+    emit('reveal-root', root)
+    return
+  }
   await ensureActive(root)
   if (key === 'all') toggleAll()
   else if (key === 'folder') void startAdd(root, '')
@@ -737,168 +747,111 @@ watch(
       <template v-for="row in rows" :key="row.isRoot ? `root:${row.root}` : `${row.root}|${row.node?.path}`">
         <!-- 工作目录根行：既是该根的标题，也是「移回该根顶层」的放置目标（拖动时高亮） -->
         <template v-if="row.isRoot">
-        <div
-          class="row root"
-          :class="{
+          <div class="row root" :class="{
             on: row.root === props.activeRoot,
             'root-active': row.root === props.activeRoot,
             'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.ok,
             'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && !dropHint.ok,
-          }"
-          :style="{ paddingLeft: '8px' }"
-          :data-root="row.root"
-          :data-path="''"
-          data-testid="tree.root"
-          @click="emit('activate', row.root)"
-        >
-          <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
-          <span
-            v-if="rootHasVisibleKids(row.root)"
-            class="guides"
-            aria-hidden="true"
-            data-testid="tree.root.guides"
-          >
-            <span class="gl root-down" :style="{ left: GUIDE_OFFSET + 'px' }" />
-          </span>
-          <button class="caret" data-testid="tree.root.caret" :title="t('tree.expandAll')" @click.stop="toggleRoot(row.root)">
-            <n-icon
-              :component="collapsedRoots.has(row.root) ? ChevronForwardOutline : ChevronDownOutline"
-              :size="13"
-            />
-          </button>
-          <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
-          <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
-          <span v-else class="badge">{{ t('local.badge') }}</span>
-          <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot') }}</span>
-          <span class="actions">
-            <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu" @select="onRootMenu(row.root, $event)">
-              <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
-              <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')" aria-label="···">
-                ···
-              </button>
-            </n-dropdown>
-          </span>
-        </div>
+          }" :style="{ paddingLeft: '8px' }" :data-root="row.root" :data-path="''" data-testid="tree.root"
+            @click="emit('activate', row.root)">
+            <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
+            <span v-if="rootHasVisibleKids(row.root)" class="guides" aria-hidden="true" data-testid="tree.root.guides">
+              <span class="gl root-down" :style="{ left: GUIDE_OFFSET + 'px' }" />
+            </span>
+            <button class="caret" data-testid="tree.root.caret" :title="t('tree.expandAll')"
+              @click.stop="toggleRoot(row.root)">
+              <n-icon :component="collapsedRoots.has(row.root) ? ChevronForwardOutline : ChevronDownOutline"
+                :size="13" />
+            </button>
+            <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
+            <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
+            <span v-else class="badge">{{ t('local.badge') }}</span>
+            <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
+            }}</span>
+            <span class="actions">
+              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu"
+                @select="onRootMenu(row.root, $event)">
+                <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
+                <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')" aria-label="···">
+                  ···
+                </button>
+              </n-dropdown>
+            </span>
+          </div>
 
-        <!-- 该根顶层的「新建分组」输入行：它是根的子行，所以与子行同缩进、同连接线。
+          <!-- 该根顶层的「新建分组」输入行：它是根的子行，所以与子行同缩进、同连接线。
              注意挂在根行分支里（不是 v-else-if）：挂外面时「任意一行」都能匹配，会渲染出多个输入框。 -->
-        <div
-          v-if="adding && adding.root === row.root && adding.parent === ''"
-          class="row"
-          :style="{ paddingLeft: `${8 + INDENT}px` }"
-        >
-          <span class="guides" aria-hidden="true">
-            <!-- 输入行排在子行最前：后面还有子行就是 ├，集合本来为空才是 └ -->
-            <span
-              class="gl own"
-              :class="{ last: !rootHasVisibleKids(row.root) }"
-              :style="{ left: GUIDE_OFFSET + 'px' }"
-            />
-            <span class="gl stub" :style="{ left: GUIDE_OFFSET + 'px' }" />
-          </span>
-          <n-input
-            :ref="setAddRef"
-            v-model:value="addValue"
-            size="tiny"
-            :placeholder="t('tree.folderName')"
-            @keyup.enter="submitAdd"
-            @blur="submitAdd"
-            @keyup.esc="adding = null"
-          />
-        </div>
+          <div v-if="adding && adding.root === row.root && adding.parent === ''" class="row"
+            :style="{ paddingLeft: `${8 + INDENT}px` }">
+            <span class="guides" aria-hidden="true">
+              <!-- 输入行排在子行最前：后面还有子行就是 ├，集合本来为空才是 └ -->
+              <span class="gl own" :class="{ last: !rootHasVisibleKids(row.root) }"
+                :style="{ left: GUIDE_OFFSET + 'px' }" />
+              <span class="gl stub" :style="{ left: GUIDE_OFFSET + 'px' }" />
+            </span>
+            <n-input :ref="setAddRef" v-model:value="addValue" size="tiny" :placeholder="t('tree.folderName')"
+              @keyup.enter="submitAdd" @blur="submitAdd" @keyup.esc="adding = null" />
+          </div>
         </template>
 
         <template v-else>
-          <div
-            class="row"
-            :class="{
-              folder: row.node?.type === 'folder',
-              on: row.node?.uid === props.activeUid && row.root === props.activeRoot,
-              clickable: row.node?.type === 'request',
-              dim: row.root !== props.activeRoot,
-              dragging: dragNode?.root === row.root && dragNode?.node.uid === row.node?.uid,
-              'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
-              'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && !dropHint.ok,
-            }"
-            :data-root="row.root"
-            :data-uid="row.node?.uid"
-            :data-kind="row.node?.type"
-            :data-path="row.node?.path"
+          <div class="row" :class="{
+            folder: row.node?.type === 'folder',
+            on: row.node?.uid === props.activeUid && row.root === props.activeRoot,
+            clickable: row.node?.type === 'request',
+            dim: row.root !== props.activeRoot,
+            dragging: dragNode?.root === row.root && dragNode?.node.uid === row.node?.uid,
+            'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
+            'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && !dropHint.ok,
+          }" :data-root="row.root" :data-uid="row.node?.uid" :data-kind="row.node?.type" :data-path="row.node?.path"
             data-testid="tree.row"
             :aria-current="row.node?.uid === props.activeUid && row.root === props.activeRoot ? 'true' : undefined"
             :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
             @click="onRowClick(row.root, row.node!, $event)"
-            @pointerdown="onRowPointerDown(row.root, row.node!, $event)"
-          >
+            @pointerdown="onRowPointerDown(row.root, row.node!, $event)">
             <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局）。
                  深度 0（直接挂在集合根下的分组/请求）也要画：它的那一列就是根行展开图标的圆心，
                  由根行自己向下接出（见 .gl.root-down），于是「集合 → 顶层条目」连成一条。 -->
-            <span
-              v-if="row.depth >= 0 && !row.pinned"
-              class="guides"
-              aria-hidden="true"
-              data-testid="tree.row.guides"
-            >
-              <span
-                v-for="(cont, i) in row.lines"
-                :key="`l${i}`"
-                class="gl"
-                :class="{ on: cont }"
-                :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
-              />
-              <span
-                class="gl own"
-                :class="{ last: row.last }"
-                :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }"
-              />
+            <span v-if="row.depth >= 0 && !row.pinned" class="guides" aria-hidden="true" data-testid="tree.row.guides">
+              <span v-for="(cont, i) in row.lines" :key="`l${i}`" class="gl" :class="{ on: cont }"
+                :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
+              <span class="gl own" :class="{ last: row.last }"
+                :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
               <span class="gl stub" :style="{ left: row.depth * INDENT + GUIDE_OFFSET + 'px' }" />
             </span>
             <template v-if="row.node!.type === 'folder'">
               <!-- 必须 .stop：不用它的话，箭头自己的折展会先把图标节点换掉，
                    同一个 click 冒泡到行时 ev.target 已是脱离 DOM 的旧节点 → 行里「排除 .caret」判不出来
                    → 又折展一次，等于没反应（实测）。 -->
-              <button
-                class="caret"
-                data-testid="tree.row.caret"
-                :title="t('tree.expandAll')"
-                @click.stop="toggle(row.root, row.node!.path)"
-              >
-                <n-icon
-                  :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
-                  :size="13"
-                />
+              <button class="caret" data-testid="tree.row.caret" :title="t('tree.expandAll')"
+                @click.stop="toggle(row.root, row.node!.path)">
+                <n-icon :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
+                  :size="13" />
               </button>
-              <n-input
-                v-if="editing?.root === row.root && editing?.uid === row.node!.uid"
-                v-model:value="editing.value"
-                size="tiny"
-                class="rename"
-                @keyup.enter="submitRename"
-                @blur="submitRename"
-                @keyup.esc="editing = null"
-              />
+              <n-input v-if="editing?.root === row.root && editing?.uid === row.node!.uid" v-model:value="editing.value"
+                size="tiny" class="rename" @keyup.enter="submitRename" @blur="submitRename"
+                @keyup.esc="editing = null" />
               <span v-else class="fname" data-testid="tree.row.name">{{ row.node!.name }}</span>
               <span class="actions">
-                <n-dropdown
-                  trigger="click"
-                  placement="bottom-start"
-                  :options="folderMenu"
-                  @select="onFolderMenu(row.root, row.node!, $event)"
-                >
+                <n-dropdown trigger="click" placement="bottom-start" :options="folderMenu"
+                  @select="onFolderMenu(row.root, row.node!, $event)">
                   <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
                   <button class="act" type="button" data-testid="tree.row.plus" :title="t('tree.new')">
                     <n-icon :component="AddOutline" :size="13" />
                   </button>
                 </n-dropdown>
-                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.root, row.node!)">
+                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')"
+                  @click.stop="startRename(row.root, row.node!)">
                   <n-icon :component="CreateOutline" :size="13" />
                 </button>
-                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.root, row.node!)">
+                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')"
+                  @click.stop="startMove(row.root, row.node!)">
                   <n-icon :component="MoveOutline" :size="13" />
                 </button>
                 <n-popconfirm @positive-click="removeFolder(row.root, row.node!)">
                   <template #trigger>
-                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')" @click.stop>
+                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')"
+                      @click.stop>
                       <n-icon :component="TrashOutline" :size="13" />
                     </button>
                   </template>
@@ -909,37 +862,30 @@ watch(
 
             <template v-else>
               <method-tag :method="row.node!.method ?? 'GET'" />
-              <n-input
-                v-if="editing?.root === row.root && editing?.uid === row.node!.uid"
-                v-model:value="editing.value"
-                size="tiny"
-                class="rename"
-                @keyup.enter="submitRename"
-                @blur="submitRename"
-                @keyup.esc="editing = null"
-              />
+              <n-input v-if="editing?.root === row.root && editing?.uid === row.node!.uid" v-model:value="editing.value"
+                size="tiny" class="rename" @keyup.enter="submitRename" @blur="submitRename"
+                @keyup.esc="editing = null" />
               <button v-else class="rname" data-testid="tree.row.name" :title="row.node!.name">
                 {{ row.node!.name }}
               </button>
               <span class="actions">
-                <button
-                  class="act"
-                  type="button"
-                  data-testid="tree.row.fav"
+                <button class="act" type="button" data-testid="tree.row.fav"
                   :title="coll.isFav(row.node!.uid) ? t('tree.unfav') : t('tree.fav')"
-                  @click.stop="coll.toggleFav(row.node!.uid)"
-                >
+                  @click.stop="coll.toggleFav(row.node!.uid)">
                   <n-icon :component="coll.isFav(row.node!.uid) ? Star : StarOutline" :size="13" />
                 </button>
-                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')" @click.stop="startRename(row.root, row.node!)">
+                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')"
+                  @click.stop="startRename(row.root, row.node!)">
                   <n-icon :component="CreateOutline" :size="13" />
                 </button>
-                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')" @click.stop="startMove(row.root, row.node!)">
+                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')"
+                  @click.stop="startMove(row.root, row.node!)">
                   <n-icon :component="MoveOutline" :size="13" />
                 </button>
                 <n-popconfirm @positive-click="removeRequest(row.root, row.node!)">
                   <template #trigger>
-                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')" @click.stop>
+                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')"
+                      @click.stop>
                       <n-icon :component="TrashOutline" :size="13" />
                     </button>
                   </template>
@@ -952,60 +898,29 @@ watch(
           <!-- 该分组下的「新建子分组」输入行 -->
           <div
             v-if="adding && adding.root === row.root && adding.parent === row.node!.path && row.node!.type === 'folder'"
-            class="row"
-            :style="{ paddingLeft: 8 + (row.depth + 2) * INDENT + 'px' }"
-          >
-          <!-- 输入行是该分组的子行：接上它那一列（还有后续兄弟则竖线继续），自己是 └ -->
-          <span v-if="addParentRow" class="guides" aria-hidden="true">
-            <span
-              v-for="(cont, i) in addParentRow.lines"
-              :key="`l${i}`"
-              class="gl"
-              :class="{ on: cont }"
-              :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }"
-            />
-            <!-- 父分组自身那一列：它挂在集合根下（depth 0）时没有祖先列，不能画 -->
-            <span
-              v-if="addParentRow.depth > 0"
-              class="gl"
-              :class="{ on: !addParentRow.last }"
-              :style="{ left: addParentRow.depth * INDENT + GUIDE_OFFSET + 'px' }"
-            />
-            <span
-              class="gl own last"
-              :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }"
-            />
-            <span class="gl stub" :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
-          </span>
-            <n-input
-              :ref="setAddRef"
-              v-model:value="addValue"
-              size="tiny"
-              :placeholder="t('tree.subFolderName')"
-              @keyup.enter="submitAdd"
-              @blur="submitAdd"
-              @keyup.esc="adding = null"
-            />
+            class="row" :style="{ paddingLeft: 8 + (row.depth + 2) * INDENT + 'px' }">
+            <!-- 输入行是该分组的子行：接上它那一列（还有后续兄弟则竖线继续），自己是 └ -->
+            <span v-if="addParentRow" class="guides" aria-hidden="true">
+              <span v-for="(cont, i) in addParentRow.lines" :key="`l${i}`" class="gl" :class="{ on: cont }"
+                :style="{ left: (i + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
+              <!-- 父分组自身那一列：它挂在集合根下（depth 0）时没有祖先列，不能画 -->
+              <span v-if="addParentRow.depth > 0" class="gl" :class="{ on: !addParentRow.last }"
+                :style="{ left: addParentRow.depth * INDENT + GUIDE_OFFSET + 'px' }" />
+              <span class="gl own last" :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
+              <span class="gl stub" :style="{ left: (addParentRow.depth + 1) * INDENT + GUIDE_OFFSET + 'px' }" />
+            </span>
+            <n-input :ref="setAddRef" v-model:value="addValue" size="tiny" :placeholder="t('tree.subFolderName')"
+              @keyup.enter="submitAdd" @blur="submitAdd" @keyup.esc="adding = null" />
           </div>
         </template>
       </template>
     </div>
 
-    <n-modal
-      :show="!!moving"
-      preset="card"
-      :title="t('tree.moveTitle')"
-      style="width: 420px"
-      @update:show="(v: boolean) => { if (!v) moving = null }"
-    >
+    <n-modal :show="!!moving" preset="card" :title="t('tree.moveTitle')" style="width: 420px"
+      @update:show="(v: boolean) => { if (!v) moving = null }">
       <div v-if="moving" class="move-body">
         <p class="move-hint">{{ t('tree.moveHint', { name: moving.node.name }) }}</p>
-        <n-select
-          v-model:value="moving.dest"
-          :options="destOptions"
-          size="small"
-          data-testid="tree.move.dest"
-        />
+        <n-select v-model:value="moving.dest" :options="destOptions" size="small" data-testid="tree.move.dest" />
       </div>
       <template #footer>
         <div class="move-ft">
@@ -1199,8 +1114,8 @@ watch(
    方法徽标默认 10px（给页签 / 请求栏那种紧凑场景），树上比 12.5px 的请求名小一截；
    字号不同时，相同 line-height 下两者的基线会差出 1px 以上，看着就是两个字错位。
    这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。 */
-.row > .mt,
-.row > .rname {
+.row>.mt,
+.row>.rname {
   display: inline-flex;
   align-items: center;
   line-height: 26px;
@@ -1208,7 +1123,7 @@ watch(
 }
 
 /* 方法与名称之间再收窄 */
-.row > .mt + .rname {
+.row>.mt+.rname {
   margin-left: -2px;
 }
 
@@ -1235,7 +1150,7 @@ watch(
   min-height: 30px;
 }
 
-.row.root > .coll-name {
+.row.root>.coll-name {
   font-size: 15px;
   color: var(--app-text);
 }
@@ -1259,8 +1174,8 @@ watch(
 }
 
 /* 非活动根：整棵树降低对比度，让当前工作目录更突出（仍可读、可操作） */
-.row.dim > .fname,
-.row.dim > .rname {
+.row.dim>.fname,
+.row.dim>.rname {
   color: var(--app-muted);
 }
 
@@ -1270,7 +1185,7 @@ watch(
   box-shadow: inset 2px 0 0 var(--app-accent);
 }
 
-.row.root.root-active > .coll-name {
+.row.root.root-active>.coll-name {
   font-size: 16px;
   color: var(--app-accent-dark);
 }
@@ -1289,7 +1204,7 @@ watch(
 }
 
 .fname {
-  font-weight: 500;
+  /* 与请求名同字号、同字重（不加重）：目录与请求在树里是平级条目，靠文件夹图标区分即可 */
   font-size: 12.5px;
   color: var(--app-text);
   overflow: hidden;

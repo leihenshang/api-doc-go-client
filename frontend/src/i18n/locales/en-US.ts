@@ -301,6 +301,7 @@ export default {
     readOnly: 'Read-only',
     reqCount: '{n} requests',
     reloadDir: 'Reload this workspace',
+    revealDir: 'Reveal in file manager',
     closeDir: 'Close this workspace',
     confirmCloseDir: 'Close workspace “{name}”? (files are not deleted)',
     dupFolderHint: 'The target already has a folder named “{name}”',

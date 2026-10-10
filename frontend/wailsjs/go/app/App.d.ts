@@ -137,6 +137,8 @@ export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
 export function ResolveText(arg1:string,arg2:string):Promise<app.ResolveResult>;
 
+export function RevealInFolder(arg1:string):Promise<void>;
+
 export function RunSync(arg1:string):Promise<syncengine.Report>;
 
 export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
