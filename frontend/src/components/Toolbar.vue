@@ -123,8 +123,9 @@ function onMenu(key: string | number): void {
 
     <button class="search" type="button" data-testid="toolbar.palette" :title="t('toolbar.search')"
       @click="emit('palette')">
-      <n-icon :component="SearchOutline" :size="14" />
-      <span class="sl">{{ t('toolbar.search') }}</span>
+      <n-icon :component="SearchOutline" :size="14" class="si" />
+      <span class="sl">{{ t('toolbar.searchPlaceholder') }}</span>
+      <span class="spacer" />
       <kbd>Ctrl</kbd><kbd>K</kbd>
     </button>
   </div>
@@ -176,37 +177,63 @@ function onMenu(key: string | number): void {
   font-weight: 500;
 }
 
+/* VSCode 风格搜索框：内嵌放大镜 + placeholder 灰色 + 右侧 Ctrl+K，点击弹 palette */
 .search {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--app-accent-tint);
+  min-width: 180px;
+  max-width: 240px;
+  padding: 0 8px 0 7px;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
+  background: var(--app-panel);
+  color: var(--app-text);
   font-size: 12.5px;
   font-family: inherit;
   cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 
 .search:hover {
-  border-color: var(--app-accent);
+  border-color: var(--app-border-strong);
 }
 
+.search:active {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px var(--app-accent-tint);
+}
+
+/* 左侧内嵌放大镜：灰色、与输入框左侧内边距对齐 */
+.si {
+  flex: 0 0 auto;
+  color: var(--app-placeholder);
+}
+
+/* placeholder 文字 */
 .sl {
+  color: var(--app-placeholder);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 让 kbd 贴到最右侧 */
+.spacer {
+  flex: 0 0 auto;
 }
 
 kbd {
-  border: 1px solid var(--app-kbd-border);
+  border: 1px solid var(--app-border);
   border-radius: 4px;
   padding: 0 4px;
   font-family: var(--app-mono);
   font-size: 10px;
   line-height: 15px;
-  background: var(--app-kbd-bg);
-  color: var(--app-accent-dark);
+  background: var(--app-surface-2);
+  color: var(--app-muted);
 }
 </style>
