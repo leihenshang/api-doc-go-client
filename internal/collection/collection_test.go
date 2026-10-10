@@ -163,3 +163,37 @@ func TestEnvSecretsSplit(t *testing.T) {
 		t.Fatalf("环境文件应已移除")
 	}
 }
+
+// TestEnvNameAcceptsChinese 回归：中文 / 数字 / 括号等名称必须能建、能改名。
+//
+// 这条测试是按「客户端实际链接的共享包」校验的 —— 现象曾出现在客户端明明放开了字符集、
+// 界面却仍报「只能包含字母、数字、- 与 _」，根因是 go.mod 里锁的还是旧版共享包，
+// 只改本地 share 源码不生效。所以这里从 Collection 的真实入口走一遍，防止版本回退再次漏网。
+func TestEnvNameAcceptsChinese(t *testing.T) {
+	c := openTemp(t)
+	cases := []string{"测试环境1", "测试环境", "预发(v2)", "预发（v2）", "dev.v1", "生产环境-华东"}
+	for _, name := range cases {
+		if err := c.SaveEnv(Env{Name: name}); err != nil {
+			t.Fatalf("SaveEnv(%q) 应被接受: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(c.Dir, "environments", name+".yml")); err != nil {
+			t.Fatalf("环境文件未落盘 %q: %v", name, err)
+		}
+	}
+	// 改中文名：旧文件消失、新文件出现
+	if err := c.RenameEnv("测试环境1", "测试环境2", ""); err != nil {
+		t.Fatalf("RenameEnv 中文名: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "environments", "测试环境1.yml")); !os.IsNotExist(err) {
+		t.Fatalf("改名后旧文件应移除")
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "environments", "测试环境2.yml")); err != nil {
+		t.Fatalf("改名后新文件应存在: %v", err)
+	}
+	// 仍然拒绝的：路径分隔符、空格、Windows 非法字符、前导点
+	for _, bad := range []string{"a/b", "a b", "a:b", ".hidden", ".."} {
+		if err := c.SaveEnv(Env{Name: bad}); err == nil {
+			t.Fatalf("SaveEnv(%q) 应被拒绝", bad)
+		}
+	}
+}
