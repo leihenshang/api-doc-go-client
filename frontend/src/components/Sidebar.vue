@@ -283,6 +283,25 @@ function toggleRoot(root: string): void {
   collapsedRoots.value = next
 }
 
+/**
+ * 点根行（集合名这一整片区域）：切活动根，且集合收起时展开它 ——
+ * 「点一下就该看到集合下的第一层」，不必去点那个小箭头。只展开不收起：
+ * 收起是明确的收缩意图，仍走行内箭头（caret）切换，避免误点把树折掉。
+ *
+ * 行内控件（caret / ··· 点状菜单 / 徽章 / 下拉）自己处理点击，这里要放行，
+ * 不能因为用户只是想打开菜单就顺带切活动根、展开集合。
+ */
+function onRootRowClick(root: string, ev: MouseEvent): void {
+  const el = ev.target as HTMLElement | null
+  if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
+  if (collapsedRoots.value.has(root)) {
+    const next = new Set(collapsedRoots.value)
+    next.delete(root)
+    collapsedRoots.value = next
+  }
+  emit('activate', root)
+}
+
 function toggleAll(): void {
   if (allCollapsed.value) {
     collapsed.value = new Set()
@@ -758,7 +777,7 @@ watch(
             'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.ok,
             'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && !dropHint.ok,
           }" :style="{ paddingLeft: '8px' }" :data-root="row.root" :data-path="''" data-testid="tree.root"
-            @click="emit('activate', row.root)">
+            @click="onRootRowClick(row.root, $event)">
             <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
             <span v-if="rootHasVisibleKids(row.root)" class="guides" aria-hidden="true" data-testid="tree.root.guides">
               <span class="gl root-down" :style="{ left: GUIDE_OFFSET + 'px' }" />

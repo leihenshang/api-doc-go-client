@@ -41,6 +41,7 @@ import {
   NInput,
   NModal,
   NSpin,
+  NTreeSelect,
   darkTheme,
   dateEnUS,
   dateZhCN,
@@ -546,25 +547,33 @@ function onExternalChange(root: string): void {
 onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
 
 // ---- 新建请求：直接开一个未落盘的空 tab；名称与分组在**关闭时**才问 ----
-// n-tree-select 默认以 key 字段作为节点标识（不是 value）；根目录用 sentinel 避免空串被当成无效 key
+// 分组用 n-tree-select 树形选择：key=目录相对路径；根目录用 sentinel 避免空串被当成无效 key
+// 经常量锚定组件：Volar「整理导入」曾多次把模板里使用的组件误判为未使用而删除导入，
+// 导致弹窗里分组选择器整个不渲染；在 <script> 中显式引用后导入不会再被误删。
+const TreeSelectComp = NTreeSelect
 const ROOT_KEY = '__root__'
-interface FolderNode {
-  label: string
+interface TreeOption {
   key: string
-  children?: FolderNode[]
+  label: string
+  children?: TreeOption[]
+  [k: string]: unknown
 }
-const folderTree = computed<FolderNode[]>(() => {
-  const walk = (nodes: TreeNode[]): FolderNode[] =>
+const folderTreeOptions = computed<TreeOption[]>(() => {
+  const walk = (nodes: TreeNode[]): TreeOption[] =>
     nodes
       .filter((n) => n.type === 'folder')
-      .map<FolderNode>((n) => ({
-        label: n.name,
-        key: n.path,
-        children: n.children ? walk(n.children) : undefined,
-      }))
+      .map<TreeOption>((n) => {
+        const kids = n.children ? walk(n.children) : undefined
+        // 只含接口、没有子目录的文件夹是叶子：省略 children 并显式标记 isLeaf，避免出现可展开箭头
+        return kids && kids.length
+          ? { key: n.path, label: n.name, children: kids }
+          : { key: n.path, label: n.name, isLeaf: true }
+      })
   const rest = walk(coll.tree)
   const rootLabel = t('prompt.folderRoot')
-  return rest.length ? [{ label: rootLabel, key: ROOT_KEY, children: rest }] : [{ label: rootLabel, key: ROOT_KEY }]
+  return rest.length
+    ? [{ key: ROOT_KEY, label: rootLabel, children: rest }]
+    : [{ key: ROOT_KEY, label: rootLabel, isLeaf: true }]
 })
 
 /** 新建请求（folder 为保存时的默认分组）；doc 为「导入 cURL」等预填内容。 */
@@ -970,8 +979,8 @@ watch(
             <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
-            <n-tree-select v-model:value="draftForm.folder" :options="folderTree" filterable
-              data-testid="draft.folder" />
+            <component :is="TreeSelectComp" v-model:value="draftForm.folder" :options="folderTreeOptions" show-line
+              filterable :placeholder="t('prompt.folderPlaceholder')" data-testid="draft.folder" />
           </n-form-item>
         </n-form>
         <template #footer>

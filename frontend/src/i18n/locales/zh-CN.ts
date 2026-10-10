@@ -643,6 +643,7 @@ export default {
     reqName: '请求名称',
     folder: '所属分组',
     folderRoot: '根目录',
+    folderPlaceholder: '选择所属分组（默认根目录）',
     method: '方法',
     saveDraftTitle: '保存请求',
     saveDraftHint: '这是新建但还没有保存的请求：填好名称、选好分组再保存，或者直接丢弃。',
