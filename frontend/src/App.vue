@@ -884,7 +884,7 @@ watch(
           :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
           @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')" @reload="coll.reload()"
           @palette="showPalette = true" @manage-env="showEnvManager = true" @import="showImport = true"
-          @export="exportDoc($event)" @mock="showMock = true" @sync="showSync = true" @update:currentEnv="pickEnv" />
+          @export="exportDoc($event)" @mock="showMock = true" @update:currentEnv="pickEnv" />
       </title-bar>
 
       <n-spin :show="coll.loading">
@@ -894,7 +894,7 @@ watch(
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
                 @activate="activateRoot" @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
                 @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
-                @import-curl="openCurl" />
+                @import-curl="openCurl" @sync="showSync = true" />
             </aside>
 
             <main class="main">

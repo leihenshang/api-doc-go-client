@@ -22,6 +22,7 @@ import {
   RefreshOutline,
   Star,
   StarOutline,
+  SyncOutline,
   TerminalOutline,
   TrashOutline
 } from '@vicons/ionicons5'
@@ -51,6 +52,8 @@ const emit = defineEmits<{
   'reveal-root': [root: string]
   /** 关闭某个工作目录 */
   'close-root': [root: string]
+  /** 打开同步（作用于被点击的根） */
+  sync: []
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
@@ -112,6 +115,7 @@ const rootMenu = computed(() => [
   { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
   { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
   { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
+  { key: 'sync', label: t('sync.title'), icon: () => h(NIcon, { component: SyncOutline }) },
   { type: 'divider', key: 'd1' },
   { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }) },
   { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }) },
@@ -131,6 +135,7 @@ async function onRootMenu(root: string, key: string | number): Promise<void> {
   else if (key === 'req') emit('new-request', '')
   else if (key === 'grpc') emit('new-grpc-request', '')
   else if (key === 'curl') emit('import-curl', '')
+  else if (key === 'sync') emit('sync')
   else if (key === 'reload') emit('reload-root', root)
   else if (key === 'close' && confirm(t('tree.confirmCloseDir', { name: rootName(root) }))) emit('close-root', root)
 }

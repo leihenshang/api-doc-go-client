@@ -40,7 +40,6 @@ const emit = defineEmits<{
   import: []
   export: [format: 'markdown' | 'html']
   mock: []
-  sync: []
   /** 切换活动根（多根并存） */
   activate: [root: string]
   'update:currentEnv': [v: string]
@@ -82,7 +81,6 @@ const menu = computed(() => [
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
   { key: 'reload', label: t('toolbar.reload'), icon: () => h(NIcon, { component: RefreshOutline }) },
   { key: 'd1', type: 'divider' as const },
-  { key: 'sync', label: t('sync.title'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'import', label: t('import.title'), icon: () => h(NIcon, { component: CloudDownloadOutline }) },
   { key: 'export-md', label: t('export.markdown'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'export-html', label: t('export.html'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
@@ -104,7 +102,6 @@ function onMenu(key: string | number): void {
   else if (key === 'export-md') emit('export', 'markdown')
   else if (key === 'export-html') emit('export', 'html')
   else if (key === 'mock') emit('mock')
-  else if (key === 'sync') emit('sync')
 }
 </script>
 

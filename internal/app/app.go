@@ -725,7 +725,16 @@ func (a *App) ListConflicts() ([]collection.ConflictItem, error) {
 	return c.ListConflicts()
 }
 
-// ResolveConflict 冲突三选一：local | remote | copy。
+// ConflictDetail 查看单个冲突副本的差异字段（本地 → 服务器）。
+func (a *App) ConflictDetail(file string) (*collection.ConflictDetail, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.ConflictDetail(file)
+}
+
+// ResolveConflict 应用冲突取舍：local（保留本地）| remote（采用服务器）| copy（保留副本）。
 func (a *App) ResolveConflict(file, choice string) error {
 	c, err := a.requireCollection()
 	if err != nil {

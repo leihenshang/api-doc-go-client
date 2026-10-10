@@ -80,6 +80,28 @@ type ConflictItem struct {
 	CreatedAt int64  `json:"createdAt"` // Unix 毫秒
 }
 
+// FieldDiff 一个有差异的字段：本地值 → 服务器值。
+type FieldDiff struct {
+	Field  string `json:"field"` // name | method | url | docs（前端做字段名国际化）
+	Local  string `json:"local"`
+	Server string `json:"server"`
+}
+
+// ConflictDetail 冲突详情：副本元信息 + 差异字段列表。
+type ConflictDetail struct {
+	ConflictItem
+	Diffs      []FieldDiff `json:"diffs"`
+	HasPayload bool        `json:"hasPayload"` // 旧版本遗留副本可能没有服务器快照
+}
+
+// conflictPayload 服务端同步载荷的最小子集（collection 层不能依赖 syncengine，避免循环引用）。
+type conflictPayload struct {
+	Name   string `json:"name"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	Extra  string `json:"extra"`
+}
+
 // ListConflicts 列出 .conflicts/ 下的冲突副本。
 func (c *Collection) ListConflicts() ([]ConflictItem, error) {
 	dir := filepath.Join(c.Dir, ".conflicts")
@@ -95,57 +117,206 @@ func (c *Collection) ListConflicts() ([]ConflictItem, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") {
 			continue
 		}
-		full := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(full)
-		if err != nil {
-			continue
+		if _, item, err := c.readConflictFile(e.Name()); err == nil {
+			out = append(out, item)
 		}
-		f, err := share.DecodeRequest(data)
-		if err != nil {
-			continue
-		}
-		item := ConflictItem{
-			File: e.Name(),
-			Name: f.Info.Name,
-		}
-		if f.Extra != nil {
-			if v, ok := f.Extra["conflict_of"].(string); ok {
-				item.OfUID = v
-			}
-			switch v := f.Extra["server_rev"].(type) {
-			case int:
-				item.ServerRev = int64(v)
-			case int64:
-				item.ServerRev = v
-			case float64:
-				item.ServerRev = int64(v)
-			}
-		}
-		if st, err := os.Stat(full); err == nil {
-			item.CreatedAt = st.ModTime().UnixMilli()
-		}
-		out = append(out, item)
 	}
 	return out, nil
 }
 
-// ResolveConflict 三选一（R8 / I4）：
-//   - "local"  保留本地：删掉副本，本地继续 dirty，下次 push 覆盖服务端
-//   - "remote" 以远端为准：删掉副本（服务端版本由下一轮 pull 落回）
-//   - "copy"   保留副本：什么都不动
-func (c *Collection) ResolveConflict(file, choice string) error {
+// readConflictFile 读取并解码一个冲突副本，同时还原其元信息。
+func (c *Collection) readConflictFile(file string) (*requestFile, ConflictItem, error) {
+	var item ConflictItem
 	full := filepath.Join(c.Dir, ".conflicts", filepath.Base(file))
-	if _, err := os.Stat(full); err != nil {
-		return fmt.Errorf("冲突副本不存在")
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return nil, item, fmt.Errorf("冲突副本不存在")
 	}
+	f, err := share.DecodeRequest(data)
+	if err != nil {
+		return nil, item, fmt.Errorf("冲突副本已损坏：%w", err)
+	}
+	item.File = filepath.Base(file)
+	item.Name = f.Info.Name
+	if f.Extra != nil {
+		if v, ok := f.Extra["conflict_of"].(string); ok {
+			item.OfUID = v
+		}
+		item.ServerRev = toRev(f.Extra["server_rev"])
+	}
+	if st, err := os.Stat(full); err == nil {
+		item.CreatedAt = st.ModTime().UnixMilli()
+	}
+	return f, item, nil
+}
+
+// ConflictDetail 提取副本里本地版本与服务器版本的差异字段。
+func (c *Collection) ConflictDetail(file string) (*ConflictDetail, error) {
+	f, item, err := c.readConflictFile(file)
+	if err != nil {
+		return nil, err
+	}
+	d := &ConflictDetail{ConflictItem: item, Diffs: []FieldDiff{}}
+	sp, ok := f.Extra["server_payload"].(string)
+	if !ok || strings.TrimSpace(sp) == "" {
+		// 旧副本无服务器快照：HasPayload 留 false，前端只允许保留本地
+		return d, nil
+	}
+	var p conflictPayload
+	if err := json.Unmarshal([]byte(sp), &p); err != nil {
+		return nil, fmt.Errorf("服务器版本解析失败：%w", err)
+	}
+	d.HasPayload = true
+	localName, localMethod, localURL, localDocs := conflictLocalValues(f)
+	// 比较口径必须与 ResolveConflict("remote") 的实际写入完全一致：
+	// name/method/url 服务端留空（omitempty）表示未改动；desc 仅在 extra 里存在时才比较。
+	if p.Name != "" {
+		d.Diffs = appendFieldDiff(d.Diffs, "name", localName, p.Name)
+	}
+	if p.Method != "" {
+		d.Diffs = appendFieldDiff(d.Diffs, "method", strings.ToUpper(localMethod), strings.ToUpper(p.Method))
+	}
+	if p.URL != "" {
+		d.Diffs = appendFieldDiff(d.Diffs, "url", localURL, p.URL)
+	}
+	if desc, ok := remoteDesc(p.Extra); ok {
+		d.Diffs = appendFieldDiff(d.Diffs, "docs", localDocs, desc)
+	}
+	return d, nil
+}
+
+// ResolveConflict 应用冲突取舍（I4）：
+//   - "local"  以副本里的本地版本整份还原原文件，base_rev 前移到 server_rev
+//     （下轮 push 是正常的新提交，不再重复冲突）
+//   - "remote" 按服务端快照改写标量字段并固化为已同步
+//   - "copy"   什么都不做（保留副本待手动处理）
+func (c *Collection) ResolveConflict(file, choice string) error {
+	f, item, err := c.readConflictFile(file)
+	if err != nil {
+		return err
+	}
+	full := filepath.Join(c.Dir, ".conflicts", filepath.Base(file))
 	switch choice {
-	case "local", "remote":
-		return c.moveToTrash(full)
+	case "local":
+		if err := c.applyLocalVersion(f, item); err != nil {
+			return err
+		}
+	case "remote":
+		if err := c.applyRemoteVersion(f, item); err != nil {
+			return err
+		}
 	case "copy":
 		return nil
 	default:
 		return fmt.Errorf("未知的取舍方式：%s", choice)
 	}
+	return c.moveToTrash(full)
+}
+
+// applyLocalVersion 用副本（完整本地版本）还原原文件。
+func (c *Collection) applyLocalVersion(f *requestFile, item ConflictItem) error {
+	if item.OfUID == "" {
+		return fmt.Errorf("副本缺少溯源 uid，无法定位原请求")
+	}
+	r, err := c.ReadRequest(item.OfUID)
+	if err != nil {
+		return fmt.Errorf("原请求已不存在，无法应用本地版本：%w", err)
+	}
+	// 副本保存时摘除了 uid；还原 uid 与新基线、删除溯源键后，整份写回原路径
+	f.Meta.UID = item.OfUID
+	f.Meta.BaseRev = item.ServerRev
+	for _, k := range []string{"conflict_of", "server_rev", "server_payload"} {
+		delete(f.Extra, k)
+	}
+	out := fromFile(r.Path, f)
+	return c.SaveRequest(out)
+}
+
+// applyRemoteVersion 按服务端快照改写原请求（口径同 syncengine.applyAPI：仅 name/method/url/docs）。
+func (c *Collection) applyRemoteVersion(f *requestFile, item ConflictItem) error {
+	sp, ok := f.Extra["server_payload"].(string)
+	if !ok || strings.TrimSpace(sp) == "" {
+		return fmt.Errorf("该冲突副本缺少服务器版本快照，无法采用服务器版本")
+	}
+	var p conflictPayload
+	if err := json.Unmarshal([]byte(sp), &p); err != nil {
+		return fmt.Errorf("服务器版本解析失败：%w", err)
+	}
+	if item.OfUID == "" {
+		return fmt.Errorf("副本缺少溯源 uid，无法定位原请求")
+	}
+	r, err := c.ReadRequest(item.OfUID)
+	if err != nil {
+		return fmt.Errorf("原请求已不存在，无法应用服务器版本：%w", err)
+	}
+	if p.Name != "" {
+		r.Name = p.Name
+	}
+	if p.Method != "" {
+		r.Method = strings.ToUpper(p.Method)
+	}
+	if p.URL != "" {
+		r.URL = p.URL
+	}
+	if desc, ok := remoteDesc(p.Extra); ok {
+		r.Docs = desc
+	}
+	r.BaseRev = item.ServerRev
+	if err := c.SaveRequest(r); err != nil {
+		return err
+	}
+	// 固化为已同步：下一轮不再 dirty、不再冲突
+	return c.MarkSynced(r.UID, c.FileHashOf(r.Path), item.ServerRev)
+}
+
+// conflictLocalValues 从副本取本地版本的四个可同步标量。
+func conflictLocalValues(f *requestFile) (name, method, url, docs string) {
+	name, docs = f.Info.Name, f.Docs
+	if f.Info.Type == TypeGRPC || f.GRPC != nil {
+		method = MethodGRPC
+		if f.GRPC != nil {
+			url = GrpcURL(f.GRPC.Target, f.GRPC.Service, f.GRPC.Method)
+		}
+		return
+	}
+	method, url = f.HTTP.Method, f.HTTP.URL
+	return
+}
+
+// remoteDesc 从服务端载荷的 extra JSON 中取 desc；字段不存在时 ok=false。
+func remoteDesc(extraJSON string) (string, bool) {
+	if strings.TrimSpace(extraJSON) == "" {
+		return "", false
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(extraJSON), &m) != nil {
+		return "", false
+	}
+	v, ok := m["desc"]
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+func appendFieldDiff(out []FieldDiff, field, local, server string) []FieldDiff {
+	if local == server {
+		return out
+	}
+	return append(out, FieldDiff{Field: field, Local: local, Server: server})
+}
+
+func toRev(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
 }
 
 // ExportMarkdown 把集合导出为一份 Markdown 文档（标题层级 = 目录树，请求含方法/URL/参数/头/体/文档）。

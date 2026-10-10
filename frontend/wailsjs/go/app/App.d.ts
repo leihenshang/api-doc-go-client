@@ -23,6 +23,8 @@ export function ClearHistory():Promise<void>;
 
 export function CloseCollection(arg1:string):Promise<void>;
 
+export function ConflictDetail(arg1:string):Promise<collection.ConflictDetail>;
+
 export function CreateDoc(arg1:string):Promise<collection.DocEntry>;
 
 export function CreateFolder(arg1:string,arg2:string):Promise<void>;

@@ -166,9 +166,10 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	var p Payload
 	_ = json.Unmarshal(it.Payload, &p)
 
-	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）
+	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）。
+	// it.Payload 即服务端版本快照，一并存入副本，应用内解决冲突时才能「采用服务器版本」。
 	if it.Type == "api" {
-		e.saveLocalIfDirty(it.UID, it.ItemRev)
+		e.saveLocalIfDirty(it.UID, it.ItemRev, it.Payload)
 	}
 
 	var err error
@@ -196,7 +197,8 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 }
 
 // saveLocalIfDirty 本地有未推送改动时，先落冲突副本再让远端覆盖（§4.4 LWW + 副本）。
-func (e *Engine) saveLocalIfDirty(uid string, serverRev int64) {
+// serverPayload 为该条目的服务端版本（SyncPayload JSON），缺它则副本只能选本地。
+func (e *Engine) saveLocalIfDirty(uid string, serverRev int64, serverPayload []byte) {
 	nodes, err := e.Coll.DirtyNodes()
 	if err != nil {
 		return
@@ -206,7 +208,7 @@ func (e *Engine) saveLocalIfDirty(uid string, serverRev int64) {
 			continue
 		}
 		if req, err := e.Coll.ReadRequest(uid); err == nil {
-			_, _ = e.Coll.SaveConflictCopy(req, serverRev, nil)
+			_, _ = e.Coll.SaveConflictCopy(req, serverRev, serverPayload)
 		}
 		return
 	}
