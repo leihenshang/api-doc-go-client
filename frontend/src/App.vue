@@ -22,7 +22,7 @@ import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api, onAppEvent } from '@/lib/ipc'
-import { message } from '@/lib/notice'
+import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
 import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
@@ -40,13 +40,12 @@ import {
   NIcon,
   NInput,
   NModal,
-  NSelect,
   NSpin,
   darkTheme,
   dateEnUS,
   dateZhCN,
   enUS,
-  zhCN,
+  zhCN
 } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -538,18 +537,25 @@ function onExternalChange(root: string): void {
 onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
 
 // ---- 新建请求：直接开一个未落盘的空 tab；名称与分组在**关闭时**才问 ----
-const folderOptions = computed(() => {
-  const out: { label: string; value: string }[] = [{ label: t('prompt.folder'), value: '' }]
-  const walk = (nodes: TreeNode[]): void => {
-    for (const n of nodes) {
-      if (n.type === 'folder') {
-        out.push({ label: n.name, value: n.path })
-        if (n.children) walk(n.children)
-      }
-    }
-  }
-  walk(coll.tree)
-  return out
+// n-tree-select 默认以 key 字段作为节点标识（不是 value）；根目录用 sentinel 避免空串被当成无效 key
+const ROOT_KEY = '__root__'
+interface FolderNode {
+  label: string
+  key: string
+  children?: FolderNode[]
+}
+const folderTree = computed<FolderNode[]>(() => {
+  const walk = (nodes: TreeNode[]): FolderNode[] =>
+    nodes
+      .filter((n) => n.type === 'folder')
+      .map<FolderNode>((n) => ({
+        label: n.name,
+        key: n.path,
+        children: n.children ? walk(n.children) : undefined,
+      }))
+  const rest = walk(coll.tree)
+  const rootLabel = t('prompt.folderRoot')
+  return rest.length ? [{ label: rootLabel, key: ROOT_KEY, children: rest }] : [{ label: rootLabel, key: ROOT_KEY }]
 })
 
 /** 新建请求（folder 为保存时的默认分组）；doc 为「导入 cURL」等预填内容。 */
@@ -587,7 +593,7 @@ const savingDraft = ref(false)
 function openDraftDialog(tab: Tab, saveOnly: boolean): void {
   draftSaveOnly.value = saveOnly
   draftTab.value = tab
-  draftForm.value = { name: draftName(tab), folder: tab.draftFolder }
+  draftForm.value = { name: draftName(tab), folder: tab.draftFolder || ROOT_KEY }
 }
 
 /** 关掉草稿保存框并复位模式。 */
@@ -628,16 +634,17 @@ function answerClose(choice: CloseChoice): void {
 }
 
 /**
- * 关掉一个页签（草稿走保存框；脏页签先问）。
+ * 关掉一个页签（草稿/脏页签都先问；其余直接关）。
  * 返回是否真的关掉了 —— 批量关闭据此判断「用户取消（中止整批）」还是「写盘被拒（保留页签）」。
  * `seq` 用于批量关闭时提示进度（「第 i / n 个」）。
  */
 async function closeOne(key: string, seq: { i: number; n: number } | null = null): Promise<boolean> {
   const tab = tabs.tabs.find((t) => t.key === key)
   if (!tab) return true // 已经不在了（批量关闭过程中被前面的操作带走）：算处理过
+  // 草稿：走保存框（需要用户提供名称+分组）
   if (tab.draft) {
     openDraftDialog(tab, false)
-    return false
+    return false // 保存框由对话框的保存/丢弃按钮控制关闭，这里不阻塞批量流程（草稿逐个处理）
   }
   if (!tab.dirty) {
     await tabs.close(key)
@@ -662,24 +669,25 @@ function requestClose(key: string): void {
 }
 
 /**
- * 批量关闭（关闭左侧 / 右侧 / 全部）：按页签顺序逐个关，脏页签**依次**询问；
- * 草稿一律跳过（不该静默丢未落盘内容，请用页签上的 × 或 Ctrl+W 单独走保存框）；
- * 用户点「取消」= 中止整批，剩下的一律保留（与主流编辑器一致）。
+ * 批量关闭（关闭左侧 / 右侧 / 全部）：
+ *  - 已落盘脏页签：**依次**弹「保存/丢弃/取消」；
+ *  - 草稿（新建未落盘）：统一累计，最后**一次性**弹「全部丢弃 / 取消」——N 个草稿弹 N 个保存框不现实；
+ *  - 用户点「取消」（任一环节）= 中止整批，剩下的一律保留。
  */
 async function closeManySequential(keys: string[]): Promise<void> {
-  // 先数出要问几个脏页签：草稿会被静默跳过，算进去会让「第 i / n 个」的 n 虚高
+  // dirty 总数用于提示「第 i / n 个」——草稿单独处理，不计入
   const dirty = keys.filter((k) => {
     const td = tabs.tabs.find((x) => x.key === k)
     return !!td && !td.draft && td.dirty
   }).length
   let closed = 0
-  let skipped = 0
   let asked = 0
+  const remainingDrafts: string[] = []
   for (const key of keys) {
     const tab = tabs.tabs.find((t) => t.key === key)
     if (!tab) continue
     if (tab.draft) {
-      skipped++
+      remainingDrafts.push(key)
       continue
     }
     const seq = tab.dirty ? { i: ++asked, n: dirty } : null
@@ -689,11 +697,47 @@ async function closeManySequential(keys: string[]): Promise<void> {
     }
     closed++
   }
+  // 循环结束后：还有草稿待处理 → 批量确认「全部丢弃？」
+  if (remainingDrafts.length) {
+    const discarding = await askBatchDiscardDrafts(remainingDrafts.length)
+    if (discarding) {
+      for (const k of remainingDrafts) {
+        const tab = tabs.tabs.find((t) => t.key === k)
+        if (!tab) continue
+        await tabs.close(k) // 草稿直接 close = 丢弃（没有磁盘副本，无需 closeDiscard）
+        closed++
+      }
+    } else {
+      // 用户取消草稿丢弃：本次已关闭的 + 剩余草稿一起保留
+      // 如果 closed=0 且取消，不提示
+      if (closed > 0) message.info(t('tab.closeAborted', { n: closed }))
+      return
+    }
+  }
   if (!closed) {
     message.info(t('tab.nothingToClose'))
     return
   }
-  message.success(skipped ? t('tab.closedSkipDraft', { n: closed }) : t('tab.closedSome', { n: closed }))
+  message.success(t('tab.closedSome', { n: closed }))
+}
+
+/** 批量丢弃草稿的确认框：一次性问「有 N 个新建请求未保存，全部丢弃？」。 */
+function askBatchDiscardDrafts(n: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const title = t('prompt.draftBatchTitle', { n })
+    const content = t('prompt.draftBatchContent', { n })
+    const d = dialog.warning({
+      title,
+      content,
+      positiveText: t('prompt.draftBatchDiscard'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+      onMaskClick: () => resolve(false),
+    })
+    void d
+  })
 }
 
 /** tab 栏右键菜单命令：关闭类走批量关闭（草稿自动跳过），复制新建开草稿，保存所有 = 立即 flush 全部改动。 */
@@ -754,9 +798,11 @@ async function confirmSaveDraft(): Promise<void> {
   const tab = draftTab.value
   const name = draftForm.value.name.trim()
   if (!tab || !name) return
+  // 树的根目录 key 是 sentinel，落盘前转回空串
+  const folder = draftForm.value.folder === ROOT_KEY ? '' : draftForm.value.folder
   savingDraft.value = true
   try {
-    await tabs.saveDraft(tab.key, draftForm.value.folder, name)
+    await tabs.saveDraft(tab.key, folder, name)
     const keepOpen = draftSaveOnly.value
     closeDraftDialog()
     if (!keepOpen) await tabs.close(tab.key)
@@ -915,7 +961,7 @@ watch(
             <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
-            <n-select v-model:value="draftForm.folder" :options="folderOptions" tag filterable
+            <n-tree-select v-model:value="draftForm.folder" :options="folderTree" filterable
               data-testid="draft.folder" />
           </n-form-item>
         </n-form>

@@ -628,7 +628,8 @@ export default {
   prompt: {
     newRequest: 'New request',
     reqName: 'Request name',
-    folder: 'Folder (empty = root)',
+    folder: 'Folder',
+    folderRoot: 'Root',
     method: 'Method',
     saveDraftTitle: 'Save request',
     saveDraftHint: 'This request is new and not saved yet: give it a name, pick a folder and save, or discard it.',
@@ -639,6 +640,9 @@ export default {
     unsavedHint: '“{name}” has unsaved changes. Save before closing the tab?',
     unsavedBatch: 'Closing tabs: {i} of {n}',
     saveAndClose: 'Save and close',
+    draftBatchTitle: '{n} unsaved new request(s)',
+    draftBatchContent: 'These requests have not been saved to disk and will be lost. Discard all?',
+    draftBatchDiscard: 'Discard all',
   },
   confirm: {
     unsavedTitle: 'Unsaved changes',

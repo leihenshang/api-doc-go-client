@@ -629,7 +629,8 @@ export default {
   prompt: {
     newRequest: '新建请求',
     reqName: '请求名称',
-    folder: '所属分组（留空 = 根目录）',
+    folder: '所属分组',
+    folderRoot: '根目录',
     method: '方法',
     saveDraftTitle: '保存请求',
     saveDraftHint: '这是新建但还没有保存的请求：填好名称、选好分组再保存，或者直接丢弃。',
@@ -640,6 +641,9 @@ export default {
     unsavedHint: '「{name}」有未保存的修改，关闭页签前要保存吗？',
     unsavedBatch: '批量关闭：第 {i}/{n} 个',
     saveAndClose: '保存并关闭',
+    draftBatchTitle: '有 {n} 个新建请求未保存',
+    draftBatchContent: '这些请求还没有落盘（关闭后会丢失），全部丢弃？',
+    draftBatchDiscard: '全部丢弃',
   },
   confirm: {
     unsavedTitle: '有未保存的修改',
