@@ -5,6 +5,7 @@
 import type {
   CollectionInfo,
   CollectionSummary,
+  ConflictDetail,
   ConflictItem,
   CookieInfo,
   DocEntry,
@@ -283,6 +284,7 @@ export const api = {
   unbindSync: () => call<null>('UnbindSync'),
   runSync: (token: string) => call<SyncReport>('RunSync', token),
   listConflicts: () => call<ConflictItem[] | null>('ListConflicts').then((v) => v ?? []),
+  getConflictDetail: (file: string) => call<ConflictDetail>('ConflictDetail', file),
   resolveConflict: (file: string, choice: string) => call<null>('ResolveConflict', file, choice),
   listDocs: () => call<DocEntry[] | null>('ListDocs').then((v) => v ?? []),
   readDoc: (uid: string) => call<DocEntry>('ReadDoc', uid),

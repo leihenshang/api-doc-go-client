@@ -482,6 +482,21 @@ export interface ConflictItem {
   createdAt: number
 }
 
+/** 一个有差异的字段：本地值 → 服务器值。 */
+export interface FieldDiff {
+  /** name | method | url | docs */
+  field: string
+  local: string
+  server: string
+}
+
+/** 冲突详情：副本元信息 + 差异字段。 */
+export interface ConflictDetail extends ConflictItem {
+  diffs: FieldDiff[]
+  /** 旧版本遗留副本可能没有服务器快照，只能保留本地 */
+  hasPayload: boolean
+}
+
 /** 文档条目（B13）。 */
 export interface DocEntry {
   uid: string

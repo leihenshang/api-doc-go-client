@@ -1,10 +1,13 @@
 package collection
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"api-doc-go-client/internal/index"
 )
 
 // 保存冲突检测（P0）：客户端带「读到文件时的内容哈希」来保存，
@@ -86,6 +89,158 @@ func TestSaveRequestUpdatesIndexHash(t *testing.T) {
 	n2, _, _ := c.idx.Get(r.UID)
 	if n2.Hash == n.Hash {
 		t.Fatalf("再次保存后索引 hash 应更新")
+	}
+}
+
+// 构造一个带服务器快照的冲突副本（模拟 push 冲突：原文件 = 本地版本）。
+func seedConflictCopy(t *testing.T, c *Collection) (uid, file string) {
+	t.Helper()
+	// 注入临时索引库：单测不依赖用户配置目录（ensureIndex 默认落在 AppData）
+	idx, err := index.Open(filepath.Join(c.Dir, ".test-index.sqlite"))
+	if err != nil {
+		t.Fatalf("开测试索引: %v", err)
+	}
+	c.idx = idx
+	t.Cleanup(func() { _ = idx.Close() })
+
+	r, err := c.CreateRequest("", "users", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.URL = "{{host}}/users"
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存本地版本: %v", err)
+	}
+	serverPayload := mustJSON(t, map[string]any{
+		"name":   "用户列表",
+		"method": "GET",
+		"url":    "{{host}}/members",
+		"extra":  string(mustJSON(t, map[string]any{"desc": "服务端的说明"})),
+	})
+	full, err := c.SaveConflictCopy(r, 7, serverPayload)
+	if err != nil {
+		t.Fatalf("存冲突副本: %v", err)
+	}
+	return r.UID, filepath.Base(full)
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	return b
+}
+
+// ConflictDetail 应只挑出有差异的字段（name/url/docs），method 相同不出现。
+func TestConflictDetailDiffs(t *testing.T) {
+	c := newTestCollection(t)
+	_, file := seedConflictCopy(t, c)
+
+	d, err := c.ConflictDetail(file)
+	if err != nil {
+		t.Fatalf("ConflictDetail: %v", err)
+	}
+	if !d.HasPayload {
+		t.Fatalf("应识别到服务器快照")
+	}
+	got := map[string]FieldDiff{}
+	for _, df := range d.Diffs {
+		got[df.Field] = df
+	}
+	if _, ok := got["method"]; ok {
+		t.Fatalf("method 两边都是 GET，不应出现")
+	}
+	n, ok := got["name"]
+	if !ok || n.Local != "users" || n.Server != "用户列表" {
+		t.Fatalf("name 差异不对: %+v", got["name"])
+	}
+	u, ok := got["url"]
+	if !ok || u.Local != "{{host}}/users" || u.Server != "{{host}}/members" {
+		t.Fatalf("url 差异不对: %+v", got["url"])
+	}
+	ds, ok := got["docs"]
+	if !ok || ds.Local != "" || ds.Server != "服务端的说明" {
+		t.Fatalf("docs 差异不对: %+v", got["docs"])
+	}
+}
+
+// 选本地：副本内容整份还原，base_rev 前移到 server_rev；副本消失。
+func TestResolveConflictLocal(t *testing.T) {
+	c := newTestCollection(t)
+	uid, file := seedConflictCopy(t, c)
+
+	if err := c.ResolveConflict(file, "local"); err != nil {
+		t.Fatalf("ResolveConflict(local): %v", err)
+	}
+	got, err := c.ReadRequest(uid)
+	if err != nil {
+		t.Fatalf("读原请求: %v", err)
+	}
+	if got.Name != "users" || got.URL != "{{host}}/users" || got.Docs != "" {
+		t.Fatalf("本地版本未还原: %+v", got)
+	}
+	if got.BaseRev != 7 {
+		t.Fatalf("base_rev 应前移到 7，得到 %d", got.BaseRev)
+	}
+	if list, _ := c.ListConflicts(); len(list) != 0 {
+		t.Fatalf("副本应已移除，剩 %d 份", len(list))
+	}
+}
+
+// 选服务器：标量字段按快照改写并固化为已同步（不再 dirty）。
+func TestResolveConflictRemote(t *testing.T) {
+	c := newTestCollection(t)
+	uid, file := seedConflictCopy(t, c)
+
+	if err := c.ResolveConflict(file, "remote"); err != nil {
+		t.Fatalf("ResolveConflict(remote): %v", err)
+	}
+	got, err := c.ReadRequest(uid)
+	if err != nil {
+		t.Fatalf("读原请求: %v", err)
+	}
+	if got.Name != "用户列表" || got.URL != "{{host}}/members" || got.Docs != "服务端的说明" {
+		t.Fatalf("服务器版本未应用: %+v", got)
+	}
+	if got.BaseRev != 7 {
+		t.Fatalf("base_rev 应为 7，得到 %d", got.BaseRev)
+	}
+	// MarkSynced 固化：索引 hash 与磁盘一致，下一轮不 dirty
+	if c.NodeHash(uid) != c.FileHashOf(got.Path) {
+		t.Fatalf("应已固化为已同步")
+	}
+}
+
+// 旧版本副本（无服务器快照）：只能保留本地，不能选服务器。
+func TestResolveConflictLegacyNoPayload(t *testing.T) {
+	c := newTestCollection(t)
+	r, err := c.CreateRequest("", "users", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+	full, err := c.SaveConflictCopy(r, 9, nil)
+	if err != nil {
+		t.Fatalf("存副本: %v", err)
+	}
+	file := filepath.Base(full)
+
+	d, err := c.ConflictDetail(file)
+	if err != nil {
+		t.Fatalf("ConflictDetail: %v", err)
+	}
+	if d.HasPayload || len(d.Diffs) != 0 {
+		t.Fatalf("旧副本应无快照无差异: %+v", d)
+	}
+	if err := c.ResolveConflict(file, "remote"); err == nil {
+		t.Fatalf("缺少服务器快照时采用服务器应报错")
+	}
+	if err := c.ResolveConflict(file, "local"); err != nil {
+		t.Fatalf("保留本地应成功: %v", err)
 	}
 }
 
