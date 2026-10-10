@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// 底部状态栏：左侧同步状态，右侧版本号。
+// 底部状态栏：左侧同步状态，中间集合规模/保存状态，右侧全局设置、请求历史、Cookie 管理入口。
+import type { SyncStatus } from '@/types'
+import { LockClosedOutline, SettingsOutline, TimeOutline } from '@vicons/ionicons5'
+import { NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SyncStatus } from '@/types'
 
 const props = defineProps<{
   requests: number
@@ -13,7 +15,7 @@ const props = defineProps<{
   /** 最后一次成功写盘的时间戳（>0 时显示「已保存 HH:mm」） */
   lastSavedAt?: number
 }>()
-const emit = defineEmits<{ 'open-sync': [] }>()
+const emit = defineEmits<{ 'open-sync': []; history: []; cookies: []; settings: [] }>()
 const { t } = useI18n()
 
 /** 同步状态摘要（状态栏左侧）。 */
@@ -51,12 +53,30 @@ function clock(ms: number): string {
       {{ syncText }}
     </span>
     <span class="sp" />
+
+    <!-- 全局入口：图标 + 文字，位于统计信息左侧（原在集合切换下拉里，现收到底栏） -->
+    <span class="acts">
+      <button class="act" type="button" data-testid="statusbar.history" @click="emit('history')">
+        <n-icon :component="TimeOutline" :size="14" />
+        <span class="lb">{{ t('history.title') }}</span>
+      </button>
+      <button class="act" type="button" data-testid="statusbar.cookies" @click="emit('cookies')">
+        <n-icon :component="LockClosedOutline" :size="14" />
+        <span class="lb">{{ t('cookies.title') }}</span>
+      </button>
+      <button class="act" type="button" data-testid="statusbar.settings" @click="emit('settings')">
+        <n-icon :component="SettingsOutline" :size="14" />
+        <span class="lb">{{ t('settings.title') }}</span>
+      </button>
+    </span>
+
     <!-- 集合规模：与集合树一致（种子/扫描的权威计数来自 App 传入的 props） -->
     <span class="counts" data-testid="statusbar.counts">
       {{ t('status.requests', { n: props.requests }) }}{{ t('common.sep') }}{{ t('status.envs', { n: props.envs }) }}
     </span>
     <!-- 保存状态：写盘进行中 / 最近一次成功保存的时间（手动保存模式下帮助确认「存了没」） -->
-    <span v-if="(props.savingCount ?? 0) > 0" class="save run" data-testid="statusbar.saving">{{ t('status.saving') }}</span>
+    <span v-if="(props.savingCount ?? 0) > 0" class="save run" data-testid="statusbar.saving">{{ t('status.saving')
+    }}</span>
     <span v-else-if="(props.lastSavedAt ?? 0) > 0" class="save" data-testid="statusbar.saved">
       {{ t('status.savedAt', { t: clock(props.lastSavedAt ?? 0) }) }}
     </span>
@@ -128,5 +148,36 @@ function clock(ms: number): string {
 
 .sync:hover {
   filter: brightness(1.1);
+}
+
+/* 全局入口：图标 + 文字，位于统计信息左侧 */
+.acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--app-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.act:hover {
+  background: var(--app-row-hover);
+  color: var(--app-accent);
+}
+
+.lb {
+  white-space: nowrap;
 }
 </style>

@@ -271,6 +271,7 @@ export default {
     colType: 'Type',
     colDesc: 'Description',
     colRequired: 'Required',
+    requiredYes: 'Yes',
   },
   tree: {
     expandAll: 'Expand all',

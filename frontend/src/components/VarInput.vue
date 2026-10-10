@@ -232,13 +232,16 @@ function onLeave(): void {
 
 <template>
   <div ref="wrap" class="vw">
-    <div class="vi" :class="{ 'has-miss': (missing?.length ?? 0) > 0, 'has-suffix': !!$slots.suffix }" @click="focus">
-      <div ref="hl" class="hl mono" aria-hidden="true">
-        <span v-for="(p, i) in parts" :key="i" :class="p.cls" :data-name="p.name || undefined">{{ p.text }}</span>
-        <span v-if="!modelValue" class="ph">{{ placeholder }}</span>
+    <div class="vi" :class="{ 'has-miss': (missing?.length ?? 0) > 0 }" @click="focus">
+      <div class="field">
+        <div ref="hl" class="hl mono" aria-hidden="true">
+          <span v-for="(p, i) in parts" :key="i" :class="p.cls" :data-name="p.name || undefined">{{ p.text }}</span>
+          <span v-if="!modelValue" class="ph">{{ placeholder }}</span>
+        </div>
+        <input ref="el" v-bind="$attrs" class="in mono" :value="modelValue" spellcheck="false" autocomplete="off"
+          @input="onInput" @scroll="sync" @mousemove="onMove" @mouseleave="onLeave" @blur="onBlur"
+          @keydown="onKeydown" />
       </div>
-      <input ref="el" v-bind="$attrs" class="in mono" :value="modelValue" spellcheck="false" autocomplete="off"
-        @input="onInput" @scroll="sync" @mousemove="onMove" @mouseleave="onLeave" @blur="onBlur" @keydown="onKeydown" />
       <span v-if="$slots.suffix" class="suffix">
         <slot name="suffix" />
       </span>
@@ -277,6 +280,8 @@ function onLeave(): void {
 
 .vi {
   position: relative;
+  display: flex;
+  align-items: center;
   /* 高度由使用方通过 --vi-h 指定，保证高亮层与 input 完全重叠 */
   height: var(--vi-h, 28px);
   border: 1px solid var(--app-border);
@@ -289,26 +294,25 @@ function onLeave(): void {
   border-color: var(--app-accent);
 }
 
+/* 文字层容器：右侧被 suffix 挤开，文字与图标各占其位、互不遮挡 */
+.field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
 /* 有未定义变量时描边给一点警告色，具体是哪个变量由悬停提示说明 */
 .vi.has-miss {
   border-color: var(--app-warn);
 }
 
-/* 右侧内嵌动作（例如「保存」图标）：给文本层让出右端，避免被盖住 */
-.vi.has-suffix .hl,
-.vi.has-suffix .in {
-  padding-right: 44px;
-}
-
 .suffix {
-  position: absolute;
-  top: 0;
-  right: 0;
+  flex: 0 0 auto;
   height: 100%;
   display: flex;
   align-items: center;
   padding: 0 5px;
-  z-index: 2;
 }
 
 .suffix :deep(button) {

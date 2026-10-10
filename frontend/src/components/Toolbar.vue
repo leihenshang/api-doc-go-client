@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 集合 / 环境 / 本地搜索这一组控件（design-spec §2）。
 // 2026-10-03 起并入标题栏（TitleBar 的默认插槽），不再独占一行 —— testid 沿用 toolbar.* 保持兼容。
-import { NIcon, NDropdown } from 'naive-ui'
+import EnvPicker from '@/components/EnvPicker.vue'
+import type { CollectionSummary, Env } from '@/types'
 import {
   CheckmarkOutline,
   ChevronDownOutline,
@@ -9,17 +10,13 @@ import {
   CloudUploadOutline,
   FolderOpenOutline,
   LayersOutline,
-  LockClosedOutline,
   PlayOutline,
   RefreshOutline,
-  SearchOutline,
-  SettingsOutline,
-  TimeOutline,
+  SearchOutline
 } from '@vicons/ionicons5'
+import { NDropdown, NIcon } from 'naive-ui'
 import { computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
-import EnvPicker from '@/components/EnvPicker.vue'
-import type { CollectionSummary, Env } from '@/types'
 
 const props = defineProps<{
   name: string
@@ -38,9 +35,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'open-other': []
   reload: []
-  history: []
-  cookies: []
-  settings: []
   palette: []
   'manage-env': []
   import: []
@@ -93,10 +87,6 @@ const menu = computed(() => [
   { key: 'export-md', label: t('export.markdown'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'export-html', label: t('export.html'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
   { key: 'mock', label: t('mock.title'), icon: () => h(NIcon, { component: PlayOutline }) },
-  { key: 'd2', type: 'divider' as const },
-  { key: 'history', label: t('history.title'), icon: () => h(NIcon, { component: TimeOutline }) },
-  { key: 'cookies', label: t('cookies.title'), icon: () => h(NIcon, { component: LockClosedOutline }) },
-  { key: 'settings', label: t('settings.title'), icon: () => h(NIcon, { component: SettingsOutline }) },
 ])
 
 function onMenu(key: string | number): void {
@@ -110,9 +100,6 @@ function onMenu(key: string | number): void {
   }
   if (key === 'open') emit('open-other')
   else if (key === 'reload') emit('reload')
-  else if (key === 'history') emit('history')
-  else if (key === 'cookies') emit('cookies')
-  else if (key === 'settings') emit('settings')
   else if (key === 'import') emit('import')
   else if (key === 'export-md') emit('export', 'markdown')
   else if (key === 'export-html') emit('export', 'html')
@@ -131,14 +118,11 @@ function onMenu(key: string | number): void {
       </button>
     </n-dropdown>
 
-    <env-picker
-      :envs="props.envs"
-      :model-value="props.currentEnv"
-      @update:model-value="emit('update:currentEnv', $event)"
-      @manage="emit('manage-env')"
-    />
+    <env-picker :envs="props.envs" :model-value="props.currentEnv"
+      @update:model-value="emit('update:currentEnv', $event)" @manage="emit('manage-env')" />
 
-    <button class="search" type="button" data-testid="toolbar.palette" :title="t('toolbar.search')" @click="emit('palette')">
+    <button class="search" type="button" data-testid="toolbar.palette" :title="t('toolbar.search')"
+      @click="emit('palette')">
       <n-icon :component="SearchOutline" :size="14" />
       <span class="sl">{{ t('toolbar.search') }}</span>
       <kbd>Ctrl</kbd><kbd>K</kbd>

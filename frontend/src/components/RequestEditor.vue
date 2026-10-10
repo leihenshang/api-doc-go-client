@@ -18,7 +18,7 @@ import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { Auth } from '@/types'
-import { MdEditor } from 'md-editor-v3'
+import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
 import { NCheckbox, NInput, NSelect } from 'naive-ui'
@@ -251,6 +251,7 @@ async function genDocs(): Promise<void> {
         colType: t('docs.colType'),
         colDesc: t('docs.colDesc'),
         colRequired: t('docs.colRequired'),
+        requiredYes: t('docs.requiredYes'),
       },
     })
   } catch (err) {
