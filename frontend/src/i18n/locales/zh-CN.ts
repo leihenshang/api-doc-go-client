@@ -46,6 +46,7 @@ export default {
     layoutToBottom: '响应区改到下方',
     layoutToRight: '响应区改到右侧',
     search: 'Ctrl+K 本地搜索',
+    searchPlaceholder: '搜索请求、环境、命令',
     switchCollection: '切换集合',
     workspaces: '工作目录',
     recentDirs: '最近打开',

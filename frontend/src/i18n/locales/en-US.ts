@@ -46,6 +46,7 @@ export default {
     layoutToBottom: 'Move response below',
     layoutToRight: 'Move response to the right',
     search: 'Ctrl+K local search',
+    searchPlaceholder: 'Search requests, envs, commands',
     switchCollection: 'Switch collection',
     workspaces: 'Workspaces',
     recentDirs: 'Recent workspaces',
