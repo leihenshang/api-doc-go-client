@@ -301,6 +301,7 @@ export default {
     readOnly: '只读',
     reqCount: '{n} 个请求',
     reloadDir: '重新载入该工作目录',
+    revealDir: '在文件管理器中打开',
     closeDir: '关闭该工作目录',
     confirmCloseDir: '关闭工作目录「{name}」？（不会删除目录里的文件）',
     dupFolderHint: '目标下已有同名分组「{name}」',

@@ -182,6 +182,8 @@ export const api = {
   setActiveCollection: (root: string) => call<null>('SetActiveCollection', root),
   /** 关闭一个工作目录（其它根不受影响）。 */
   closeCollection: (root: string) => call<null>('CloseCollection', root),
+  /** 在系统文件管理器中打开该工作目录。 */
+  revealInFolder: (root: string) => call<null>('RevealInFolder', root),
   /** 重载指定工作目录（外部改动 / git 操作后）；不传 = 活动根。 */
   reloadCollectionOf: (root = '') => call<CollectionInfo>('ReloadCollectionOf', root).then(normalizeInfo),
   reload: () => call<CollectionInfo>('ReloadCollection').then(normalizeInfo),
