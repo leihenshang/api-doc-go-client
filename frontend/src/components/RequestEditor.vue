@@ -175,6 +175,27 @@ function removeAt(list: 'vars' | 'asserts', i: number): void {
   else asserts.value = asserts.value.filter((_, j) => j !== i)
 }
 
+/** 前置变量：末行一有输入就就地补一行空行（省去手动点「添加一行」）。
+ *  只在末尾已有行时才补 —— 空表不主动建行，避免给没用到 vars 的请求凭空写出空段（落盘会带上）。 */
+function onVarsEdit(): void {
+  touch()
+  const list = props.tab.request.varsPreRequest
+  if (!list || list.length === 0) return
+  const last = list[list.length - 1]
+  if (last.name.trim() === '' && last.value.trim() === '') return
+  list.push({ name: '', value: '', enabled: true })
+}
+
+/** 断言：末行一有输入就就地补一行空行（同上，空表不主动建行）。 */
+function onAssertsEdit(): void {
+  touch()
+  const list = props.tab.request.asserts
+  if (!list || list.length === 0) return
+  const last = list[list.length - 1]
+  if ((last.name ?? '').trim() === '' && last.expr.trim() === '') return
+  list.push({ name: '', expr: '' })
+}
+
 const auth = computed<Auth>(() => props.tab.request.auth ?? { type: 'none' })
 const authType = computed({
   get: () => auth.value.type || 'none',
@@ -452,9 +473,9 @@ watch(
         <div v-for="(v, i) in varsPre" :key="i" class="srow" data-testid="vars.row">
           <n-checkbox v-model:checked="v.enabled" size="small" @update:checked="touch" />
           <n-input v-model:value="v.name" size="small" :placeholder="t('editor.colName')" data-testid="vars.name"
-            @input="touch" />
+            @input="onVarsEdit" />
           <n-input v-model:value="v.value" size="small" :placeholder="t('editor.colValue')" data-testid="vars.value"
-            @input="touch" />
+            @input="onVarsEdit" />
           <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('vars', i)">×</button>
         </div>
         <button class="link" type="button" data-testid="vars.add" @click="addVar">{{ t('editor.addRow') }}</button>
@@ -472,9 +493,9 @@ watch(
         <p class="hint">{{ t('editor.testsHint') }}</p>
         <div v-for="(a, i) in asserts" :key="i" class="srow" data-testid="assert.row">
           <n-input v-model:value="a.name" size="small" :placeholder="t('editor.colDesc')" class="aname"
-            data-testid="assert.name" @input="touch" />
+            data-testid="assert.name" @input="onAssertsEdit" />
           <n-input v-model:value="a.expr" size="small" class="mono" :placeholder="t('editor.assertExpr')"
-            data-testid="assert.expr" @input="touch" />
+            data-testid="assert.expr" @input="onAssertsEdit" />
           <button class="rm" type="button" :title="t('common.delete')" @click="removeAt('asserts', i)">×</button>
         </div>
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>

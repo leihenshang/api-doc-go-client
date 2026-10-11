@@ -4,7 +4,7 @@
 // showType 时增加「类型」列（multipart 的 text / file，file 的 value 是文件路径）。
 import { NButton, NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
 import { CloseOutline, FolderOpenOutline } from '@vicons/ionicons5'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/lib/ipc'
 import type { KV } from '@/types'
@@ -28,10 +28,32 @@ const typeOptions = computed(() => [
   { label: t('editor.partFile'), value: 'file' },
 ])
 
+/** 一行空数据（新参数 / 表单行）。 */
+function blankKV(): KV {
+  return { name: '', value: '', enabled: true, type: props.showType ? 'text' : undefined }
+}
+
+/** 该行是否已有输入：名称 / 值 / 说明任一非空（只有说明也算，别把已写的备注当空行覆盖掉）。 */
+function hasInput(r: KV): boolean {
+  return r.name.trim() !== '' || r.value.trim() !== '' || (r.description ?? '').trim() !== ''
+}
+
+/** 末尾始终留一行空行：末行一有输入就自动补一行，空表也补一行 —— 省去每次手动点「添加一行」。
+ *  只有用户的真实编辑才由输入事件 emit('change') 标脏；这里补的占位空行**不标脏**，
+ *  否则打开请求 / 切换页签（URL 回填参数表）都会冒出未保存圆点。 */
+function ensureTrailingBlank(): void {
+  const last = props.rows[props.rows.length - 1]
+  if (last && !hasInput(last)) return
+  props.rows.push(blankKV())
+}
+
 function add(): void {
-  props.rows.push({ name: '', value: '', enabled: true, type: props.showType ? 'text' : undefined })
+  props.rows.push(blankKV())
   emit('change')
 }
+
+onMounted(ensureTrailingBlank)
+watch(() => props.rows, ensureTrailingBlank, { deep: true })
 
 function del(i: number): void {
   props.rows.splice(i, 1)
