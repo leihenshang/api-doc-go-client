@@ -1197,15 +1197,16 @@ watch(
   flex: 0 0 auto;
 }
 
-/* 集合根行：行高略高、字号比树里的条目大一档，层级一眼可辨。
+/* 集合根行：行高略高；标题字号与树内目录/API 条目一致、不加重，避免压过子项。
    选择器必须写成 `.row.root > .coll-name`：`.row > .rname`（同为两个类）也命中根行的名字，
-   两者同在时按后出现的算 —— 只写 `.coll-name` 的话 15px 会被 12.5px 盖掉（旧代码的 14px 就是这么失效的）。 */
+   两者同在时按后出现的算 —— 只写 `.coll-name` 的话字号/字重会被 `.rname` 盖掉（旧代码的 14px 就是这么失效的）。 */
 .row.root {
   min-height: 30px;
 }
 
 .row.root>.coll-name {
-  font-size: 15px;
+  font-size: 12.5px;
+  font-weight: 400;
   color: var(--app-text);
 }
 
@@ -1233,14 +1234,15 @@ watch(
   color: var(--app-muted);
 }
 
-/* 活动根：底色 + 左侧强调条 + 名称再大一档，一眼看出「集合级操作会落到谁身上」 */
+/* 活动根：底色 + 左侧强调条，突出当前工作目录（标题仍与条目同字号、不加重） */
 .row.root.root-active {
   background: var(--app-info-tint);
   box-shadow: inset 2px 0 0 var(--app-accent);
 }
 
 .row.root.root-active>.coll-name {
-  font-size: 16px;
+  font-size: 12.5px;
+  font-weight: 400;
   color: var(--app-accent-dark);
 }
 
