@@ -258,9 +258,8 @@ func (c *Collection) applyRemoteVersion(f *requestFile, item ConflictItem) error
 	if p.URL != "" {
 		r.URL = p.URL
 	}
-	if desc, ok := remoteDesc(p.Extra); ok {
-		r.Docs = desc
-	}
+	// 服务端快照的 extra：说明 / 请求头 / 请求参数 / JSON 体（口径同 syncengine 拉取）
+	ApplySyncExtra(r, p.Extra)
 	r.BaseRev = item.ServerRev
 	if err := c.SaveRequest(r); err != nil {
 		return err

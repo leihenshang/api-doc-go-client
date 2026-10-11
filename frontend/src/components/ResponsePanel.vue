@@ -5,7 +5,7 @@
 // 变量入口只剩字段表的「变量书签」，落点固定为当前环境（映射见 lib/saveVars.ts）。
 import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
 import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
@@ -14,10 +14,19 @@ import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { loadFields, mergeFields, saveFields, type FieldRow } from '@/lib/responseFields'
+import {
+  loadFields,
+  mergeFields,
+  paramsFromRows,
+  removeFields,
+  rootJsonType,
+  rowsFromDoc,
+  saveFields,
+  type FieldRow,
+} from '@/lib/responseFields'
 import { deriveVarName, removeVar, saveVars, scopeVarNames, type VarScope } from '@/lib/saveVars'
 import type { Tab } from '@/stores/tabs'
-import type { ResponseExample, SendResult } from '@/types'
+import type { ResponseDoc, ResponseExample, SendResult } from '@/types'
 
 const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
@@ -152,17 +161,82 @@ const bookmarks = computed(
   () => new Set(fields.value.filter((f) => scopeNames.value.has(deriveVarName(f.path))).map((f) => f.path)),
 )
 
-// 切换请求：换用该请求的字段存档与示例列表，页签回到「响应体」
+/** gRPC 请求不承载响应文档（字段表仍本地可用，不写请求模型）。 */
+const isGrpcReq = computed(() => !!props.tab.request?.grpc)
+
+// 切换请求：字段表真相源是请求模型的 RespDoc；无文档时回退旧 localStorage 存档（一次性迁移）
 watch(
   () => props.tab.uid,
-  (uid) => {
-    fields.value = loadFields(uid)
+  (uid, oldUid) => {
+    let rows = rowsFromDoc(props.tab.request?.respDoc)
+    if (!rows.length) rows = loadFields(uid)
+    // 草稿转正：旧 draft uid 下的字段表迁移到真实请求
+    if (!rows.length && oldUid && oldUid !== uid) rows = loadFields(oldUid)
+    fields.value = rows
     viewingUid.value = ''
     seg.value = 'body'
     void reloadExamples()
+    // 迁移/转正：把本地字段一次性写进请求模型
+    if (!props.tab.draft && !isGrpcReq.value && rows.length && !props.tab.request?.respDoc?.params?.length) {
+      void persistRows(rows, true)
+    }
   },
   { immediate: true },
 )
+
+// 同步/外部改动带回了响应文档（页签内请求被重新载入）时刷新字段表
+watch(
+  () => props.tab.request?.respDoc,
+  (doc) => {
+    fields.value = rowsFromDoc(doc)
+  },
+)
+
+/** 含义输入去抖写盘句柄。 */
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+onBeforeUnmount(() => {
+  if (persistTimer) clearTimeout(persistTimer)
+})
+
+/**
+ * 把字段表写回请求模型 RespDoc（文件即真相源，随后随同步与 Web 端往返）。
+ * 未落盘草稿 / gRPC 请求暂存 localStorage；immediate 用于「更新字段」与增删行。
+ * 返回是否写成功（本地存档也算成功），供调用方决定成功提示。
+ */
+async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean> {
+  const uid = props.tab.uid
+  if (props.tab.draft || isGrpcReq.value || !uid) {
+    saveFields(uid, rows)
+    return true
+  }
+  const apply = async (): Promise<boolean> => {
+    const doc: ResponseDoc = {
+      type: rootJsonType(body.value) || props.tab.request?.respDoc?.type || '',
+      params: paramsFromRows(rows),
+      sample: body.value || props.tab.request?.respDoc?.sample || '',
+    }
+    try {
+      await api.updateResponseDoc(uid, doc)
+      if (props.tab.request) props.tab.request.respDoc = doc
+      removeFields(uid) // 旧本地存档迁移完成后清理
+      return true
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+      return false
+    }
+  }
+  if (immediate) {
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    return apply()
+  }
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => void apply(), 600)
+  return true
+}
 
 // 重新发送后回到本次响应并复位页签，避免新响应体"消失"
 watch(
@@ -181,14 +255,15 @@ async function reloadExamples(): Promise<void> {
   }
 }
 
-/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段与含义），停留在当前页签。
+/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段与含义），写入请求模型 RespDoc。
  *  字段表只存在于「响应字段」页签（响应体下方不再挂表），所以提示里带上页签名，点了不会「没反应」。
  *  任何失败只提示，不允许抛错中断渲染（否则面板内容与下拉会整体卡死）。 */
-function updateFields(): void {
+async function updateFields(): Promise<void> {
   try {
     const { rows, added } = mergeFields(fields.value, body.value)
     fields.value = rows
-    saveFields(props.tab.uid, rows)
+    const ok = await persistRows(rows, true)
+    if (!ok) return
     if (added > 0) {
       message.success(t('resp.fieldsAdded', { n: added }))
     } else {
@@ -199,25 +274,26 @@ function updateFields(): void {
   }
 }
 
+/** 含义编辑：本地立即更新，去抖写盘（避免逐键存盘）。 */
 function setMeaning(path: string, value: string): void {
   fields.value = fields.value.map((r) => (r.path === path ? { ...r, meaning: value } : r))
-  saveFields(props.tab.uid, fields.value)
+  void persistRows(fields.value)
 }
 
 function removeField(path: string): void {
   fields.value = fields.value.filter((r) => r.path !== path)
-  saveFields(props.tab.uid, fields.value)
+  void persistRows(fields.value, true)
 }
 
 function removeMany(paths: string[]): void {
   const set = new Set(paths)
   fields.value = fields.value.filter((r) => !set.has(r.path))
-  saveFields(props.tab.uid, fields.value)
+  void persistRows(fields.value, true)
 }
 
 function clearFields(): void {
   fields.value = []
-  saveFields(props.tab.uid, [])
+  void persistRows([], true)
 }
 
 function openSave(): void {

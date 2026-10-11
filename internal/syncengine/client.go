@@ -22,7 +22,7 @@ const (
 	ModeMirror = "mirror" // 只拉
 )
 
-// BindInfo 集合绑定信息（写在 opencollection.yml 的 sync 段；PAT 不入库）。
+// BindInfo 集合绑定信息（写在集合目录的 .sync.json，权限 0600）。
 type BindInfo struct {
 	Linked    bool   `json:"linked"`
 	ServerURL string `json:"serverUrl"`
@@ -30,6 +30,12 @@ type BindInfo struct {
 	Mode      string `json:"mode"` // auto | manual | mirror
 	// Cursor 本地已应用的 change_log 游标
 	Cursor int64 `json:"cursor"`
+	// Token 访问令牌（PAT）。按产品要求随集合持久化，重启客户端免重填；
+	// .sync.json 已加入 .gitignore，令牌不得进版本库，分享/拷贝集合前需先解绑。
+	Token string `json:"token,omitempty"`
+	// ExampleHashes 响应示例的已推送状态（示例 UID → 文件 hash）。
+	// 推送时做脏检测；「有记录但文件已不在」视为本地删除，推送 tombstone。
+	ExampleHashes map[string]string `json:"exampleHashes,omitempty"`
 }
 
 // Client 同步 HTTP 客户端。
@@ -185,7 +191,13 @@ type Payload struct {
 	Extra    string `json:"extra,omitempty"`
 	Content  string `json:"content,omitempty"`
 	Icon     string `json:"icon,omitempty"`
-	Deleted  bool   `json:"deleted,omitempty"`
+	// example（响应示例）：Name 复用为示例名
+	ApiUID      string `json:"api_uid,omitempty"`
+	Sample      string `json:"sample,omitempty"`
+	Status      int    `json:"status,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Seq         int    `json:"seq,omitempty"`
+	Deleted     bool   `json:"deleted,omitempty"`
 }
 
 // ---- HTTP ----

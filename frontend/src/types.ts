@@ -156,6 +156,24 @@ export interface RequestDoc {
   script?: ScriptBlock | null
   /** assert 列表（post-response 后求值） */
   asserts?: ScriptAssert[] | null
+  /** 响应文档（返回类型/返回参数/响应样例），随文件持久化并经同步与 Web 端往返 */
+  respDoc?: ResponseDoc | null
+}
+
+/** 一条接口的响应侧文档（对齐 Go collection.ResponseDoc）。 */
+export interface ResponseDoc {
+  type: string
+  params: ResponseParam[]
+  sample: string
+}
+
+/** 响应参数行（fieldName 为 a.b / a[].c 嵌套路径）。 */
+export interface ResponseParam {
+  fieldName: string
+  type: string
+  required: boolean
+  description: string
+  example: string
 }
 
 /** vars.pre-request 的一行。 */
@@ -453,13 +471,24 @@ export interface MockStatus {
   hits: number
 }
 
-/** 同步绑定（.sync.json，不含 PAT）。 */
+/** 同步绑定（集合内 .sync.json，含持久化 PAT）。 */
 export interface SyncBindInfo {
   linked: boolean
   serverUrl: string
   projectId: number
   mode: string
   cursor: number
+  /** 持久化在集合 .sync.json 里的 PAT（仅回显设置弹窗用） */
+  token?: string
+}
+
+/** 绑定/更新同步设置入参（root 为空 = 活动根）。 */
+export interface SyncBindReq {
+  root?: string
+  serverUrl: string
+  projectId: number
+  mode: string
+  token: string
 }
 
 /** 一轮同步摘要。 */

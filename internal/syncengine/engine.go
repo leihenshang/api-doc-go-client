@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"api-doc-go-client/internal/collection"
+	"api-doc-go-client/internal/config"
 )
 
 // Engine 一轮同步的编排：先 pull 后 push。
@@ -20,12 +23,49 @@ type Engine struct {
 	CLI  *Client
 }
 
-// DeviceID 生成/读取设备标识（存配置目录）。
+// DeviceID 读取本机设备标识：首次生成后持久化到配置目录（device_id 文件），跨重启保持不变。
+// 设备标识随同步请求上报（change_log.device），用于服务端区分写入来源，必须是稳定值。
 func DeviceID() string {
-	// 简单实现：随机一次 + 本机持久化交给调用方；此处生成随机即可
+	if id := readDeviceID(); id != "" {
+		return id
+	}
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
-	return "dev-" + hex.EncodeToString(b)
+	id := "dev-" + hex.EncodeToString(b)
+	_ = writeDeviceID(id) // 落盘失败不阻断：退回每次随机，仍可用
+	return id
+}
+
+// deviceIDPath 设备标识文件路径（与 config.json 同目录）。
+func deviceIDPath() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "device_id")
+}
+
+func readDeviceID() string {
+	p := deviceIDPath()
+	if p == "" {
+		return ""
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func writeDeviceID(id string) error {
+	p := deviceIDPath()
+	if p == "" {
+		return fmt.Errorf("无法定位配置目录")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(id+"\n"), 0o600)
 }
 
 // Report 一轮同步的结果摘要。
@@ -42,6 +82,10 @@ type Report struct {
 // RunOne 执行一轮：pull → apply → push dirty。
 func (e *Engine) RunOne() (*Report, error) {
 	rep := &Report{}
+	// 0. 能力协商（S9）：先确认服务端支持同步协议与所需能力，避免带过期协议白跑。
+	if err := e.negotiate(); err != nil {
+		return rep, err
+	}
 	// 1. 探测游标
 	st, err := e.CLI.State(e.Bind.ProjectID)
 	if err != nil {
@@ -101,6 +145,26 @@ func (e *Engine) RunOne() (*Report, error) {
 // maxPullPages 单轮同步最多拉取的页数（增量与全量共用）。
 const maxPullPages = 200
 
+// requiredFeatures 客户端同步所需的服务端能力（S9 能力协商）。
+var requiredFeatures = []string{"sync", "change_log"}
+
+// negotiate 一轮同步前的能力协商：调 /api/meta 并校验协议版本与关键能力。
+func (e *Engine) negotiate() error {
+	meta, err := e.CLI.Meta()
+	if err != nil {
+		return err
+	}
+	if meta.SyncProto < 1 {
+		return fmt.Errorf("服务端同步协议过旧（sync_proto=%d），请升级服务端", meta.SyncProto)
+	}
+	for _, f := range requiredFeatures {
+		if !slices.Contains(meta.Features, f) {
+			return fmt.Errorf("服务端缺少同步能力 %q（features=%v），无法同步", f, meta.Features)
+		}
+	}
+	return nil
+}
+
 func (e *Engine) pullSnapshot(rep *Report) error {
 	offset := 0
 	for pages := 0; ; pages++ {
@@ -157,6 +221,8 @@ func typeRank(t string) int {
 		return 1
 	case "doc":
 		return 2
+	case "example":
+		return 3 // 示例依赖请求文件，排在其后
 	default:
 		return 9
 	}
@@ -165,6 +231,11 @@ func typeRank(t string) int {
 func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	var p Payload
 	_ = json.Unmarshal(it.Payload, &p)
+
+	// 响应示例：写 examples/ 文件即可，不进索引/冲突副本体系。
+	if it.Type == "example" {
+		return e.applyExample(it.UID, p)
+	}
 
 	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）。
 	// it.Payload 即服务端版本快照，一并存入副本，应用内解决冲突时才能「采用服务器版本」。
@@ -301,18 +372,9 @@ func (e *Engine) applyAPI(uid string, p Payload) error {
 	return e.Coll.SaveRequest(r)
 }
 
-// applyExtra 从服务端 extra 还原客户端字段（v1：desc → docs）。
+// applyExtra 从服务端 extra 还原客户端字段（说明 / 请求头 / 请求参数 / JSON 请求体）。
 func applyExtra(r *collection.Request, extra string) {
-	if extra == "" {
-		return
-	}
-	var m map[string]any
-	if json.Unmarshal([]byte(extra), &m) != nil {
-		return
-	}
-	if v, ok := m["desc"].(string); ok {
-		r.Docs = v
-	}
+	collection.ApplySyncExtra(r, extra)
 }
 
 // applyDoc 文档条目（B13）：docs/*.md 落盘。
@@ -349,7 +411,49 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 		if dir := e.findDirByUID(it.UID); dir != "" {
 			_ = os.Remove(filepath.Join(e.Coll.Dir, filepath.FromSlash(dir), "folder.yml"))
 		}
+	case "example":
+		_ = e.Coll.DeleteResponseExampleByUID(it.UID)
+		delete(e.Bind.ExampleHashes, it.UID)
 	}
+}
+
+// applyExample 应用服务端下发的响应示例：落到所属请求的 examples/ 目录。
+// 请求尚未同步到本地时报错（typeRank 已保证 api 先于 example，通常不会走到）。
+func (e *Engine) applyExample(uid string, p Payload) error {
+	if p.ApiUID == "" {
+		return fmt.Errorf("example %s 缺少 api_uid", uid)
+	}
+	r, err := e.Coll.ReadRequest(p.ApiUID)
+	if err != nil {
+		return fmt.Errorf("example %s 找不到所属请求 %s", uid, p.ApiUID)
+	}
+	status := p.Status
+	if status == 0 {
+		status = 200
+	}
+	name := p.Name
+	if name == "" {
+		name = "示例"
+	}
+	ex := &collection.ResponseExample{
+		UID: uid, Name: name, RequestUID: p.ApiUID,
+		Path: path.Join(collection.ExampleDirForPath(r.Path), name+".yml"),
+		Seq:  p.Seq,
+		Response: collection.ExampleResponse{
+			Status: status, ContentType: p.ContentType, Body: p.Sample,
+		},
+	}
+	finalPath, err := e.Coll.UpsertResponseExampleFile(ex)
+	if err != nil {
+		return err
+	}
+	if h := e.Coll.FileHashOf(finalPath); h != "" {
+		if e.Bind.ExampleHashes == nil {
+			e.Bind.ExampleHashes = map[string]string{}
+		}
+		e.Bind.ExampleHashes[uid] = h
+	}
+	return nil
 }
 
 // findDirByUID 扫描找分组目录相对路径。
@@ -410,11 +514,13 @@ func (e *Engine) pushDirty(rep *Report) error {
 			if err != nil {
 				continue
 			}
-			payload = Payload{Name: req.Name, Method: req.Method, URL: req.URL}
-			if req.Docs != "" {
-				extra := map[string]any{"desc": req.Docs}
-				eb, _ := json.Marshal(extra)
-				payload.Extra = string(eb)
+			// extra 聚合请求头 / 请求参数（query + JSON 体展平）/ 说明，
+			// 口径见 collection.SyncExtra（与服务端 Bruno 导入一致）。
+			payload = Payload{
+				Name:   req.Name,
+				Method: req.Method,
+				URL:    req.URL,
+				Extra:  collection.SyncExtra(req),
 			}
 			op = Op{OpID: newOpID(), Op: "upsert", Type: "api", UID: n.UID, BaseRev: n.BaseRev}
 		default:
@@ -444,6 +550,35 @@ func (e *Engine) pushDirty(rep *Report) error {
 		ops = append(ops, Op{OpID: oid, Op: "upsert", Type: "doc", UID: d.UID, Payload: b})
 		meta[oid] = dirtyMeta{uid: d.UID, hash: e.Coll.FileHashOf(d.Path), typ: "doc"}
 	}
+	// 响应示例：按 hash 脏检测推送；「有推送记录但文件已不在」视为本地删除 → tombstone
+	examples, _ := e.Coll.ListAllResponseExamples()
+	liveExampleUIDs := make(map[string]string, len(examples)) // uid → file hash
+	for _, ex := range examples {
+		if ex.UID == "" {
+			continue
+		}
+		h := e.Coll.FileHashOf(ex.Path)
+		liveExampleUIDs[ex.UID] = h
+		if prev, seen := e.Bind.ExampleHashes[ex.UID]; seen && prev == h && h != "" {
+			continue // 未变化
+		}
+		oid := newOpID()
+		payload := Payload{
+			Name: ex.Name, ApiUID: ex.RequestUID, Sample: ex.Response.Body,
+			Status: ex.Response.Status, ContentType: ex.Response.ContentType, Seq: ex.Seq,
+		}
+		b, _ := json.Marshal(payload)
+		ops = append(ops, Op{OpID: oid, Op: "upsert", Type: "example", UID: ex.UID, Payload: b})
+		meta[oid] = dirtyMeta{uid: ex.UID, hash: h, typ: "example"}
+	}
+	for uid := range e.Bind.ExampleHashes {
+		if _, ok := liveExampleUIDs[uid]; ok {
+			continue
+		}
+		oid := newOpID()
+		ops = append(ops, Op{OpID: oid, Op: "delete", Type: "example", UID: uid})
+		meta[oid] = dirtyMeta{uid: uid, typ: "example", isDelete: true}
+	}
 	if len(ops) == 0 {
 		return nil
 	}
@@ -462,7 +597,17 @@ func (e *Engine) pushDirty(rep *Report) error {
 		switch r.Status {
 		case "ok":
 			rep.Pushed++
-			if m.uid != "" && !m.isDelete {
+			if m.typ == "example" {
+				// 示例不进索引：用 Bind.ExampleHashes 记录推送状态（upsert 记 hash，删除清记录）
+				if m.isDelete {
+					delete(e.Bind.ExampleHashes, m.uid)
+				} else if m.hash != "" {
+					if e.Bind.ExampleHashes == nil {
+						e.Bind.ExampleHashes = map[string]string{}
+					}
+					e.Bind.ExampleHashes[m.uid] = m.hash
+				}
+			} else if m.uid != "" && !m.isDelete {
 				h := m.hash
 				if h == "" {
 					h = "synced" // 分组等无文件 hash 的条目用哨兵值
@@ -522,7 +667,7 @@ func newOpID() string {
 	return hex.EncodeToString(b)
 }
 
-// LoadBind 从 .sync.json 读绑定（PAT 不入库）。
+// LoadBind 从 .sync.json 读绑定（含持久化的 PAT）。
 func LoadBind(dir string) (BindInfo, error) {
 	var b BindInfo
 	data, err := os.ReadFile(filepath.Join(dir, ".sync.json"))

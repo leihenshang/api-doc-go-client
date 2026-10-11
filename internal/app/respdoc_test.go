@@ -1,0 +1,79 @@
+package app
+
+import (
+	"strings"
+	"testing"
+
+	"api-doc-go-client/internal/collection"
+)
+
+// UpdateResponseDoc 把响应字段表与样例写进请求模型并落盘（文件即真相源，随后可同步）。
+func TestUpdateResponseDoc(t *testing.T) {
+	core, _ := newTestApp(t)
+	r, err := core.CreateRequest("", "登录", "POST")
+	if err != nil {
+		t.Fatalf("建请求失败: %v", err)
+	}
+
+	in := ResponseDocInput{
+		UID:    r.UID,
+		Type:   "object",
+		Sample: `{"code":0}`,
+		Params: []collection.ResponseParam{
+			{FieldName: "code", Type: "number", Description: "业务码", Example: "0"},
+			{FieldName: "data[].id", Type: "string", Description: "ID", Example: "x1"},
+		},
+	}
+	if err := core.UpdateResponseDoc(in); err != nil {
+		t.Fatalf("写响应文档失败: %v", err)
+	}
+
+	got, err := core.ReadRequest(r.UID)
+	if err != nil {
+		t.Fatalf("重读失败: %v", err)
+	}
+	if got.RespDoc == nil {
+		t.Fatal("RespDoc 应已落盘")
+	}
+	if got.RespDoc.Type != "object" || got.RespDoc.Sample != `{"code":0}` {
+		t.Errorf("类型/样例落盘不符: %+v", got.RespDoc)
+	}
+	if len(got.RespDoc.Params) != 2 || got.RespDoc.Params[1].FieldName != "data[].id" {
+		t.Errorf("返回参数行不符: %+v", got.RespDoc.Params)
+	}
+	// 同步 extra 应带响应侧字段（respdoc → retType/retParams/retSample）
+	extra := collection.SyncExtra(got)
+	for _, key := range []string{`"retType"`, `"retParams"`, `"retSample"`} {
+		if !strings.Contains(extra, key) {
+			t.Errorf("SyncExtra 缺少 %s: %s", key, extra)
+		}
+	}
+
+	// 全空入参清空 RespDoc
+	if err := core.UpdateResponseDoc(ResponseDocInput{UID: r.UID}); err != nil {
+		t.Fatalf("清空响应文档失败: %v", err)
+	}
+	got2, err := core.ReadRequest(r.UID)
+	if err != nil {
+		t.Fatalf("重读失败: %v", err)
+	}
+	if got2.RespDoc != nil {
+		t.Fatalf("全空应清空 RespDoc，实际: %+v", got2.RespDoc)
+	}
+}
+
+// gRPC 请求不承载响应文档：写入应被拒绝，避免静默丢失。
+func TestUpdateResponseDocRejectGRPC(t *testing.T) {
+	core, _ := newTestApp(t)
+	g := &collection.Request{
+		UID: "g-1", Name: "SayHello", Path: "SayHello.yml", Method: "GRPC",
+		GRPC: &collection.GrpcBlock{Target: "127.0.0.1:1", Service: "demo.Greeter", Method: "SayHello"},
+	}
+	if err := core.SaveRequest(g); err != nil {
+		t.Fatalf("存 gRPC 请求失败: %v", err)
+	}
+	err := core.UpdateResponseDoc(ResponseDocInput{UID: g.UID, Type: "object"})
+	if err == nil || !strings.Contains(err.Error(), "gRPC") {
+		t.Fatalf("gRPC 请求应拒绝响应文档写入，得到: %v", err)
+	}
+}

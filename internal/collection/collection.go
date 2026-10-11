@@ -695,7 +695,25 @@ func (r *Request) toFile() *requestFile {
 		}
 		f.Extra["assert"] = list
 	}
+	// 响应文档（Web 端返回类型/返回参数/响应样例）：HTTP 请求才落盘，gRPC 不写。
+	if !r.IsGRPC() && r.RespDoc != nil {
+		f.Extra["respdoc"] = respDocExtra(r.RespDoc)
+	}
 	return f
+}
+
+// respDocExtra 把响应文档转成 Extra 可编码的通用 map（保持 camelCase 键名）。
+func respDocExtra(doc *ResponseDoc) map[string]any {
+	if doc == nil {
+		return nil
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
 }
 
 func fromFile(path string, f *requestFile) *Request {
@@ -718,7 +736,28 @@ func fromFile(path string, f *requestFile) *Request {
 	r.URL = f.HTTP.URL
 	r.Params, r.Headers, r.Body = f.HTTP.Params, f.HTTP.Headers, f.HTTP.Body
 	r.Auth = f.HTTP.Auth
+	r.RespDoc = parseRespDocExtra(f.Extra)
 	return r
+}
+
+// parseRespDocExtra 从 Extra 的 respdoc 段还原响应文档；缺段/空段/结构非法返回 nil。
+func parseRespDocExtra(extra map[string]any) *ResponseDoc {
+	v, ok := extra["respdoc"]
+	if !ok || v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var doc ResponseDoc
+	if json.Unmarshal(b, &doc) != nil {
+		return nil
+	}
+	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" {
+		return nil
+	}
+	return &doc
 }
 
 // parseScriptExtra 从 Extra 里取 vars/script/assert（Bruno 超集顶层字段）。
@@ -1689,11 +1728,12 @@ func (c *Collection) SaveRequest(r *Request) error {
 	out := r.toFile()
 	c.stripGrpcDefault(out) // 与集合默认定义一致的 proto/imports 不写盘（P8）
 	// 磁盘上已有的未知顶层字段必须保留：Bruno 会忽略它们，但我们不能丢（round-trip）
-	// vars/script/assert 已升为 Request 一等字段，由 toFile 写出，不再从旧 Extra 合并回来。
+	// vars/script/assert/respdoc 已升为 Request 一等字段，由 toFile 写出，不再从旧 Extra 合并回来
+	//（respdoc 尤其不能回填：否则清空响应文档后旧段会复活）。
 	if prev, err := readRequestFile(full); err == nil {
 		extra := map[string]any{}
 		for k, v := range prev.Extra {
-			if k == "vars" || k == "script" || k == "assert" {
+			if k == "vars" || k == "script" || k == "assert" || k == "respdoc" {
 				continue
 			}
 			extra[k] = v

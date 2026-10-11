@@ -476,9 +476,14 @@ type SyncBindInfo = syncengine.BindInfo
 // SyncReport 一轮同步摘要。
 type SyncReport = syncengine.Report
 
-// GetSyncBind 读取当前集合的同步绑定。
+// GetSyncBind 读取活动集合的同步绑定。
 func (a *App) GetSyncBind() (*syncengine.BindInfo, error) {
-	c, err := a.requireCollection()
+	return a.GetSyncBindFor("")
+}
+
+// GetSyncBindFor 读取指定工作目录的同步绑定（root 为空 = 活动根）。
+func (a *App) GetSyncBindFor(root string) (*syncengine.BindInfo, error) {
+	c, err := a.collOf(root)
 	if err != nil {
 		return nil, err
 	}
@@ -490,42 +495,69 @@ func (a *App) GetSyncBind() (*syncengine.BindInfo, error) {
 	return &b, nil
 }
 
-// SetSyncBind 绑定/更新服务端项目（PAT 只存内存，落盘由调用方决定）。
-//
-// 地址必须通过校验：非回环地址禁止明文 http（PAT 会以 Bearer 明文过网）。
+// SyncBindReq 绑定/更新同步设置的入参（Root 为空 = 活动根）。
+type SyncBindReq struct {
+	Root      string `json:"root"`
+	ServerURL string `json:"serverUrl"`
+	ProjectID uint64 `json:"projectId"`
+	Mode      string `json:"mode"`
+	Token     string `json:"token"`
+}
+
+// SetSyncBind 绑定/更新活动集合的服务端项目。
 func (a *App) SetSyncBind(serverURL string, projectID uint64, mode, token string) (*syncengine.BindInfo, error) {
-	c, err := a.requireCollection()
+	return a.SetSyncBindFor(SyncBindReq{ServerURL: serverURL, ProjectID: projectID, Mode: mode, Token: token})
+}
+
+// SetSyncBindFor 绑定/更新指定根的服务端项目。
+//
+// PAT 随 .sync.json 持久化（0600）：重启客户端后免重填；本次未填令牌时沿用同一服务端
+// 上已保存的令牌（改模式不必重输）。地址必须通过校验：非回环地址禁止明文 http。
+func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
+	c, err := a.collOf(req.Root)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(serverURL) == "" || projectID == 0 {
+	if strings.TrimSpace(req.ServerURL) == "" || req.ProjectID == 0 {
 		return nil, errors.New("服务端地址与项目 ID 必填")
 	}
-	base, err := syncengine.ValidateServerURL(serverURL)
+	base, err := syncengine.ValidateServerURL(req.ServerURL)
 	if err != nil {
 		return nil, err
 	}
+	mode := req.Mode
 	if mode == "" {
 		mode = syncengine.ModeAuto
 	}
+	tok := strings.TrimSpace(req.Token)
 	b := syncengine.BindInfo{
 		Linked: true, ServerURL: base,
-		ProjectID: projectID, Mode: mode,
+		ProjectID: req.ProjectID, Mode: mode, Token: tok,
 	}
-	// 继承已有 cursor
-	if prev, err := syncengine.LoadBind(c.Dir); err == nil && prev.ProjectID == projectID {
-		b.Cursor = prev.Cursor
+	// 继承已有 cursor；未填 PAT 且服务端未变则沿用已保存令牌（只改模式/项目时不用重输）
+	if prev, perr := syncengine.LoadBind(c.Dir); perr == nil {
+		if prev.ProjectID == req.ProjectID {
+			b.Cursor = prev.Cursor
+		}
+		if tok == "" && prev.ServerURL == base {
+			b.Token = prev.Token
+		}
 	}
 	if err := syncengine.SaveBind(c.Dir, b); err != nil {
 		return nil, err
 	}
-	a.setSyncToken(c, token)
+	a.setSyncToken(c, b.Token)
 	return &b, nil
 }
 
-// UnbindSync 解绑（文件保留）。
+// UnbindSync 解绑活动集合（清空 .sync.json，含 PAT）。
 func (a *App) UnbindSync() error {
-	c, err := a.requireCollection()
+	return a.UnbindSyncFor("")
+}
+
+// UnbindSyncFor 解绑指定根。
+func (a *App) UnbindSyncFor(root string) error {
+	c, err := a.collOf(root)
 	if err != nil {
 		return err
 	}
@@ -537,13 +569,23 @@ func (a *App) UnbindSync() error {
 	return nil
 }
 
-// RunSync 在**活动根**上执行一轮同步（先 pull 后 push）。
+// RunSync 在**活动根**上执行一轮同步（先 pull 后 push）。token 为空时用已保存的 PAT。
 func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
 	}
 	return a.runSyncFor(c, token)
+}
+
+// RunSyncForRoot 在**指定工作目录**上执行一轮同步，不切换活动根/页签组。
+// 供侧栏根行的「刷新」按钮调用：点哪个根就同步哪个根。
+func (a *App) RunSyncForRoot(root string) (*syncengine.Report, error) {
+	c, err := a.collOf(root)
+	if err != nil {
+		return nil, err
+	}
+	return a.runSyncFor(c, "")
 }
 
 // runSyncFor 对指定集合跑一轮同步。
@@ -561,13 +603,18 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 	} else {
 		b.ServerURL = base
 	}
+	// 令牌解析顺序：显式参数 → 会话内存 → .sync.json 持久化的 PAT（重启后免重填）
 	tok := token
 	if tok == "" {
 		tok = a.syncTokenOf(c)
 	}
 	if tok == "" {
-		return nil, errors.New("缺少访问令牌（PAT）")
+		tok = b.Token
 	}
+	if tok == "" {
+		return nil, errors.New("缺少访问令牌（PAT），请在同步设置中填写")
+	}
+	a.setSyncToken(c, tok)
 	cli := syncengine.New(b.ServerURL, tok, syncengine.DeviceID())
 	eng := &syncengine.Engine{Coll: c, Bind: b, CLI: cli}
 
@@ -575,8 +622,8 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 	rep, err := eng.RunOne()
 	a.setSyncRunning(c, false)
 
-	// 回写 cursor
-	b.Cursor = eng.Bind.Cursor
+	// 回写引擎侧状态（cursor + 响应示例推送状态）
+	b = eng.Bind
 	_ = syncengine.SaveBind(c.Dir, b)
 	// 同步后重建索引
 	_ = c.RebuildIndex()
@@ -709,34 +756,53 @@ func (a *App) autoSyncOnce(root string) {
 	if err != nil || !b.Linked || b.Mode != syncengine.ModeAuto {
 		return
 	}
+	// 内存没有时用 .sync.json 里持久化的 PAT：重启后定时同步仍能自动跑
 	token := a.syncTokenOf(c)
+	if token == "" {
+		token = b.Token
+	}
 	if token == "" {
 		return
 	}
 	_, _ = a.runSyncFor(c, token)
 }
 
-// ListConflicts 列出 .conflicts/ 冲突副本（I4）。
+// ListConflicts 列出活动集合 .conflicts/ 冲突副本（I4）。
 func (a *App) ListConflicts() ([]collection.ConflictItem, error) {
-	c, err := a.requireCollection()
+	return a.ListConflictsFor("")
+}
+
+// ListConflictsFor 列出指定根的冲突副本（root 为空 = 活动根）。
+func (a *App) ListConflictsFor(root string) ([]collection.ConflictItem, error) {
+	c, err := a.collOf(root)
 	if err != nil {
 		return nil, err
 	}
 	return c.ListConflicts()
 }
 
-// ConflictDetail 查看单个冲突副本的差异字段（本地 → 服务器）。
+// ConflictDetail 查看活动集合单个冲突副本的差异字段（本地 → 服务器）。
 func (a *App) ConflictDetail(file string) (*collection.ConflictDetail, error) {
-	c, err := a.requireCollection()
+	return a.ConflictDetailFor("", file)
+}
+
+// ConflictDetailFor 查看指定根的冲突副本详情。
+func (a *App) ConflictDetailFor(root, file string) (*collection.ConflictDetail, error) {
+	c, err := a.collOf(root)
 	if err != nil {
 		return nil, err
 	}
 	return c.ConflictDetail(file)
 }
 
-// ResolveConflict 应用冲突取舍：local（保留本地）| remote（采用服务器）| copy（保留副本）。
+// ResolveConflict 对活动集合应用冲突取舍：local | remote | copy。
 func (a *App) ResolveConflict(file, choice string) error {
-	c, err := a.requireCollection()
+	return a.ResolveConflictFor("", file, choice)
+}
+
+// ResolveConflictFor 对指定根应用冲突取舍。
+func (a *App) ResolveConflictFor(root, file, choice string) error {
+	c, err := a.collOf(root)
 	if err != nil {
 		return err
 	}
@@ -999,6 +1065,41 @@ func (a *App) SaveRequest(r *collection.Request) error {
 	// 新建的请求不在索引里（ReadRequest 报错），此时保持调用方给的路径。
 	if cur, err := c.ReadRequest(r.UID); err == nil && cur.Path != "" && cur.Path != r.Path {
 		r.Path = cur.Path
+	}
+	return c.SaveRequest(r)
+}
+
+// ResponseDocInput 更新请求响应文档的入参（响应字段 UI → 请求模型）。
+type ResponseDocInput struct {
+	UID    string                     `json:"uid"`
+	Type   string                     `json:"type"`
+	Params []collection.ResponseParam `json:"params"`
+	Sample string                     `json:"sample"`
+}
+
+// UpdateResponseDoc 把响应字段表与响应样例写入请求的 RespDoc 并落盘（文件即真相源，随后可同步）。
+//
+// 以磁盘上的最新请求为底打补丁，避免响应面板拿着编辑中的旧请求整体覆盖编辑器尚未保存的改动。
+// gRPC 请求不承载响应文档（toFile / SyncExtra 均不带 respdoc 段）。
+func (a *App) UpdateResponseDoc(in ResponseDocInput) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(in.UID) == "" {
+		return errors.New("缺少请求 uid")
+	}
+	r, err := c.ReadRequest(in.UID)
+	if err != nil {
+		return err
+	}
+	if r.IsGRPC() {
+		return errors.New("gRPC 请求暂不支持响应文档")
+	}
+	if strings.TrimSpace(in.Type) == "" && len(in.Params) == 0 && strings.TrimSpace(in.Sample) == "" {
+		r.RespDoc = nil
+	} else {
+		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample}
 	}
 	return c.SaveRequest(r)
 }

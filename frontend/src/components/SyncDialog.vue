@@ -1,23 +1,25 @@
 <script setup lang="ts">
-// 同步（I1–I6）：绑定服务端项目 / 手动拉推 / 冲突应用内二选一 / 状态展示。
+// 同步设置与冲突（I1–I6）：绑定服务端项目 / 解绑 / 模式与 PAT 维护 / 冲突应用内二选一。
+// 「立即同步」不在这里触发 —— 侧栏根行的刷新按钮直接同步，同步后有冲突才打开本弹窗。
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import type { ConflictDetail, SyncBindInfo, SyncReport } from '@/types'
+import type { ConflictDetail, SyncBindInfo, SyncBindReq } from '@/types'
 import { NButton, NInput, NInputNumber, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{ show: boolean }>()
-const emit = defineEmits<{ 'update:show': [v: boolean]; synced: [] }>()
+const props = defineProps<{ show: boolean; root?: string }>()
+const emit = defineEmits<{ 'update:show': [v: boolean]; synced: [root: string] }>()
 const { t } = useI18n()
+
+const rootId = computed(() => props.root ?? '')
 
 const bind = ref<SyncBindInfo>({ linked: false, serverUrl: '', projectId: 0, mode: 'auto', cursor: 0 })
 const token = ref('')
 const serverUrl = ref('')
 const projectId = ref(0)
 const mode = ref('auto')
-const report = ref<SyncReport | null>(null)
 const error = ref('')
 const busy = ref(false)
 const details = ref<ConflictDetail[]>([])
@@ -29,16 +31,17 @@ const modeOptions = computed(() => [
 ])
 
 watch(
-  () => props.show,
-  async (v) => {
+  [() => props.show, () => props.root],
+  async ([v]) => {
     if (!v) return
     error.value = ''
-    report.value = null
     try {
-      bind.value = (await api.getSyncBind()) ?? bind.value
+      bind.value = (await api.getSyncBindFor(rootId.value)) ?? bind.value
       serverUrl.value = bind.value.serverUrl ?? ''
       projectId.value = bind.value.projectId ?? 0
       mode.value = bind.value.mode || 'auto'
+      // PAT 已随集合持久化：回显已保存令牌（留空保存 = 沿用），重启客户端无需重填
+      token.value = bind.value.token ?? ''
       await loadConflicts()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -48,13 +51,13 @@ watch(
 
 async function loadConflicts(): Promise<void> {
   try {
-    const items = await api.listConflicts()
+    const items = await api.listConflictsFor(rootId.value)
     // 并发取每份副本的差异详情；单份损坏不影响其余展示
     details.value = (
       await Promise.all(
         items.map(async (it) => {
           try {
-            return await api.getConflictDetail(it.file)
+            return await api.getConflictDetailFor(rootId.value, it.file)
           } catch {
             return null
           }
@@ -66,12 +69,39 @@ async function loadConflicts(): Promise<void> {
   }
 }
 
+function bindReq(): SyncBindReq {
+  return {
+    root: rootId.value,
+    serverUrl: serverUrl.value,
+    projectId: projectId.value ?? 0,
+    mode: mode.value,
+    token: token.value,
+  }
+}
+
 async function doBind(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    bind.value = (await api.setSyncBind(serverUrl.value, projectId.value, mode.value, token.value)) ?? bind.value
+    bind.value = (await api.setSyncBindFor(bindReq())) ?? bind.value
+    token.value = bind.value.token ?? token.value
     message.success(t('sync.bound'))
+    emit('synced', rootId.value)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function doSave(): Promise<void> {
+  busy.value = true
+  error.value = ''
+  try {
+    bind.value = (await api.setSyncBindFor(bindReq())) ?? bind.value
+    token.value = bind.value.token ?? token.value
+    message.success(t('sync.saved'))
+    emit('synced', rootId.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -83,24 +113,11 @@ async function doUnbind(): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    await api.unbindSync()
+    await api.unbindSyncFor(rootId.value)
     bind.value = { linked: false, serverUrl: '', projectId: 0, mode: 'auto', cursor: 0 }
+    token.value = ''
     message.success(t('sync.unbound'))
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function doSync(): Promise<void> {
-  busy.value = true
-  error.value = ''
-  try {
-    report.value = await api.runSync(token.value)
-    message.success(t('sync.done', { p: report.value?.pulled ?? 0, s: report.value?.pushed ?? 0 }))
-    await loadConflicts()
-    emit('synced')
+    emit('synced', rootId.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -113,10 +130,10 @@ async function resolve(file: string, choice: 'local' | 'remote'): Promise<void> 
   busy.value = true
   error.value = ''
   try {
-    await api.resolveConflict(file, choice)
+    await api.resolveConflictFor(rootId.value, file, choice)
     message.success(t('sync.resolved'))
     await loadConflicts()
-    emit('synced')
+    emit('synced', rootId.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -131,11 +148,11 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
   try {
     for (const d of details.value) {
       if (choice === 'remote' && !d.hasPayload) continue
-      await api.resolveConflict(d.file, choice)
+      await api.resolveConflictFor(rootId.value, d.file, choice)
     }
     message.success(t('sync.resolved'))
     await loadConflicts()
-    emit('synced')
+    emit('synced', rootId.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -145,7 +162,7 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="t('sync.title')" style="width: 660px"
+  <n-modal :show="show" preset="card" :title="t('sync.settingsTitle')" style="width: 660px"
     @update:show="emit('update:show', false)">
     <div class="wrap">
       <!-- 连接信息（紧凑面板，与下方冲突分开） -->
@@ -173,6 +190,7 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
               data-testid="sync.token" :placeholder="t('sync.tokenPlaceholder')" />
           </div>
         </div>
+        <p class="hint">{{ t('sync.tokenSavedHint') }}</p>
 
         <div class="conn-ft">
           <n-button v-if="!bind.linked" size="small" type="primary" :loading="busy" data-testid="sync.bind"
@@ -182,8 +200,8 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
           <template v-else>
             <span class="ok">{{ t('sync.linkedBadge') }}</span>
             <span class="sp" />
-            <n-button size="small" :loading="busy" data-testid="sync.run" @click="doSync">
-              {{ t('sync.run') }}
+            <n-button size="small" type="primary" :loading="busy" data-testid="sync.save" @click="doSave">
+              {{ t('sync.save') }}
             </n-button>
             <n-button size="small" quaternary :loading="busy" data-testid="sync.unbind" @click="doUnbind">
               {{ t('sync.unbind') }}
@@ -192,9 +210,6 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
         </div>
       </section>
 
-      <p v-if="report" class="rep" data-testid="sync.report">
-        {{ t('sync.report', { p: report.pulled, s: report.pushed, c: report.conflicts, r: report.rejected }) }}
-      </p>
       <p v-if="error" class="err">{{ error }}</p>
 
       <!-- 冲突区：与连接信息分开，默认折叠列表，点开看差异 -->
@@ -260,6 +275,13 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
   white-space: nowrap;
 }
 
+.hint {
+  margin: 6px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--app-placeholder);
+}
+
 .full {
   width: 100%;
 }
@@ -278,12 +300,6 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
 .ok {
   font-size: 12px;
   color: var(--app-accent);
-}
-
-.rep {
-  margin: 0;
-  font-size: 12px;
-  color: var(--app-text-2);
 }
 
 .err {

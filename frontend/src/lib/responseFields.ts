@@ -1,12 +1,15 @@
-// 响应字段映射的本地存档（按请求 uid 存 localStorage）。
-// 与旧实现的关键差异：字段只在用户点「更新响应字段」时解析一次；重复更新**只追加新出现的字段**
+// 响应字段映射：字段表的真相源是请求模型的 RespDoc（随文件落盘、随同步往返 Web 端）；
+// localStorage 仅用于未落盘草稿与旧版本存档的一次性迁移。
+// 字段只在用户点「更新响应字段」时解析一次；重复更新**只追加新出现的字段**
 // 并保留既有顺序与「含义」标注 —— 响应里时有时无的字段（可选字段、分页尾部字段等）不会被抹掉。
+import type { ResponseDoc, ResponseParam } from '@/types'
+
 export interface FieldRow {
   path: string
   type: string
   /** 字段取值（叶子为原始值文本，容器为空串）；用于「值」列与保存为变量 */
   value: string
-  /** 本地标注的含义，不写回集合文件 */
+  /** 字段含义（写回 RespDoc.params[].description，随同步与 Web 端往返） */
   meaning: string
 }
 
@@ -135,4 +138,42 @@ export function loadFields(uid: string): FieldRow[] {
 export function saveFields(uid: string, rows: FieldRow[]): void {
   if (!uid) return
   localStorage.setItem(storeKey(uid), JSON.stringify(rows))
+}
+
+/** 删除本地存档（迁移进 RespDoc 后清理）。 */
+export function removeFields(uid: string): void {
+  if (!uid) return
+  localStorage.removeItem(storeKey(uid))
+}
+
+/** RespDoc 参数行 → 字段表行（fieldName→path、example→value、description→meaning）。 */
+export function rowsFromDoc(doc?: ResponseDoc | null): FieldRow[] {
+  if (!doc?.params) return []
+  return doc.params
+    .filter((p) => !!p && !!p.fieldName)
+    .map((p) => ({
+      path: p.fieldName,
+      type: p.type ?? '',
+      value: p.example ?? '',
+      meaning: p.description ?? '',
+    }))
+}
+
+/** 字段表行 → RespDoc 参数行（客户端无 required 概念，恒 false；含义即 description）。 */
+export function paramsFromRows(rows: FieldRow[]): ResponseParam[] {
+  return rows.map((r) => ({
+    fieldName: r.path,
+    type: r.type,
+    required: false,
+    description: r.meaning,
+    example: r.value,
+  }))
+}
+
+/** 根据响应体文本推断根 JSON 类型（{→object、[→array，其余空串）。 */
+export function rootJsonType(text: string): string {
+  const s = text.trim()
+  if (s.startsWith('{')) return 'object'
+  if (s.startsWith('[')) return 'array'
+  return ''
 }
