@@ -149,7 +149,7 @@ test('[B16] 集合树连接线：深度缩进 / 祖先竖线延续 / └ 收线 
 test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名同字号同基线', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   seedNested(dir)
-  await app.addCollection('bruno-sample') // 第二个根：用于对比「活动根 / 非活动根」的字号与强调
+  await app.addCollection('bruno-sample') // 第二个根：用于对比「活动根 / 非活动根」的强调（浅底 + 左侧强调条）
   await openCollection(page, app)
 
   // ① 竖线列 = 某一层分组的展开图标圆心（不是按钮左边缘）：这样线是从图标里垂下来的。
@@ -196,13 +196,14 @@ test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名�
   const tagBox = (await tag.boundingBox())!
   expect(Math.abs(tagBox.y + tagBox.height / 2 - (row.y + row.height / 2))).toBeLessThanOrEqual(2)
 
-  // ③ 集合目录字号：比树里的条目大一档；**被选中的那个集合再大一档**（点一下就换过去）。
-  //    注意旧实现里 `.coll-name` 的 14px 被 `.row > .rname` 的 12.5px 盖掉了 —— 这里断言真实生效值。
+  // ③ 集合目录字号：与树内条目（请求名 / 目录名）一致、不加重；活动根只靠浅底 + 左侧强调条区分，不再靠字号。
+  //    注意旧实现里 `.coll-name` 的 14px 被 `.row > .rname` 的 12.5px 盖掉过 —— 这里断言真实生效值。
   const px = async (loc: Locator): Promise<number> => parseFloat(await fontOf(loc))
   const basicName = basicRootRow.locator('.coll-name')
-  expect(await px(basicName)).toBeGreaterThan(await px(name))
+  expect(await px(basicName)).toBe(await px(name))
+  expect(await px(basicName)).toBe(await px(treeRowByUid(page, SUB_UID).locator('.fname')))
   const idleSize = await px(basicName)
   await basicRootRow.click() // 切成活动根
   await expect(basicRootRow).toHaveClass(/root-active/)
-  expect(await px(basicName)).toBeGreaterThan(idleSize)
+  expect(await px(basicName)).toBe(idleSize)
 })

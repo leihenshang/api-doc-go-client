@@ -14,6 +14,7 @@ import {
   CloseOutline,
   ContractOutline,
   CreateOutline,
+  EllipsisHorizontalOutline,
   ExpandOutline,
   FolderOpenOutline,
   GitNetworkOutline,
@@ -825,8 +826,9 @@ watch(
               <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu"
                 @select="onRootMenu(row.root, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
-                <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')" aria-label="···">
-                  ···
+                <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')"
+                  :aria-label="t('tree.more')">
+                  <n-icon :component="EllipsisHorizontalOutline" :size="13" />
                 </button>
               </n-dropdown>
             </span>
@@ -1300,7 +1302,7 @@ watch(
   display: inline-flex;
 }
 
-/* 集合根行的「···」常驻显示（不用悬停才出现） */
+/* 集合根行的「更多」菜单按钮常驻显示（不用悬停才出现） */
 .row.root .actions {
   display: inline-flex;
 }
