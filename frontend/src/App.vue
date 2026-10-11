@@ -127,6 +127,10 @@ const showImport = ref(false)
 const showCodegen = ref(false)
 const showMock = ref(false)
 const showSync = ref(false)
+/** 同步设置/冲突弹窗当前针对的根（空串 = 活动根），支持非活动根的冲突展示 */
+const syncRoot = ref('')
+/** 正在同步的根列表（侧栏根行按钮转圈） */
+const syncingRoots = ref<string[]>([])
 const syncStatus = ref<SyncStatus | null>(null)
 let syncTimer: ReturnType<typeof setInterval> | null = null
 /** 欢迎页展示用的「上次打开的目录」（多根：取最近恢复列表里的第一个）。 */
@@ -435,7 +439,50 @@ async function imported(): Promise<void> {
   tabs.refreshResolve()
 }
 
-async function onSynced(): Promise<void> {
+/** 打开同步设置/冲突弹窗：默认活动根；根行菜单进入时根已先切活动。 */
+function openSyncSettings(root = ''): void {
+  syncRoot.value = root
+  showSync.value = true
+}
+
+/**
+ * 侧栏根行「刷新」：直接同步指定根，**不切换活动根/页签**。
+ * 默认不弹设置窗；同步后有冲突才打开冲突页；缺 PAT 等配置错误时才打开设置。
+ */
+async function syncRootNow(root: string): Promise<void> {
+  if (!root || syncingRoots.value.includes(root)) return
+  syncingRoots.value = [...syncingRoots.value, root]
+  try {
+    const rep = await api.runSyncForRoot(root)
+    // 树/页签回填由 collection:changed 事件的 onExternalChange(root) 处理，这里只负责反馈
+    const confs = await api.listConflictsFor(root)
+    if (confs.length || (rep?.conflicts ?? 0) > 0) {
+      message.warning(t('sync.conflictPrompt', { n: confs.length || rep?.conflicts || 0 }))
+      syncRoot.value = root
+      showSync.value = true
+    } else {
+      message.success(t('sync.done', { p: rep?.pulled ?? 0, s: rep?.pushed ?? 0 }))
+    }
+    if (root === coll.activeRoot) await refreshSyncStatus()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    message.error(msg)
+    // 缺少令牌/未绑定：直接打开该根的同步设置（仍不切活动根）
+    if (/令牌|PAT|未关联/.test(msg)) {
+      syncRoot.value = root
+      showSync.value = true
+    }
+  } finally {
+    syncingRoots.value = syncingRoots.value.filter((r) => r !== root)
+  }
+}
+
+/** 同步弹窗内绑定/冲突处理后的收尾：非活动根只刷它的树，活动根还要回填页签。 */
+async function onSynced(root?: string): Promise<void> {
+  if (root && root !== coll.activeRoot) {
+    await coll.reloadRoot(root)
+    return
+  }
   await coll.reload()
   tabs.refreshResolve()
   await refreshSyncStatus()
@@ -918,9 +965,10 @@ watch(
           <div class="body">
             <aside class="side">
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
-                @activate="activateRoot" @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
-                @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
-                @import-curl="openCurl" @sync="showSync = true" />
+                :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
+                @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
+                @new-request="newDraft" @new-grpc-request="newGrpcDraft" @import-curl="openCurl"
+                @sync="openSyncSettings()" @sync-root="syncRootNow" />
             </aside>
 
             <main class="main">
@@ -966,7 +1014,7 @@ watch(
           </div>
 
           <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus"
-            :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="showSync = true"
+            :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="openSyncSettings()"
             @history="showHistory = true" @cookies="showCookies = true" @settings="showSettings = true" />
         </template>
 
@@ -980,7 +1028,7 @@ watch(
       <import-dialog v-model:show="showImport" @imported="imported" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
-      <sync-dialog v-model:show="showSync" @synced="onSynced" />
+      <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
       <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
         :active-root="coll.activeRoot" @open-request="openRequestInRoot" @switch-env="pickEnv" @command="onCommand" />
 

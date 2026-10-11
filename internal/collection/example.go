@@ -2,6 +2,7 @@ package collection
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -90,6 +91,9 @@ func exampleDir(reqPath string) string {
 	p := filepath.ToSlash(strings.TrimSpace(reqPath))
 	return path.Join(examplesDirName, path.Dir(p), strings.TrimSuffix(path.Base(p), path.Ext(p)))
 }
+
+// ExampleDirForPath exampleDir 的导出版本（同步引擎按请求路径定位示例目录）。
+func ExampleDirForPath(reqPath string) string { return exampleDir(reqPath) }
 
 // exampleSaveMu 串行化「选名 → 计算序号 → 写文件」：这三步之间没有原子性，
 // 并发保存（两个 MCP 会话 / 界面与 MCP 同时存）会取到同一个名字并互相覆盖。
@@ -226,6 +230,95 @@ func (c *Collection) DeleteResponseExample(reqUID, exampleUID string) error {
 		}
 	}
 	return errNotFound
+}
+
+// ListAllResponseExamples 遍历 examples/ 下全部示例（同步推送用）；目录不存在视为空。
+func (c *Collection) ListAllResponseExamples() ([]*ResponseExample, error) {
+	root := filepath.Join(c.Dir, examplesDirName)
+	out := []*ResponseExample{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // 单个文件读失败不拖垮全量
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(p))
+		if ext != ".yml" && ext != ".yaml" {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		var f exampleFile
+		if yaml.Unmarshal(data, &f) != nil || f.Meta.UID == "" {
+			return nil
+		}
+		rel, rerr := filepath.Rel(c.Dir, p)
+		if rerr != nil {
+			return nil
+		}
+		out = append(out, fromExampleFile(filepath.ToSlash(rel), &f))
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpsertResponseExampleFile 按 UID 写入/替换示例文件（同步拉取应用用）。
+// 示例的落点由其所属请求决定：调用方负责把 Path 设为 examples/<请求目录>/<名>.yml。
+// 目标文件名被其它 UID 占用时自动改成「名 (N)」，返回最终落盘的相对路径。
+func (c *Collection) UpsertResponseExampleFile(ex *ResponseExample) (string, error) {
+	exampleSaveMu.Lock()
+	defer exampleSaveMu.Unlock()
+	// 同 UID 换名/换目录时移除旧文件，避免一份示例两份落盘
+	existing, _ := c.ListAllResponseExamples()
+	for _, old := range existing {
+		if old.UID == ex.UID && old.Path != ex.Path {
+			_ = os.Remove(filepath.Join(c.Dir, filepath.FromSlash(old.Path)))
+		}
+	}
+	// 文件名冲突：换名，并同步改显示名（文件名与示例名同源）
+	for _, old := range existing {
+		if old.UID != ex.UID && old.Path == ex.Path {
+			unique, uerr := uniqueExampleName(filepath.Dir(filepath.Join(c.Dir, filepath.FromSlash(ex.Path))), sanitizeFileName(ex.Name))
+			if uerr != nil {
+				return "", uerr
+			}
+			ex.Name = unique
+			ex.Path = path.Join(path.Dir(ex.Path), unique+".yml")
+			break
+		}
+	}
+	full := filepath.Join(c.Dir, filepath.FromSlash(ex.Path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return "", err
+	}
+	data, err := yaml.Marshal(toExampleFile(ex))
+	if err != nil {
+		return "", fmt.Errorf("序列化响应示例: %w", err)
+	}
+	if err := os.WriteFile(full, data, 0o644); err != nil {
+		return "", err
+	}
+	return ex.Path, nil
+}
+
+// DeleteResponseExampleByUID 按 UID 删除示例文件（同步删除应用用）；找不到视为已删除。
+func (c *Collection) DeleteResponseExampleByUID(uid string) error {
+	existing, err := c.ListAllResponseExamples()
+	if err != nil {
+		return err
+	}
+	for _, ex := range existing {
+		if ex.UID == uid {
+			return os.Remove(filepath.Join(c.Dir, filepath.FromSlash(ex.Path)))
+		}
+	}
+	return nil
 }
 
 func toExampleFile(ex *ResponseExample) *exampleFile {

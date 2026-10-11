@@ -25,6 +25,8 @@ export function CloseCollection(arg1:string):Promise<void>;
 
 export function ConflictDetail(arg1:string):Promise<collection.ConflictDetail>;
 
+export function ConflictDetailFor(arg1:string,arg2:string):Promise<collection.ConflictDetail>;
+
 export function CreateDoc(arg1:string):Promise<collection.DocEntry>;
 
 export function CreateFolder(arg1:string,arg2:string):Promise<void>;
@@ -57,6 +59,8 @@ export function GetSettings():Promise<config.Settings>;
 
 export function GetSyncBind():Promise<syncengine.BindInfo>;
 
+export function GetSyncBindFor(arg1:string):Promise<syncengine.BindInfo>;
+
 export function GetSyncStatus():Promise<app.SyncStatus>;
 
 export function GrpcMessageFields(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<Array<proto.FieldInfo>>;
@@ -74,6 +78,8 @@ export function ImportGrpcProtos(arg1:Array<string>,arg2:Array<string>):Promise<
 export function ListCollections():Promise<Array<app.CollectionSummary>>;
 
 export function ListConflicts():Promise<Array<collection.ConflictItem>>;
+
+export function ListConflictsFor(arg1:string):Promise<Array<collection.ConflictItem>>;
 
 export function ListCookies():Promise<Array<cookiejar.Info>>;
 
@@ -137,11 +143,15 @@ export function ReplayHistory(arg1:number,arg2:string):Promise<runner.Result>;
 
 export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
+export function ResolveConflictFor(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function ResolveText(arg1:string,arg2:string):Promise<app.ResolveResult>;
 
 export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RunSync(arg1:string):Promise<syncengine.Report>;
+
+export function RunSyncForRoot(arg1:string):Promise<syncengine.Report>;
 
 export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
 
@@ -173,6 +183,8 @@ export function SetQuitAllowed(arg1:boolean):Promise<void>;
 
 export function SetSyncBind(arg1:string,arg2:number,arg3:string,arg4:string):Promise<syncengine.BindInfo>;
 
+export function SetSyncBindFor(arg1:app.SyncBindReq):Promise<syncengine.BindInfo>;
+
 export function StartAutoSync(arg1:number):Promise<void>;
 
 export function StartMock(arg1:number):Promise<mocksrv.Status>;
@@ -186,6 +198,10 @@ export function SubscribeEvents():Promise<any|any>;
 export function SyncDocAssets(arg1:string):Promise<number>;
 
 export function UnbindSync():Promise<void>;
+
+export function UnbindSyncFor(arg1:string):Promise<void>;
+
+export function UpdateResponseDoc(arg1:app.ResponseDocInput):Promise<void>;
 
 export function WindowIsMaximised():Promise<boolean>;
 

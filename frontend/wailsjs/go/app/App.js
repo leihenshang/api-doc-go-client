@@ -30,6 +30,10 @@ export function ConflictDetail(arg1) {
   return window['go']['app']['App']['ConflictDetail'](arg1);
 }
 
+export function ConflictDetailFor(arg1, arg2) {
+  return window['go']['app']['App']['ConflictDetailFor'](arg1, arg2);
+}
+
 export function CreateDoc(arg1) {
   return window['go']['app']['App']['CreateDoc'](arg1);
 }
@@ -94,6 +98,10 @@ export function GetSyncBind() {
   return window['go']['app']['App']['GetSyncBind']();
 }
 
+export function GetSyncBindFor(arg1) {
+  return window['go']['app']['App']['GetSyncBindFor'](arg1);
+}
+
 export function GetSyncStatus() {
   return window['go']['app']['App']['GetSyncStatus']();
 }
@@ -128,6 +136,10 @@ export function ListCollections() {
 
 export function ListConflicts() {
   return window['go']['app']['App']['ListConflicts']();
+}
+
+export function ListConflictsFor(arg1) {
+  return window['go']['app']['App']['ListConflictsFor'](arg1);
 }
 
 export function ListCookies() {
@@ -254,6 +266,10 @@ export function ResolveConflict(arg1, arg2) {
   return window['go']['app']['App']['ResolveConflict'](arg1, arg2);
 }
 
+export function ResolveConflictFor(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ResolveConflictFor'](arg1, arg2, arg3);
+}
+
 export function ResolveText(arg1, arg2) {
   return window['go']['app']['App']['ResolveText'](arg1, arg2);
 }
@@ -264,6 +280,10 @@ export function RevealInFolder(arg1) {
 
 export function RunSync(arg1) {
   return window['go']['app']['App']['RunSync'](arg1);
+}
+
+export function RunSyncForRoot(arg1) {
+  return window['go']['app']['App']['RunSyncForRoot'](arg1);
 }
 
 export function SaveDoc(arg1) {
@@ -326,6 +346,10 @@ export function SetSyncBind(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['SetSyncBind'](arg1, arg2, arg3, arg4);
 }
 
+export function SetSyncBindFor(arg1) {
+  return window['go']['app']['App']['SetSyncBindFor'](arg1);
+}
+
 export function StartAutoSync(arg1) {
   return window['go']['app']['App']['StartAutoSync'](arg1);
 }
@@ -352,6 +376,14 @@ export function SyncDocAssets(arg1) {
 
 export function UnbindSync() {
   return window['go']['app']['App']['UnbindSync']();
+}
+
+export function UnbindSyncFor(arg1) {
+  return window['go']['app']['App']['UnbindSyncFor'](arg1);
+}
+
+export function UpdateResponseDoc(arg1) {
+  return window['go']['app']['App']['UpdateResponseDoc'](arg1);
 }
 
 export function WindowIsMaximised() {

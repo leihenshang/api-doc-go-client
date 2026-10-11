@@ -73,6 +73,26 @@ type Request struct {
 	VarsPreRequest []ScriptVar    `json:"varsPreRequest,omitempty"`
 	Script         *ScriptBlock   `json:"script,omitempty"`
 	Asserts        []ScriptAssert `json:"asserts,omitempty"`
+	// RespDoc 服务端同步来的响应文档（返回类型/返回参数/响应样例）。仅 HTTP 请求有；
+	// 磁盘上落在顶层 respdoc 段（经 Extra 往返），同步 extra 用 retType/retParams/retSample。
+	// 返回参数行的 fieldName 已是 a.b / a[].c 嵌套路径，原样存取、不做展平/还原。
+	RespDoc *ResponseDoc `json:"respDoc,omitempty"`
+}
+
+// ResponseDoc 一条接口的响应侧文档（Web 端「返回参数/响应样例」），随同步双向传播。
+type ResponseDoc struct {
+	Type   string          `json:"type"`   // 返回类型徽标（JSON 类型：object/array/...）
+	Params []ResponseParam `json:"params"` // 返回参数行（对齐 Web ApiParam 契约）
+	Sample string          `json:"sample"` // 响应样例原文（通常是 JSON 文本）
+}
+
+// ResponseParam 返回参数行（与 syncParamRow / Web ApiParam 同形）。
+type ResponseParam struct {
+	FieldName   string `json:"fieldName"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
+	Example     string `json:"example"`
 }
 
 // IsGRPC 是否 gRPC 请求（内存里以 grpc 段是否存在为准）。

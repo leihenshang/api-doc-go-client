@@ -38,6 +38,8 @@ const props = defineProps<{
   activeRoot: string
   /** 活动页签对应的请求 uid（行选中态 + 自动展开/滚动） */
   activeUid?: string
+  /** 正在同步的根（根行刷新按钮转圈） */
+  busySyncRoots?: string[]
 }>()
 const emit = defineEmits<{
   open: [uid: string]
@@ -52,8 +54,10 @@ const emit = defineEmits<{
   'reveal-root': [root: string]
   /** 关闭某个工作目录 */
   'close-root': [root: string]
-  /** 打开同步（作用于被点击的根） */
+  /** 打开同步设置（作用于活动根） */
   sync: []
+  /** 点根行刷新：直接同步指定根，不切换活动根 */
+  'sync-root': [root: string]
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
@@ -115,7 +119,7 @@ const rootMenu = computed(() => [
   { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
   { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
   { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
-  { key: 'sync', label: t('sync.title'), icon: () => h(NIcon, { component: SyncOutline }) },
+  { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }) },
   { type: 'divider', key: 'd1' },
   { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }) },
   { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }) },
@@ -243,6 +247,25 @@ function rootDir(root: string): string {
 
 function rootReadOnly(root: string): boolean {
   return props.roots.find((r) => r.root === root)?.readOnly ?? false
+}
+
+/** 该根是否已关联服务端项目（关联后根行显示独立的同步刷新按钮）。 */
+function rootLinked(root: string): boolean {
+  return props.roots.find((r) => r.root === root)?.linked ?? false
+}
+
+/** 该根是否正在同步（刷新按钮转圈）。 */
+function rootSyncing(root: string): boolean {
+  return props.busySyncRoots?.includes(root) ?? false
+}
+
+/**
+ * 根行刷新按钮：直接同步被点击的根，**不切换活动根/页签组**
+ * （同步设置走 “···” 菜单；有冲突由上层弹出冲突页）。
+ */
+function onSyncRoot(root: string): void {
+  if (rootSyncing(root)) return
+  emit('sync-root', root)
 }
 
 const allCollapsed = computed(() => {
@@ -793,6 +816,12 @@ watch(
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
             }}</span>
             <span class="actions">
+              <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
+              <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
+                :title="t('tree.syncNow')" :aria-label="t('tree.syncNow')" :disabled="rootSyncing(row.root)"
+                @click.stop="onSyncRoot(row.root)">
+                <n-icon :component="SyncOutline" :size="13" :class="{ spin: rootSyncing(row.root) }" />
+              </button>
               <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu"
                 @select="onRootMenu(row.root, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
@@ -1295,5 +1324,21 @@ watch(
 .act.danger:hover {
   background: var(--app-danger-tint);
   color: var(--app-danger);
+}
+
+.act:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* 同步进行中：刷新图标旋转 */
+.spin {
+  animation: sidebar-spin 1s linear infinite;
+}
+
+@keyframes sidebar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

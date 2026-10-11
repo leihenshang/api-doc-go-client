@@ -21,10 +21,12 @@ import type {
   MockStatus,
   RequestDoc,
   ResolveResult,
+  ResponseDoc,
   ResponseExample,
   SendResult,
   Settings,
   SyncBindInfo,
+  SyncBindReq,
   SyncReport,
   SyncStatus,
 } from '@/types'
@@ -252,6 +254,9 @@ export const api = {
     call<ResponseExample>('SaveResponseExample', r, name, res).then(normalizeExample),
   deleteResponseExample: (reqUid: string, exampleUid: string) =>
     call<null>('DeleteResponseExample', reqUid, exampleUid),
+  // 响应字段 UI → 请求模型 RespDoc（落盘并随同步往返）
+  updateResponseDoc: (uid: string, doc: ResponseDoc) =>
+    call<null>('UpdateResponseDoc', { uid, type: doc.type, params: doc.params, sample: doc.sample }),
   resolveText: (text: string, envName: string) =>
     call<ResolveResult>('ResolveText', text, envName).then(normalizeResolve),
   getSettings: () => call<Settings>('GetSettings'),
@@ -283,6 +288,17 @@ export const api = {
     call<SyncBindInfo>('SetSyncBind', serverUrl, projectId, mode, token),
   unbindSync: () => call<null>('UnbindSync'),
   runSync: (token: string) => call<SyncReport>('RunSync', token),
+  // 按根（工作目录）版本：侧栏根行刷新/非活动根的冲突页用，不切换活动根
+  getSyncBindFor: (root: string) => call<SyncBindInfo>('GetSyncBindFor', root),
+  setSyncBindFor: (req: SyncBindReq) => call<SyncBindInfo>('SetSyncBindFor', req),
+  unbindSyncFor: (root: string) => call<null>('UnbindSyncFor', root),
+  runSyncForRoot: (root: string) => call<SyncReport>('RunSyncForRoot', root),
+  listConflictsFor: (root: string) =>
+    call<ConflictItem[] | null>('ListConflictsFor', root).then((v) => v ?? []),
+  getConflictDetailFor: (root: string, file: string) =>
+    call<ConflictDetail>('ConflictDetailFor', root, file),
+  resolveConflictFor: (root: string, file: string, choice: string) =>
+    call<null>('ResolveConflictFor', root, file, choice),
   listConflicts: () => call<ConflictItem[] | null>('ListConflicts').then((v) => v ?? []),
   getConflictDetail: (file: string) => call<ConflictDetail>('ConflictDetail', file),
   resolveConflict: (file: string, choice: string) => call<null>('ResolveConflict', file, choice),

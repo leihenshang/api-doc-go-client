@@ -166,6 +166,62 @@ export namespace app {
 	        this.values = source["values"];
 	    }
 	}
+	export class ResponseDocInput {
+	    uid: string;
+	    type: string;
+	    params: collection.ResponseParam[];
+	    sample: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResponseDocInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
+	        this.type = source["type"];
+	        this.params = this.convertValues(source["params"], collection.ResponseParam);
+	        this.sample = source["sample"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SyncBindReq {
+	    root: string;
+	    serverUrl: string;
+	    projectId: number;
+	    mode: string;
+	    token: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncBindReq(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.root = source["root"];
+	        this.serverUrl = source["serverUrl"];
+	        this.projectId = source["projectId"];
+	        this.mode = source["mode"];
+	        this.token = source["token"];
+	    }
+	}
 	export class SyncStatus {
 	    linked: boolean;
 	    mode: string;
@@ -711,6 +767,60 @@ export namespace collection {
 	        this.mod = source["mod"];
 	    }
 	}
+	export class ResponseParam {
+	    fieldName: string;
+	    type: string;
+	    required: boolean;
+	    description: string;
+	    example: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResponseParam(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fieldName = source["fieldName"];
+	        this.type = source["type"];
+	        this.required = source["required"];
+	        this.description = source["description"];
+	        this.example = source["example"];
+	    }
+	}
+	export class ResponseDoc {
+	    type: string;
+	    params: ResponseParam[];
+	    sample: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResponseDoc(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.params = this.convertValues(source["params"], ResponseParam);
+	        this.sample = source["sample"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ScriptAssert {
 	    name?: string;
 	    expr: string;
@@ -794,6 +904,7 @@ export namespace collection {
 	    varsPreRequest?: ScriptVar[];
 	    script?: ScriptBlock;
 	    asserts?: ScriptAssert[];
+	    respDoc?: ResponseDoc;
 	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
@@ -819,6 +930,7 @@ export namespace collection {
 	        this.varsPreRequest = this.convertValues(source["varsPreRequest"], ScriptVar);
 	        this.script = this.convertValues(source["script"], ScriptBlock);
 	        this.asserts = this.convertValues(source["asserts"], ScriptAssert);
+	        this.respDoc = this.convertValues(source["respDoc"], ResponseDoc);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -839,6 +951,7 @@ export namespace collection {
 		    return a;
 		}
 	}
+	
 	
 	export class ResponseExample {
 	    uid: string;
@@ -884,6 +997,7 @@ export namespace collection {
 		    return a;
 		}
 	}
+	
 	
 	
 
@@ -1284,6 +1398,8 @@ export namespace syncengine {
 	    projectId: number;
 	    mode: string;
 	    cursor: number;
+	    token?: string;
+	    exampleHashes?: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new BindInfo(source);
@@ -1296,6 +1412,8 @@ export namespace syncengine {
 	        this.projectId = source["projectId"];
 	        this.mode = source["mode"];
 	        this.cursor = source["cursor"];
+	        this.token = source["token"];
+	        this.exampleHashes = source["exampleHashes"];
 	    }
 	}
 	export class Report {
