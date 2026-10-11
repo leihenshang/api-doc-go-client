@@ -18,7 +18,6 @@ import {
   ExpandOutline,
   FolderOpenOutline,
   GitNetworkOutline,
-  MoveOutline,
   OpenOutline,
   RefreshOutline,
   Star,
@@ -28,7 +27,7 @@ import {
   TrashOutline
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
-import { NButton, NDropdown, NIcon, NInput, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { NDropdown, NIcon, NInput, NPopconfirm } from 'naive-ui'
 import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -666,51 +665,6 @@ async function performMove(
   }
 }
 
-// ---- 移动到目标分组 ----
-const moving = ref<{ root: string; node: TreeNode; dest: string } | null>(null)
-
-async function startMove(root: string, node: TreeNode): Promise<void> {
-  await ensureActive(root)
-  // 默认目标：该根的根（空串）；分组不能移入自己或后代（后端也会拒）
-  moving.value = { root, node, dest: '' }
-}
-
-const destOptions = computed(() => {
-  const out: { label: string; value: string }[] = [{ label: t('tree.moveRoot'), value: '' }]
-  const root = moving.value?.root ?? coll.activeRoot
-  const item = props.roots.find((r) => r.root === root)
-  if (!item) return out
-  const walk = (nodes: TreeNode[]): void => {
-    for (const n of nodes) {
-      if (n.type !== 'folder') continue
-      // 分组移动时排除自己与后代
-      if (
-        moving.value?.node.type === 'folder' &&
-        (n.uid === moving.value.node.uid || n.path.startsWith(moving.value.node.path + '/'))
-      ) {
-        continue
-      }
-      out.push({ label: n.name, value: n.path })
-      if (n.children) walk(n.children)
-    }
-  }
-  walk(item.info.tree)
-  return out
-})
-
-async function submitMove(): Promise<void> {
-  const cur = moving.value
-  if (!cur) return
-  moving.value = null
-  try {
-    await ensureActive(cur.root)
-    if (cur.node.type === 'folder') await coll.moveFolder(cur.node.uid, cur.dest)
-    else await coll.moveRequest(cur.node.uid, cur.dest)
-  } catch (e) {
-    fail(e)
-  }
-}
-
 /** 在指定根的树里按 uid 找节点。 */
 function findNode(root: string, uid: string): TreeNode | null {
   const item = props.roots.find((r) => r.root === root)
@@ -900,10 +854,6 @@ watch(
                   @click.stop="startRename(row.root, row.node!)">
                   <n-icon :component="CreateOutline" :size="13" />
                 </button>
-                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')"
-                  @click.stop="startMove(row.root, row.node!)">
-                  <n-icon :component="MoveOutline" :size="13" />
-                </button>
                 <n-popconfirm @positive-click="removeFolder(row.root, row.node!)">
                   <template #trigger>
                     <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')"
@@ -933,10 +883,6 @@ watch(
                 <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')"
                   @click.stop="startRename(row.root, row.node!)">
                   <n-icon :component="CreateOutline" :size="13" />
-                </button>
-                <button class="act" type="button" data-testid="tree.row.move" :title="t('tree.move')"
-                  @click.stop="startMove(row.root, row.node!)">
-                  <n-icon :component="MoveOutline" :size="13" />
                 </button>
                 <n-popconfirm @positive-click="removeRequest(row.root, row.node!)">
                   <template #trigger>
@@ -971,44 +917,8 @@ watch(
         </template>
       </template>
     </div>
-
-    <n-modal :show="!!moving" preset="card" :title="t('tree.moveTitle')" style="width: 420px"
-      @update:show="(v: boolean) => { if (!v) moving = null }">
-      <div v-if="moving" class="move-body">
-        <p class="move-hint">{{ t('tree.moveHint', { name: moving.node.name }) }}</p>
-        <n-select v-model:value="moving.dest" :options="destOptions" size="small" data-testid="tree.move.dest" />
-      </div>
-      <template #footer>
-        <div class="move-ft">
-          <n-button size="small" @click="moving = null">{{ t('common.cancel') }}</n-button>
-          <n-button size="small" type="primary" data-testid="tree.move.ok" @click="submitMove">
-            {{ t('tree.moveOk') }}
-          </n-button>
-        </div>
-      </template>
-    </n-modal>
   </div>
 </template>
-
-<style scoped>
-.move-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.move-hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--app-muted);
-}
-
-.move-ft {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-</style>
 
 <style scoped>
 .sidebar {
