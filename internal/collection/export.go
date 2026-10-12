@@ -453,8 +453,13 @@ func (c *Collection) ExportHTML() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// 请求正文（含 Docs）会被 mdToHTML 分配 toc-N 锚点；TOC 只给 folder/request 编号。
+	// 因此这里用 scan 拿到每个请求的 Docs，给请求编号后把其 Docs 内的标题数计入计数器，
+	// 使 TOC 的 toc-N 与正文实际标题顺序（含文档子标题）严格对应，避免点选错位。
+	res, _ := c.scan()
 
-	// TOC：id 分配顺序必须与 mdToHTML（集合名 → 树先序 folder/request）完全一致。
+	// TOC：id 分配顺序必须与 mdToHTML 输出正文标题的顺序完全一致
+	// （集合名 → 树先序 folder/request，且每个 request 之后紧跟其 Docs 内的标题）。
 	// 先消耗 toc-0 给集合名，再 DFS 遍历节点；doc 节点不生成标题，跳过。
 	var tocID int
 	nextID := func() string {
@@ -510,13 +515,20 @@ func (c *Collection) ExportHTML() (string, error) {
 				toc.WriteString(`</li>`)
 				continue
 			}
-			// request
-			id := nextID()
-			toc.WriteString(`<li class="toc-request"><a href="#`)
-			toc.WriteString(id)
-			toc.WriteString(`">`)
-			toc.WriteString(html.EscapeString(n.Name))
-			toc.WriteString(`</a></li>`)
+		// request
+		id := nextID()
+		toc.WriteString(`<li class="toc-request"><a href="#`)
+		toc.WriteString(id)
+		toc.WriteString(`">`)
+		toc.WriteString(html.EscapeString(n.Name))
+		toc.WriteString(`</a></li>`)
+		// 该请求正文之后会紧跟其 Docs 内的标题（被 mdToHTML 占用 toc-N），
+		// 必须把这部分标题数计入计数器，后续节点的 toc-N 才能与正文对齐。
+		if res != nil {
+			if r, ok := res.reqs[n.UID]; ok {
+				tocID += countDocHeadings(r.Docs)
+			}
+		}
 		}
 	}
 	walkTOC(tree, 0, true)
@@ -716,24 +728,35 @@ func (c *Collection) ExportHTML() (string, error) {
     if(target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // 点击目录链接 => 单节展示（阻止锚点默认跳转，避免隐藏后定位偏移）
+  // 点击目录链接：目录(fodler)只在左侧展开/收起子树，右侧不展示其下 API；
+  // 只有点击具体的 API(request) 才在右侧单节展示，集合根点击可看全部。
   for(var li=0; li<tocLinks.length; li++){
     tocLinks[li].addEventListener('click', function(e){
       var href = this.getAttribute('href') || '';
-      if(href.charAt(0) === '#'){
-        e.preventDefault();
-        showSection(href.slice(1));
+      if(href.charAt(0) !== '#') return;
+      e.preventDefault();
+      var item = this.parentElement; // 该链接所在的 <li>
+      if(item && item.classList.contains('toc-folder')){
+        // 目录：仅切换 TOC 展开/折叠，便于展开后点选其下的 API；右侧内容不变
+        var expanded = item.getAttribute('aria-expanded') === 'true';
+        item.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        return;
       }
+      showSection(href.slice(1));
     });
   }
   // 显示全部按钮
   var allBtn = document.querySelector('.toc-all');
   if(allBtn){ allBtn.addEventListener('click', showAll); }
 
-  // 默认进入单节展示：展示第一个顶层条目（集合根点击可看全部），避免一屏铺满所有 API
-  var firstHeading = content ? content.querySelector('h2,h3,h4,h5,h6') : null;
-  if(firstHeading && firstHeading.id){
-    showSection(firstHeading.id);
+  // 默认进入单节展示：优先展示第一个 API（request），避免一屏铺满；无 API 时退回第一个标题
+  var firstReq = list.querySelector('.toc-request a');
+  if(firstReq && firstReq.getAttribute('href')){
+    var fid = firstReq.getAttribute('href').slice(1);
+    if(document.getElementById(fid)){ showSection(fid); }
+  } else {
+    var firstHeading = content ? content.querySelector('h2,h3,h4,h5,h6') : null;
+    if(firstHeading && firstHeading.id){ showSection(firstHeading.id); }
   }
 })();
 </script>
@@ -861,6 +884,34 @@ func mdToHTML(src string) string {
 		b.WriteString("</code></pre>\n")
 	}
 	return b.String()
+}
+
+// countDocHeadings 统计一段 Markdown 里「标题」的数量，规则与 mdToHTML 完全一致
+// （遇到 ``` 围栏时跳过其内部内容；以 # 开头的行算一个标题，最多 6 级）。
+// 用途：导出 HTML 时，请求的正文（含 Docs）会被 mdToHTML 分配 toc-N 锚点，
+// 而 TOC 只给 folder/request 编号；若 Docs 内含有标题，会占用 toc-N 序号使两者错位。
+// 因此给请求编号后，必须把其 Docs 内的标题数也计入计数器，保证 TOC 链接与正文锚点严格对应。
+func countDocHeadings(md string) int {
+	if strings.TrimSpace(md) == "" {
+		return 0
+	}
+	lines := strings.Split(md, "\n")
+	n := 0
+	inCode := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "```") {
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
+		if strings.HasPrefix(trim, "#") {
+			n++
+		}
+	}
+	return n
 }
 
 // splitRow 按未转义的 `|` 切分表格行（支持 \| 表示字面量竖线）。

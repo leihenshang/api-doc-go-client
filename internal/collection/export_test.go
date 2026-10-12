@@ -261,6 +261,64 @@ func TestExportHTMLTOCToggleSearch(t *testing.T) {
 	if got := strings.Count(htmlOut, `class="toc-folder" data-default="false" aria-expanded="false"`); got != countFolders(tree)-1 {
 		t.Fatalf("默认折叠目录数 = %d, 期望 %d:\n%s", got, countFolders(tree)-1, htmlOut)
 	}
+	// 4) 点击目录(fodler)不应在右侧展示其下 API：脚本需对 folder 与 request 分流
+	//    （folder 仅切换 TOC 展开；只有 request 调 showSection）。防止误改回「点目录即展示」。
+	if !strings.Contains(htmlOut, `classList.contains('toc-folder')`) {
+		t.Fatalf("HTML 缺少目录点击分流逻辑（folder 不应展示 API）:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, `showSection(href.slice(1))`) {
+		t.Fatalf("HTML 缺少单节展示逻辑（点 API 应展示对应一节）:\n%s", htmlOut)
+	}
+}
+
+// TestExportHTMLTOCWithDocHeadings 验证：当请求 Docs 内含 # 标题时，TOC 的 toc-N
+// 编号仍与正文「实际标题顺序」严格对应——即给请求编号后需把其 Docs 内标题数计入计数器，
+// 否则正文 id 会被文档子标题挤偏，点选靠后的 API 会命中错误内容（错位）。
+func TestExportHTMLTOCWithDocHeadings(t *testing.T) {
+	c := newTestCollection(t)
+	c.Name = "带文档标题的集合"
+	// 请求一：Docs 含 2 个 # 标题；请求二：无 Docs。
+	r1, err := c.CreateRequest("", "请求一", "GET")
+	if err != nil {
+		t.Fatalf("建请求一: %v", err)
+	}
+	r1.Docs = "# 文档标题A\n# 文档标题B"
+	if err := c.SaveRequest(r1); err != nil {
+		t.Fatalf("保存请求一: %v", err)
+	}
+	if _, err := c.CreateRequest("", "请求二", "GET"); err != nil {
+		t.Fatalf("建请求二: %v", err)
+	}
+
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+
+	// 编号推演：toc-0=集合名；toc-1=请求一(其后 Docs 占 2 个序号 → tocID+2)；toc-4=请求二。
+	// 正文实际标题：toc-0 集合 / toc-1 请求一 / toc-2 文档标题A / toc-3 文档标题B / toc-4 请求二。
+	wants := []struct {
+		id   string
+		text string
+	}{
+		{"toc-0", "带文档标题的集合"},
+		{"toc-1", "请求一"},
+		{"toc-2", "文档标题A"},
+		{"toc-3", "文档标题B"},
+		{"toc-4", "请求二"},
+	}
+	for _, w := range wants {
+		if !strings.Contains(htmlOut, `id="`+w.id+`">`+w.text) {
+			t.Fatalf("正文缺少正确锚点 %s => %q:\n%s", w.id, w.text, htmlOut)
+		}
+	}
+	// 关键：TOC 里请求二链接必须指向 toc-4（而非被文档标题挤到 toc-2），且文档子标题不进 TOC。
+	if got := strings.Count(htmlOut, `href="#toc-4"`); got != 1 {
+		t.Fatalf("TOC 中请求二链接数 = %d, 期望 1（应指向 toc-4）:\n%s", got, htmlOut)
+	}
+	if got := strings.Count(htmlOut, `href="#toc-2"`); got != 0 {
+		t.Fatalf("文档子标题不应出现在 TOC（href=#toc-2 数 = %d）:\n%s", got, htmlOut)
+	}
 }
 
 // collectTOCIDs 从 HTML 中抽取所有形如 prefix"N" 的数字 N（prefix 形如 `href="#toc-` 或 `id="toc-`）。
