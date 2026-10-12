@@ -6,6 +6,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -438,6 +439,8 @@ func escapePipe(s string) string {
 }
 
 // ExportHTML 导出单文件 HTML（内联样式，可直接浏览器打开/分享）。
+// 左侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
+// 正文每个标题带 toc-N 锚点（由 mdToHTML 分配），与 TOC 链接一一对应。
 func (c *Collection) ExportHTML() (string, error) {
 	md, err := c.ExportMarkdown()
 	if err != nil {
@@ -445,6 +448,80 @@ func (c *Collection) ExportHTML() (string, error) {
 	}
 	// 轻量 Markdown → HTML（标题/代码块/粗体/表格/分隔线/段落），避免再引依赖
 	body := mdToHTML(md)
+
+	tree, err := c.Tree()
+	if err != nil {
+		return "", err
+	}
+
+	// TOC：id 分配顺序必须与 mdToHTML（集合名 → 树先序 folder/request）完全一致。
+	// 先消耗 toc-0 给集合名，再 DFS 遍历节点；doc 节点不生成标题，跳过。
+	var tocID int
+	nextID := func() string {
+		id := fmt.Sprintf("toc-%d", tocID)
+		tocID++
+		return id
+	}
+	var toc strings.Builder
+	toc.WriteString(`<nav class="toc" aria-label="目录">`)
+	toc.WriteString(`<div class="toc-title">目录</div>`)
+	// 目录搜索：输入时过滤并自动展开命中节点的祖先（见底部 <script>）
+	toc.WriteString(`<input type="search" class="toc-search" placeholder="搜索目录…" aria-label="搜索目录">`)
+	// 显示全部：退出「单节展示」模式，右侧恢复列出所有 API
+	toc.WriteString(`<button type="button" class="toc-all">显示全部</button>`)
+	toc.WriteString(`<ul class="toc-list">`)
+	// 集合名（对应正文第一个标题 toc-0）
+	toc.WriteString(`<li class="toc-root"><a href="#`)
+	toc.WriteString(nextID())
+	toc.WriteString(`">`)
+	toc.WriteString(html.EscapeString(c.Name))
+	toc.WriteString(`</a></li>`)
+
+	// walkTOC 生成可折叠的目录树；isTop 标记顶层，仅第一个顶层目录默认展开（data-default / aria-expanded），
+	// 其余目录默认折叠，满足「默认仅第一个目录打开」的需求。doc 节点不进正文标题，TOC 也跳过。
+	var walkTOC func(nodes []*Node, depth int, isTop bool)
+	walkTOC = func(nodes []*Node, depth int, isTop bool) {
+		for i, n := range nodes {
+			// doc 节点不进正文标题，TOC 也跳过（与 ExportMarkdown 行为一致）
+			if n.Type == "doc" {
+				continue
+			}
+			if n.Type == "folder" {
+				id := nextID()
+				// 仅第一个顶层目录默认展开；嵌套目录一律默认折叠
+				open := isTop && i == 0
+				toc.WriteString(`<li class="toc-folder" data-default="`)
+				toc.WriteString(strconv.FormatBool(open))
+				toc.WriteString(`" aria-expanded="`)
+				toc.WriteString(strconv.FormatBool(open))
+				toc.WriteString(`">`)
+				// 折叠/展开开关（点击切换 aria-expanded，不触发跳转）
+				toc.WriteString(`<span class="toc-toggle" role="button" tabindex="0" aria-label="折叠或展开"></span>`)
+				toc.WriteString(`<a href="#`)
+				toc.WriteString(id)
+				toc.WriteString(`">`)
+				toc.WriteString(html.EscapeString(n.Name))
+				toc.WriteString(`</a>`)
+				if len(n.Children) > 0 {
+					toc.WriteString(`<ul>`)
+					walkTOC(n.Children, depth+1, false)
+					toc.WriteString(`</ul>`)
+				}
+				toc.WriteString(`</li>`)
+				continue
+			}
+			// request
+			id := nextID()
+			toc.WriteString(`<li class="toc-request"><a href="#`)
+			toc.WriteString(id)
+			toc.WriteString(`">`)
+			toc.WriteString(html.EscapeString(n.Name))
+			toc.WriteString(`</a></li>`)
+		}
+	}
+	walkTOC(tree, 0, true)
+	toc.WriteString(`</ul></nav>`)
+
 	var b strings.Builder
 	b.WriteString(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -456,9 +533,58 @@ func (c *Collection) ExportHTML() (string, error) {
 	b.WriteString(`</title>
 <style>
   :root { color-scheme: light; }
+  * { box-sizing: border-box; }
   body { font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-         max-width: 920px; margin: 0 auto; padding: 32px 24px; color: #202124; background: #fff; }
-  h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; }
+         margin: 0; padding: 0; color: #202124; background: #fff; }
+  .layout { display: flex; gap: 24px; max-width: 1100px; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
+  /* 左侧 sticky 目录树：窄栏、浅底卡片，滚动时固定 */
+  .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
+         border: 1px solid #e3e3e3; border-radius: 10px; background: #f5f6f8; padding: 12px 14px; font-size: 13px; }
+  .toc-title { font-weight: 600; color: #202124; margin-bottom: 8px; }
+  /* 目录搜索框 */
+  .toc-search { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 6px 8px;
+    border: 1px solid #e3e3e3; border-radius: 6px; font-size: 13px; font-family: inherit;
+    color: #202124; background: #fff; outline: none; }
+  .toc-search:focus { border-color: #18a058; }
+  /* 显示全部：退出单节展示模式 */
+  .toc-all { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 5px 8px;
+    border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #18a058;
+    font-size: 12px; font-family: inherit; cursor: pointer; }
+  .toc-all:hover { border-color: #18a058; background: #f0faf3; }
+  .toc-list, .toc ul { list-style: none; margin: 0; padding: 0; }
+  /* 嵌套目录：保留左侧缩进，并加树形连接线（风格对齐 client 侧栏树） */
+  .toc ul { padding-left: 14px; }
+  .toc li { margin: 2px 0; }
+  /* 连接线：每个嵌套 li 画一段竖线（拼接成连续竖线），再用 ::after 画短横线连到文字；
+     末项的竖线只到横线（中线），形成 └ 形，不向下多余延伸 */
+  .toc-list ul > li { position: relative; }
+  .toc-list ul > li::before {
+    content: ""; position: absolute; top: -3px; bottom: 0; left: -8px;
+    border-left: 1px solid #e3e3e3;
+  }
+  .toc-list ul > li::after {
+    content: ""; position: absolute; top: 11px; left: -8px; width: 8px;
+    border-top: 1px solid #e3e3e3;
+  }
+  .toc-list ul > li:last-child::before { bottom: auto; height: 14px; }
+  /* 折叠/展开：文件夹默认展开（aria-expanded=true）才显示子列表；折叠时隐藏 */
+  .toc-folder[aria-expanded="false"] > ul { display: none; }
+  /* 文件夹开关：右侧三角形，展开时旋转 90° 指向下方；
+     用 -1px 微调使其与文字视觉居中（三角形几何中心略低于文本中线） */
+  .toc-toggle { display: inline-block; width: 0; height: 0; margin: 0 6px 0 2px;
+    border-style: solid; border-width: 4px 0 4px 6px; border-color: transparent transparent transparent #6b7280;
+    vertical-align: middle; position: relative; top: -1px; cursor: pointer; transition: transform .15s ease; }
+  .toc-folder[aria-expanded="true"] > .toc-toggle { transform: rotate(90deg); }
+  .toc a { color: #202124; text-decoration: none; display: block; padding: 3px 6px; border-radius: 4px; line-height: 1.4; }
+  .toc a:hover { background: #18a058; color: #fff; }
+  /* 必须放在 .toc a 的块级规则之后并用更高优先级覆盖，否则 folder 标题会被
+     覆盖回 display:block，导致开关与文字各占一行（错位） */
+  .toc li.toc-folder > a { display: inline; }
+  .toc-root > a { font-weight: 600; }
+  .toc-folder > a { font-weight: 600; color: #18a058; }
+  .toc a:target, .toc a.current { background: #18a058; color: #fff; }
+  .content { flex: 1 1 auto; min-width: 0; }
+  h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; scroll-margin-top: 16px; }
   h1 { font-size: 1.8em; border-bottom: 1px solid #e3e3e3; padding-bottom: 0.3em; }
   code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
          background: #f5f6f8; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.92em; }
@@ -470,12 +596,147 @@ func (c *Collection) ExportHTML() (string, error) {
   hr { border: none; border-top: 1px solid #e3e3e3; margin: 1.6em 0; }
   blockquote { margin: 0.6em 0; padding: 0.4em 1em; border-left: 3px solid #18a058; background: #f5f6f8; color: #555; }
   strong { font-weight: 600; }
+  /* 窄屏：目录树移到正文上方、不再 sticky */
+  @media (max-width: 720px) {
+    .layout { flex-direction: column; gap: 12px; padding: 16px 14px; }
+    .toc { flex: 0 0 auto; position: static; max-height: none; width: 100%; }
+  }
 </style>
 </head>
 <body>
 `)
+	b.WriteString(`<div class="layout">`)
+	b.WriteString(toc.String())
+	b.WriteString(`<main class="content">`)
 	b.WriteString(body)
+	b.WriteString(`</main></div>`)
 	b.WriteString(`
+<script>
+(function(){
+  var list = document.querySelector('.toc-list');
+  var box = document.querySelector('.toc-search');
+  if(!list || !box) return;
+
+  // 折叠 / 展开：点击开关切换 aria-expanded，CSS 据此隐藏子列表（点击不会触发跳转）
+  list.addEventListener('click', function(e){
+    var t = e.target;
+    if(t && t.classList && t.classList.contains('toc-toggle')){
+      var li = t.parentElement;
+      li.setAttribute('aria-expanded', li.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+    }
+  });
+  list.addEventListener('keydown', function(e){
+    var t = e.target;
+    if(t && t.classList && t.classList.contains('toc-toggle') && (e.key === 'Enter' || e.key === ' ')){
+      e.preventDefault();
+      t.click();
+    }
+  });
+
+  // 搜索：隐藏不匹配条目，自动展开命中节点的祖先目录，命中目录时一并展开其子节点
+  function reset(){
+    var lis = list.querySelectorAll('li');
+    for(var i=0;i<lis.length;i++){
+      lis[i].style.display = '';
+      if(lis[i].classList.contains('toc-folder')){
+        lis[i].setAttribute('aria-expanded', lis[i].getAttribute('data-default') || 'false');
+      }
+    }
+  }
+  function filter(q){
+    if(!q){ reset(); return; }
+    q = q.toLowerCase();
+    var all = list.querySelectorAll('li');
+    var i, a, node, cur, ul, parent, k, desc;
+    for(i=0;i<all.length;i++){ all[i].dataset.shown = ''; }
+    for(i=0;i<all.length;i++){
+      a = all[i].querySelector(':scope > a');
+      if(a && a.textContent.toLowerCase().indexOf(q) !== -1){
+        node = all[i];
+        node.dataset.shown = '1';
+        if(node.classList.contains('toc-folder')){
+          node.setAttribute('aria-expanded', 'true');
+          desc = node.querySelectorAll('li');
+          for(k=0;k<desc.length;k++){ desc[k].dataset.shown = '1'; }
+        }
+        cur = node;
+        while(cur){
+          ul = cur.parentElement;
+          parent = ul ? ul.parentElement : null;
+          if(parent && parent !== list && parent.tagName === 'LI'){
+            parent.dataset.shown = '1';
+            if(parent.classList.contains('toc-folder')) parent.setAttribute('aria-expanded', 'true');
+            cur = parent;
+          } else { cur = null; }
+        }
+      }
+    }
+    for(i=0;i<all.length;i++){
+      all[i].style.display = all[i].dataset.shown ? '' : 'none';
+    }
+  }
+  box.addEventListener('input', function(){ filter(box.value.trim()); });
+
+  // 单节展示：点击目录项时，右侧仅显示该项对应的 API（含其下子节点），其余隐藏。
+  // 这样导出的 HTML 不再一屏铺满全部 API，而是像文档站一样「左侧选、右侧看一节」。
+  var content = document.querySelector('.content');
+  var tocLinks = list.querySelectorAll('.toc a');
+
+  function clearCurrent(){
+    for(var i=0;i<tocLinks.length;i++){ tocLinks[i].classList.remove('current'); }
+  }
+  function showAll(){
+    if(!content) return;
+    var kids = content.children;
+    for(var i=0;i<kids.length;i++){ kids[i].style.display = ''; }
+    clearCurrent();
+  }
+  // 仅展示 id 对应的那一节：从目标标题起，到下一个同级或更高级标题为止（含其间的所有子节点）。
+  function showSection(id){
+    if(!content) return;
+    var target = document.getElementById(id);
+    if(!target) return;
+    var lvl = parseInt(target.tagName.charAt(1), 10); // 1..6
+    var nodes = [];
+    var sib = target;
+    while(sib){
+      nodes.push(sib);
+      sib = sib.nextElementSibling;
+      if(sib && sib.tagName.charAt(0) === 'H'){
+        var nlvl = parseInt(sib.tagName.charAt(1), 10);
+        if(nlvl <= lvl) break; // 遇到同级或更高级标题 => 超出本节范围
+      }
+    }
+    var kids = content.children;
+    for(var i=0;i<kids.length;i++){ kids[i].style.display = 'none'; }
+    for(var j=0;j<nodes.length;j++){ nodes[j].style.display = ''; }
+    clearCurrent();
+    var cur = document.querySelector('.toc a[href="#' + id + '"]');
+    if(cur) cur.classList.add('current');
+    if(target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // 点击目录链接 => 单节展示（阻止锚点默认跳转，避免隐藏后定位偏移）
+  for(var li=0; li<tocLinks.length; li++){
+    tocLinks[li].addEventListener('click', function(e){
+      var href = this.getAttribute('href') || '';
+      if(href.charAt(0) === '#'){
+        e.preventDefault();
+        showSection(href.slice(1));
+      }
+    });
+  }
+  // 显示全部按钮
+  var allBtn = document.querySelector('.toc-all');
+  if(allBtn){ allBtn.addEventListener('click', showAll); }
+
+  // 默认进入单节展示：展示第一个顶层条目（集合根点击可看全部），避免一屏铺满所有 API
+  var firstHeading = content ? content.querySelector('h2,h3,h4,h5,h6') : null;
+  if(firstHeading && firstHeading.id){
+    showSection(firstHeading.id);
+  }
+})();
+</script>
 </body>
 </html>
 `)
@@ -483,12 +744,15 @@ func (c *Collection) ExportHTML() (string, error) {
 }
 
 // mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、表格、---、> 引用、段落）。
+// 每个标题按顺序分配 id="toc-N"（N 从 0 自增），供 HTML 导出的目录树（TOC）锚点跳转。
 func mdToHTML(src string) string {
 	lines := strings.Split(src, "\n")
 	var b strings.Builder
 	inCode := false
 	inTable := false
 	inQuote := false
+	// 标题锚点计数器：与 ExportHTML 生成 TOC 的顺序一致（集合名 → 树先序 folder/request）。
+	hID := 0
 
 	closeTable := func() {
 		if inTable {
@@ -547,7 +811,9 @@ func mdToHTML(src string) string {
 				level = 6
 			}
 			text := strings.TrimSpace(trim[level:])
-			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", level, inlineMD(text), level)
+			id := fmt.Sprintf("toc-%d", hID)
+			hID++
+			fmt.Fprintf(&b, "<h%d id=\"%s\">%s</h%d>\n", level, id, inlineMD(text), level)
 			continue
 		}
 		if strings.HasPrefix(trim, ">") {

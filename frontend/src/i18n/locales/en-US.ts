@@ -174,6 +174,10 @@ export default {
     syncAt: 'Last {t}',
     saving: 'Saving…',
     savedAt: 'Saved {t}',
+    mcp: 'MCP',
+    mcpRunning: 'Running',
+    mcpStopped: 'Disabled',
+    mcpError: 'Error',
   },
   sidebar: {
     collections: 'Collections',
@@ -519,6 +523,8 @@ export default {
     mcpCopied: 'Copied to clipboard',
     mcpCopyFailed: 'Copy failed — select and copy manually',
     saveApply: 'Save & Apply',
+    dirtySave: 'Settings changed — click “Save” to apply.',
+    dirtyMcpRestart: 'Settings changed — click “Save” to apply; after changing the MCP listen address / port / token, restart the MCP service.',
   },
   history: {
     title: 'Request history',

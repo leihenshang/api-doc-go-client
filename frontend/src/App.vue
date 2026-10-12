@@ -29,7 +29,7 @@ import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } fr
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
-import type { RequestDoc, SyncStatus, TreeNode } from '@/types'
+import type { MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import {
@@ -133,6 +133,12 @@ const syncRoot = ref('')
 const syncingRoots = ref<string[]>([])
 const syncStatus = ref<SyncStatus | null>(null)
 let syncTimer: ReturnType<typeof setInterval> | null = null
+/** 内嵌 MCP 服务运行状态（底栏入口展示用）；App 持有以便设置面板与底栏共享同一份数据。 */
+const mcpStatus = ref<MCPStatus | null>(null)
+/** 设置弹窗打开时跳到的分区（底栏点 MCP 时传入 'mcp'）。 */
+const settingsInitial = ref<'appearance' | 'network' | 'local' | 'mcp'>('appearance')
+/** MCP 状态轮询定时器（5s 一刷，反映运行/停止变化）；卸载时清理。 */
+let mcpTimer: ReturnType<typeof setInterval> | null = null
 /** 欢迎页展示用的「上次打开的目录」（多根：取最近恢复列表里的第一个）。 */
 const lastDir = savedRootDirs()[0] ?? ''
 
@@ -434,6 +440,21 @@ async function exportDoc(format: 'markdown' | 'html'): Promise<void> {
   }
 }
 
+/** 拉取内嵌 MCP 服务运行状态（后端不支持时静默降级为 null）。 */
+async function loadMcpStatus(): Promise<void> {
+  try {
+    mcpStatus.value = await api.mcpStatus()
+  } catch {
+    mcpStatus.value = null
+  }
+}
+
+/** 从底栏 MCP 入口打开设置并直接定位到 MCP 分区。 */
+function openMcpSettings(): void {
+  settingsInitial.value = 'mcp'
+  showSettings.value = true
+}
+
 async function imported(): Promise<void> {
   await coll.reload()
   tabs.refreshResolve()
@@ -555,6 +576,11 @@ onMounted(() => {
   syncTimer = setInterval(() => {
     void refreshSyncStatus()
   }, 5000)
+  // MCP 运行状态轮询（底栏入口）：每 5s 刷新一次，反映「启用/停止」变化
+  void loadMcpStatus()
+  mcpTimer = setInterval(() => {
+    void loadMcpStatus()
+  }, 5000)
   // 恢复上次打开的工作目录（多根）；单个失败只提示，不阻塞其它根。
   // 必须等设置读完再恢复：恢复上限在设置里，抢跑会拿到默认值，把超出上限的目录当成「不需要恢复」。
   void settingsReady.then(() => restoreRoots())
@@ -563,6 +589,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onHotkey)
   if (syncTimer) clearInterval(syncTimer)
+  if (mcpTimer) clearInterval(mcpTimer)
 })
 
 // ---- 同步状态（状态栏）----
@@ -956,8 +983,7 @@ watch(
         <toolbar v-if="coll.ready && coll.info" :name="coll.name" :dir="coll.dir" :envs="coll.info.envs"
           :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
           @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')" @reload="coll.reload()"
-          @palette="showPalette = true" @manage-env="showEnvManager = true" @import="showImport = true"
-          @export="exportDoc($event)" @mock="showMock = true" @update:currentEnv="pickEnv" />
+          @palette="showPalette = true" @manage-env="showEnvManager = true" @update:currentEnv="pickEnv" />
       </title-bar>
 
       <n-spin :show="coll.loading">
@@ -1008,21 +1034,23 @@ watch(
                   </div>
                 </div>
 
-                <overview v-else :info="coll.info" @new-request="newDraft()" />
+                <overview v-else :info="coll.info" @new-request="newDraft()"
+                  @import="showImport = true" @export="exportDoc($event)" @mock="showMock = true" />
               </transition>
             </main>
           </div>
 
-          <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus"
+          <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus" :mcp="mcpStatus"
             :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="openSyncSettings()"
-            @history="showHistory = true" @cookies="showCookies = true" @settings="showSettings = true" />
+            @history="showHistory = true" @cookies="showCookies = true" @settings="showSettings = true"
+            @mcp="openMcpSettings" />
         </template>
 
         <welcome v-else :last-dir="lastDir" @open="openCollection" />
       </n-spin>
 
       <env-manager v-model:show="showEnvManager" @saved="envSaved" />
-      <settings-dialog v-model:show="showSettings" />
+      <settings-dialog v-model:show="showSettings" :initial-section="settingsInitial" @saved="loadMcpStatus()" />
       <history-dialog v-model:show="showHistory" @open="tabs.openRequest($event)" />
       <cookie-dialog v-model:show="showCookies" />
       <import-dialog v-model:show="showImport" @imported="imported" />

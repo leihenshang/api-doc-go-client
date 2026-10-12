@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 底部状态栏：左侧同步状态，中间集合规模/保存状态，右侧全局设置、请求历史、Cookie 管理入口。
-import type { SyncStatus } from '@/types'
-import { LockClosedOutline, SettingsOutline, TimeOutline } from '@vicons/ionicons5'
+import type { MCPStatus, SyncStatus } from '@/types'
+import { CodeSlashOutline, LockClosedOutline, SettingsOutline, TimeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -14,9 +14,25 @@ const props = defineProps<{
   savingCount?: number
   /** 最后一次成功写盘的时间戳（>0 时显示「已保存 HH:mm」） */
   lastSavedAt?: number
+  /** 内嵌 MCP 服务运行状态（运行中 / 出错 / 未启用）；null 视为未启用 */
+  mcp?: MCPStatus | null
 }>()
-const emit = defineEmits<{ 'open-sync': []; history: []; cookies: []; settings: [] }>()
+const emit = defineEmits<{ 'open-sync': []; history: []; cookies: []; settings: []; mcp: [] }>()
 const { t } = useI18n()
+
+/** MCP 入口状态：运行中=ok、出错=err、其它（未启用/未加载）=off。 */
+const mcpClass = computed(() => {
+  if (props.mcp?.running) return 'ok'
+  if (props.mcp?.error) return 'err'
+  return 'off'
+})
+
+/** MCP 入口的提示文案（title）：运行中带地址、出错带错误、否则提示未启用。 */
+const mcpTitle = computed(() => {
+  if (props.mcp?.running) return `${t('status.mcpRunning')}：${props.mcp.url}`
+  if (props.mcp?.error) return `${t('status.mcpError')}：${props.mcp.error}`
+  return t('status.mcpStopped')
+})
 
 /** 同步状态摘要（状态栏左侧）。 */
 const syncText = computed(() => {
@@ -63,6 +79,12 @@ function clock(ms: number): string {
       <button class="act" type="button" data-testid="statusbar.cookies" @click="emit('cookies')">
         <n-icon :component="LockClosedOutline" :size="14" />
         <span class="lb">{{ t('cookies.title') }}</span>
+      </button>
+      <button class="act" type="button" :class="mcpClass" :title="mcpTitle"
+        data-testid="statusbar.mcp" @click="emit('mcp')">
+        <n-icon :component="CodeSlashOutline" :size="14" />
+        <span class="lb">{{ t('status.mcp') }}</span>
+        <span class="dot" />
       </button>
       <button class="act" type="button" data-testid="statusbar.settings" @click="emit('settings')">
         <n-icon :component="SettingsOutline" :size="14" />
@@ -175,6 +197,31 @@ function clock(ms: number): string {
 .act:hover {
   background: var(--app-row-hover);
   color: var(--app-accent);
+}
+
+/* MCP 入口状态：运行中绿、出错红、未启用灰；小圆点直观反映运行状态 */
+.act.ok {
+  color: #18a058;
+}
+
+.act.err {
+  color: #d03050;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-muted);
+  flex: 0 0 auto;
+}
+
+.act.ok .dot {
+  background: #18a058;
+}
+
+.act.err .dot {
+  background: #d03050;
 }
 
 .lb {

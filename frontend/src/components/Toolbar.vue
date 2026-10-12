@@ -6,11 +6,8 @@ import type { CollectionSummary, Env } from '@/types'
 import {
   CheckmarkOutline,
   ChevronDownOutline,
-  CloudDownloadOutline,
-  CloudUploadOutline,
   FolderOpenOutline,
   LayersOutline,
-  PlayOutline,
   RefreshOutline,
   SearchOutline
 } from '@vicons/ionicons5'
@@ -37,9 +34,6 @@ const emit = defineEmits<{
   reload: []
   palette: []
   'manage-env': []
-  import: []
-  export: [format: 'markdown' | 'html']
-  mock: []
   /** 切换活动根（多根并存） */
   activate: [root: string]
   'update:currentEnv': [v: string]
@@ -80,11 +74,6 @@ const menu = computed(() => [
     : []),
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
   { key: 'reload', label: t('toolbar.reload'), icon: () => h(NIcon, { component: RefreshOutline }) },
-  { key: 'd1', type: 'divider' as const },
-  { key: 'import', label: t('import.title'), icon: () => h(NIcon, { component: CloudDownloadOutline }) },
-  { key: 'export-md', label: t('export.markdown'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
-  { key: 'export-html', label: t('export.html'), icon: () => h(NIcon, { component: CloudUploadOutline }) },
-  { key: 'mock', label: t('mock.title'), icon: () => h(NIcon, { component: PlayOutline }) },
 ])
 
 function onMenu(key: string | number): void {
@@ -98,10 +87,6 @@ function onMenu(key: string | number): void {
   }
   if (key === 'open') emit('open-other')
   else if (key === 'reload') emit('reload')
-  else if (key === 'import') emit('import')
-  else if (key === 'export-md') emit('export', 'markdown')
-  else if (key === 'export-html') emit('export', 'html')
-  else if (key === 'mock') emit('mock')
 }
 </script>
 

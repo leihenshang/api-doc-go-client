@@ -5,12 +5,12 @@ import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPStatus, Settings } from '@/types'
-import { CodeSlashOutline, ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
+import { ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
 import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; initialSection?: SectionKey }>()
 const emit = defineEmits<{ 'update:show': [v: boolean]; saved: [] }>()
 const { t, locale } = useI18n()
 const settings = useSettingsStore()
@@ -29,11 +29,12 @@ const mcpBusy = ref(false)
 // 每类设置一个分区，右侧只渲染当前分区（设置项多起来后不至于一路往下滚）。
 type SectionKey = 'appearance' | 'network' | 'local' | 'mcp'
 
+// 左侧分区：界面 / 网络 / 本地。MCP 已移到底部状态栏入口（与「设置」同级），
+// 只能通过 initialSection='mcp' 直接进入（保留 mcp 面板内容）。
 const sections = computed(() => [
   { key: 'appearance' as const, label: t('settings.appearance'), icon: ColorPaletteOutline },
   { key: 'network' as const, label: t('settings.network'), icon: GlobeOutline },
   { key: 'local' as const, label: t('settings.local'), icon: FolderOpenOutline },
-  { key: 'mcp' as const, label: t('settings.mcp'), icon: CodeSlashOutline },
 ])
 
 const active = ref<SectionKey>('appearance')
@@ -166,9 +167,18 @@ watch(
     if (!v) return
     error.value = ''
     notice.value = ''
-    // mcp 是嵌套对象：必须逐层拷贝，否则表单里的编辑会直接写进 store（取消也回不去）
-    form.value = { ...settings.form, mcp: { ...settings.form.mcp, allowOrigins: [...(settings.form.mcp?.allowOrigins ?? [])] } }
-    active.value = 'appearance' // 每次打开回到第一个分区（否则上次停留的地方会让人以为设置变了）
+    // mcp 是嵌套对象：必须逐层拷贝，否则表单里的编辑会直接写进 store（取消也回不去）。
+    // allow 也要深拷贝每个条目，否则勾选授权会直接改到 store（dirty 比较也会失真）。
+    form.value = {
+      ...settings.form,
+      mcp: {
+        ...settings.form.mcp,
+        allowOrigins: [...(settings.form.mcp?.allowOrigins ?? [])],
+        allow: (settings.form.mcp?.allow ?? []).map((a) => ({ ...a })),
+      },
+    }
+    // 每次打开回到指定分区：默认界面，状态栏点 MCP 时可直达 MCP 分区
+    active.value = props.initialSection ?? 'appearance'
     void loadMCP()
   },
 )
@@ -221,6 +231,60 @@ function saveApply(): void {
   void doSave()
 }
 
+/**
+ * 勾选类配置即时生效：直接把整份表单写盘（含未保存的文本编辑，符合「勾选即生效」且无需点保存）。
+ * 复用 doSave —— 它会 settings.save + 重拉 MCP 状态 + 发 saved。写盘后 form 与 store 一致，dirty 归零。
+ */
+async function applyNow(): Promise<void> {
+  await doSave()
+}
+
+/**
+ * 脏检查：比较表单与 store 的关键字段是否不同（排除嵌套对象引用差异）。
+ * 任一关键字段变化即视为有未保存改动，用于提示「点击保存生效」。
+ */
+function snapshot(s: Settings): string {
+  const m = s.mcp
+  return JSON.stringify({
+    insecureSsl: s.insecureSsl,
+    timeoutSec: s.timeoutSec,
+    followRedirects: s.followRedirects,
+    maxRedirects: s.maxRedirects,
+    persistCookies: s.persistCookies,
+    historyLimit: s.historyLimit,
+    uiScale: s.uiScale,
+    responseLayout: s.responseLayout,
+    restoreLimit: s.restoreLimit,
+    proxyUrl: s.proxyUrl,
+    mcp: {
+      addr: m.addr,
+      port: m.port,
+      token: m.token,
+      readOnly: m.readOnly,
+      enabled: m.enabled,
+      allowOrigins: m.allowOrigins,
+      allow: m.allow,
+    },
+  })
+}
+
+const dirty = computed(() => snapshot(form.value) !== snapshot(settings.form))
+
+/** MCP 相关字段是否变化（地址/端口/令牌/只读/开关/白名单）：变化后保存需重启 MCP 服务。 */
+const mcpDirty = computed(() => {
+  const a = form.value.mcp
+  const b = settings.form.mcp
+  return (
+    a.addr !== b.addr ||
+    a.port !== b.port ||
+    a.token !== b.token ||
+    a.readOnly !== b.readOnly ||
+    a.enabled !== b.enabled ||
+    JSON.stringify(a.allowOrigins) !== JSON.stringify(b.allowOrigins) ||
+    JSON.stringify(a.allow) !== JSON.stringify(b.allow)
+  )
+})
+
 async function clearCookies(): Promise<void> {
   error.value = ''
   try {
@@ -239,8 +303,10 @@ function close(): void {
 <template>
   <n-modal :show="show" preset="card" :title="t('settings.title')" style="width: 760px" @update:show="close">
     <div class="cols">
-      <!-- 左侧竖向菜单：按设置类型分区，右侧只显示当前分区 -->
-      <nav class="nav" :aria-label="t('settings.title')">
+      <!-- 左侧竖向菜单：按设置类型分区，右侧只显示当前分区。
+           进入 MCP 分区（由状态栏入口直达）时隐藏整列导航，只满宽显示 MCP 面板；
+           其它分区（界面/网络/本地）打开时导航照常显示。 -->
+      <nav v-if="active !== 'mcp'" class="nav" :aria-label="t('settings.title')">
         <button v-for="sec in sections" :key="sec.key" class="nav-item" :class="{ on: active === sec.key }"
           type="button" :data-testid="`settings.nav.${sec.key}`" :aria-current="active === sec.key"
           @click="active = sec.key">
@@ -252,6 +318,10 @@ function close(): void {
       <div class="body">
         <p v-if="error" class="err">{{ error }}</p>
         <p v-if="notice" class="ok">{{ notice }}</p>
+        <!-- 脏检查提示：有未保存改动时引导用户点保存；MCP 关键字段变化额外提示需重启服务 -->
+        <p v-if="dirty" class="hint dirty" data-testid="settings.dirtyHint">
+          {{ mcpDirty ? t('settings.dirtyMcpRestart') : t('settings.dirtySave') }}
+        </p>
 
         <!-- 分区一：界面 -->
         <div v-show="active === 'appearance'" class="pane" data-testid="settings.pane.appearance">
@@ -277,7 +347,8 @@ function close(): void {
           </div>
           <div class="row">
             <span class="lbl">{{ t('settings.autoSave') }}</span>
-            <n-checkbox v-model:checked="form.autoSave" data-testid="settings.autoSave">
+            <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
+              @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }">
               <span class="hint">{{ t('settings.autoSaveHint') }}</span>
             </n-checkbox>
           </div>
@@ -287,7 +358,8 @@ function close(): void {
         <!-- 分区二：网络与安全 -->
         <div v-show="active === 'network'" class="pane" data-testid="settings.pane.network">
           <div class="row">
-            <n-checkbox v-model:checked="form.insecureSsl" data-testid="settings.insecureSsl">
+            <n-checkbox :checked="form.insecureSsl" data-testid="settings.insecureSsl"
+              @update:checked="(v: boolean) => { form.insecureSsl = v; void applyNow() }">
               {{ t('settings.insecureSsl') }}
             </n-checkbox>
           </div>
@@ -298,7 +370,8 @@ function close(): void {
               data-testid="settings.timeout" />
           </div>
           <div class="row">
-            <n-checkbox v-model:checked="form.followRedirects" data-testid="settings.followRedirects">
+            <n-checkbox :checked="form.followRedirects" data-testid="settings.followRedirects"
+              @update:checked="(v: boolean) => { form.followRedirects = v; void applyNow() }">
               {{ t('settings.followRedirects') }}
             </n-checkbox>
           </div>
@@ -318,7 +391,8 @@ function close(): void {
         <!-- 分区三：本地数据 -->
         <div v-show="active === 'local'" class="pane" data-testid="settings.pane.local">
           <div class="row">
-            <n-checkbox v-model:checked="form.persistCookies" data-testid="settings.persistCookies">
+            <n-checkbox :checked="form.persistCookies" data-testid="settings.persistCookies"
+              @update:checked="(v: boolean) => { form.persistCookies = v; void applyNow() }">
               {{ t('settings.persistCookies') }}
             </n-checkbox>
             <span class="sp" />
@@ -355,7 +429,8 @@ function close(): void {
           <!-- 启用服务 -->
           <div class="block">
             <div class="row">
-              <n-checkbox v-model:checked="form.mcp.enabled" data-testid="settings.mcpEnabled">
+              <n-checkbox :checked="form.mcp.enabled" data-testid="settings.mcpEnabled"
+                @update:checked="(v: boolean) => { form.mcp.enabled = v; void applyNow() }">
                 {{ t('settings.mcpEnabled') }}
               </n-checkbox>
             </div>
@@ -376,8 +451,9 @@ function close(): void {
           <!-- 只读模式：决定所有工作区是否可写（含下方各工作区的「可写」开关） -->
           <div class="block">
             <div class="row">
-              <n-checkbox v-model:checked="form.mcp.readOnly" :disabled="!form.mcp.enabled"
-                data-testid="settings.mcpReadOnly">
+              <n-checkbox :checked="form.mcp.readOnly" :disabled="!form.mcp.enabled"
+                data-testid="settings.mcpReadOnly"
+                @update:checked="(v: boolean) => { form.mcp.readOnly = v; void applyNow() }">
                 {{ t('settings.mcpReadOnly') }}
               </n-checkbox>
             </div>
@@ -637,6 +713,16 @@ function close(): void {
 .hint {
   font-size: 11.5px;
   margin: 0 0 2px;
+}
+
+/* 未保存改动提示条：浅底卡片 + 绿色强调，提醒「点击保存生效」 */
+.dirty {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  color: var(--app-accent);
 }
 
 .err {
