@@ -369,3 +369,63 @@ func equalSet(a, b []int) bool {
 	}
 	return true
 }
+
+// TestExportMarkdownBodyFormTable 回归：请求同时含 URL 参数与请求体（表单）时，
+// 两者在生成的 Markdown 中「分开展示」为两张独立的表格（参数 / 请求体参数），
+// 请求体表单不再以无序列表渲染。
+func TestExportMarkdownBodyFormTable(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "订单"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	r, err := c.CreateRequest("订单", "订单-创建", "POST")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	// URL 参数
+	r.Params = []KV{{Name: "version", Value: "2", Enabled: true, Description: "API 版本"}}
+	// 请求体：表单字段（原应渲染为表格，而非列表）
+	r.Body = Body{
+		Type: "form-urlencoded",
+		Form: []KV{
+			{Name: "username", Value: "admin", Enabled: true},
+			{Name: "pwd", Value: "123", Enabled: true},
+		},
+	}
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存请求: %v", err)
+	}
+
+	md, err := c.ExportMarkdown()
+	if err != nil {
+		t.Fatalf("ExportMarkdown: %v", err)
+	}
+
+	// 1) 两个章节各自有独立表格标题
+	if !strings.Contains(md, "**参数**") {
+		t.Fatalf("Markdown 缺少 URL 参数表格标题:\n%s", md)
+	}
+	if !strings.Contains(md, "**请求体参数**") {
+		t.Fatalf("Markdown 缺少请求体参数表格标题（应分开展示为表格）:\n%s", md)
+	}
+	// 2) 请求体表单字段以表格行呈现（带 | 分隔），而非无序列表
+	if !strings.Contains(md, "| `username` | `admin` |") {
+		t.Fatalf("请求体表单未以表格行展示:\n%s", md)
+	}
+	if strings.Contains(md, "- `username`") {
+		t.Fatalf("请求体表单错误地以无序列表展示（应分开展示为表格）:\n%s", md)
+	}
+	// 3) URL 参数也在其表中
+	if !strings.Contains(md, "| `version` | `2` |") {
+		t.Fatalf("URL 参数未出现在参数表中:\n%s", md)
+	}
+
+	// 4) 导出 HTML 中两张表都应存在
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	if got := strings.Count(htmlOut, "<table>"); got < 2 {
+		t.Fatalf("HTML 中表格数 = %d, 期望至少 2（参数表 + 请求体表）:\n%s", got, htmlOut)
+	}
+}

@@ -379,25 +379,30 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			}
 			fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
 			fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
-			writeMDSection(&b, "参数", r.Params)
-			writeMDSection(&b, "请求头", r.Headers)
-			if r.Body.Type != "" && r.Body.Type != "none" {
-				fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
-				raw := r.Body.Raw
-				if raw == "" && len(r.Body.Form) > 0 {
-					var lines []string
-					for _, f := range r.Body.Form {
-						if !f.Enabled {
-							continue
-						}
-						lines = append(lines, fmt.Sprintf("- `%s`: `%s`", f.Name, f.Value))
-					}
-					raw = strings.Join(lines, "\n")
+		writeMDSection(&b, "参数", r.Params)
+		writeMDSection(&b, "请求头", r.Headers)
+		if r.Body.Type != "" && r.Body.Type != "none" {
+			// 请求体：原始内容（JSON/文本）以代码块展示；表单字段另以表格「分开展示」，
+			// 与「参数」（URL 参数）区分——同一请求章节内为两张独立的表格，便于对照阅读。
+			raw := r.Body.Raw
+			var formRows []KV
+			for _, f := range r.Body.Form {
+				if !f.Enabled || f.Name == "" {
+					continue
 				}
+				formRows = append(formRows, KV{Name: f.Name, Value: f.Value, Enabled: true})
+			}
+			if len(formRows) > 0 {
+				fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
 				if strings.TrimSpace(raw) != "" {
 					fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
 				}
+				writeMDSection(&b, "请求体参数", formRows)
+			} else if strings.TrimSpace(raw) != "" {
+				fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
+				fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
 			}
+		}
 			if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
 				fmt.Fprintf(&b, "**认证**：%s\n\n", r.Auth.Type)
 			}
