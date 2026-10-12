@@ -174,6 +174,10 @@ export default {
     syncAt: '上次 {t}',
     saving: '保存中…',
     savedAt: '已保存 {t}',
+    mcp: 'MCP',
+    mcpRunning: '运行中',
+    mcpStopped: '未启用',
+    mcpError: '出错',
   },
   sidebar: {
     collections: '集合',
@@ -520,6 +524,8 @@ export default {
     mcpCopied: '已复制到剪贴板',
     mcpCopyFailed: '复制失败，请手动选中复制',
     saveApply: '保存并应用',
+    dirtySave: '配置已修改，点击「保存」生效。',
+    dirtyMcpRestart: '配置已修改，点击「保存」生效；修改 MCP 监听地址 / 端口 / 令牌后需重启 MCP 服务。',
   },
   history: {
     title: '请求历史',

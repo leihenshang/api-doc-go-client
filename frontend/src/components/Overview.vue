@@ -1,13 +1,25 @@
 <script setup lang="ts">
 // 集合概览（Collection tab 的内容）：集合概况 + 常用快捷键 + 六大特性卡。
-import { NButton } from 'naive-ui'
+import { NButton, NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import FeatureCards from '@/components/FeatureCards.vue'
+import {
+  CloudDownloadOutline,
+  CloudUploadOutline,
+  PlayOutline,
+} from '@vicons/ionicons5'
 import type { CollectionInfo, TreeNode } from '@/types'
 
 const props = defineProps<{ info: CollectionInfo | null }>()
-const emit = defineEmits<{ 'new-request': [] }>()
+// 集合概要页承载的常用操作：新建请求 + 导入接口 / 导出 MD / 导出 HTML / 本地 Mock
+// （原先散落在集合切换下拉里，现统一收拢到这里，入口更聚焦）。
+const emit = defineEmits<{
+  'new-request': []
+  import: []
+  export: [format: 'markdown' | 'html']
+  mock: []
+}>()
 const { t } = useI18n()
 
 function countRequests(nodes: TreeNode[]): number {
@@ -52,8 +64,32 @@ const shortcuts = computed(() => [
         </div>
       </div>
       <div class="acts">
-        <n-button size="small" type="primary" @click="emit('new-request')">
+        <n-button class="act" size="medium" type="primary" @click="emit('new-request')">
           {{ t('overview.newRequest') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary @click="emit('import')">
+          <template #icon>
+            <n-icon :component="CloudDownloadOutline" :size="14" />
+          </template>
+          {{ t('import.title') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary @click="emit('export', 'markdown')">
+          <template #icon>
+            <n-icon :component="CloudUploadOutline" :size="14" />
+          </template>
+          {{ t('export.markdown') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary @click="emit('export', 'html')">
+          <template #icon>
+            <n-icon :component="CloudUploadOutline" :size="14" />
+          </template>
+          {{ t('export.html') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary @click="emit('mock')">
+          <template #icon>
+            <n-icon :component="PlayOutline" :size="14" />
+          </template>
+          {{ t('mock.title') }}
         </n-button>
       </div>
       <ul v-if="shortcuts.length" class="sc">
@@ -118,6 +154,20 @@ const shortcuts = computed(() => [
 
 .acts {
   margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 操作按钮放大：medium 基础高度 34px，再抬到 38px 并加宽横向内边距，使其更醒目；
+   accent 绿配色与圆角沿用 client 默认（不改文案/emit/点击行为）。 */
+.acts :deep(.act) {
+  min-height: 38px;
+  padding-left: 22px;
+  padding-right: 22px;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .sc {
