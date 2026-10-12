@@ -13,3 +13,7 @@ vars:
       value: e2e-token
       enabled: true
       secret: false
+    - name: clxone-ipam
+      value: __FIXTURE__
+      enabled: true
+      secret: false

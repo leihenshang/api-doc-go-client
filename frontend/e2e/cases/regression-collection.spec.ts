@@ -8,8 +8,9 @@ import { t } from '../helpers/i18n'
 import { openCollection, openReqTab, openRequest, pickMethod, saveNow, treeRow, treeRowByUid } from '../helpers/ui'
 
 /** naive popconfirm 的确认按钮；用过的 popconfirm 会留在 DOM 里，取最近打开的那个（最后可见的） */
+// 行内操作收进「···」菜单后，删除改走全局 dialog.warning（确认按钮文案 t('common.delete')）。
 const confirmButton = (page: import('@playwright/test').Page) =>
-  page.locator('.n-popconfirm:visible').getByRole('button', { name: t('common.confirm') }).last()
+  page.locator('.n-dialog:visible').getByRole('button', { name: t('common.delete') }).last()
 
 // 种子里的固定 uid（basic 集合）
 const EMPTY_UID = '55555555-5555-4555-8555-555555555555'

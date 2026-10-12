@@ -125,9 +125,20 @@ func Send(ctx context.Context, r collection.Request, vars map[string]string, opt
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	target, err := buildURL(r, vars)
+	target, missing, err := buildURL(r, vars)
 	if err != nil {
 		return nil, err
+	}
+	// 地址解析不出来就别发：变量没解析出来（未定义 / 当前环境没选对）时 URL 仍是
+	// {{name}}/... 形态，url.Parse 认为它没有协议头，发出去只会得到一句看不懂的
+	// `unsupported protocol scheme ""`。这里提前拦下，把缺失的变量名说清楚。
+	// 判据用「不是 http/https」而不是只看空协议头：`localhost:2025/x` 会被解析成
+	// scheme=localhost，同样发不出去，也该在这里给出人话。
+	if target.Scheme != "http" && target.Scheme != "https" {
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("URL 无法发送：变量未定义（%s）。请检查顶部「环境」是否选中了含这些变量的环境", strings.Join(missing, "、"))
+		}
+		return nil, fmt.Errorf("URL 无法发送：不是 http/https 地址（%q）。形如 host:port 的地址要补上 http:// 前缀", target.String())
 	}
 	req, err := buildRequest(ctx, r, vars, target)
 	if err != nil {
@@ -215,21 +226,23 @@ func MergeOptions(o Options, s *collection.RequestSettings) Options {
 	return o
 }
 
-func buildURL(r collection.Request, vars map[string]string) (*url.URL, error) {
-	raw, _ := varx.Resolve(strings.TrimSpace(r.URL), vars)
+// buildURL 渲染 URL 并合并查询参数；第二个返回值是「引用了但未定义」的变量名
+// （varx 的既定规则：未定义变量保留原文，由调用方决定是否拦截）。
+func buildURL(r collection.Request, vars map[string]string) (*url.URL, []string, error) {
+	raw, missing := varx.Resolve(strings.TrimSpace(r.URL), vars)
 	if raw == "" {
-		return nil, fmt.Errorf("URL 为空")
+		return nil, missing, fmt.Errorf("URL 为空")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("URL 无法解析: %w", err)
+		return nil, missing, fmt.Errorf("URL 无法解析: %w", err)
 	}
 	q := u.Query()
 	for _, p := range resolveKV(r.Params, vars) {
 		q.Set(p.Name, p.Value)
 	}
 	u.RawQuery = q.Encode()
-	return u, nil
+	return u, missing, nil
 }
 
 func buildRequest(ctx context.Context, r collection.Request, vars map[string]string, u *url.URL) (*http.Request, error) {

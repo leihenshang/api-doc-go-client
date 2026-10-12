@@ -3,7 +3,7 @@
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
-import { message } from '@/lib/notice'
+import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
@@ -27,7 +27,7 @@ import {
   TrashOutline
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
-import { NDropdown, NIcon, NInput, NPopconfirm } from 'naive-ui'
+import { NDropdown, NIcon, NInput } from 'naive-ui'
 import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -101,14 +101,7 @@ const INDENT = 16
  */
 const GUIDE_OFFSET = 8
 
-const folderMenu = computed(() => [
-  { key: 'request', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
-  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
-  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
-  { key: 'folder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
-])
-
-/** 集合标题 “···” 下拉：集合级动作统一入口（展开/收起、新建分组/请求、导入 curl、重载、关闭）。 */
+/** 集合标题 "···" 下拉：集合级动作统一入口（展开/收起、新建分组/请求、导入 curl、重载、关闭）。 */
 const rootMenu = computed(() => [
   {
     key: 'all',
@@ -448,12 +441,60 @@ async function removeRequest(root: string, node: TreeNode): Promise<void> {
   }
 }
 
-async function onFolderMenu(root: string, node: TreeNode, key: string | number): Promise<void> {
-  await ensureActive(root)
-  if (key === 'request') emit('new-request', node.path)
-  else if (key === 'grpc') emit('new-grpc-request', node.path)
-  else if (key === 'curl') emit('import-curl', node.path)
-  else void startAdd(root, node.path)
+/**
+ * 行内「···」菜单：把分组/请求的常用操作（新建子项、重命名、删除、收藏）收进一个下拉，
+ * 不再在行内堆一排图标按钮；「更新」(根行立即同步) 仍作为直接按钮，不进菜单。
+ */
+function rowMenuOptions(row: Row): any[] {
+  const n = row.node!
+  if (n.type === 'folder') {
+    return [
+      { key: 'request', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }), testid: 'tree.row.plus' },
+      { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
+      { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
+      { key: 'subfolder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
+      { type: 'divider', key: 'd1' },
+      { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
+      { key: 'delete', label: t('tree.delDir'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
+    ]
+  }
+  const fav = coll.isFav(n.uid)
+  return [
+    { key: 'fav', label: fav ? t('tree.unfav') : t('tree.fav'), icon: () => h(NIcon, { component: fav ? Star : StarOutline }), testid: 'tree.row.fav' },
+    { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
+    { key: 'delete', label: t('tree.delApi'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
+  ]
+}
+
+async function onRowMenu(row: Row, key: string | number): Promise<void> {
+  const n = row.node!
+  await ensureActive(row.root)
+  if (n.type === 'folder') {
+    if (key === 'request') emit('new-request', n.path)
+    else if (key === 'grpc') emit('new-grpc-request', n.path)
+    else if (key === 'curl') emit('import-curl', n.path)
+    else if (key === 'subfolder') void startAdd(row.root, n.path)
+    else if (key === 'rename') void startRename(row.root, n)
+    else if (key === 'delete') confirmDelete(row.root, n, 'folder')
+  } else {
+    if (key === 'fav') coll.toggleFav(n.uid)
+    else if (key === 'rename') void startRename(row.root, n)
+    else if (key === 'delete') confirmDelete(row.root, n, 'request')
+  }
+}
+
+/** 删除二次确认（沿用全局 dialog，与弹窗确认风格一致）。 */
+function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request'): void {
+  dialog.warning({
+    title: kind === 'folder' ? t('tree.delDir') : t('tree.delApi'),
+    content:
+      kind === 'folder'
+        ? t('tree.confirmDelFolder', { name: node.name })
+        : t('tree.confirmDelRequest', { name: node.name }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => (kind === 'folder' ? removeFolder(root, node) : removeRequest(root, node)),
+  })
 }
 
 // ---- 拖动调整上级目录（自己实现，不用 HTML5 拖拽）----
@@ -843,26 +884,20 @@ watch(
                 @keyup.esc="editing = null" />
               <span v-else class="fname" data-testid="tree.row.name">{{ row.node!.name }}</span>
               <span class="actions">
-                <n-dropdown trigger="click" placement="bottom-start" :options="folderMenu"
-                  @select="onFolderMenu(row.root, row.node!, $event)">
+                <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
+                  @select="onRowMenu(row, $event)">
                   <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
-                  <button class="act" type="button" data-testid="tree.row.plus" :title="t('tree.new')">
-                    <n-icon :component="AddOutline" :size="13" />
+                  <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
+                    :aria-label="t('tree.more')">
+                    <n-icon :component="EllipsisHorizontalOutline" :size="13" />
                   </button>
-                </n-dropdown>
-                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')"
-                  @click.stop="startRename(row.root, row.node!)">
-                  <n-icon :component="CreateOutline" :size="13" />
-                </button>
-                <n-popconfirm @positive-click="removeFolder(row.root, row.node!)">
-                  <template #trigger>
-                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delDir')"
-                      @click.stop>
-                      <n-icon :component="TrashOutline" :size="13" />
-                    </button>
+                  <template #option="{ option }">
+                    <div class="row-menu-item" :data-testid="(option as any).testid">
+                      <component :is="(option as any).icon" v-if="(option as any).icon" class="ric" />
+                      <span class="lbl">{{ (option as any).label }}</span>
+                    </div>
                   </template>
-                  {{ t('tree.confirmDelFolder', { name: row.node!.name }) }}
-                </n-popconfirm>
+                </n-dropdown>
               </span>
             </template>
 
@@ -875,24 +910,20 @@ watch(
                 {{ row.node!.name }}
               </button>
               <span class="actions">
-                <button class="act" type="button" data-testid="tree.row.fav"
-                  :title="coll.isFav(row.node!.uid) ? t('tree.unfav') : t('tree.fav')"
-                  @click.stop="coll.toggleFav(row.node!.uid)">
-                  <n-icon :component="coll.isFav(row.node!.uid) ? Star : StarOutline" :size="13" />
-                </button>
-                <button class="act" type="button" data-testid="tree.row.rename" :title="t('tree.rename')"
-                  @click.stop="startRename(row.root, row.node!)">
-                  <n-icon :component="CreateOutline" :size="13" />
-                </button>
-                <n-popconfirm @positive-click="removeRequest(row.root, row.node!)">
-                  <template #trigger>
-                    <button class="act danger" type="button" data-testid="tree.row.delete" :title="t('tree.delApi')"
-                      @click.stop>
-                      <n-icon :component="TrashOutline" :size="13" />
-                    </button>
+                <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
+                  @select="onRowMenu(row, $event)">
+                  <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
+                  <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
+                    :aria-label="t('tree.more')">
+                    <n-icon :component="EllipsisHorizontalOutline" :size="13" />
+                  </button>
+                  <template #option="{ option }">
+                    <div class="row-menu-item" :data-testid="(option as any).testid">
+                      <component :is="(option as any).icon" v-if="(option as any).icon" class="ric" />
+                      <span class="lbl">{{ (option as any).label }}</span>
+                    </div>
                   </template>
-                  {{ t('tree.confirmDelRequest', { name: row.node!.name }) }}
-                </n-popconfirm>
+                </n-dropdown>
               </span>
             </template>
           </div>
@@ -1233,6 +1264,18 @@ watch(
 .act:hover {
   background: var(--app-chip-strong);
   color: var(--app-text);
+}
+
+/* 行内「···」菜单项：图标 + 文字同原生下拉对齐（覆盖 #option 默认渲染时保持一致性） */
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-menu-item .ric {
+  display: inline-flex;
+  color: var(--app-muted);
 }
 
 .act.danger:hover {

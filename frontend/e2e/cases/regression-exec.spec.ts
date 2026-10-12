@@ -158,4 +158,36 @@ test.describe('请求执行：网络策略与响应形态', () => {
     expect(echo.fields).toMatchObject({ field1: 'v1' })
     expect(echo.contentType).toBe('multipart/form-data')
   })
+
+  // 环境变量没解析出来时（变量未定义 / 顶部没选中对应环境），URL 仍是 {{var}}/... 形态。
+  // 旧行为把原样地址发给 http.Client，返回一句看不懂的 `unsupported protocol scheme ""`；
+  // 现在必须在发送前拦下，并点名缺失的变量与「检查环境」。
+  test('[E9] 环境变量未定义：给可定位的错误，而非看不懂的协议头报错', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+
+    // basic 种子的 dev 环境只有 host/tlsHost/token，没有 host1
+    await sendUrl(page, app, '{{host1}}/apis/linkingthing.com/ipam/ipv6-filing/v1/selfownedfilings?action=export_template')
+
+    const alert = page.locator('.resp .n-alert')
+    await expect(alert).toContainText('host1')
+    await expect(alert).toContainText(/变量未定义/)
+    await expect(alert).toContainText(/环境/)
+    // 不应把底层协议头错误直接抛给用户
+    await expect(alert).not.toContainText(/unsupported protocol scheme/i)
+  })
+
+  // 环境变量名含连字符（如 clxone-ipam）时，占位符 {{clxone-ipam}} 必须被正确解析、发送，
+  // 而非原样发出（旧实现的正则不允许连字符，会触发协议头报错，且悬停不显示取值）。
+  test('[E10] 变量名含连字符：{{clxone-ipam}} 正常解析并发送 @smoke', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+
+    await sendUrl(page, app, '{{clxone-ipam}}/echo')
+    await expect(page.getByTestId('resp.status')).toContainText('200')
+    // 不应把底层协议头错误直接抛给用户
+    await expect(page.locator('.resp .n-alert')).toHaveCount(0)
+  })
 })

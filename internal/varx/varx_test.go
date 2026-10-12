@@ -82,3 +82,59 @@ func TestBuiltinsMemoized(t *testing.T) {
 		t.Fatalf("同名内置变量应取同一个值，got %q", got)
 	}
 }
+
+// TestResolveHyphenatedName 复现用户场景：环境变量名带连字符 clxone-ipam。
+func TestResolveHyphenatedName(t *testing.T) {
+	out, missing := Resolve("{{clxone-ipam}}/apis/x?action=export", map[string]string{
+		"clxone-ipam": "http://127.0.0.1:4444",
+	})
+	if missing != nil {
+		t.Fatalf("不应有缺失变量，got %v", missing)
+	}
+	want := "http://127.0.0.1:4444/apis/x?action=export"
+	if out != want {
+		t.Fatalf("解析结果应为 %q，实际 %q", want, out)
+	}
+}
+
+// TestCollectHyphenatedName 悬停取值：含连字符的名字要能被识别。
+func TestCollectHyphenatedName(t *testing.T) {
+	names := CollectNames("{{clxone-ipam}}/x")
+	if len(names) != 1 || names[0] != "clxone-ipam" {
+		t.Fatalf("CollectNames 应返回 [clxone-ipam]，实际 %v", names)
+	}
+	vals := CollectValues("{{clxone-ipam}}", map[string]string{"clxone-ipam": "http://127.0.0.1:4444"})
+	if vals["clxone-ipam"] != "http://127.0.0.1:4444" {
+		t.Fatalf("CollectValues 应取到 clxone-ipam 的值，实际 %v", vals)
+	}
+}
+
+// TestResolveNestedHyphenated 变量值里再引用带连字符的变量（嵌套）。
+func TestResolveNestedHyphenated(t *testing.T) {
+	out, missing := Resolve("{{a}}", map[string]string{"a": "{{b-c}}", "b-c": "v"})
+	if missing != nil {
+		t.Fatalf("不应有缺失变量，got %v", missing)
+	}
+	if out != "v" {
+		t.Fatalf("嵌套解析结果应为 v，实际 %q", out)
+	}
+}
+
+// TestMissingHyphenatedReportedByOriginalName 缺失的带连字符变量：缺失名单应回原始名。
+func TestMissingHyphenatedReportedByOriginalName(t *testing.T) {
+	out, missing := Resolve("{{clxone-ipam}}/x", map[string]string{})
+	if !strings.Contains(out, "{{clxone-ipam}}") {
+		t.Fatalf("未定义变量应保留原文，实际 %q", out)
+	}
+	if len(missing) != 1 || missing[0] != "clxone-ipam" {
+		t.Fatalf("缺失名单应为 [clxone-ipam]，实际 %v", missing)
+	}
+}
+
+// TestResolvePlainNameUnchanged 普通（无连字符）变量行为不变。
+func TestResolvePlainNameUnchanged(t *testing.T) {
+	out, missing := Resolve("{{host}}/x", map[string]string{"host": "http://localhost:2025"})
+	if missing != nil || out != "http://localhost:2025/x" {
+		t.Fatalf("普通名解析异常：out=%q missing=%v", out, missing)
+	}
+}

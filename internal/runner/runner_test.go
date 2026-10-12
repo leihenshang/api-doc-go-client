@@ -153,6 +153,41 @@ func TestMissingVarKeptAndReported(t *testing.T) {
 	}
 }
 
+// URL 整体由 {{host}} 之类变量构成、而该变量未定义（环境没选对 / 没建）时，
+// 解析结果没有协议头：必须给出「点名前」的可定位错误，而不是把 {{host}} 原样
+// 发出去换来一句 `unsupported protocol scheme ""`。
+func TestUnresolvedHostGivesClearError(t *testing.T) {
+	r := collection.Request{
+		UID: "u4b", Method: "GET",
+		URL: "{{host1}}/apis/linkingthing.com/ipam/ipv6-filing/v1/selfownedfilings?action=export_template",
+	}
+	_, err := Send(context.Background(), r, map[string]string{}, DefaultOptions())
+	if err == nil {
+		t.Fatal("变量未定义导致 URL 没有协议头，应当报错")
+	}
+	if !strings.Contains(err.Error(), "host1") {
+		t.Fatalf("错误应点名缺失的变量: %v", err)
+	}
+	if !strings.Contains(err.Error(), "变量未定义") {
+		t.Fatalf("错误应说明是变量未定义: %v", err)
+	}
+	if strings.Contains(err.Error(), "unsupported protocol scheme") {
+		t.Fatalf("不应把底层协议头错误直接抛给用户: %v", err)
+	}
+}
+
+// 没有协议头、但也不是变量问题（手滑漏写 http://）：同样给可读提示。
+func TestMissingSchemeGivesClearError(t *testing.T) {
+	r := collection.Request{UID: "u4c", Method: "GET", URL: "localhost:2025/apis/x"}
+	_, err := Send(context.Background(), r, map[string]string{}, DefaultOptions())
+	if err == nil {
+		t.Fatal("缺少协议头应报错")
+	}
+	if !strings.Contains(err.Error(), "http://") || !strings.Contains(err.Error(), "地址") {
+		t.Fatalf("错误应指出不是 http/https 地址并提示补协议头: %v", err)
+	}
+}
+
 // 自签证书：默认校验应失败，开启 InsecureSSL 后成功。
 func TestInsecureSSLPolicy(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

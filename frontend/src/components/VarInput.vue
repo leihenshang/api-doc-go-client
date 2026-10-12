@@ -40,7 +40,8 @@ interface Tip {
   left: number
 }
 
-const NAME_RE = /^\{\{\s*(\$?[A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/
+// 抽取 {{name}} 里的变量名；允许连字符与点（clxone-ipam 这类环境名），与 Go 侧 varx 解析规则一致。
+const NAME_RE = /^\{\{\s*(\$?[A-Za-z_][A-Za-z0-9_.\-]*)\s*\}\}$/
 
 // 敏感值的展示掩码（与共享包 varx.MaskedValue 保持一致）
 const SECRET_MASK = '••••••'
