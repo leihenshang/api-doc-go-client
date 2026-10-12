@@ -16,8 +16,8 @@ export interface VarEntry {
   value: string
 }
 
-/** 变量名写入校验与 Go 侧占位符规则一致：`[A-Za-z_][A-Za-z0-9_]*`。 */
-export const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** 变量名写入校验与 Go 侧占位符规则一致：允许字母数字下划线、连字符、点。 */
+export const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.\-]*$/
 
 /** 字段路径 → 合法变量名（`data.items.0.id` → `data_items_0_id`）。 */
 export function deriveVarName(path: string): string {

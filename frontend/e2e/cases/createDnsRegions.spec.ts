@@ -31,8 +31,6 @@ const FOLDER = 'dns'
 const REQ_NAME = requestNameOf(DEMO_URL)
 
 const folderRow = (page: Page): Locator => page.getByTestId('tree.row').filter({ hasText: FOLDER })
-const dropdownOption = (page: Page, label: string): Locator =>
-  page.locator('.n-dropdown-option').filter({ hasText: label })
 
 test.skip(!DEMO_URL, '未设置 E2E_DEMO_URL（需外部可达的 https 接口），跳过 @demo 用例')
 
@@ -52,9 +50,7 @@ test(`[B2/B3/E1] 集合内新建分组 → 分组内新建请求 ${REQ_NAME || '
   })
 
   await test.step(`3. 在分组内新建请求「${REQ_NAME}」`, async () => {
-    await hoverAndClick(folderRow(page), 'tree.row.plus') // 分组行内「新建」下拉（悬停才显示）
-    await expect(dropdownOption(page, t('tree.newRequest'))).toBeVisible()
-    await dropdownOption(page, t('tree.newRequest')).click()
+    await hoverAndClick(folderRow(page), 'tree.row.plus') // 分组行「···」菜单 → 新建请求（直接弹窗）
 
     const modal = page.locator('.n-modal')
     await expect(modal).toBeVisible()

@@ -345,6 +345,18 @@ async function closeRoot(root: string): Promise<void> {
   void refreshSyncStatus()
 }
 
+/** 在已打开的所有集合树里找某请求 uid 所属的工作目录（根）；找不到返回空串。 */
+function findRootOfUid(uid: string): string {
+  const walk = (nodes: TreeNode[]): boolean => {
+    for (const n of nodes) {
+      if (n.uid === uid && n.type === 'request') return true
+      if (n.children && walk(n.children)) return true
+    }
+    return false
+  }
+  return coll.roots.find((r) => walk(r.info.tree))?.root ?? ''
+}
+
 /**
  * 打开请求（命令面板跨目录搜索会带上 root）：
  * 目标根不是活动根时先切过去 —— 页签按根分组，别把别根的请求开到当前组的标签栏里。
@@ -352,6 +364,15 @@ async function closeRoot(root: string): Promise<void> {
 async function openRequestInRoot(uid: string, root?: string): Promise<void> {
   if (root && root !== coll.activeRoot) await activateRoot(root)
   await tabs.openRequest(uid)
+}
+
+/**
+ * 从历史记录打开：记录可能属于任一已打开集合，先定位所属集合根并切过去（复用 openRequestInRoot
+ * 的切根逻辑，含未保存改动确认），左侧树才会展开并选中对应 API。若直接 tabs.openRequest(uid)
+ * 不切根，activeRoot 仍是旧集合，树里找不到该节点 → 选中态跟不过去。
+ */
+async function openHistoryRequest(uid: string): Promise<void> {
+  await openRequestInRoot(uid, findRootOfUid(uid))
 }
 
 /** 重载某个根（外部改动 / 手工触发）：只刷新它的树，不动其它根。 */
@@ -1051,7 +1072,7 @@ watch(
 
       <env-manager v-model:show="showEnvManager" @saved="envSaved" />
       <settings-dialog v-model:show="showSettings" :initial-section="settingsInitial" @saved="loadMcpStatus()" />
-      <history-dialog v-model:show="showHistory" @open="tabs.openRequest($event)" />
+      <history-dialog v-model:show="showHistory" @open="openHistoryRequest" />
       <cookie-dialog v-model:show="showCookies" />
       <import-dialog v-model:show="showImport" @imported="imported" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />

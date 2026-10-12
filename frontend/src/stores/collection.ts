@@ -176,6 +176,12 @@ export const useCollectionStore = defineStore('collection', {
     async reload(): Promise<void> {
       if (!this.info) return
       this.replaceInfo(await api.reload())
+      // 环境列表可能因**外部改动**（MCP / 编辑器 / 同步拉取）而变化：校正当前选择，
+      // 别让 currentEnv 停在空串或已不存在的环境名上。停在空串时发送会走 envVars("")，
+      // 只拿到内置动态变量 → URL 里的 {{变量}} 原样发出去，Go 侧报看不懂的协议头错误。
+      // （reloadRoot 早就做了这件事，外部改动的主路径 reload 却漏了。）
+      const prev = this.currentEnv
+      this.currentEnv = prev && this.envNames.includes(prev) ? prev : (this.envNames[0] ?? '')
     },
     /** 把新的概要写回 roots（按目录匹配，root 标识不变）。 */
     replaceInfo(info: CollectionInfo): void {
@@ -297,14 +303,19 @@ export const useCollectionStore = defineStore('collection', {
     /** 给环境改名（两个文件一起搬）；当前选中的正是旧名时跟着切到新名。 */
     async renameEnv(oldName: string, newName: string): Promise<void> {
       if (oldName === newName) return
+      // 先记下「要不要跟着改名」：reload 会按新列表校正 currentEnv（旧名已不在列表里），
+      // 若在 reload 之后再比 oldName 就永远判不中了。
+      const follow = this.currentEnv === oldName
       await api.renameEnv(oldName, newName)
       await this.reload()
-      if (this.currentEnv === oldName) this.setEnv(newName)
+      if (follow) this.setEnv(newName)
     },
     async deleteEnv(name: string): Promise<void> {
+      // 同上：删掉的环境不在新列表里，reload 后 currentEnv 已被校正，须先记下是否删的是当前项
+      const wasCurrent = this.currentEnv === name
       await api.deleteEnv(name)
       await this.reload()
-      if (this.currentEnv === name) this.setEnv(this.envNames[0] ?? '')
+      if (wasCurrent) this.setEnv(this.envNames[0] ?? '')
     },
   },
 })

@@ -150,7 +150,12 @@ func SendGRPC(ctx context.Context, req GrpcRequest, vars map[string]string, opts
 
 // renderTarget 渲染变量并校验地址形态。
 func renderTarget(target string, vars map[string]string) (string, error) {
-	rendered, _ := varx.Resolve(target, vars)
+	rendered, missing := varx.Resolve(target, vars)
+	// 变量没解析出来（未定义 / 环境没选对）时地址还是 {{name}} 形态：拨号会报一句
+	// 看不懂的 DNS/端口错误。这里按缺失变量名提前给出可定位的提示。
+	if len(missing) > 0 {
+		return "", fmt.Errorf("服务地址无法连接：变量未定义（%s）。请检查顶部「环境」是否选中了含这些变量的环境", strings.Join(missing, "、"))
+	}
 	rendered = normalizeTarget(rendered)
 	if rendered == "" {
 		return "", errors.New("服务地址为空（形如 host:port）")
