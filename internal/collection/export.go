@@ -6,6 +6,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -321,6 +322,15 @@ func toRev(v any) int64 {
 
 // ExportMarkdown 把集合导出为一份 Markdown 文档（标题层级 = 目录树，请求含方法/URL/参数/头/体/文档）。
 func (c *Collection) ExportMarkdown() (string, error) {
+	return c.exportMarkdown(false)
+}
+
+// exportMarkdown 生成集合 Markdown。
+// shiftDocs=true（HTML 导出用）：把每个请求 Docs 内的标题整体降一级、嵌到请求标题之下 ——
+// HTML 单节展示按标题级别圈定一节，Docs 若与请求标题同级（生成的 Docs 都是 ## 起）会被整段排除，
+// 用户点开 API 看不到文档内容；降级后 Docs 连同其响应字段/示例小节都归属于该请求。
+// 同时标题级别在该模式下封顶 5，给 Docs 留出 h6 的位置。
+func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 	res, err := c.scan()
 	if err != nil {
 		return "", err
@@ -339,7 +349,11 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			if depth > 6 {
 				depth = 6
 			}
-			pad := strings.Repeat("#", depth+2)
+			level := depth + 2
+			if shiftDocs && level > 5 {
+				level = 5 // 封顶 h5：Docs 至少要能深一级（h6），否则单节展示仍会把 Docs 排除在节外
+			}
+			pad := strings.Repeat("#", level)
 			if n.Type == "folder" {
 				fmt.Fprintf(&b, "%s %s\n\n", pad, n.Name)
 				if n.Children != nil {
@@ -350,6 +364,17 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			r, ok := res.reqs[n.UID]
 			if !ok {
 				continue
+			}
+			// appendDocs 附加请求文档；HTML 导出时做标题降级（Markdown 导出保持原样）。
+			appendDocs := func() {
+				docs := strings.TrimSpace(r.Docs)
+				if docs == "" {
+					return
+				}
+				if shiftDocs {
+					docs = shiftHeadings(docs, level+1)
+				}
+				fmt.Fprintf(&b, "%s\n\n", docs)
 			}
 			// gRPC 请求按协议分节（G11.6）：无 query / 请求头 / 请求体，改展示目标与方法信息
 			if g := r.GRPC; g != nil {
@@ -371,9 +396,7 @@ func (c *Collection) ExportMarkdown() (string, error) {
 						fmt.Fprintf(&b, "**请求消息**\n\n```\n%s\n```\n\n", body)
 					}
 				}
-				if strings.TrimSpace(r.Docs) != "" {
-					fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(r.Docs))
-				}
+				appendDocs()
 				fmt.Fprintf(&b, "---\n\n")
 				continue
 			}
@@ -406,9 +429,7 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
 				fmt.Fprintf(&b, "**认证**：%s\n\n", r.Auth.Type)
 			}
-			if strings.TrimSpace(r.Docs) != "" {
-				fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(r.Docs))
-			}
+			appendDocs()
 			fmt.Fprintf(&b, "---\n\n")
 		}
 	}
@@ -447,7 +468,8 @@ func escapePipe(s string) string {
 // 左侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
 // 正文每个标题带 toc-N 锚点（由 mdToHTML 分配），与 TOC 链接一一对应。
 func (c *Collection) ExportHTML() (string, error) {
-	md, err := c.ExportMarkdown()
+	// Docs 标题降级到请求标题之下（否则单节展示会把 Docs 整段排除在 API 小节之外）
+	md, err := c.exportMarkdown(true)
 	if err != nil {
 		return "", err
 	}
@@ -520,9 +542,11 @@ func (c *Collection) ExportHTML() (string, error) {
 				toc.WriteString(`</li>`)
 				continue
 			}
-			// request
+			// request：方法徽标前置，配色与文案口径与客户端集合树（MethodTag）完全一致
 			id := nextID()
-			toc.WriteString(`<li class="toc-request"><a href="#`)
+			toc.WriteString(`<li class="toc-request">`)
+			toc.WriteString(methodBadge(n.Method))
+			toc.WriteString(`<a href="#`)
 			toc.WriteString(id)
 			toc.WriteString(`">`)
 			toc.WriteString(html.EscapeString(n.Name))
@@ -600,6 +624,18 @@ func (c *Collection) ExportHTML() (string, error) {
   .toc-root > a { font-weight: 600; }
   .toc-folder > a { font-weight: 600; color: #18a058; }
   .toc a:target, .toc a.current { background: #18a058; color: #fff; }
+  /* 请求条目：方法徽标 + 名称横排（对齐客户端集合树 MethodTag：等宽小字、语义色，无底色） */
+  .toc-request { display: flex; align-items: center; gap: 6px; }
+  .toc-request > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tm { flex: 0 0 auto; min-width: 34px; font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+        font-size: 10px; font-weight: 600; letter-spacing: 0.4px; line-height: 16px; }
+  .m-get { color: #18a058; }
+  .m-post { color: #2080f0; }
+  .m-put { color: #f0a020; }
+  .m-delete { color: #d03050; }
+  .m-patch { color: #8a2be2; }
+  .m-grpc { color: #0e94a8; }
+  .m-other { color: #8a9199; }
   .content { flex: 1 1 auto; min-width: 0; }
   h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; scroll-margin-top: 16px; }
   h1 { font-size: 1.8em; border-bottom: 1px solid #e3e3e3; padding-bottom: 0.3em; }
@@ -771,14 +807,21 @@ func (c *Collection) ExportHTML() (string, error) {
 	return b.String(), nil
 }
 
-// mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、表格、---、> 引用、段落）。
+// mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、`行内代码`、表格、
+// --- 分隔线、> 引用、无序/有序列表、段落），并兼容 Docs 里手写的白名单 HTML 标签。
 // 每个标题按顺序分配 id="toc-N"（N 从 0 自增），供 HTML 导出的目录树（TOC）锚点跳转。
+//
+// Markdown 与 HTML 标签冲突的处理口径：
+//   - 代码围栏内一切原样转义（含 <tag>），不解析任何标签；
+//   - 白名单内的标签（无 script/iframe/form 等危险项，属性经 sanitizeHTMLAttrs 清洗）原样输出；
+//   - 其余 `<...>` 一律按文本转义显示 —— 既不吞内容，也不让注入标记活下来。
 func mdToHTML(src string) string {
 	lines := strings.Split(src, "\n")
 	var b strings.Builder
 	inCode := false
 	inTable := false
 	inQuote := false
+	listTag := "" // "" | "ul" | "ol"
 	// 标题锚点计数器：与 ExportHTML 生成 TOC 的顺序一致（集合名 → 树先序 folder/request）。
 	hID := 0
 
@@ -794,14 +837,25 @@ func mdToHTML(src string) string {
 			inQuote = false
 		}
 	}
+	closeList := func() {
+		if listTag != "" {
+			b.WriteString("</" + listTag + ">\n")
+			listTag = ""
+		}
+	}
+	// 任何块级元素切换前都先收起全部打开中的块。
+	closeBlocks := func() {
+		closeTable()
+		closeQuote()
+		closeList()
+	}
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trim := strings.TrimSpace(line)
 
 		if strings.HasPrefix(trim, "```") {
-			closeTable()
-			closeQuote()
+			closeBlocks()
 			if !inCode {
 				b.WriteString("<pre><code>")
 				inCode = true
@@ -818,26 +872,17 @@ func mdToHTML(src string) string {
 		}
 
 		if trim == "" {
-			closeTable()
-			closeQuote()
+			closeBlocks()
 			continue
 		}
 		if trim == "---" {
-			closeTable()
-			closeQuote()
+			closeBlocks()
 			b.WriteString("<hr>\n")
 			continue
 		}
 		if strings.HasPrefix(trim, "#") {
-			closeTable()
-			closeQuote()
-			level := 0
-			for level < len(trim) && trim[level] == '#' {
-				level++
-			}
-			if level > 6 {
-				level = 6
-			}
+			closeBlocks()
+			level := headingLevel(trim)
 			text := strings.TrimSpace(trim[level:])
 			id := fmt.Sprintf("toc-%d", hID)
 			hID++
@@ -846,6 +891,7 @@ func mdToHTML(src string) string {
 		}
 		if strings.HasPrefix(trim, ">") {
 			closeTable()
+			closeList()
 			if !inQuote {
 				b.WriteString("<blockquote>\n")
 				inQuote = true
@@ -853,9 +899,44 @@ func mdToHTML(src string) string {
 			fmt.Fprintf(&b, "<p>%s</p>\n", inlineMD(strings.TrimSpace(strings.TrimPrefix(trim, ">"))))
 			continue
 		}
+		// 独占一行的白名单 HTML 块标签（<br>、</details>、<img …>）：原样输出，不包 <p>
+		if m := blockTagOnlyRE.FindStringSubmatch(trim); m != nil && htmlAllowedTags[strings.ToLower(m[1])] {
+			closeBlocks()
+			if clean, ok := sanitizeHTMLTag(trim); ok {
+				b.WriteString(clean)
+				b.WriteString("\n")
+			} else {
+				fmt.Fprintf(&b, "<p>%s</p>\n", html.EscapeString(trim))
+			}
+			continue
+		}
+		// 列表：- / * / + 起头为无序，数字+./) 起头为有序（生成的 Docs 大量使用 - 列表）
+		if m := ulItemRE.FindStringSubmatch(trim); m != nil {
+			closeTable()
+			closeQuote()
+			if listTag != "ul" {
+				closeList()
+				b.WriteString("<ul>\n")
+				listTag = "ul"
+			}
+			fmt.Fprintf(&b, "<li>%s</li>\n", inlineMD(m[1]))
+			continue
+		}
+		if m := olItemRE.FindStringSubmatch(trim); m != nil {
+			closeTable()
+			closeQuote()
+			if listTag != "ol" {
+				closeList()
+				b.WriteString("<ol>\n")
+				listTag = "ol"
+			}
+			fmt.Fprintf(&b, "<li>%s</li>\n", inlineMD(m[1]))
+			continue
+		}
 		closeQuote()
 		// 表格
 		if strings.HasPrefix(trim, "|") {
+			closeList()
 			cells := splitRow(trim)
 			// 分隔行 |---|---|：必须整行都是表格分隔语法，
 			// 只判断「下一行含 ---」会把普通正文误当表头（后续内容被吞进表里）
@@ -877,14 +958,13 @@ func mdToHTML(src string) string {
 					fmt.Fprintf(&b, "<td>%s</td>", inlineMD(c))
 				}
 				b.WriteString("</tr>\n")
+				continue
 			}
-			continue
 		}
-		closeTable()
+		closeBlocks()
 		fmt.Fprintf(&b, "<p>%s</p>\n", inlineMD(trim))
 	}
-	closeTable()
-	closeQuote()
+	closeBlocks()
 	if inCode {
 		b.WriteString("</code></pre>\n")
 	}
@@ -958,11 +1038,11 @@ func isTableSeparator(line string) bool {
 	return true
 }
 
-// inlineMD 处理 `code` 与 **bold**（导出用的最小集）。
+// inlineMD 处理 `code`、**bold** 与白名单内联 HTML 标签（导出用的最小集）。
 //
 // 必须一次扫描、按 code span 优先：先做全局替换会让 `**` 的配对跨越 code span，
 // 产出交叉标签（<code><strong>a</code> b</strong>），奇数个反引号还会留下未闭合的 <code>。
-// 未闭合的 ` / ** 一律按字面量输出。
+// 未闭合的 ` / ** 一律按字面量输出。白名单外的 `<...>` 按文本转义（防注入/防标签吞内容）。
 func inlineMD(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -987,9 +1067,21 @@ func inlineMD(s string) string {
 			}
 			b.WriteString(html.EscapeString("**"))
 			i += 2
+		case s[i] == '<':
+			// 白名单内联标签（<b>、<br/>、<a href="…"> 等）原样输出（属性清洗过）；
+			// 其它（<script>、未闭合的 `<x`、a < b 等）落到 default 转义。
+			if loc := inlineTagRE.FindStringIndex(s[i:]); loc != nil && loc[0] == 0 {
+				if clean, ok := sanitizeHTMLTag(s[i : i+loc[1]]); ok {
+					b.WriteString(clean)
+					i += loc[1]
+					continue
+				}
+			}
+			b.WriteString("&lt;")
+			i++
 		default:
 			j := i + 1
-			for j < len(s) && s[j] != '`' && !strings.HasPrefix(s[j:], "**") {
+			for j < len(s) && s[j] != '`' && s[j] != '<' && !strings.HasPrefix(s[j:], "**") {
 				j++
 			}
 			b.WriteString(html.EscapeString(s[i:j]))
@@ -997,6 +1089,199 @@ func inlineMD(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// headingLevel 返回 ATX 标题级别（1..6）：行首连续 # 的个数（>6 按 6），规则与 mdToHTML 一致；
+// 代码围栏内的行由调用方排除。注意不要求 # 后有空格（#foo 也按标题处理），与既有计数口径保持一致。
+func headingLevel(trim string) int {
+	if trim == "" || trim[0] != '#' {
+		return 0
+	}
+	n := 0
+	for n < len(trim) && trim[n] == '#' {
+		n++
+	}
+	if n > 6 {
+		n = 6
+	}
+	return n
+}
+
+// shiftHeadings 把一段 Markdown 的标题整体下移，使最浅标题级别 = minLevel（其余标题按同一差值
+// 下移，最深封到 h6）。标题数量不变（只改前缀），故 HTML 的 toc-N 编号仍与正文严格对应。
+// 代码围栏内的 # 行不视为标题；delta<=0（Docs 本身已经够深）时原样返回。
+func shiftHeadings(md string, minLevel int) string {
+	if minLevel < 1 {
+		minLevel = 1
+	}
+	lines := strings.Split(md, "\n")
+
+	min := 0
+	inCode := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "```") {
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
+		if lv := headingLevel(trim); lv > 0 && (min == 0 || lv < min) {
+			min = lv
+		}
+	}
+	if min == 0 || minLevel-min <= 0 {
+		return md
+	}
+	delta := minLevel - min
+
+	inCode = false
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "```") {
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
+		lv := headingLevel(trim)
+		if lv == 0 {
+			continue
+		}
+		newLv := lv + delta
+		if newLv > 6 {
+			newLv = 6
+		}
+		lines[i] = strings.Repeat("#", newLv) + " " + strings.TrimSpace(trim[lv:])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// methodBadge 生成 TOC 请求条目的方法徽标：名称与配色（--app-method-*）对齐客户端集合树 MethodTag。
+func methodBadge(method string) string {
+	m := strings.ToUpper(strings.TrimSpace(method))
+	cls := "m-other"
+	switch m {
+	case "GET":
+		cls = "m-get"
+	case "POST":
+		cls = "m-post"
+	case "PUT":
+		cls = "m-put"
+	case "DELETE":
+		cls = "m-delete"
+	case "PATCH":
+		cls = "m-patch"
+	case "GRPC":
+		cls = "m-grpc"
+	}
+	if m == "" {
+		m = "GET"
+	}
+	return `<span class="tm ` + cls + `">` + html.EscapeString(m) + `</span>`
+}
+
+var (
+	// 独占一行的 HTML 标签（块级直通）：<details>、</div>、<br/>、<img src="…"> 等。
+	blockTagOnlyRE = regexp.MustCompile(`^</?([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^<>]*)?/?>$`)
+	// 无序列表项：- / * / + 起头（生成的 Docs 的「简要描述」「请求头」都是这种行）。
+	ulItemRE = regexp.MustCompile(`^[-*+]\s+(.+)$`)
+	// 有序列表项：数字 + . 或 ) 起头。
+	olItemRE = regexp.MustCompile(`^\d+[.)]\s+(.+)$`)
+	// 行内 HTML 标签（inlineMD 用；属性部分不允许出现尖括号，避免误吞后续 Markdown）。
+	inlineTagRE = regexp.MustCompile(`</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?\s*/?>`)
+	// 标签内属性：name 或 name=value（value 支持双引号/单引号/裸值）。
+	htmlAttrRE = regexp.MustCompile(`[a-zA-Z_:][-a-zA-Z0-9_:.]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>` + "`" + `]+))?`)
+	tagNameRE  = regexp.MustCompile(`^</?([a-zA-Z][a-zA-Z0-9-]*)`)
+)
+
+// htmlAllowedTags 允许在导出 HTML 中原样保留的标签白名单。
+// 刻意不含 script/iframe/object/embed/form/input/button/link/style/meta/svg 等可执行或可外联的标签 ——
+// 即使内容来自用户自己的集合，也按「最小能力」放行（markdown-it 常见排版标签即可）。
+var htmlAllowedTags = map[string]bool{
+	"a": true, "abbr": true, "b": true, "blockquote": true, "br": true, "caption": true,
+	"cite": true, "code": true, "col": true, "colgroup": true, "dd": true, "del": true,
+	"details": true, "div": true, "dl": true, "dt": true, "em": true, "figcaption": true,
+	"figure": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	"hr": true, "i": true, "img": true, "kbd": true, "li": true, "mark": true, "ol": true,
+	"p": true, "pre": true, "q": true, "s": true, "small": true, "span": true, "strong": true,
+	"sub": true, "sup": true, "summary": true, "table": true, "tbody": true, "td": true,
+	"tfoot": true, "th": true, "thead": true, "tr": true, "u": true, "ul": true,
+}
+
+// sanitizeHTMLTag 清洗单个 HTML 标签：非白名单标签返回 ok=false；白名单标签删除所有 on* 事件
+// 属性与 javascript:/vbscript: 链接，其余属性（class/href/src/alt/title/colspan…）保留并规范引号。
+func sanitizeHTMLTag(tag string) (string, bool) {
+	m := tagNameRE.FindStringSubmatch(tag)
+	if m == nil {
+		return "", false
+	}
+	name := strings.ToLower(m[1])
+	if !htmlAllowedTags[name] {
+		return "", false
+	}
+	closing := strings.HasPrefix(strings.TrimSpace(tag), "</")
+	selfClose := strings.HasSuffix(strings.TrimSpace(tag), "/>")
+
+	var b strings.Builder
+	b.WriteString("<")
+	if closing {
+		b.WriteString("/")
+	}
+	b.WriteString(name)
+	if !closing {
+		// 取标签名之后、结尾 > / /> 之前的属性区（m[0] 形如 "<a" 或 "</div"）
+		rest := tag[len(m[0]):]
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimSuffix(rest, "/>")
+		rest = strings.TrimSuffix(rest, ">")
+		rest = strings.TrimSpace(rest)
+		for _, am := range htmlAttrRE.FindAllString(rest, -1) {
+			pair := strings.SplitN(am, "=", 2)
+			an := strings.ToLower(strings.TrimSpace(pair[0]))
+			if an == "" {
+				continue
+			}
+			if strings.HasPrefix(an, "on") {
+				continue // 事件属性一律删除
+			}
+			if len(pair) == 1 {
+				b.WriteString(" " + an)
+				continue
+			}
+			raw := strings.TrimSpace(pair[1])
+			var v string
+			if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+				v = raw[1 : len(raw)-1]
+			} else {
+				v = raw
+			}
+			if (an == "href" || an == "src") && dangerousURL(v) {
+				continue
+			}
+			// html.EscapeString 已把引号转成 &#34;/&#39;，双引号包裹安全
+			b.WriteString(" " + an + "=\"" + html.EscapeString(v) + "\"")
+		}
+		if selfClose {
+			b.WriteString(" /")
+		}
+	}
+	b.WriteString(">")
+	return b.String(), true
+}
+
+// dangerousURL 判断 URL 是否带可执行 scheme（javascript:/vbscript:/data:text/html）。
+func dangerousURL(v string) bool {
+	u := strings.ToLower(strings.TrimSpace(v))
+	switch {
+	case strings.HasPrefix(u, "javascript:"), strings.HasPrefix(u, "vbscript:"):
+		return true
+	case strings.HasPrefix(u, "data:text/html"):
+		return true
+	}
+	return false
 }
 
 // grpcStreamLabel 流式形态的中文标注（导出文档用）。

@@ -426,6 +426,212 @@ func TestExportMarkdownBodyFormTable(t *testing.T) {
 		t.Fatalf("ExportHTML: %v", err)
 	}
 	if got := strings.Count(htmlOut, "<table>"); got < 2 {
-		t.Fatalf("HTML 中表格数 = %d, 期望至少 2（参数表 + 请求体表）:\n%s", got, htmlOut)
+		t.Fatalf("HTML 中表格数 = %d，期望至少 2（参数表 + 请求体表）:\n%s", got, htmlOut)
+	}
+}
+
+// TestExportHTMLDocsNestedUnderRequest 验证 HTML 导出把请求的 Docs 章节作为请求标题的子节输出：
+//   - Docs 内的 ## 标题整体降为 <h3>（请求标题是 <h2>），单节展示（showSection 按标题级别圈节）
+//     不再把 Docs 排除在该 API 小节之外；
+//   - Docs 里的 - 列表渲染成 <ul><li>（生成的接口文档大量使用列表）；
+//   - TOC 请求条目带与客户端 MethodTag 同色值的方法徽标；
+//   - Markdown 导出保持原层级不变（## 仍是 ##）。
+func TestExportHTMLDocsNestedUnderRequest(t *testing.T) {
+	c := newTestCollection(t)
+	r, err := c.CreateRequest("", "用户-列表", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.URL = "{{host}}/api/user/list"
+	r.Docs = "## 简要描述\n- **名称**: 用户列表\n- 分页查询\n\n## 响应字段\n\n| 参数名 | 必选 | 类型 | 说明 |\n| --- | --- | --- | --- |\n| id | 是 | string | 用户ID |\n"
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+	r2, err := c.CreateRequest("", "用户-新建", "POST")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r2.URL = "{{host}}/api/user"
+	if err := c.SaveRequest(r2); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+
+	// Markdown 导出：Docs 标题层级保持原样
+	md, err := c.ExportMarkdown()
+	if err != nil {
+		t.Fatalf("ExportMarkdown: %v", err)
+	}
+	if !strings.Contains(md, "## 简要描述") {
+		t.Fatalf("Markdown 导出不应改动 Docs 标题层级:\n%s", md)
+	}
+
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	// 请求标题仍是 <h2>，Docs 标题降为 <h3>（toc 顺序：集合 h1 / 请求 h2 / 两个 Docs h3…）
+	if !strings.Contains(htmlOut, `<h2 id="toc-1">用户-列表 <code>GET</code></h2>`) {
+		t.Fatalf("请求标题不是预期的 h2:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, `<h3 id="toc-2">简要描述</h3>`) {
+		t.Fatalf("Docs 标题未降级嵌套到请求下（应出现 h3「简要描述」）:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, `<h3 id="toc-3">响应字段</h3>`) {
+		t.Fatalf("Docs「响应字段」小节缺失或层级不对:\n%s", htmlOut)
+	}
+	// 列表渲染为 <ul><li>，行内 **粗体** 生效
+	if !strings.Contains(htmlOut, "<ul>\n<li><strong>名称</strong>: 用户列表</li>") {
+		t.Fatalf("Docs 列表未正确渲染:\n%s", htmlOut)
+	}
+	// Docs 字段表格仍在
+	if !strings.Contains(htmlOut, "<td>id</td>") || !strings.Contains(htmlOut, "<td>用户ID</td>") {
+		t.Fatalf("Docs 响应字段表格内容缺失:\n%s", htmlOut)
+	}
+	// TOC 方法徽标：GET 绿 / POST 蓝（class 与客户端 token 同名）
+	if !strings.Contains(htmlOut, `<span class="tm m-get">GET</span>`) {
+		t.Fatalf("TOC 缺少 GET 方法徽标:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, `<span class="tm m-post">POST</span>`) {
+		t.Fatalf("TOC 缺少 POST 方法徽标:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, ".m-get { color: #18a058; }") || !strings.Contains(htmlOut, ".m-post { color: #2080f0; }") {
+		t.Fatalf("TOC 方法徽标配色与客户端不一致:\n%s", htmlOut)
+	}
+	// TOC 只给 folder/request 编号，Docs 子标题占正文锚点但不进 TOC：
+	// TOC 链接集合必须是正文锚点集合的子集，且请求二链接指向 toc-4（中间两个编号被请求一的 Docs 占用）。
+	hrefs := collectTOCIDs(htmlOut, `href="#toc-`)
+	ids := collectTOCIDs(htmlOut, `id="toc-`)
+	idSet := map[int]bool{}
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	for _, h := range hrefs {
+		if !idSet[h] {
+			t.Fatalf("TOC 链接 %d 找不到对应正文锚点:\n  hrefs=%v\n  ids=%v", h, hrefs, ids)
+		}
+	}
+	if !idSet[4] || hrefs[len(hrefs)-1] != 4 {
+		t.Fatalf("请求二的 TOC 链接应指向 toc-4（被请求一的 2 个 Docs 标题占用两号），hrefs=%v", hrefs)
+	}
+}
+
+// TestExportHTMLSafeHTMLTags 验证 Docs 内 Markdown 与 HTML 标签混用的处理口径：
+// 白名单排版标签（<br>/<details>/<b>…）保留，script/事件属性/javascript: 链接被清洗或转义。
+func TestExportHTMLSafeHTMLTags(t *testing.T) {
+	c := newTestCollection(t)
+	r, err := c.CreateRequest("", "标签混用", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.Docs = strings.Join([]string{
+		"## 说明",
+		"第一行<br>第二行",
+		"这是 <b>粗体</b> 与 <a href=\"https://example.com\" onclick=\"evil()\">安全链接</a>",
+		"<details>",
+		"<summary>展开详情</summary>",
+		"详情正文",
+		"</details>",
+		"危险：<script>alert(1)</script><a href=\"javascript:evil()\">x</a><img src=x onerror=alert(1)>",
+		"代码里的标签：`<div>` 原样显示",
+	}, "\n")
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	// 恰好 1 个 <script>（页面自带的交互脚本）：Docs 里的 script 必须被转义
+	if got := strings.Count(htmlOut, "<script>"); got != 1 {
+		t.Fatalf("HTML 含 %d 个原生 <script>，Docs 内脚本必须转义:\n%s", got, htmlOut)
+	}
+	if !strings.Contains(htmlOut, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		t.Fatalf("Docs 内 script 标签未按文本转义:\n%s", htmlOut)
+	}
+	// 白名单标签保留
+	for _, want := range []string{"第一行<br>第二行", "<b>粗体</b>", "<details>", "<summary>展开详情</summary>", "</details>"} {
+		if !strings.Contains(htmlOut, want) {
+			t.Fatalf("白名单 HTML 未保留，缺 %q:\n%s", want, htmlOut)
+		}
+	}
+	// 安全链接保留 href，但事件属性被删除
+	if !strings.Contains(htmlOut, `<a href="https://example.com">安全链接</a>`) {
+		t.Fatalf("安全链接被误删:\n%s", htmlOut)
+	}
+	if strings.Contains(htmlOut, "onclick") || strings.Contains(htmlOut, "onerror") {
+		t.Fatalf("事件属性未被清洗:\n%s", htmlOut)
+	}
+	if strings.Contains(htmlOut, `href="javascript:`) {
+		t.Fatalf("javascript: 链接未被剔除:\n%s", htmlOut)
+	}
+	// 行内代码中的标签转义显示
+	if !strings.Contains(htmlOut, "<code>&lt;div&gt;</code>") {
+		t.Fatalf("行内代码中的 HTML 标签应转义显示:\n%s", htmlOut)
+	}
+}
+
+// TestShiftHeadings 标题降级纯函数：整体平移、封到 h6、代码围栏内的 # 不算标题。
+func TestShiftHeadings(t *testing.T) {
+	in := "# A\n## B\n\n```\n# not a heading\n```\n"
+	got := shiftHeadings(in, 3)
+	want := "### A\n#### B\n\n```\n# not a heading\n```\n"
+	if got != want {
+		t.Fatalf("shiftHeadings=\n%q\nwant\n%q", got, want)
+	}
+	// 已经足够深时原样返回
+	deep := "##### A\n###### B\n"
+	if got2 := shiftHeadings(deep, 3); got2 != deep {
+		t.Fatalf("深层标题不应被改动:\n%q", got2)
+	}
+	// 深层封顶 h6（标题数量不变）
+	flat := "# A\n###### B\n"
+	got3 := shiftHeadings(flat, 4)
+	if !strings.Contains(got3, "#### A\n") || !strings.Contains(got3, "###### B\n") {
+		t.Fatalf("深层标题应封到 h6:\n%q", got3)
+	}
+}
+
+// TestInfoRespUIDs 集合概要携带「响应字段非空」的请求 uid 集合（侧栏 Resp 节点数据源）。
+func TestInfoRespUIDs(t *testing.T) {
+	c := newTestCollection(t)
+	r, err := c.CreateRequest("", "有响应文档", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r2, err := c.CreateRequest("", "无响应文档", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.RespDoc = &ResponseDoc{
+		Type:   "object",
+		Params: []ResponseParam{{FieldName: "id", Type: "string", Description: "主键", Example: "1"}},
+	}
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+
+	info, err := c.Info()
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	set := map[string]bool{}
+	for _, uid := range info.RespUIDs {
+		set[uid] = true
+	}
+	if !set[r.UID] {
+		t.Fatalf("RespUIDs 应包含带响应字段的请求 %q，got=%v", r.UID, info.RespUIDs)
+	}
+	if set[r2.UID] {
+		t.Fatalf("RespUIDs 不应包含无响应文档的请求 %q，got=%v", r2.UID, info.RespUIDs)
+	}
+
+	// 直接查 RespUIDs 与 Info 口径一致
+	uids, err := c.RespUIDs()
+	if err != nil {
+		t.Fatalf("RespUIDs: %v", err)
+	}
+	if len(uids) != 1 || uids[0] != r.UID {
+		t.Fatalf("RespUIDs=%v，期望仅 [%s]", uids, r.UID)
 	}
 }

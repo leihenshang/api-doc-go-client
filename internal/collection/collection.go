@@ -946,6 +946,11 @@ func (c *Collection) Tree() ([]*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.treeFromScan(res), nil
+}
+
+// treeFromScan 用一次扫描结果构建树（分组在前，组内按 seq / 名称排序；含文档条目 B13）。
+func (c *Collection) treeFromScan(res *scanResult) []*Node {
 	// 目录树：先收集目录与请求
 	type dirNode struct {
 		name     string
@@ -1011,12 +1016,34 @@ func (c *Collection) Tree() ([]*Node, error) {
 		share.SortNodes(out)
 		return out
 	}
-	return build(dirs[""].children), nil
+	return build(dirs[""].children)
 }
 
-// Info 集合概要（树 + 环境）。
+// RespUIDs 列出响应字段表非空（RespDoc.Params 至少一行）的 HTTP 请求 uid（排序稳定，便于前端 diff）。
+// 供前端侧栏在请求叶子下挂「Resp」子节点；字段表真相源是请求文件的 respdoc 段。
+func (c *Collection) RespUIDs() ([]string, error) {
+	res, err := c.scan()
+	if err != nil {
+		return nil, err
+	}
+	return respUIDsOf(res), nil
+}
+
+// respUIDsOf 从扫描结果收集响应字段表非空的请求 uid。
+func respUIDsOf(res *scanResult) []string {
+	out := make([]string, 0)
+	for uid, r := range res.reqs {
+		if r.RespDoc != nil && len(r.RespDoc.Params) > 0 {
+			out = append(out, uid)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Info 集合概要（树 + 环境 + 响应字段节点集合）；只扫描磁盘一次。
 func (c *Collection) Info() (*CollectionInfo, error) {
-	tree, err := c.Tree()
+	res, err := c.scan()
 	if err != nil {
 		return nil, err
 	}
@@ -1024,7 +1051,10 @@ func (c *Collection) Info() (*CollectionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &CollectionInfo{Dir: c.Dir, Name: c.Name, UID: c.UID, Tree: tree, Envs: envs}, nil
+	return &CollectionInfo{
+		Dir: c.Dir, Name: c.Name, UID: c.UID,
+		Tree: c.treeFromScan(res), Envs: envs, RespUIDs: respUIDsOf(res),
+	}, nil
 }
 
 // ---------- 环境变量 ----------

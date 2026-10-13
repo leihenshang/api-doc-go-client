@@ -3,17 +3,21 @@
 // 左「视图→显示」：美化/原始 分段控件、展开全部、换行开关态胶囊；
 // 右「解析→输出」：更新响应字段、竖分隔线、复制响应体（幽灵）、保存▾（唯一主按钮）。
 import { NIcon } from 'naive-ui'
-import { ChevronDownOutline, CopyOutline, RefreshOutline } from '@vicons/ionicons5'
+import { ChevronDownOutline, CopyOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import SaveDropdown from '@/components/SaveDropdown.vue'
 
 const view = defineModel<'pretty' | 'raw'>('view', { required: true })
 const wrap = defineModel<boolean>('wrap', { required: true })
+/** 响应区查找条是否打开（按钮点亮态由面板双向绑定）。 */
+const findOn = defineModel<boolean>('findOn', { default: false })
 
 const props = defineProps<{
   isJson: boolean
   copied: boolean
   canSaveExample: boolean
+  /** 是否展示「在响应中查找」按钮（有响应内容时由面板开启） */
+  findable?: boolean
 }>()
 const emit = defineEmits<{
   'expand-all': []
@@ -22,6 +26,7 @@ const emit = defineEmits<{
   'copy-body': []
   'save-file': []
   'save-example': []
+  find: []
 }>()
 const { t } = useI18n()
 
@@ -73,6 +78,18 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
         @click="wrap = !wrap"
       >
         {{ t('resp.wrap') }}
+      </button>
+      <!-- 在响应内容中查找（响应区页内搜索，Ctrl+F 亦可） -->
+      <button
+        v-if="findable"
+        class="chip-btn"
+        :class="{ on: findOn }"
+        type="button"
+        data-testid="resp.find"
+        :title="t('resp.findInResponse')"
+        @click="emit('find')"
+      >
+        <n-icon :component="SearchOutline" :size="13" />
       </button>
     </div>
     <!-- 输出组（design-spec §3 第 3 排右侧）：更新响应字段 / 竖分隔线 / 复制响应体 / 保存▾ -->

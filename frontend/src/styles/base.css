@@ -11,6 +11,20 @@
   background: var(--app-selection);
 }
 
+/* 页内查找高亮（响应区 / 请求编辑器）：琥珀色半透明底；当前命中实色琥珀 + 白字。
+   明暗主题通用（颜色自带足够透明度与亮度对比）。 */
+mark.find-hit {
+  background: rgba(240, 160, 32, 0.32);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0;
+}
+
+mark.find-hit.on {
+  background: #f0a020;
+  color: #fff;
+}
+
 html,
 body,
 #app {

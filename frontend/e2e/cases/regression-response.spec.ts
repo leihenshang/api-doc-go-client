@@ -1,16 +1,20 @@
-// 对应 doc §5 回归要点 17：响应字段「只追加不删除」与保存响应示例（Bruno 的 Save Response）。
+// 回归：响应字段覆盖式更新（值一致时继承说明）、Resp 树节点与保存响应示例（Bruno 的 Save Response）。
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, reopenApp, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
 const exampleModal = (page: Page) =>
   page.locator('.n-modal').filter({ has: page.getByPlaceholder(t('resp.exampleNamePlaceholder')) })
+
+// 「更新响应字段」覆盖确认弹窗（naive 标题是 prop 渲染，按文案定位）
+const overwriteModal = (page: Page) =>
+  page.locator('.n-modal').filter({ hasText: t('resp.fieldsOverwriteTitle') })
 
 // 响应示例保存入口收进「保存 ▾」菜单（response-panel 设计稿）：点触发器再点菜单项
 async function openSaveExample(page: Page) {
@@ -26,40 +30,108 @@ async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url
   await send(page)
 }
 
-test.describe('响应区：字段映射与响应示例', () => {
-  test('[E23] 响应字段只追加不删除，且已填含义保留 @smoke', async ({ page, app }) => {
+test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响应示例', () => {
+  test('[E23] 覆盖式更新响应字段：值一致继承说明、字段表进 Resp 分段、侧栏出 Resp 节点 @smoke', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
 
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await page.getByTestId('resp.updateFields').click()
+    await expect(page.getByTestId('resp.json')).toBeVisible() // 更新后响应体不消失
+
+    // 首次更新（无旧字段）：直接执行并把请求编辑器切到「响应字段」分段
+    await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
+    const rows = page.getByTestId('resp.fields.row')
+    await expect(rows.first()).toBeVisible()
+    expect(await rows.count()).toBe(2) // flat=true / value=1
+    await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsUpdated', { n: 2 }))
+
+    // 给 value 字段（两次响应取值都为 1）填含义
+    const valueMeaning = page
+      .getByTestId('resp.fields.row')
+      .filter({ has: page.locator('.fp', { hasText: 'value' }) })
+      .getByTestId('resp.fields.meaning')
+      .locator('input')
+    await valueMeaning.fill('业务主体')
+    await valueMeaning.blur()
+    await page.waitForTimeout(700) // 含义去抖写盘（600ms）
+
+    // 再打同结构的 flat：字段已存在 → 弹覆盖确认（默认勾选继承说明）
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await page.getByTestId('resp.updateFields').click()
+    await expect(overwriteModal(page)).toBeVisible() // 覆盖确认
+    await page.getByTestId('resp.fieldsConfirm').click()
+    await expect(valueMeaning).toHaveValue('业务主体') // 路径与取值都一致 → 说明继承
+
+    // 换成 withArray（覆盖：flat/value 字段消失，items.* 出现）
     await sendUrl(page, app, '{{host}}/json/withArray')
     await page.getByTestId('resp.updateFields').click()
-    await expect(page.getByTestId('resp.json')).toBeVisible() // 回归：更新字段不切页签，响应体不消失
-    const rows = page.getByTestId('resp.fields.row')
-    await expect(rows).toHaveCount(0) // 响应体下方不再挂字段表（只在「响应字段」页签里）
-    await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsTab'))
-
-    await openRespTab(page, 'fields')
+    await expect(overwriteModal(page)).toBeVisible()
+    await page.getByTestId('resp.fieldsConfirm').click()
     await expect(rows.first()).toBeVisible()
-    const count = await rows.count()
-    expect(count).toBeGreaterThan(0) // 叶子字段：items.0.id / items.0.name / items.1.id / items.1.name / total
-    await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsAdded', { n: count }))
+    expect(await rows.count()).toBeGreaterThan(2) // total / items.0.id / items.0.name / items.1.* 
+    await expect(
+      page.getByTestId('resp.fields.row').filter({ has: page.locator('.fp', { hasText: 'value' }) }),
+    ).toHaveCount(0) // 覆盖：旧字段消失
 
-    // 标注含义后，换成字段更少的响应再更新一次
-    await page.getByTestId('resp.fields.meaning').first().locator('input').fill('业务主体')
-    await openRespTab(page, 'body')
+    // 取消分支：有旧字段时取消不覆盖
     await sendUrl(page, app, '{{host}}/json/fewer')
+    const arrayCount = await rows.count()
     await page.getByTestId('resp.updateFields').click()
-    await openRespTab(page, 'fields')
+    await overwriteModal(page).getByRole('button', { name: t('common.cancel') }).click()
+    await expect(rows).toHaveCount(arrayCount) // 取消后字段表不变
 
-    await expect(rows).toHaveCount(count) // 只追加：字段变少也不会删掉已有的
-    await expect(page.getByTestId('resp.fields.meaning').first().locator('input')).toHaveValue('业务主体')
-    await expect(page.locator('.n-message').last()).toContainText(t('resp.fieldsNoChange'))
+    // 取消后字段表停留在 fewer（覆盖未执行）：respdoc 段随 fewer 字段落盘，侧栏 Resp 节点仍在
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('respdoc')
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('fieldName: total')
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).not.toContain('业务主体')
+    // 若 api 分组处于折叠态则展开（默认是展开；仅当 ping 行不可见时点 caret，避免把展开的折叠掉）
+    const pingRows = page.locator('[data-testid="tree.row"][data-uid="33333333-3333-4333-8333-333333333333"]')
+    const pingVisible = await pingRows.count()
+    console.log('DEBUG ping rows:', pingVisible, await pingRows.evaluateAll((els) => els.map((e) => {
+      let p = e as HTMLElement
+      const hiddenBy: string[] = []
+      for (let cur = p.parentElement; cur && cur !== document.body; cur = cur.parentElement) {
+        if (getComputedStyle(cur).display === 'none') hiddenBy.push(cur.className + '/' + (cur as HTMLElement).dataset.testid)
+      }
+      return { kind: (e as HTMLElement).dataset.kind, vis: getComputedStyle(e).display, hiddenBy }
+    }))))
+    if (pingVisible === 0) {
+      const caret = page.locator('[data-testid="tree.row"][data-kind="folder"][data-path="api"] .caret')
+      console.log('DEBUG caret count/class:', await caret.count(), await caret.getAttribute('class'))
+      await caret.click()
+    }
+    await expect(page.locator('[data-testid="tree.row"][data-uid="33333333-3333-4333-8333-333333333333"]')).toBeVisible()
+    await expect(page.getByTestId('tree.resp.name')).toBeVisible()
 
-    // 字段含义存在本地存档（localStorage key 按请求 uid）
-    const stored = await page.evaluate((uid) => localStorage.getItem(`client.fieldmap.${uid}`), PING_UID)
-    expect(stored ?? '').toContain('业务主体')
-    expect(dir).toContain('collection-')
+    // 点侧栏 Resp 节点：定位到请求的「响应字段」分段
+    await page.getByTestId('tree.resp.name').click()
+    await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
+  })
+
+  test('[E23] 勾选取消继承：同路径取值变化时说明不继承', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await page.getByTestId('resp.updateFields').click()
+    const valueMeaning = page
+      .getByTestId('resp.fields.row')
+      .filter({ has: page.locator('.fp', { hasText: 'value' }) })
+      .getByTestId('resp.fields.meaning')
+      .locator('input')
+    await valueMeaning.fill('旧说明')
+    await valueMeaning.blur()
+    await page.waitForTimeout(700)
+
+    // 再打 flat：覆盖弹窗里取消勾选继承 → 同路径同值的说明也不沿用
+    await sendUrl(page, app, '{{host}}/json/flat')
+    await page.getByTestId('resp.updateFields').click()
+    await page.getByTestId('resp.fieldsInherit').uncheck()
+    await page.getByTestId('resp.fieldsConfirm').click()
+    await expect(valueMeaning).toHaveValue('')
   })
 
   test('[E23] 保存响应示例：落盘 / 同名去重 / 回看只读 / 删除进 .trash', async ({ page, app }) => {
@@ -122,8 +194,9 @@ test.describe('响应区：字段映射与响应示例', () => {
     await expect(page.getByTestId('resp.json')).toBeVisible() // 响应体
     await openRespTab(page, 'headers')
     await expect(page.getByTestId('resp.headerRow').first()).toBeVisible() // 响应头
-    await openRespTab(page, 'fields')
-    await expect(page.getByTestId('resp.fields.row').first()).toBeVisible() // 响应字段
+    // 响应字段在请求编辑器 Resp 分段（更新后自动切过去）
+    await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
+    await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
   })
 
   // 首次打开请求（尚未发送）时，响应区状态栏与「已保存的响应示例」下拉必须与发送后同一位置/样式，

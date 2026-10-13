@@ -7,7 +7,9 @@ import { NDropdown, NIcon } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import {
   AddOutline,
+  ChevronBackCircleOutline,
   ChevronBackOutline,
+  ChevronForwardCircleOutline,
   ChevronForwardOutline,
   CloseCircleOutline,
   CloseOutline,
@@ -15,7 +17,7 @@ import {
   LayersOutline,
   SaveOutline,
 } from '@vicons/ionicons5'
-import { computed, h, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
@@ -97,6 +99,66 @@ function onDrop(i: number, e: DragEvent): void {
   if (from < 0 || from === i) return
   emit('reorder', from, i)
 }
+
+// ---- 标签横向滚动：左右箭头 + 滚轮 + 激活项自动入视 ----
+const scroller = ref<HTMLElement | null>(null)
+const canLeft = ref(false)
+const canRight = ref(false)
+let resizeObs: ResizeObserver | undefined
+
+/** 一次切换的滚动距离：约 4 个标签宽，最小 160px。 */
+const scrollStep = 200
+
+function refreshArrows(): void {
+  const el = scroller.value
+  if (!el) return
+  canLeft.value = el.scrollLeft > 2
+  canRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+}
+
+function scrollBy(dir: -1 | 1): void {
+  scroller.value?.scrollBy({ left: dir * scrollStep, behavior: 'smooth' })
+}
+
+/** 鼠标滚轮纵向滚动时映射为标签栏横向滚动（标签太多排满时不必抓细滚动条）。 */
+function onWheel(e: WheelEvent): void {
+  const el = scroller.value
+  if (!el || Math.abs(e.deltaY) < 1) return
+  // 已经滚到边界且内容不溢出时放行，避免吞掉页面滚动
+  if (e.deltaY < 0 && el.scrollLeft <= 0) return
+  if (e.deltaY > 0 && el.scrollLeft + el.clientWidth >= el.scrollWidth - 1) return
+  e.preventDefault()
+  el.scrollBy({ left: e.deltaY, behavior: 'auto' })
+}
+
+/** 激活标签变化后自动滚到可见（新建/切换/关闭都适用）。 */
+function scrollActiveIntoView(): void {
+  void nextTick(() => {
+    const el = scroller.value
+    if (!el) return
+    const active = el.querySelector<HTMLElement>('.tab.active:not(.coll)')
+    active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    refreshArrows()
+  })
+}
+
+watch(() => props.tabs.length, () => void nextTick(refreshArrows))
+watch(() => props.activeKey, scrollActiveIntoView)
+
+onMounted(() => {
+  void nextTick(() => {
+    refreshArrows()
+    if (scroller.value && typeof ResizeObserver !== 'undefined') {
+      resizeObs = new ResizeObserver(refreshArrows)
+      resizeObs.observe(scroller.value)
+    }
+    window.addEventListener('resize', refreshArrows)
+  })
+})
+onBeforeUnmount(() => {
+  resizeObs?.disconnect()
+  window.removeEventListener('resize', refreshArrows)
+})
 </script>
 
 <template>
@@ -106,7 +168,13 @@ function onDrop(i: number, e: DragEvent): void {
       <span class="tt">{{ t('tab.collection') }}</span>
     </button>
 
-    <div class="tabs">
+    <!-- 标签排满溢出时的左右手动切换钮（不溢出自动隐藏） -->
+    <button v-show="canLeft" class="nav nav-left" type="button" data-testid="tab.scrollLeft"
+      :title="t('tab.scrollLeft')" @click="scrollBy(-1)">
+      <n-icon :component="ChevronBackCircleOutline" :size="16" />
+    </button>
+
+    <div ref="scroller" class="tabs" @scroll.passive="refreshArrows" @wheel="onWheel">
       <div
         v-for="(tab, i) in tabs"
         :key="tab.key"
@@ -138,6 +206,11 @@ function onDrop(i: number, e: DragEvent): void {
         </button>
       </div>
     </div>
+
+    <button v-show="canRight" class="nav nav-right" type="button" data-testid="tab.scrollRight"
+      :title="t('tab.scrollRight')" @click="scrollBy(1)">
+      <n-icon :component="ChevronForwardCircleOutline" :size="16" />
+    </button>
 
     <!-- 「＋」＝新建 HTTP 请求（gRPC 入口在侧栏：工具栏「＋」下拉 / 分组行菜单） -->
     <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
@@ -172,18 +245,49 @@ function onDrop(i: number, e: DragEvent): void {
 }
 
 .tabs {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: stretch;
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
+  scroll-behavior: smooth;
 }
 
 .tabs::-webkit-scrollbar {
   height: 0;
 }
 
+/* 左右切换钮：压在标签轨两端（不额外占布局位），有溢出方向才显示 */
+.nav {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: var(--app-panel);
+  color: var(--app-muted);
+  cursor: pointer;
+  padding: 2px 1px;
+  line-height: 0;
+}
+
+.nav:hover {
+  color: var(--app-accent);
+}
+
+.nav-left {
+  margin-right: -4px;
+}
+
+.nav-right {
+  margin-left: -4px;
+}
+
 .tab {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;

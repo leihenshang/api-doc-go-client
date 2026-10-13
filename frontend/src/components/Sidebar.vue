@@ -7,7 +7,7 @@ import { api } from '@/lib/ipc'
 import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
-import type { CollectionSummary, TreeNode } from '@/types'
+import type { CollectionSummary, RespTreeNode, TreeNode } from '@/types'
 import {
     AddOutline,
     ArrowDownOutline,
@@ -16,6 +16,7 @@ import {
     ChevronDownOutline,
     ChevronForwardOutline,
     CloseOutline,
+    CodeOutline,
     ContractOutline,
     CreateOutline,
     EllipsisHorizontalOutline,
@@ -69,6 +70,8 @@ const emit = defineEmits<{
   'open-collection': []
   /** 工具条「创建集合」：已选好父目录并填了名称，dir 为完整目标路径（不存在由 OpenCollection 初始化） */
   'create-collection': [dir: string]
+  /** 点击请求下的合成 Resp 子节点（uid=请求 uid，root=所属工作目录） */
+  'open-resp': [uid: string, root: string]
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
@@ -90,7 +93,7 @@ interface Row {
   root: string
   /** 根行（工作目录标题）：没有 node，不参与层级连接线 */
   isRoot: boolean
-  node: TreeNode | null
+  node: TreeNode | RespTreeNode | null
   depth: number
   /** 是否是父级（可见）子行里的最后一个：决定本行连接线画成 ├ 还是 └ */
   last: boolean
@@ -101,6 +104,22 @@ interface Row {
   lines: boolean[]
   /** 置顶收藏区（平铺展示，不是集合根的子行）：不参与连接线 */
   pinned?: boolean
+  /** 合成的 Resp 子节点（挂在带响应字段的请求叶子下；不落盘、不可拖） */
+  respChild?: boolean
+}
+
+/** 合成 Resp 子行（挂在请求叶子下，缩进/连接线按「目录的子行」同一套规则）。 */
+function makeRespRow(root: string, n: TreeNode, depth: number, lines: boolean[]): Row {
+  return {
+    root,
+    isRoot: false,
+    node: { type: 'resp', uid: n.uid, name: 'Resp', path: `${n.path}/__resp__` },
+    depth: depth + 1,
+    last: true,
+    // 请求叶子是其父级的最后一个可见后续不重要：连接线由其自身在父列上的短横线收口
+    lines: depth === 0 ? [] : [...lines, true],
+    respChild: true,
+  }
 }
 
 const INDENT = 16
@@ -287,7 +306,10 @@ function rootHasVisibleKids(root: string): boolean {
 
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
-  // H5：收藏的请求置顶展示（不改变磁盘顺序）；收藏按根隔离，置顶区只显示活动根的
+  // 各工作目录「响应字段表非空」的请求 uid 集合（CollectionInfo.respUids，随概要刷新）
+  const respSets: Record<string, Set<string>> = {}
+  for (const r of props.roots) respSets[r.root] = new Set(r.info.respUids ?? [])
+  // H5：收藏的请求置顶展示（不改变磁盘顺序）；置顶区只显示活动根的
   const favUids = coll.favSet
   const favRows: Row[] = []
   // lines 逐级下传：进入子层时把「本行还有后续兄弟」补进列尾，正好是子行的一列祖先竖线。
@@ -297,6 +319,10 @@ const rows = computed<Row[]>(() => {
     nodes.forEach((n, i) => {
       const last = i === nodes.length - 1
       out.push({ root, isRoot: false, node: n, depth, last, lines })
+      // 带响应字段表的请求叶子下挂一个合成 Resp 子节点（纯 UI 物，不落盘、不进 DnD）
+      if (n.type === 'request' && respSets[root]?.has(n.uid)) {
+        out.push(makeRespRow(root, n, depth, lines))
+      }
       if (n.type === 'folder' && n.children?.length && !isCollapsed(root, n.path)) {
         walk(root, n.children, depth + 1, depth === 0 ? [] : [...lines, !last])
       }
@@ -584,7 +610,7 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
     else if (key === 'subfolder') void startAdd(row.root, n.path)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'folder')
-  } else {
+  } else if (n.type === 'request') {
     if (key === 'fav') coll.toggleFav(n.uid)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'request')
@@ -592,16 +618,17 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
 }
 
 /** 删除二次确认（沿用全局 dialog，与弹窗确认风格一致）。 */
-function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request'): void {
+function confirmDelete(root: string, node: TreeNode | RespTreeNode, kind: 'folder' | 'request'): void {
+  const n = node as TreeNode
   dialog.warning({
     title: kind === 'folder' ? t('tree.delDir') : t('tree.delApi'),
     content:
       kind === 'folder'
-        ? t('tree.confirmDelFolder', { name: node.name })
-        : t('tree.confirmDelRequest', { name: node.name }),
+        ? t('tree.confirmDelFolder', { name: n.name })
+        : t('tree.confirmDelRequest', { name: n.name }),
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
-    onPositiveClick: () => (kind === 'folder' ? removeFolder(root, node) : removeRequest(root, node)),
+    onPositiveClick: () => (kind === 'folder' ? removeFolder(root, n) : removeRequest(root, n)),
   })
 }
 
@@ -638,14 +665,17 @@ let suppressClick = false
  * 规则：目标必须是分组或根；同根内分组不能移入自己或自己的后代（会成环）；
  * 跨工作目录两种都能搬：请求单搬、分组连同其下子分组与请求整棵搬（目标侧重建 + 源进 .trash）。
  */
-function canDrop(node: TreeNode, dragRoot: string, destRoot: string, destPath: string): boolean {
+function canDrop(node: TreeNode | RespTreeNode, dragRoot: string, destRoot: string, destPath: string): boolean {
+  if (node.type === 'resp') return false
   if (dragRoot !== destRoot) return true
   if (node.type === 'folder' && destPath === node.path) return false
   if (node.type === 'folder' && destPath.startsWith(node.path + '/')) return false
   return true
 }
 
-function onRowPointerDown(root: string, node: TreeNode, ev: PointerEvent): void {
+function onRowPointerDown(root: string, node: TreeNode | RespTreeNode, ev: PointerEvent): void {
+  // Resp 子节点是纯展示/入口行：不可拖动改目录
+  if (node.type === 'resp') return
   if (!dragEnabled.value || ev.button !== 0) return
   // 只排除「行内操作控件」：展开箭头、悬停动作按钮、重命名输入框、下拉与链接。
   // 注意不能一刀切排除所有 button —— 请求/分组的名字本身就是个 <button class="rname">，
@@ -756,7 +786,12 @@ function onPointerUp(ev: PointerEvent): void {
  * 行内控件（箭头 / 下拉 / 操作按钮 / 重命名输入框）自己处理点击，这里要放行，否则点「+」建子项时会顺带折展一次。
  * 点的是非活动根里的请求时，先把那一根切成活动根 —— 页签是按根分组的。
  */
-function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
+function onRowClick(root: string, node: TreeNode | RespTreeNode, ev: MouseEvent): void {
+  // 合成 Resp 子节点：打开所属请求并把请求编辑器定位到「响应字段」分段（不参与折展/拖动）
+  if (node.type === 'resp') {
+    emit('open-resp', node.uid, root)
+    return
+  }
   if (editing.value || suppressClick) return
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
@@ -1029,7 +1064,7 @@ watch(
               </span>
             </template>
 
-            <template v-else>
+            <template v-else-if="row.node!.type === 'request'">
               <method-tag :method="row.node!.method ?? 'GET'" />
               <n-input v-if="editing?.root === row.root && editing?.uid === row.node!.uid" v-model:value="editing.value"
                 size="tiny" class="rename" @keyup.enter="submitRename" @blur="submitRename"
@@ -1053,6 +1088,16 @@ watch(
                   </template>
                 </n-dropdown>
               </span>
+            </template>
+
+            <!-- 合成 Resp 子节点：点击打开所属请求并定位到「响应字段」分段 -->
+            <template v-else-if="row.node!.type === 'resp'">
+              <span class="resp-ico" data-testid="tree.resp.icon" :title="t('tree.respHint')">
+                <n-icon :component="CodeOutline" :size="12" />
+              </span>
+              <button class="rname resp-node" type="button" data-testid="tree.resp.name" :title="t('tree.respHint')">
+                {{ t('tree.respNode') }}
+              </button>
             </template>
           </div>
 
@@ -1418,6 +1463,33 @@ watch(
 .rename {
   flex: 1 1 auto;
   max-width: 190px;
+}
+
+/* Resp 子节点：图标 + 文案弱化一档（子叶的从属感），等宽小标签与请求名对齐 */
+.resp-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: var(--app-method-other);
+}
+
+.row:hover .resp-ico,
+.row.on .resp-ico {
+  color: var(--app-accent);
+}
+
+button.rname.resp-node {
+  text-align: left;
+  font-size: 12px;
+  color: var(--app-muted);
+  font-family: var(--app-mono);
+  letter-spacing: 0.3px;
+}
+
+button.rname.resp-node:hover {
+  color: var(--app-accent);
 }
 
 .actions {
