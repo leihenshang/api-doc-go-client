@@ -12,6 +12,7 @@ import {
   AddOutline,
   ArrowDownOutline,
   ArrowUpOutline,
+  CheckmarkOutline,
   ChevronDownOutline,
   ChevronForwardOutline,
   CloseOutline,
@@ -151,20 +152,40 @@ const searching = computed(() => keyword.value.trim() !== '')
 
 type SortMode = 'default' | 'asc' | 'desc'
 const sortMode = ref<SortMode>('default')
-const sortIcon = computed(
-  () => (sortMode.value === 'asc' ? ArrowUpOutline : sortMode.value === 'desc' ? ArrowDownOutline : SwapVerticalOutline),
-)
-const sortTitle = computed(() =>
-  sortMode.value === 'default'
-    ? t('sidebar.sortDefault')
-    : sortMode.value === 'asc'
-      ? t('sidebar.sortAsc')
-      : t('sidebar.sortDesc'),
-)
 
-/** 点一下循环：默认 → 升序 → 降序 → 默认。 */
-function cycleSort(): void {
-  sortMode.value = sortMode.value === 'default' ? 'asc' : sortMode.value === 'asc' ? 'desc' : 'default'
+/**
+ * 「···」菜单：创建集合 + 排序三态（当前项打勾 —— 与工具条「工作目录」菜单同一惯例：
+ * 勾选替换图标位）。下拉项统一「图标 + 文字」。
+ */
+const treeMenu = computed(() => [
+  { key: 'create', label: t('sidebar.createCollection'), icon: () => h(NIcon, { component: AddOutline }) },
+  { type: 'divider' as const, key: 'd-sort' },
+  {
+    key: 'sort:asc',
+    label: t('sidebar.sortAsc'),
+    icon: () => h(NIcon, { component: sortMode.value === 'asc' ? CheckmarkOutline : ArrowUpOutline }),
+  },
+  {
+    key: 'sort:desc',
+    label: t('sidebar.sortDesc'),
+    icon: () => h(NIcon, { component: sortMode.value === 'desc' ? CheckmarkOutline : ArrowDownOutline }),
+  },
+  {
+    key: 'sort:default',
+    label: t('sidebar.sortDefault'),
+    icon: () => h(NIcon, { component: sortMode.value === 'default' ? CheckmarkOutline : SwapVerticalOutline }),
+  },
+])
+
+function onTreeMenu(key: string | number): void {
+  if (key === 'create') {
+    void startCreate()
+    return
+  }
+  if (typeof key === 'string' && key.startsWith('sort:')) {
+    const mode = key.slice('sort:'.length)
+    if (mode === 'asc' || mode === 'desc' || mode === 'default') sortMode.value = mode
+  }
 }
 
 /**
@@ -865,20 +886,20 @@ watch(
 
 <template>
   <div class="sidebar">
-    <!-- 树工具条：打开集合 / 创建集合（图标），右侧为排序循环按钮 -->
+    <!-- 树工具条：打开集合（图标）+ 「···」菜单（创建集合 / 排序三态，当前排序打勾） -->
     <div class="ops">
       <button class="op" type="button" data-testid="tree.openCollection" :title="t('sidebar.openCollection')"
         @click="emit('open-collection')">
         <n-icon :component="FolderOpenOutline" :size="15" />
       </button>
-      <button class="op" type="button" data-testid="tree.createCollection" :title="t('sidebar.createCollection')"
-        @click="startCreate">
-        <n-icon :component="AddOutline" :size="15" />
-      </button>
       <span class="op-sp" />
-      <button class="op" type="button" data-testid="tree.sort" :title="sortTitle" @click="cycleSort">
-        <n-icon :component="sortIcon" :size="15" />
-      </button>
+      <n-dropdown trigger="click" placement="bottom-end" :options="treeMenu" @select="onTreeMenu">
+        <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同根行「···」） -->
+        <button class="op" type="button" data-testid="tree.ops.menu" :title="t('tree.more')"
+          :aria-label="t('tree.more')">
+          <n-icon :component="EllipsisHorizontalOutline" :size="15" />
+        </button>
+      </n-dropdown>
     </div>
 
     <div class="search">
@@ -911,7 +932,7 @@ watch(
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-              }}</span>
+            }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
