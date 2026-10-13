@@ -9,27 +9,27 @@ import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
 import {
-  AddOutline,
-  ArrowDownOutline,
-  ArrowUpOutline,
-  CheckmarkOutline,
-  ChevronDownOutline,
-  ChevronForwardOutline,
-  CloseOutline,
-  ContractOutline,
-  CreateOutline,
-  EllipsisHorizontalOutline,
-  ExpandOutline,
-  FolderOpenOutline,
-  GitNetworkOutline,
-  OpenOutline,
-  RefreshOutline,
-  Star,
-  StarOutline,
-  SwapVerticalOutline,
-  SyncOutline,
-  TerminalOutline,
-  TrashOutline
+    AddOutline,
+    ArrowDownOutline,
+    ArrowUpOutline,
+    CheckmarkOutline,
+    ChevronDownOutline,
+    ChevronForwardOutline,
+    CloseOutline,
+    ContractOutline,
+    CreateOutline,
+    EllipsisHorizontalOutline,
+    ExpandOutline,
+    FolderOpenOutline,
+    GitNetworkOutline,
+    OpenOutline,
+    RefreshOutline,
+    Star,
+    StarOutline,
+    SwapVerticalOutline,
+    SyncOutline,
+    TerminalOutline,
+    TrashOutline
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
 import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
@@ -43,6 +43,8 @@ const props = defineProps<{
   activeRoot: string
   /** 活动页签对应的请求 uid（行选中态 + 自动展开/滚动） */
   activeUid?: string
+  /** 页签点击信号：每点一次页签加一（重复点当前页签时 activeUid 不变，靠它触发滚动） */
+  revealTick?: number
   /** 正在同步的根（根行刷新按钮转圈） */
   busySyncRoots?: string[]
 }>()
@@ -857,10 +859,11 @@ function scrollToRow(root: string, uid: string): void {
   }
 }
 
-// tab 切换 → 集合树同步选中：展开（该根 / 祖先分组）并滚动到可见位置
+// 点页签（或切换页签）→ 集合树同步选中：展开（该根 / 祖先分组）并滚动到可见位置。
+// 同时监听 revealTick：重复点当前页签时 activeUid 不变，没有它就不会触发。
 watch(
-  () => props.activeUid,
-  async (uid) => {
+  [() => props.activeUid, () => props.revealTick],
+  async ([uid]) => {
     if (!uid) return
     const root = coll.activeRoot
     const item = props.roots.find((r) => r.root === root)

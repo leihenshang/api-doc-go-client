@@ -33,20 +33,20 @@ import type { MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import {
-  NButton,
-  NConfigProvider,
-  NForm,
-  NFormItem,
-  NIcon,
-  NInput,
-  NModal,
-  NSpin,
-  NTreeSelect,
-  darkTheme,
-  dateEnUS,
-  dateZhCN,
-  enUS,
-  zhCN
+    NButton,
+    NConfigProvider,
+    NForm,
+    NFormItem,
+    NIcon,
+    NInput,
+    NModal,
+    NSpin,
+    NTreeSelect,
+    darkTheme,
+    dateEnUS,
+    dateZhCN,
+    enUS,
+    zhCN
 } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -374,6 +374,16 @@ async function withoutDetailTransition<T>(fn: () => T | Promise<T>): Promise<T> 
 
 /** 详情区实际渲染的页签：有活动页签用它；切根瞬间没有活动页签时沿用上一个（避免闪概览）。 */
 const detailTab = computed(() => tabs.active ?? (switchingRoot.value ? stuckActive.value : null))
+
+/**
+ * 通知集合树「把选中行滚到可见」的信号：点页签一律加一 ——
+ * 重复点当前页签时 activeUid 没变，只靠 Sidebar 对 activeUid 的 watch 不会触发滚动。
+ */
+const treeRevealTick = ref(0)
+function onTabSelect(key: string): void {
+  tabs.setActive(key)
+  treeRevealTick.value++
+}
 
 /** 侧栏/工具条点击某个根：切成活动根，并把标签栏换成该根的会话。 */
 async function activateRoot(root: string): Promise<void> {
@@ -1081,7 +1091,7 @@ watch(
           <div class="body">
             <aside class="side">
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
-                :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
+                :reveal-tick="treeRevealTick" :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
                 @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
                 @new-request="newDraft" @new-grpc-request="newGrpcDraft" @import-curl="openCurl"
                 @sync="openSyncSettings()" @sync-root="syncRootNow" @open-collection="openCollection('')"
@@ -1093,7 +1103,7 @@ watch(
               :title="t('sidebar.resizeHint')" @pointerdown="startSideResize" />
 
             <main class="main">
-              <tab-bar :tabs="tabs.tabs" :active-key="tabs.activeKey" @select="tabs.setActive($event)"
+              <tab-bar :tabs="tabs.tabs" :active-key="tabs.activeKey" @select="onTabSelect"
                 @select-overview="tabs.setActive('')" @close="requestClose($event)" @new="newDraft()"
                 @reorder="(from: number, to: number) => tabs.reorder(from, to)" @command="onTabCommand" />
 
