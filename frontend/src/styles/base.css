@@ -223,6 +223,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* md-editor-v3 的 markdown 主题（@vavt/markdown-theme，经 preview.css/style.css 的
+   @import 打包，且排在 base.css 之后）把代码块头部吸顶条写成 sticky + z-index:10000，
+   高于 naive-ui 弹窗的默认层级（约 2000 量级）—— 打开全局设置等弹窗时，文档里滚过的
+   代码条会浮在弹窗上面。这里压回 10：它只需在自己的滚动容器里盖住普通文档流内容，
+   10 足够且不再越权压弹窗。body 前缀提一级优先级，保证盖过主题里的同选择器规则。 */
+body .md-editor-preview .md-editor-code .md-editor-code-head {
+  z-index: 10;
+}
+
 .mono {
   font-family: var(--app-mono);
 }
