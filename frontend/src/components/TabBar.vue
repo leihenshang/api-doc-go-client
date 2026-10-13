@@ -104,6 +104,8 @@ function onDrop(i: number, e: DragEvent): void {
 const scroller = ref<HTMLElement | null>(null)
 const canLeft = ref(false)
 const canRight = ref(false)
+/** 标签是否已排满到需要横向滚动（决定滚动钮与轨道末尾留白的显示）。 */
+const overflow = ref(false)
 let resizeObs: ResizeObserver | undefined
 
 /** 一次切换的滚动距离：约 4 个标签宽，最小 160px。 */
@@ -114,6 +116,7 @@ function refreshArrows(): void {
   if (!el) return
   canLeft.value = el.scrollLeft > 2
   canRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+  overflow.value = canLeft.value || canRight.value
 }
 
 function scrollBy(dir: -1 | 1): void {
@@ -205,16 +208,19 @@ onBeforeUnmount(() => {
           <n-icon :component="CloseOutline" :size="13" />
         </button>
       </div>
+
+      <!-- 「＋」＝新建 HTTP 请求：常驻标签末尾，紧贴最后一个标签（随标签一起滚） -->
+      <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
+        <n-icon :component="AddOutline" :size="16" />
+      </button>
+
+      <!-- 溢出时右滚动钮会压在轨道右端，末尾留白保证「＋」完整可见 -->
+      <div v-if="overflow" class="end-gap" aria-hidden="true" />
     </div>
 
     <button v-show="canRight" class="nav nav-right" type="button" data-testid="tab.scrollRight"
       :title="t('tab.scrollRight')" @click="scrollBy(1)">
       <n-icon :component="ChevronForwardCircleOutline" :size="16" />
-    </button>
-
-    <!-- 「＋」＝新建 HTTP 请求（gRPC 入口在侧栏：工具栏「＋」下拉 / 分组行菜单） -->
-    <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
-      <n-icon :component="AddOutline" :size="16" />
     </button>
 
     <!-- 右键 tab 的上下文菜单（手动定位到鼠标处；点外面自动收起） -->
@@ -389,5 +395,10 @@ onBeforeUnmount(() => {
 
 .add:hover {
   color: var(--app-accent);
+}
+
+/* 标签溢出时右滚动钮压在轨道右端，末尾留白让「＋」完整可见 */
+.end-gap {
+  flex: 0 0 18px;
 }
 </style>
