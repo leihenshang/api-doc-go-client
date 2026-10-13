@@ -3,12 +3,15 @@
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
+import { api } from '@/lib/ipc'
 import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
 import {
   AddOutline,
+  ArrowDownOutline,
+  ArrowUpOutline,
   ChevronDownOutline,
   ChevronForwardOutline,
   CloseOutline,
@@ -22,12 +25,13 @@ import {
   RefreshOutline,
   Star,
   StarOutline,
+  SwapVerticalOutline,
   SyncOutline,
   TerminalOutline,
   TrashOutline
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
-import { NDropdown, NIcon, NInput } from 'naive-ui'
+import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
 import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -58,6 +62,10 @@ const emit = defineEmits<{
   sync: []
   /** 点根行刷新：直接同步指定根，不切换活动根 */
   'sync-root': [root: string]
+  /** 工具条「打开集合」：弹出目录选择（App 侧统一走 openCollection 流程） */
+  'open-collection': []
+  /** 工具条「创建集合」：已选好父目录并填了名称，dir 为完整目标路径（不存在由 OpenCollection 初始化） */
+  'create-collection': [dir: string]
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
@@ -139,6 +147,82 @@ async function onRootMenu(root: string, key: string | number): Promise<void> {
 
 const searching = computed(() => keyword.value.trim() !== '')
 
+// ---- 排序：关（磁盘顺序）/ 名称升序 / 名称降序，作用于每一层的同级条目 ----
+
+type SortMode = 'default' | 'asc' | 'desc'
+const sortMode = ref<SortMode>('default')
+const sortIcon = computed(
+  () => (sortMode.value === 'asc' ? ArrowUpOutline : sortMode.value === 'desc' ? ArrowDownOutline : SwapVerticalOutline),
+)
+const sortTitle = computed(() =>
+  sortMode.value === 'default'
+    ? t('sidebar.sortDefault')
+    : sortMode.value === 'asc'
+      ? t('sidebar.sortAsc')
+      : t('sidebar.sortDesc'),
+)
+
+/** 点一下循环：默认 → 升序 → 降序 → 默认。 */
+function cycleSort(): void {
+  sortMode.value = sortMode.value === 'default' ? 'asc' : sortMode.value === 'asc' ? 'desc' : 'default'
+}
+
+/**
+ * 排序返回**新数组**（绝不改动 store 里的树）：分组在前、其余条目（请求/文档）在后，
+ * 各自按名称排（localeCompare 中文也能正确排序）；子层递归同样处理。
+ */
+function sortTree(nodes: TreeNode[]): TreeNode[] {
+  if (sortMode.value === 'default') return nodes
+  const dir = sortMode.value === 'asc' ? 1 : -1
+  const byName = (a: TreeNode, b: TreeNode): number => a.name.localeCompare(b.name, 'zh-Hans-CN') * dir
+  const folders: TreeNode[] = []
+  const leaves: TreeNode[] = []
+  for (const n of nodes) {
+    const copy = n.children?.length ? { ...n, children: sortTree(n.children) } : n
+      ; (copy.type === 'folder' ? folders : leaves).push(copy)
+  }
+  folders.sort(byName)
+  leaves.sort(byName)
+  return [...folders, ...leaves]
+}
+
+// ---- 顶部工具条：打开集合 / 创建集合 ----
+
+const createShow = ref(false)
+const createName = ref('')
+const createParent = ref('')
+
+/** 创建集合：先选父目录（系统目录对话框自带「新建文件夹」），再填名称；目录不存在由 OpenCollection 初始化。 */
+async function startCreate(): Promise<void> {
+  let parent = ''
+  try {
+    parent = await api.pickDirectory()
+  } catch {
+    return // 系统对话框都打不起来：静默（无可用环境时按钮本就不该有反应）
+  }
+  if (!parent) return // 用户取消
+  createParent.value = parent
+  createName.value = ''
+  createShow.value = true
+}
+
+/** 拼目标目录：去掉父目录尾部分隔符再拼接（/ 或 \ 由 Go 侧 filepath.Abs 统一处理）。 */
+function joinDir(parent: string, name: string): string {
+  return parent.replace(/[\\/]+$/, '') + '/' + name
+}
+
+/** 名称非法时返回 false：naive-ui dialog 收到 false 不关闭，用户可直接改。 */
+function confirmCreate(): boolean {
+  const name = createName.value.trim()
+  if (!name || /[\\/]/.test(name)) {
+    message.warning(t('sidebar.createNameInvalid'))
+    return false
+  }
+  emit('create-collection', joinDir(createParent.value, name))
+  createShow.value = false
+  return true
+}
+
 // 搜索：命中请求保留其祖先分组
 function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
   const out: TreeNode[] = []
@@ -155,9 +239,10 @@ function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
   return out
 }
 
-/** 每个根的树（搜索时按关键字过滤：命中的请求保留其祖先分组）。 */
+/** 每个根的树（搜索时按关键字过滤：命中的请求保留其祖先分组；排序开启时深排序副本）。 */
 function treeOf(root: CollectionSummary): TreeNode[] {
-  return searching.value ? filterTree(root.info.tree, keyword.value.trim().toLowerCase()) : root.info.tree
+  const base = searching.value ? filterTree(root.info.tree, keyword.value.trim().toLowerCase()) : root.info.tree
+  return sortTree(base)
 }
 
 /** 分组折叠态按「根 + 路径」记：两个根里可能有同路径的分组（拷贝出来的集合）。 */
@@ -780,6 +865,22 @@ watch(
 
 <template>
   <div class="sidebar">
+    <!-- 树工具条：打开集合 / 创建集合（图标），右侧为排序循环按钮 -->
+    <div class="ops">
+      <button class="op" type="button" data-testid="tree.openCollection" :title="t('sidebar.openCollection')"
+        @click="emit('open-collection')">
+        <n-icon :component="FolderOpenOutline" :size="15" />
+      </button>
+      <button class="op" type="button" data-testid="tree.createCollection" :title="t('sidebar.createCollection')"
+        @click="startCreate">
+        <n-icon :component="AddOutline" :size="15" />
+      </button>
+      <span class="op-sp" />
+      <button class="op" type="button" data-testid="tree.sort" :title="sortTitle" @click="cycleSort">
+        <n-icon :component="sortIcon" :size="15" />
+      </button>
+    </div>
+
     <div class="search">
       <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')" />
     </div>
@@ -810,7 +911,7 @@ watch(
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-            }}</span>
+              }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -873,8 +974,11 @@ watch(
               <!-- 必须 .stop：不用它的话，箭头自己的折展会先把图标节点换掉，
                    同一个 click 冒泡到行时 ev.target 已是脱离 DOM 的旧节点 → 行里「排除 .caret」判不出来
                    → 又折展一次，等于没反应（实测）。 -->
-              <!-- 没有下级（子分组 / 请求都为空）的目录不画展开图标：它无可展开，与叶子一致 -->
-              <button v-if="!!row.node!.children?.length" class="caret" data-testid="tree.row.caret" :title="t('tree.expandAll')"
+              <!-- 目录行恒显示展开图标：本设计里目录行没有文件夹图标，caret 是「这是目录」的唯一
+                   视觉标记。空目录显示**暗态禁用**箭头 —— 保留「这是目录」的辨识度，
+                   又不暗示点开有内容（曾完全隐藏过，实测空目录像残缺的叶子行，还原）。 -->
+              <button class="caret" data-testid="tree.row.caret" :class="{ empty: !row.node!.children?.length }"
+                :disabled="!row.node!.children?.length" :title="t('tree.expandAll')"
                 @click.stop="toggle(row.root, row.node!.path)">
                 <n-icon :component="isCollapsed(row.root, row.node!.path) ? ChevronForwardOutline : ChevronDownOutline"
                   :size="13" />
@@ -948,6 +1052,17 @@ watch(
         </template>
       </template>
     </div>
+
+    <!-- 创建集合：名称即目录名；确认后 emit 给 App 走统一 openCollection 流程 -->
+    <n-modal v-model:show="createShow" preset="dialog" type="info" :title="t('sidebar.createTitle')"
+      :positive-text="t('common.create')" :negative-text="t('common.cancel')" @positive-click="confirmCreate"
+      @negative-click="createShow = false" @close="createShow = false" @esc="createShow = false">
+      <div class="cform">
+        <span class="clb">{{ t('sidebar.createName') }}</span>
+        <n-input v-model:value="createName" size="small" :placeholder="t('sidebar.createNamePh')" autofocus
+          @keyup.enter="confirmCreate" />
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -961,6 +1076,50 @@ watch(
 
 .search {
   padding: 0 8px 6px 10px;
+}
+
+/* 树工具条：打开 / 创建集合 + 排序（右侧）。图标钮 hover 出浅底，与树行操作钮观感一致 */
+.ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 0 8px;
+}
+
+.op {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  padding: 0;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.op:hover {
+  background: var(--app-row-hover);
+  color: var(--app-text);
+}
+
+.op-sp {
+  flex: 1 1 auto;
+}
+
+/* 创建集合弹窗：标签 + 名称输入一行排布 */
+.cform {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clb {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--app-text-2);
 }
 
 .tree {
@@ -1200,6 +1359,12 @@ watch(
   padding: 0;
   color: var(--app-muted);
   cursor: pointer;
+}
+
+/* 空目录：暗态箭头，占位与正常目录一致（行首对齐不跳动），不可点 */
+.caret:disabled {
+  color: var(--app-placeholder);
+  cursor: default;
 }
 
 .fname {
