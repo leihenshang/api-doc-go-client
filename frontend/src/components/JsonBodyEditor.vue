@@ -153,9 +153,8 @@ function sync(ev: Event): void {
   outline: none;
 }
 
-.ta::selection {
-  background: var(--app-active);
-}
+/* 选区不用在这里写：全局 ::selection（base.css）是半透明的品牌绿，
+   下层 .hl 的彩色文字能透出来；这里若写不透明底色会盖住文字（选中即消失）。 */
 
 .hl {
   color: var(--app-text);
