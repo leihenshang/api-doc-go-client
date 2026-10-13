@@ -215,6 +215,66 @@ function startResize(e: PointerEvent): void {
   window.addEventListener('pointercancel', stop)
 }
 
+// ---- 侧栏拖宽：min = 根标题自然宽（标题不被截断），max = 页面 50%；松手记 localStorage ----
+
+const SIDE_W_KEY = 'apidoc.sideW'
+/** 标题测不出来时的兜底最小宽（与默认 260 同量级） */
+const SIDE_W_MIN_FALLBACK = 200
+/** 根行右侧操作区的固定占位（同步钮 + ··· 钮 + 行内边距）：actions hover 才渲染，量不到，按占位估 */
+const SIDE_W_ROW_CHROME = 8 + 16 + 6 + 44 + 16
+
+function minSideWidth(): number {
+  let min = SIDE_W_MIN_FALLBACK
+  const rows = document.querySelectorAll<HTMLElement>('.side .row.root')
+  if (!rows.length) return min
+  // .rname 有 ellipsis，被截断后 DOM 读不到完整文本宽 —— 用 canvas 按标题字体量
+  const ctx = document.createElement('canvas').getContext('2d')
+  if (!ctx) return min
+  rows.forEach((row) => {
+    const name = row.querySelector<HTMLElement>('.rname')
+    if (!name) return
+    ctx.font = getComputedStyle(name).font
+    let w = SIDE_W_ROW_CHROME + ctx.measureText(name.textContent ?? '').width
+    const badge = row.querySelector<HTMLElement>('.badge')
+    if (badge) w += badge.offsetWidth + 4
+    min = Math.max(min, Math.ceil(w))
+  })
+  return min
+}
+
+function maxSideWidth(): number {
+  return Math.round(document.documentElement.clientWidth / 2)
+}
+
+/** 写入 --app-side-w（TitleBar 左侧标识区引用同一变量，宽度变化后自动保持对齐）。 */
+function applySideWidth(w: number): void {
+  const clamped = Math.min(maxSideWidth(), Math.max(minSideWidth(), Math.round(w)))
+  document.documentElement.style.setProperty('--app-side-w', `${clamped}px`)
+}
+
+function startSideResize(e: PointerEvent): void {
+  e.preventDefault()
+  const move = (ev: PointerEvent): void => applySideWidth(ev.clientX)
+  const stop = (): void => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+    document.body.classList.remove('dragging', 'col', 'side-resizing')
+    const cur = parseFloat(document.documentElement.style.getPropertyValue('--app-side-w'))
+    if (cur > 0) localStorage.setItem(SIDE_W_KEY, String(cur))
+  }
+  document.body.classList.add('dragging', 'col', 'side-resizing')
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop)
+  window.addEventListener('pointercancel', stop)
+}
+
+/** 窗口缩放后把已保存的侧栏宽夹回 [标题宽, 50%]（如放大后再缩小窗口）。 */
+function clampSideWidth(): void {
+  const saved = Number(localStorage.getItem(SIDE_W_KEY))
+  if (saved > 0) applySideWidth(saved)
+}
+
 // ---- 打开 / 切换工作目录（多根）----
 
 /** 恢复上限的兜底值：正常走设置项 `restoreLimit`（默认 8），设置没读到才用它。 */
@@ -572,6 +632,9 @@ function onHotkey(e: KeyboardEvent): void {
 onMounted(() => {
   const settingsReady = settings.load()
   window.addEventListener('keydown', onHotkey)
+  // 侧栏宽：应用上次拖过的值（夹取到当前 [标题宽, 50%]），窗口缩放时同步夹取
+  clampSideWidth()
+  window.addEventListener('resize', clampSideWidth)
   // 关窗前 flush 未保存改动（自动保存模式下补上防抖未触发的最后编辑）；
   // 手动保存模式下不写盘（未保存改动本就该显式保存留档）；新建草稿没有磁盘副本，始终同步一份到 localStorage
   window.addEventListener('beforeunload', () => {
@@ -609,6 +672,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onHotkey)
+  window.removeEventListener('resize', clampSideWidth)
   if (syncTimer) clearInterval(syncTimer)
   if (mcpTimer) clearInterval(mcpTimer)
 })
@@ -1003,7 +1067,7 @@ watch(
         <!-- 集合 / 环境 / 本地搜索并入标题栏（原先独占一行的工具栏） -->
         <toolbar v-if="coll.ready && coll.info" :name="coll.name" :dir="coll.dir" :envs="coll.info.envs"
           :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
-          @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')" @reload="coll.reload()"
+          @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')"
           @palette="showPalette = true" @manage-env="showEnvManager = true" @update:currentEnv="pickEnv" />
       </title-bar>
 
@@ -1015,8 +1079,13 @@ watch(
                 :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
                 @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
                 @new-request="newDraft" @new-grpc-request="newGrpcDraft" @import-curl="openCurl"
-                @sync="openSyncSettings()" @sync-root="syncRootNow" />
+                @sync="openSyncSettings()" @sync-root="syncRootNow" @open-collection="openCollection('')"
+                @create-collection="openCollection" />
             </aside>
+
+            <!-- 侧栏拖宽手柄：夹在 [标题自然宽, 页面 50%] 之间，松手记入 localStorage -->
+            <div class="side-splitter" role="separator" aria-orientation="vertical" data-testid="side.splitter"
+              :title="t('sidebar.resizeHint')" @pointerdown="startSideResize" />
 
             <main class="main">
               <tab-bar :tabs="tabs.tabs" :active-key="tabs.activeKey" @select="tabs.setActive($event)"
@@ -1055,8 +1124,8 @@ watch(
                   </div>
                 </div>
 
-                <overview v-else :info="coll.info" @new-request="newDraft()"
-                  @import="showImport = true" @export="exportDoc($event)" @mock="showMock = true" />
+                <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
+                  @export="exportDoc($event)" @mock="showMock = true" />
               </transition>
             </main>
           </div>
@@ -1100,7 +1169,7 @@ watch(
         <template #footer>
           <div class="modal-ft">
             <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
-            }}</n-button>
+              }}</n-button>
             <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{
               t('prompt.discard') }}</n-button>
             <n-button size="small" type="primary" :disabled="!draftForm.name.trim()" :loading="savingDraft"
@@ -1171,6 +1240,23 @@ watch(
   border-right: 1px solid var(--app-border);
   overflow: hidden;
   background: var(--app-sidebar);
+}
+
+/* 侧栏拖宽手柄：负 margin 覆盖在侧栏右缘上（不占布局宽，主区起点仍在 --app-side-w，
+   标题栏槽位对齐不被破坏），悬停/拖动显出细线 */
+.side-splitter {
+  flex: 0 0 5px;
+  margin-left: -5px;
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.side-splitter:hover,
+body.side-resizing .side-splitter {
+  background: var(--app-accent-tint);
 }
 
 .main {

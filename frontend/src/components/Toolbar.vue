@@ -8,7 +8,6 @@ import {
   ChevronDownOutline,
   FolderOpenOutline,
   LayersOutline,
-  RefreshOutline,
   SearchOutline
 } from '@vicons/ionicons5'
 import { NDropdown, NIcon } from 'naive-ui'
@@ -31,7 +30,6 @@ const props = defineProps<{
 // 模板里一律用 props.xxx 取值。
 const emit = defineEmits<{
   'open-other': []
-  reload: []
   palette: []
   'manage-env': []
   /** 切换活动根（多根并存） */
@@ -73,7 +71,6 @@ const menu = computed(() => [
     ? [{ type: 'group' as const, key: 'recent', label: t('toolbar.recentDirs'), children: recentOptions.value }]
     : []),
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
-  { key: 'reload', label: t('toolbar.reload'), icon: () => h(NIcon, { component: RefreshOutline }) },
 ])
 
 function onMenu(key: string | number): void {
@@ -86,7 +83,6 @@ function onMenu(key: string | number): void {
     return
   }
   if (key === 'open') emit('open-other')
-  else if (key === 'reload') emit('reload')
 }
 </script>
 
