@@ -50,6 +50,9 @@ const hl = ref<HTMLElement | null>(null)
 const wrap = ref<HTMLElement | null>(null)
 const el = ref<HTMLInputElement | null>(null)
 const tip = ref<Tip | null>(null)
+const sugEl = ref<HTMLElement | null>(null)
+/** 联想浮层的横向位置（跟随光标，见 updateSugPos） */
+const sugLeft = ref(0)
 
 // ---- 变量自动提示（输入 {{ 前缀后弹出候选，Tab 录入）----
 // 候选 = 使用方传入的环境变量名 + 内置动态变量；不传 suggestions 则整体禁用。
@@ -79,6 +82,43 @@ function varPrefixAt(text: string, sel: number): string | null {
   return prefix
 }
 
+// ---- 光标位置测量：镜像元素与 input 同字体，量「光标前文本」的宽度 ----
+// 浮层要落在光标处而不是固定在输入框左端：URL 往往很长，固定左侧会离输入位置很远。
+let mirror: HTMLDivElement | null = null
+
+/** 光标相对 .vw（浮层的定位祖先）左边缘的横向位置（已扣 input 横向滚动）。 */
+function caretX(input: HTMLInputElement): number {
+  const box = wrap.value
+  if (!box) return 0
+  const cs = getComputedStyle(input)
+  if (!mirror) {
+    mirror = document.createElement('div')
+    mirror.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;white-space:pre;'
+    mirror.style.fontFamily = cs.fontFamily
+    mirror.style.fontSize = cs.fontSize
+    mirror.style.fontWeight = cs.fontWeight
+    mirror.style.letterSpacing = cs.letterSpacing
+    input.parentElement?.appendChild(mirror)
+  }
+  mirror.textContent = input.value.slice(0, input.selectionStart ?? 0)
+  const boxRect = box.getBoundingClientRect()
+  const inputRect = input.getBoundingClientRect()
+  const textW = mirror.offsetWidth
+  return inputRect.left - boxRect.left + parseFloat(cs.paddingLeft) + textW - input.scrollLeft
+}
+
+/** 把联想浮层挪到光标正下方；右端超出容器时贴右缘收住，保证浮层完整可见。 */
+async function updateSugPos(): Promise<void> {
+  const input = el.value
+  const box = wrap.value
+  if (!input || !box) return
+  const x = Math.max(0, caretX(input))
+  sugLeft.value = x // 先落一个粗略值，避免首帧闪回上次位置
+  await nextTick() // 等浮层渲染出来才能量它的宽度
+  const w = sugEl.value?.offsetWidth ?? Math.min(160, box.clientWidth)
+  sugLeft.value = Math.min(x, Math.max(0, box.clientWidth - w))
+}
+
 function openSuggest(): void {
   const input = el.value
   if (!input || !(props.suggestions?.length)) return
@@ -97,6 +137,7 @@ function openSuggest(): void {
   sugs.value = list
   sugHi.value = sugOpen.value ? Math.min(sugHi.value, list.length - 1) : 0
   sugOpen.value = true
+  void updateSugPos()
 }
 
 async function applySuggestion(): Promise<void> {
@@ -148,6 +189,16 @@ function onBlur(): void {
   tip.value = null
 }
 
+// 左右方向键 / Home / End / 点击都会移动光标：浮层开着时跟着挪（默认行为在 keyup 后才生效）
+function onKeyup(e: KeyboardEvent): void {
+  if (!sugOpen.value) return
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') void updateSugPos()
+}
+
+function onClick(): void {
+  if (sugOpen.value) void updateSugPos()
+}
+
 const parts = computed<Part[]>(() => {
   const out: Part[] = []
   const re = /\{\{[^{}]*\}\}/g
@@ -163,9 +214,10 @@ const parts = computed<Part[]>(() => {
   return out
 })
 
-// 高亮层不随 input 滚动，需手动同步横向偏移
+// 高亮层不随 input 滚动，需手动同步横向偏移；联想浮层同理（光标可视位置变了）
 function sync(): void {
   if (hl.value && el.value) hl.value.scrollLeft = el.value.scrollLeft
+  if (sugOpen.value) void updateSugPos()
 }
 
 function onInput(e: Event): void {
@@ -241,15 +293,15 @@ function onLeave(): void {
         </div>
         <input ref="el" v-bind="$attrs" class="in mono" :value="modelValue" spellcheck="false" autocomplete="off"
           @input="onInput" @scroll="sync" @mousemove="onMove" @mouseleave="onLeave" @blur="onBlur"
-          @keydown="onKeydown" />
+          @keydown="onKeydown" @keyup="onKeyup" @click="onClick" />
       </div>
       <span v-if="$slots.suffix" class="suffix">
         <slot name="suffix" />
       </span>
     </div>
 
-    <!-- 变量自动提示浮层：光标落在 {{… 内时给出候选，Tab/Enter 录入 -->
-    <div v-if="sugOpen" class="sug mono" data-testid="var.suggest">
+    <!-- 变量自动提示浮层：光标落在 {{… 内时给出候选，Tab/Enter 录入；位置跟随光标（sugLeft） -->
+    <div ref="sugEl" v-if="sugOpen" class="sug mono" :style="{ left: `${sugLeft}px` }" data-testid="var.suggest">
       <div v-for="(s, i) in sugs" :key="s" class="sug-item" :class="{ on: i === sugHi }" data-testid="var.suggest.item"
         @mouseenter="sugHi = i" @mousedown.prevent="applySuggestion">
         {{ s }}
@@ -407,7 +459,7 @@ function onLeave(): void {
   pointer-events: none;
 }
 
-/* 变量自动提示浮层：定位在输入框下方，可溢出输入框（.vw 不裁切） */
+/* 变量自动提示浮层：落在光标正下方（left 由内联样式按光标位置计算），可溢出输入框（.vw 不裁切） */
 .sug {
   position: absolute;
   top: calc(var(--vi-h, 28px) + 4px);

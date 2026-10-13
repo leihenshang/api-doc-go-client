@@ -1,7 +1,7 @@
-// 批次1 功能点：G6 会话恢复 / G11 快捷键 / G5 取消发送 / H3 Cookie 面板 / G9 撤销重做。
+// 批次1 功能点：G6 会话恢复 / G11 快捷键 / G5 取消发送 / H3 Cookie 面板 / G9 撤销重做 / G14 页签与集合树联动。
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, reopenApp, send, treeRowByUid } from '../helpers/ui'
+import { openCollection, openRequest, reopenApp, treeRow } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 const PONG_UID = '88888888-8888-4888-8888-888888888888'
@@ -73,5 +73,39 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
     await expect(url).toHaveValue('http://example.com/one')
     await page.keyboard.press('Control+Shift+z')
     await expect(url).toHaveValue('http://example.com/two')
+  })
+
+  // 重复点当前页签时 activeUid 不变：靠 App 传给 Sidebar 的 revealTick 触发滚动（只 watch uid 会漏）
+  test('[G14] 点页签后集合树把选中行滚到可见（含重复点当前页签）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    // 铺 40 条请求把树撑出真实滚动条（夹具只有几行，800px 视口里根本滚不动）
+    for (let i = 0; i < 40; i++) await app.ipc('CreateRequest', 'api', `gen-${i}`, 'GET')
+    await app.ipc('ReloadCollection')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await openRequest(page, 'gen-39')
+
+    const inView = async (name: string): Promise<boolean> => {
+      const r = await treeRow(page, name).boundingBox()
+      const t = await page.locator('.tree').boundingBox()
+      return !!r && !!t && r.y >= t.y - 1 && r.y + r.height <= t.y + t.height + 1
+    }
+    const scrollTree = (to: 'top' | 'bottom'): Promise<void> =>
+      page.evaluate((w) => {
+        const el = document.querySelector('.tree') as HTMLElement
+        el.scrollTop = w === 'top' ? 0 : el.scrollHeight
+      }, to)
+
+    // 树滚到顶：底部的 gen-39 出视野；重复点它自己的页签也要滚回来
+    await scrollTree('top')
+    expect(await inView('gen-39')).toBe(false)
+    await page.getByTestId('tab.item').filter({ hasText: 'gen-39' }).click()
+    await expect.poll(() => inView('gen-39')).toBe(true)
+
+    // 树滚到底：顶部的 ping 出视野；切到 ping 页签滚回去
+    await scrollTree('bottom')
+    expect(await inView('ping')).toBe(false)
+    await page.getByTestId('tab.item').filter({ hasText: 'ping' }).click()
+    await expect.poll(() => inView('ping')).toBe(true)
   })
 })
