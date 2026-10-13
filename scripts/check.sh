@@ -58,6 +58,9 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "L0-5/5 i18n key 一致性"
   (cd "$ROOT/frontend" && npm run --silent i18n:check)
 
+  step "L0-6/6 前后端模型契约门禁（type-contract）"
+  (cd "$ROOT/frontend" && node scripts/type-contract.mjs)
+
   step "L1 go test ./...（含集合文件层/执行器/e2e 夹具/配置/历史/Cookie 单测）"
   (cd "$ROOT" && go test ./...)
 fi

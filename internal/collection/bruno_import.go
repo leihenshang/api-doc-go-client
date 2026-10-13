@@ -97,17 +97,43 @@ func (c *Collection) ImportBruno(srcDir string) (*ImportSummary, error) {
 func parseBru(data []byte) (*Request, string, bool) {
 	lines := strings.Split(string(data), "\n")
 	var (
-		name    string
-		method  string
-		url     string
-		docs    string
-		section string
-		params  []KV
-		headers []KV
-		inDocs  bool
+		name      string
+		method    string
+		url       string
+		docs      string
+		section   string
+		params    []KV
+		headers   []KV
+		inDocs    bool
+		bodyType  string // "json" | "text"（form/multipart 暂不解析）
+		bodyBuf   strings.Builder
+		inBody    bool
+		fenceSeen bool // 是否已见到正文起始三引号
 	)
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		// body 段：body:json / body:text，正文用 ''' 包裹（Bruno 语法）
+		if !inBody && (trimmed == "body:json" || trimmed == "body:text") {
+			bodyType = strings.TrimPrefix(trimmed, "body:")
+			inBody = true
+			fenceSeen = false
+			continue
+		}
+		if inBody {
+			if strings.HasPrefix(trimmed, "'''") {
+				if fenceSeen {
+					inBody = false // 结束围栏
+				} else {
+					fenceSeen = true
+				}
+				continue
+			}
+			if fenceSeen {
+				bodyBuf.WriteString(line)
+				bodyBuf.WriteByte('\n')
+			}
+			continue
+		}
 		// 节标题
 		if strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, " ") && !strings.HasPrefix(trimmed, "\t") {
 			section = strings.TrimSuffix(trimmed, ":")
@@ -157,6 +183,14 @@ func parseBru(data []byte) (*Request, string, bool) {
 		Headers: headers,
 		Docs:    strings.TrimSpace(docs),
 		Body:    Body{Type: "none"},
+	}
+	// body:json 同时写 Data（Bruno 原字段，同步/往返保留）与 Raw（界面与发送直接可用，
+	// 不依赖 runner 的 data 回落）；body:text 只写 Raw。
+	if body := strings.TrimSpace(bodyBuf.String()); body != "" && (bodyType == "json" || bodyType == "text") {
+		r.Body = Body{Type: bodyType, Raw: body}
+		if bodyType == "json" {
+			r.Body.Data = body
+		}
 	}
 	return r, name, true
 }

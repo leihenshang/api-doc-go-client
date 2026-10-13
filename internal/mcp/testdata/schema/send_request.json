@@ -1,0 +1,122 @@
+{
+  "properties": {
+    "body": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "form": {
+          "items": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "raw": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "raw",
+        "form"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "env": {
+      "type": "string"
+    },
+    "exampleName": {
+      "type": "string"
+    },
+    "headers": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "includeBody": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "maxBodyBytes": {
+      "type": "integer"
+    },
+    "method": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "saveExample": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "uid": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

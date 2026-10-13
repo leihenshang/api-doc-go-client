@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"api-doc-go-client/internal/config"
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -91,6 +93,10 @@ type MCPBackend interface {
 	Start(req MCPRequest) (*MCPStatus, error)
 	// Stop 停止服务（幂等）。
 	Stop()
+	// SetAuthorizer 注入风险工具交互授权器（T2）；nil = 不拦截（stdio 自动化 / 开关关闭）。
+	SetAuthorizer(z mcpauth.Authorizer)
+	// SetAuditor 注入工具调用审计器（T3）；nil = 不落审计。
+	SetAuditor(a mcpaudit.Auditor)
 }
 
 // SetMCPBackend 注入内嵌 MCP 服务实现（main / devserver 启动时调用）。
@@ -186,6 +192,11 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 		return st
 	}
 
+	// 每次重启服务前重新装配授权链：交互开关 / 持久授权可能刚被改动。
+	backend.SetAuthorizer(a.buildMCPAuthorizer())
+	if aud := a.ensureAuditor(); aud != nil {
+		backend.SetAuditor(aud)
+	}
 	st, err := backend.Start(MCPRequest{
 		Enabled:      cfg.Enabled,
 		Addr:         cfg.Addr,
@@ -235,6 +246,7 @@ func (a *App) Shutdown(_ context.Context) {
 	if backend != nil {
 		backend.Stop() // 释放 MCP 监听端口
 	}
+	a.closeAuditor() // T3：刷新审计队列并关闭文件
 	// 关掉所有已打开工作目录的监听与 Mock（多根并存：逐个收尾，别只收活动根）
 	a.closeAllCollections()
 }

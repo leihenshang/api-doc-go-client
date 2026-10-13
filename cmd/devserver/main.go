@@ -86,7 +86,14 @@ func main() {
 		for {
 			select {
 			case ev := <-events:
-				data, _ := json.Marshal(map[string]any{"name": "collection:changed", "payload": ev})
+				// ev 是 App.emitAppEvent 下发的信封 {name, payload}：
+				// 事件名必须透传（collection:changed / mcp:authz-request / mcp:authz-settled…），
+				// 不能再硬编码，否则浏览器态收不到非 collection 事件。
+				name, _ := ev["name"].(string)
+				if name == "" {
+					continue
+				}
+				data, _ := json.Marshal(map[string]any{"name": name, "payload": ev["payload"]})
 				fmt.Fprintf(w, "data: %s\n\n", data)
 				flusher.Flush()
 			case <-notify:

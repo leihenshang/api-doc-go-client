@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -32,6 +35,14 @@ type Config struct {
 	// NewApp 构造项目级运行时（必填）：*app.App 满足 ProjectApp。
 	// 由调用方注入以避免 internal/mcp 与 internal/app 互相依赖。
 	NewApp NewAppFunc
+	// Authorizer 风险工具（medium/high）调用前的交互授权器（T2）。
+	// nil = 不额外拦截（stdio 自动化 / 交互开关关闭时），等同开关出现前的行为。
+	Authorizer mcpauth.Authorizer
+	// Auditor 工具调用审计器（T3）；nil = 不落审计。
+	Auditor mcpaudit.Auditor
+	// Transport / ClientHint 授权请求里展示的传输线索：内嵌 HTTP 服务传 "http"。
+	Transport  string
+	ClientHint string
 }
 
 // NewServer 装配 MCP 服务器（注册全部工具）。
@@ -46,12 +57,22 @@ func NewServer(cfg Config) (*mcp.Server, *Service, error) {
 		return nil, nil, err
 	}
 	svc := NewService(reg)
+	if cfg.Logger != nil {
+		guardLogger = cfg.Logger
+	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "api-doc-go",
 		Title:   "api-doc-go 接口集合",
 		Version: serverVersion,
 	}, nil)
-	RegisterTools(server, svc, cfg.ReadOnly)
+	if err := registerToolsWithOpts(server, svc, cfg.ReadOnly, toolGuardOpts{
+		authorizer: cfg.Authorizer,
+		auditor:    cfg.Auditor,
+		transport:  cfg.Transport,
+		clientHint: cfg.ClientHint,
+	}); err != nil {
+		return nil, nil, err
+	}
 	return server, svc, nil
 }
 

@@ -1,0 +1,23 @@
+{
+  "properties": {
+    "includeBody": {
+      "type": "boolean"
+    },
+    "maxBodyBytes": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    },
+    "uid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid"
+  ],
+  "type": "object"
+}

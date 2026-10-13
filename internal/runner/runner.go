@@ -299,7 +299,12 @@ func validHeaderValue(v string) bool { return !strings.ContainsAny(v, "\r\n\x00"
 func buildBody(b collection.Body, vars map[string]string) ([]byte, string, error) {
 	switch strings.ToLower(b.Type) {
 	case "json":
-		raw, _ := varx.Resolve(b.Raw, vars)
+		// raw 优先；raw 为空时回落 Bruno 的结构化 body.data（T5：避免导入的集合发空体）。
+		src := b.Raw
+		if strings.TrimSpace(src) == "" {
+			src = b.Data
+		}
+		raw, _ := varx.Resolve(src, vars)
 		return []byte(raw), "application/json", nil
 	case "text":
 		raw, _ := varx.Resolve(b.Raw, vars)

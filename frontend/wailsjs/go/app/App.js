@@ -6,8 +6,16 @@ export function ActiveCollection() {
   return window['go']['app']['App']['ActiveCollection']();
 }
 
+export function AnswerMCPAuthz(arg1, arg2) {
+  return window['go']['app']['App']['AnswerMCPAuthz'](arg1, arg2);
+}
+
 export function ApplyMCPSettings() {
   return window['go']['app']['App']['ApplyMCPSettings']();
+}
+
+export function Authorize(arg1, arg2) {
+  return window['go']['app']['App']['Authorize'](arg1, arg2);
 }
 
 export function CancelSend(arg1) {
@@ -20,6 +28,14 @@ export function ClearCookies() {
 
 export function ClearHistory() {
   return window['go']['app']['App']['ClearHistory']();
+}
+
+export function ClearMCPAudit() {
+  return window['go']['app']['App']['ClearMCPAudit']();
+}
+
+export function ClearMCPGrants() {
+  return window['go']['app']['App']['ClearMCPGrants']();
 }
 
 export function CloseCollection(arg1) {
@@ -80,6 +96,10 @@ export function EnvFileHash(arg1) {
 
 export function ExportDoc(arg1, arg2) {
   return window['go']['app']['App']['ExportDoc'](arg1, arg2);
+}
+
+export function ExportMCPAudit(arg1) {
+  return window['go']['app']['App']['ExportMCPAudit'](arg1);
 }
 
 export function GenerateCode(arg1, arg2, arg3) {
@@ -160,6 +180,14 @@ export function ListGrpcProtos() {
 
 export function ListHistory(arg1) {
   return window['go']['app']['App']['ListHistory'](arg1);
+}
+
+export function ListMCPAudit(arg1) {
+  return window['go']['app']['App']['ListMCPAudit'](arg1);
+}
+
+export function ListMCPGrants() {
+  return window['go']['app']['App']['ListMCPGrants']();
 }
 
 export function ListResponseExamples(arg1) {
@@ -244,6 +272,10 @@ export function ReloadCollectionOf(arg1) {
 
 export function RemoveGrpcProto(arg1) {
   return window['go']['app']['App']['RemoveGrpcProto'](arg1);
+}
+
+export function RemoveMCPGrant(arg1, arg2) {
+  return window['go']['app']['App']['RemoveMCPGrant'](arg1, arg2);
 }
 
 export function RenameEnv(arg1, arg2, arg3) {

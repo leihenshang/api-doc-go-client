@@ -1,5 +1,33 @@
 export namespace app {
 	
+	export class AuditQueryDTO {
+	    tool: string;
+	    project: string;
+	    risk: string;
+	    search: string;
+	    ok?: boolean;
+	    sinceMs?: number;
+	    untilMs?: number;
+	    limit?: number;
+	    offset?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuditQueryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tool = source["tool"];
+	        this.project = source["project"];
+	        this.risk = source["risk"];
+	        this.search = source["search"];
+	        this.ok = source["ok"];
+	        this.sinceMs = source["sinceMs"];
+	        this.untilMs = source["untilMs"];
+	        this.limit = source["limit"];
+	        this.offset = source["offset"];
+	    }
+	}
 	export class CollectionSummary {
 	    root: string;
 	    info?: collection.CollectionInfo;
@@ -91,6 +119,22 @@ export namespace app {
 		    }
 		    return a;
 		}
+	}
+	export class MCPGrant {
+	    tool: string;
+	    project: string;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPGrant(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tool = source["tool"];
+	        this.project = source["project"];
+	        this.createdAt = source["createdAt"];
+	    }
 	}
 	export class MCPStatus {
 	    enabled: boolean;
@@ -1027,6 +1071,8 @@ export namespace config {
 	    readOnly: boolean;
 	    allowOrigins: string[];
 	    allow?: MCPAllowDir[];
+	    interactiveAuth?: boolean;
+	    grants?: mcpauth.Grant[];
 	
 	    static createFrom(source: any = {}) {
 	        return new MCPConfig(source);
@@ -1041,6 +1087,8 @@ export namespace config {
 	        this.readOnly = source["readOnly"];
 	        this.allowOrigins = source["allowOrigins"];
 	        this.allow = this.convertValues(source["allow"], MCPAllowDir);
+	        this.interactiveAuth = source["interactiveAuth"];
+	        this.grants = this.convertValues(source["grants"], mcpauth.Grant);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1212,6 +1260,166 @@ export namespace index {
 	        this.hash = source["hash"];
 	        this.syncedHash = source["syncedHash"];
 	        this.baseRev = source["baseRev"];
+	    }
+	}
+
+}
+
+export namespace mcpaudit {
+	
+	export class Event {
+	    ts: string;
+	    tsMs: number;
+	    sessionId?: string;
+	    transport?: string;
+	    client?: string;
+	    tool: string;
+	    risk: string;
+	    project?: string;
+	    requestId?: string;
+	    approved?: boolean;
+	    grantedBy?: string;
+	    argsSummary?: string;
+	    ok: boolean;
+	    resultKind: string;
+	    resultSummary?: string;
+	    durationMs: number;
+	    seq: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Event(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ts = source["ts"];
+	        this.tsMs = source["tsMs"];
+	        this.sessionId = source["sessionId"];
+	        this.transport = source["transport"];
+	        this.client = source["client"];
+	        this.tool = source["tool"];
+	        this.risk = source["risk"];
+	        this.project = source["project"];
+	        this.requestId = source["requestId"];
+	        this.approved = source["approved"];
+	        this.grantedBy = source["grantedBy"];
+	        this.argsSummary = source["argsSummary"];
+	        this.ok = source["ok"];
+	        this.resultKind = source["resultKind"];
+	        this.resultSummary = source["resultSummary"];
+	        this.durationMs = source["durationMs"];
+	        this.seq = source["seq"];
+	    }
+	}
+	export class Page {
+	    total: number;
+	    events: Event[];
+	    file: string;
+	    true: boolean;
+	    corrupt: number;
+	    dropped: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Page(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.events = this.convertValues(source["events"], Event);
+	        this.file = source["file"];
+	        this.true = source["true"];
+	        this.corrupt = source["corrupt"];
+	        this.dropped = source["dropped"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace mcpauth {
+	
+	export class Grant {
+	    tool: string;
+	    project: string;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Grant(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tool = source["tool"];
+	        this.project = source["project"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class Request {
+	    requestId: string;
+	    sessionId: string;
+	    transport: string;
+	    tool: string;
+	    risk: string;
+	    write: boolean;
+	    netEgress: boolean;
+	    project: string;
+	    argsSummary: string;
+	    clientHint: string;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestId = source["requestId"];
+	        this.sessionId = source["sessionId"];
+	        this.transport = source["transport"];
+	        this.tool = source["tool"];
+	        this.risk = source["risk"];
+	        this.write = source["write"];
+	        this.netEgress = source["netEgress"];
+	        this.project = source["project"];
+	        this.argsSummary = source["argsSummary"];
+	        this.clientHint = source["clientHint"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class Result {
+	    decision: string;
+	    grantedBy: string;
+	    reason?: string;
+	    requestId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.decision = source["decision"];
+	        this.grantedBy = source["grantedBy"];
+	        this.reason = source["reason"];
+	        this.requestId = source["requestId"];
 	    }
 	}
 

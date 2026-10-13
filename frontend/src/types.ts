@@ -15,6 +15,11 @@ export type BodyType = 'none' | 'json' | 'text' | 'form' | 'multipart'
 export interface ReqBody {
   type: BodyType
   raw: string
+  /**
+   * 结构化 JSON 体（share Bruno 的 body.data 字段）。
+   * 与 raw 并存：Bruno/同步往返保留它；界面编辑/发送时以 raw 为准，空则由内核回落 data。
+   */
+  data?: string
   form: KV[]
 }
 
@@ -382,6 +387,86 @@ export interface MCPConfig {
    * 空 = 不授权任何目录：AI 读写不到任何集合（安全默认），需要用时在设置里显式添加。
    */
   allow: MCPAllowDir[]
+  /**
+   * 风险操作前要求确认（T2 交互授权）。
+   * null/undefined = 旧配置，后端按默认 true 处理；显式 false = 不弹窗（纯静态白名单）。
+   */
+  interactiveAuth?: boolean | null
+  /** 「始终允许」持久授权（由授权弹窗 / 设置页维护） */
+  grants?: MCPGrant[]
+}
+
+/** MCP 持久授权条目（config.MCP.grants）。 */
+export interface MCPGrant {
+  /** 工具名；'*' = 所有风险工具 */
+  tool: string
+  /** 项目基名；'' = 任意项目 */
+  project: string
+  createdAt: number
+}
+
+/** 风险工具授权弹窗决策（与 Go mcpauth.Decision 同值）。 */
+export type AuthzDecision = 'allow_15m' | 'allow_always' | 'deny'
+
+/** Go 侧下发的授权请求（事件 mcp:authz-request 的 payload）。 */
+export interface AuthzRequest {
+  requestId: string
+  sessionId: string
+  transport: 'http' | 'stdio' | string
+  tool: string
+  risk: 'low' | 'medium' | 'high'
+  write: boolean
+  netEgress: boolean
+  project: string
+  /** 脱敏后的入参摘要 JSON 文本 */
+  argsSummary: string
+  clientHint: string
+  /** unix 毫秒 */
+  createdAt: number
+}
+
+/** MCP 工具调用审计记录（mcpaudit.Event）。 */
+export interface McpAuditEvent {
+  ts: string
+  tsMs: number
+  sessionId?: string
+  transport?: string
+  client?: string
+  tool: string
+  risk: 'low' | 'medium' | 'high' | string
+  project?: string
+  requestId?: string
+  approved?: boolean | null
+  grantedBy?: string
+  argsSummary?: string
+  ok: boolean
+  resultKind: 'ok' | 'biz_error' | 'denied' | 'panic' | string
+  resultSummary?: string
+  durationMs: number
+  seq: number
+}
+
+/** 审计查询（App.AuditQueryDTO）。 */
+export interface McpAuditQuery {
+  tool?: string
+  project?: string
+  risk?: string
+  search?: string
+  ok?: boolean | null
+  sinceMs?: number
+  untilMs?: number
+  limit?: number
+  offset?: number
+}
+
+/** 审计查询分页结果（mcpaudit.Page）。 */
+export interface McpAuditPage {
+  total: number
+  events: McpAuditEvent[]
+  file: string
+  truncated: boolean
+  corrupt: number
+  dropped: number
 }
 
 /** MCP 可访问的工作目录（白名单条目）。 */

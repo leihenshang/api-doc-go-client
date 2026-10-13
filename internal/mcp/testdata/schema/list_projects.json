@@ -1,0 +1,11 @@
+{
+  "properties": {
+    "project": {
+      "type": "string"
+    },
+    "refresh": {
+      "type": "boolean"
+    }
+  },
+  "type": "object"
+}

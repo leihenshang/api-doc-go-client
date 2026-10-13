@@ -1,0 +1,21 @@
+{
+  "properties": {
+    "ifMatch": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "newName": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "newName"
+  ],
+  "type": "object"
+}

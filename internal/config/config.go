@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"api-doc-go-client/internal/mcpauth"
 )
 
 const (
@@ -76,9 +78,14 @@ type MCPConfig struct {
 	AllowOrigins []string `json:"allowOrigins"`
 	// Allow MCP 可访问的工作目录白名单（每条区分只读/可写）。
 	//
-	// 安全默认：为空 = 一个目录都不授权（AI 无法读写任何集合）；
+	// 安全默认：为空 = 一个目录都不授权（AI 无法写任何集合）；
 	// 需要用时在设置里显式添加。以前「项目根目录」由调用方给，等于把「能写哪里」交给了调用方。
 	Allow []MCPAllowDir `json:"allow,omitempty"`
+	// InteractiveAuth 风险工具（send_request + 10 个写工具）调用前是否弹窗确认（T2）。
+	// 用指针：旧配置文件无此字段（nil）时内嵌服务默认 true；用户显式关闭后落 false。
+	InteractiveAuth *bool `json:"interactiveAuth,omitempty"`
+	// Grants 「始终允许」持久授权表（仅由用户在弹窗或设置页维护）。
+	Grants []mcpauth.Grant `json:"grants,omitempty"`
 }
 
 // MCPAllowDir MCP 可访问的工作目录（白名单条目）。
@@ -227,6 +234,10 @@ func (m MCPConfig) normalize(def MCPConfig) MCPConfig {
 		allow = append(allow, MCPAllowDir{Path: p, Writable: a.Writable})
 	}
 	m.Allow = allow
+	// 持久授权去重（工具名是否存在由 app 层对照 T1 元数据表再校验，config 不反向依赖 mcp）。
+	if len(m.Grants) > 0 {
+		m.Grants = mcpauth.NormalizeGrants(m.Grants, nil)
+	}
 	return m
 }
 

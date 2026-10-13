@@ -30,10 +30,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
+	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/mcp"
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 )
 
 // splitAndTrim 逗号分隔字符串 → 去空去白的切片。
@@ -49,13 +53,14 @@ func splitAndTrim(s string) []string {
 
 func main() {
 	var (
-		root        = flag.String("root", "", "【旧写法】单个可写工作目录：等价于 -allow-writable 传同一个目录")
-		allow       = flag.String("allow", "", "MCP 可访问的工作目录（逗号分隔，只读授权）；目录本身或其一级子目录含 opencollection.yml 即算项目")
-		allowW      = flag.String("allow-writable", "", "MCP 可访问且**可写**的工作目录（逗号分隔）；写工具只在这些目录里生效")
-		addr        = flag.String("http", "", "启用 streamable HTTP 的监听地址，如 127.0.0.1:8189；留空 = 只走 stdio")
-		readOnly    = flag.Bool("readonly", false, "只读模式：不注册创建/修改/删除类工具")
-		httpToken   = flag.String("http-token", "", "HTTP 传输的 Bearer 令牌；绑非回环地址时不给则自动生成并打印")
-		allowOrigin = flag.String("http-allow-origin", "", "允许的浏览器来源（Origin），逗号分隔；* = 任意。用于浏览器端客户端与 DNS rebinding 防护")
+		root           = flag.String("root", "", "【旧写法】单个可写工作目录：等价于 -allow-writable 传同一个目录")
+		allow          = flag.String("allow", "", "MCP 可访问的工作目录（逗号分隔，只读授权）；目录本身或其一级子目录含 opencollection.yml 即算项目")
+		allowW         = flag.String("allow-writable", "", "MCP 可访问且**可写**的工作目录（逗号分隔）；写工具只在这些目录里生效")
+		addr           = flag.String("http", "", "启用 streamable HTTP 的监听地址，如 127.0.0.1:8189；留空 = 只走 stdio")
+		readOnly       = flag.Bool("readonly", false, "只读模式：不注册创建/修改/删除类工具")
+		httpToken      = flag.String("http-token", "", "HTTP 传输的 Bearer 令牌；绑非回环地址时不给则自动生成并打印")
+		allowOrigin    = flag.String("http-allow-origin", "", "允许的浏览器来源（Origin），逗号分隔；* = 任意。用于浏览器端客户端与 DNS rebinding 防护")
+		requireConsent = flag.Bool("require-consent", false, "无头严格模式：send_request 与全部写工具一律拒绝（无 UI 可确认，fail-closed）；只读工具不受影响")
 	)
 	flag.Parse()
 	// 白名单：-allow（只读）+ -allow-writable（可写）；-root 是旧写法，按可写授权处理
@@ -79,7 +84,26 @@ func main() {
 	// 日志一律走 stderr：stdio 传输下 stdout 属于 JSON-RPC 协议，写日志会破坏会话
 	logger := log.New(os.Stderr, "mcpserver ", log.LstdFlags)
 
-	server, svc, err := mcp.NewServer(mcp.Config{Allow: allowDirs, ReadOnly: *readOnly, Logger: logger})
+	cfg := mcp.Config{Allow: allowDirs, ReadOnly: *readOnly, Logger: logger,
+		Transport: "stdio", ClientHint: "stdio"}
+	if *requireConsent {
+		// 无头严格模式：没有 UI 可应答授权弹窗，所有非 low 工具 fail-closed。
+		cfg.Authorizer = mcpauth.DenyAuthorizer{Reason: "headless-strict"}
+		logger.Printf("已启用 -require-consent：风险工具（send_request 与写工具）将一律拒绝")
+	}
+	// T3：stdio 形态也写审计（落用户配置目录 audit.log.jsonl，0600；失败 fail-open 不阻断服务）。
+	if dir, err := config.Dir(); err == nil {
+		if aud, aerr := mcpaudit.New(filepath.Join(dir, "audit.log.jsonl"), logger.Printf); aerr == nil {
+			cfg.Auditor = aud
+			defer func() { _ = aud.Close() }()
+			logger.Printf("审计日志：%s", aud.Path())
+		} else {
+			logger.Printf("审计日志不可用（不影响服务）: %v", aerr)
+		}
+	} else {
+		logger.Printf("定位配置目录失败，审计日志未启用: %v", err)
+	}
+	server, svc, err := mcp.NewServer(cfg)
 	if err != nil {
 		logger.Fatalf("启动失败: %v", err)
 	}
