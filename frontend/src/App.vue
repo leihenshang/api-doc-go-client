@@ -137,6 +137,11 @@ let syncTimer: ReturnType<typeof setInterval> | null = null
 const mcpStatus = ref<MCPStatus | null>(null)
 /** 设置弹窗打开时跳到的分区（底栏点 MCP 时传入 'mcp'）。 */
 const settingsInitial = ref<'appearance' | 'network' | 'local' | 'mcp'>('appearance')
+// MCP 入口把 initialSection 置为 'mcp' 后必须复位：它是「一次性直达指令」，
+// 残留会让下一次从命令面板 / 底栏「设置」等常规入口打开时直接落在 MCP 分区
+watch(showSettings, (v) => {
+  if (!v) settingsInitial.value = 'appearance'
+})
 /** MCP 状态轮询定时器（5s 一刷，反映运行/停止变化）；卸载时清理。 */
 let mcpTimer: ReturnType<typeof setInterval> | null = null
 /** 欢迎页展示用的「上次打开的目录」（多根：取最近恢复列表里的第一个）。 */
@@ -1169,7 +1174,7 @@ watch(
         <template #footer>
           <div class="modal-ft">
             <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
-              }}</n-button>
+            }}</n-button>
             <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{
               t('prompt.discard') }}</n-button>
             <n-button size="small" type="primary" :disabled="!draftForm.name.trim()" :loading="savingDraft"
