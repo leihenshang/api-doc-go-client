@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "project": {
+      "type": "string"
+    },
+    "uid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid"
+  ],
+  "type": "object"
+}

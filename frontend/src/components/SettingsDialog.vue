@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
+import McpAuditPanel from '@/components/McpAuditPanel.vue'
 import { api } from '@/lib/ipc'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
-import type { MCPStatus, Settings } from '@/types'
+import type { MCPGrant, MCPStatus, Settings } from '@/types'
 import { ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
 import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
@@ -99,6 +100,37 @@ function setAllowWritable(dir: string, v: boolean): void {
   if (a) a.writable = v
 }
 
+// ---------- T2：交互授权开关 + 「始终允许」清单 ----------
+
+/** 「始终允许」授权清单（来自后端，不经过 settings 表单：弹窗也会写入，必须现拉）。 */
+const grants = ref<MCPGrant[]>([])
+
+async function loadGrants(): Promise<void> {
+  try {
+    grants.value = await api.listMCPGrants()
+  } catch {
+    grants.value = []
+  }
+}
+
+/** 开关的勾选状态：null（旧配置）按默认开处理，只有显式 false 才算关。 */
+const interactiveChecked = computed({
+  get: () => form.value.mcp.interactiveAuth !== false,
+  set: (v: boolean) => {
+    form.value.mcp.interactiveAuth = v
+  },
+})
+
+async function removeGrant(g: MCPGrant): Promise<void> {
+  await api.removeMCPGrant(g.tool, g.project)
+  await loadGrants()
+}
+
+async function clearGrants(): Promise<void> {
+  await api.clearMCPGrants()
+  await loadGrants()
+}
+
 async function regenerateToken(): Promise<void> {
   mcpBusy.value = true
   error.value = ''
@@ -180,6 +212,7 @@ watch(
     // 每次打开回到指定分区：默认界面，状态栏点 MCP 时可直达 MCP 分区
     active.value = props.initialSection ?? 'appearance'
     void loadMCP()
+    void loadGrants()
   },
 )
 
@@ -459,6 +492,48 @@ function close(): void {
             </div>
           </div>
 
+          <!-- T2 交互授权：风险工具（send_request + 10 个写工具）调用前弹窗确认 -->
+          <div class="block">
+            <div class="row">
+              <n-checkbox :checked="interactiveChecked" :disabled="!form.mcp.enabled"
+                data-testid="settings.mcp.interactiveAuth"
+                @update:checked="(v: boolean) => { interactiveChecked = v; void applyNow() }">
+                {{ t('settings.mcpInteractiveAuth') }}
+              </n-checkbox>
+            </div>
+            <p class="hint muted">{{ t('settings.mcpInteractiveAuthHint') }}</p>
+          </div>
+
+          <!-- 「始终允许」持久授权清单：弹窗选择后写入，可在这里单条移除/清空 -->
+          <div class="block" v-if="interactiveChecked">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpGrants') }}</span>
+              <span class="sp" />
+              <n-popconfirm v-if="grants.length" @positive-click="clearGrants">
+                <template #trigger>
+                  <n-button size="tiny" quaternary type="error" data-testid="settings.mcp.grantsClear">
+                    {{ t('settings.mcpGrantsClear') }}
+                  </n-button>
+                </template>
+                {{ t('settings.mcpGrantsClearConfirm') }}
+              </n-popconfirm>
+            </div>
+            <p v-if="!grants.length" class="hint muted" data-testid="settings.mcp.grantsEmpty">
+              {{ t('settings.mcpGrantsEmpty') }}
+            </p>
+            <div v-else class="grants" data-testid="settings.mcp.grants">
+              <div v-for="g in grants" :key="`${g.tool}|${g.project}`" class="grant">
+                <code class="mono">{{ g.tool === '*' ? t('settings.mcpGrantAllTools') : g.tool }}</code>
+                <span class="muted">{{ g.project === '' ? t('settings.mcpGrantAnyProject') : g.project }}</span>
+                <span class="sp" />
+                <n-button size="tiny" quaternary type="error" :data-testid="`settings.mcp.grants.remove.${g.tool}.${g.project}`"
+                  @click="removeGrant(g)">
+                  {{ t('settings.mcpGrantRemove') }}
+                </n-button>
+              </div>
+            </div>
+          </div>
+
           <!-- 可访问的工作区：直接列出客户端当前加载的所有工作区，勾选授权；默认可写，可写与否受「只读模式」控制。 -->
           <div class="block">
             <div class="row">
@@ -520,6 +595,14 @@ function close(): void {
             </div>
             <pre v-if="mcp?.running" class="ex mono" data-testid="settings.mcpExample">{{ mcpExample() }}</pre>
           </div>
+
+          <!-- T3：调用审计（实时列表 + 过滤 + 导出/清空） -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('audit.title') }}</span>
+            </div>
+            <mcp-audit-panel />
+          </div>
         </div>
       </div>
     </div>
@@ -542,6 +625,30 @@ function close(): void {
   flex-direction: column;
   gap: 6px;
   margin: 2px 0 6px;
+}
+
+.grants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+
+.grant {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  font-size: 12px;
+}
+
+.grant code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--app-fill);
 }
 
 .dir {

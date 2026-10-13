@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"api-doc-go-client/internal/config"
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 )
 
 // isolateConfigDir 把配置目录指到临时目录（Windows 看 %AppData%，类 Unix 看 XDG_CONFIG_HOME）。
@@ -16,8 +18,10 @@ func isolateConfigDir(t *testing.T) {
 
 // fakeMCPBackend 只记录 Start 收到的配置，不真的监听端口。
 type fakeMCPBackend struct {
-	last   MCPRequest
-	starts int
+	last       MCPRequest
+	starts     int
+	authorizer mcpauth.Authorizer
+	auditor    mcpaudit.Auditor
 }
 
 func (f *fakeMCPBackend) Start(req MCPRequest) (*MCPStatus, error) {
@@ -31,6 +35,9 @@ func (f *fakeMCPBackend) Start(req MCPRequest) (*MCPStatus, error) {
 }
 
 func (f *fakeMCPBackend) Stop() {}
+
+func (f *fakeMCPBackend) SetAuthorizer(z mcpauth.Authorizer) { f.authorizer = z }
+func (f *fakeMCPBackend) SetAuditor(a mcpaudit.Auditor)      { f.auditor = a }
 
 // 启用内嵌 MCP 且令牌为空时自动生成的令牌必须**落盘**：
 // 生成发生在写回 a.settings 之后的话，切主题（setTheme → SaveSettings 写空令牌）

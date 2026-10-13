@@ -12,6 +12,8 @@ import (
 
 	"api-doc-go-client/internal/app"
 	"api-doc-go-client/internal/config"
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 )
 
 // embedStopTimeout 停服等待上限（ServeHTTP 收到 ctx 取消后做优雅关闭）。
@@ -30,6 +32,24 @@ type embedBackend struct {
 	logger *log.Logger
 	// newApp 给每个项目一个独立实例（App 一次只能打开一个集合，多项目必须各自一个）。
 	newApp NewAppFunc
+	// authz 风险工具交互授权器（T2）：App.Startup 注入；nil = 不拦截。
+	authz mcpauth.Authorizer
+	// auditor 调用审计器（T3）：App.Startup 注入；nil = 不落审计。
+	auditor mcpaudit.Auditor
+}
+
+// SetAuthorizer 注入交互授权器（App 在 Startup 时把自己作为 UI 桥注入）。
+func (b *embedBackend) SetAuthorizer(z mcpauth.Authorizer) {
+	b.mu.Lock()
+	b.authz = z
+	b.mu.Unlock()
+}
+
+// SetAuditor 注入调用审计器（T3）。
+func (b *embedBackend) SetAuditor(a mcpaudit.Auditor) {
+	b.mu.Lock()
+	b.auditor = a
+	b.mu.Unlock()
 }
 
 // toAllowDirs 把设置里的白名单转成 MCP 层的类型（两层各自定义，避免 config 反向依赖 mcp）。
@@ -90,11 +110,19 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 	}
 	_ = ln.Close()
 
+	b.mu.Lock()
+	authz := b.authz
+	auditor := b.auditor
+	b.mu.Unlock()
 	srv, svc, err := NewServer(Config{
-		Allow:    allow,
-		ReadOnly: req.ReadOnly,
-		Logger:   b.logger,
-		NewApp:   b.newApp,
+		Allow:      allow,
+		ReadOnly:   req.ReadOnly,
+		Logger:     b.logger,
+		NewApp:     b.newApp,
+		Authorizer: authz,
+		Auditor:    auditor,
+		Transport:  "http",
+		ClientHint: "http",
 	})
 	if err != nil {
 		st.Error = fmt.Sprintf("装配 MCP 服务失败：%v", err)

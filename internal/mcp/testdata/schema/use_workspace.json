@@ -1,0 +1,11 @@
+{
+  "properties": {
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspace"
+  ],
+  "type": "object"
+}

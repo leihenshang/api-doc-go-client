@@ -1,0 +1,160 @@
+{
+  "properties": {
+    "auth": {
+      "properties": {
+        "in": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "body": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "form": {
+          "items": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "raw": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "raw",
+        "form"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "docs": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "folder": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "headers": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "ifMatch": {
+      "type": "string"
+    },
+    "method": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "name": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "project": {
+      "type": "string"
+    },
+    "uid": {
+      "type": "string"
+    },
+    "url": {
+      "type": [
+        "null",
+        "string"
+      ]
+    }
+  },
+  "required": [
+    "uid"
+  ],
+  "type": "object"
+}

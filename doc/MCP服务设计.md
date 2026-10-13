@@ -144,15 +144,21 @@ Claude Desktop 配置：
 ## 九、分层
 
 ```
-cmd/mcpserver/main.go     flag + 传输选择（stdio / HTTP）
-internal/mcp/server.go    装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层）
-internal/mcp/tools.go     16 个工具的注册与入参 schema（jsonschema tag）
-internal/mcp/service.go   语义实现（不 import SDK，可单测/复用）
-internal/mcp/registry.go  多项目 registry（只读扫描、懒打开、三种定位、创建项目）
-internal/mcp/env.go       环境变量工具（掩码、hash、写保护）
-internal/mcp/fuzzy.go     归一化 + 打分
-internal/mcp/render.go    裁剪与文本渲染
-internal/mcp/embed.go     客户端内嵌服务的启停实现
+cmd/mcpserver/main.go       flag + 传输选择（stdio / HTTP）；-require-consent 无头严格模式（T2）
+internal/mcp/server.go      装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层）
+internal/mcp/meta.go        18 个工具的元数据单一事实源（name/description/risk/write/InReadOnly，T1）
+internal/mcp/tools.go       18 个工具的注册（meta 驱动）与 guard 装饰器（授权 T2 + recover + 审计 T3）
+internal/mcp/authz_args.go  授权弹窗的入参脱敏（T2）
+internal/mcp/service.go     语义实现（不 import SDK，可单测/复用）
+internal/mcp/registry.go    多项目 registry（只读扫描、懒打开、三种定位、创建项目）
+internal/mcp/env.go         环境变量工具（掩码、hash、写保护）
+internal/mcp/fuzzy.go       归一化 + 打分
+internal/mcp/render.go      裁剪与文本渲染
+internal/mcp/embed.go       客户端内嵌服务的启停实现（SetAuthorizer/SetAuditor 注入）
+internal/mcpauth/           T2 纯逻辑：决策/持久授权表/15 分钟缓存/无头 Deny（不依赖 SDK/app）
+internal/mcpaudit/          T3 纯逻辑：audit.log.jsonl 追加写/轮转/订阅扇出/查询（不依赖 SDK/app）
+internal/app/mcp_authz.go   App 作为授权 UI 桥：弹窗事件/60s 超时/并发去重/始终允许落盘
+internal/app/mcp_audit.go   App 审计门面：List/Export/Clear + mcp:audit 事件桥
 ```
 
 ## 十、验证

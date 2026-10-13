@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "includeRequests": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

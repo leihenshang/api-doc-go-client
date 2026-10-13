@@ -22,6 +22,8 @@ import (
 	"api-doc-go-client/internal/cookiejar"
 	"api-doc-go-client/internal/history"
 	"api-doc-go-client/internal/index"
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 	"api-doc-go-client/internal/mocksrv"
 	"api-doc-go-client/internal/runner"
 	"api-doc-go-client/internal/script"
@@ -63,6 +65,13 @@ type App struct {
 	mcpBackend MCPBackend
 	// mcpStatus 内嵌 MCP 服务最近一次状态（设置页展示；避免前端自己拼）
 	mcpStatus *MCPStatus
+	// MCP 交互授权（T2）：authzMu 守护 pending/inflight；mcpGrants 用 a.mu（与 settings 同锁）。
+	authzMu     sync.Mutex
+	mcpPending  map[string]*pendingAuthz // requestId → 进行中的弹窗
+	mcpInflight map[string]*pendingAuthz // session|tool|project → 进行中的弹窗（并发去重）
+	mcpGrants   *mcpauth.GrantStore      // 「始终允许」内存表（跨 MCP 重启存活）
+	auditor     mcpaudit.Auditor         // T3 工具调用审计器（ensureAuditor 惰性创建）
+	auditCancel func()                   // 审计事件订阅退订（Shutdown 用）
 	// signalQuit 通知「外部已在收尾」（wails dev 的 Ctrl+C 会先打到 CLI 再到我们），
 	// 让信号处理器不必自己重复退出
 	signalQuit chan struct{}
@@ -99,8 +108,9 @@ type eventSub struct {
 	self int
 }
 
-// SubscribeEvents 订阅应用事件（collection:changed 等）。devserver 用它把事件经 SSE 转发给浏览器；
-// 桌面态走 Wails EventsEmit，不需要订阅。返回的 channel 只读，退调用方负责 Unsubscribe。
+// SubscribeEvents 订阅应用事件（collection:changed / mcp:authz-* 等）。
+// channel 元素是统一信封 {"name":事件名,"payload":载荷}；devserver 按 name 透传成 SSE 帧。
+// 桌面态走 Wails EventsEmit，不需要订阅。退订由返回的 func 负责。
 func (a *App) SubscribeEvents() (<-chan map[string]any, func()) {
 	a.mu.Lock()
 	a.eventSubSeq++
@@ -114,6 +124,29 @@ func (a *App) SubscribeEvents() (<-chan map[string]any, func()) {
 		a.mu.Lock()
 		delete(a.eventSubs, id)
 		a.mu.Unlock()
+	}
+}
+
+// emitAppEvent 向下行发送命名应用事件：桌面态走 Wails EventsEmit，浏览器态经
+// SubscribeEvents 的信封通道由 devserver SSE 转发（事件名由载荷自带，不再硬编码）。
+// 订阅方堵塞时丢弃该事件，保证调用方（含 MCP 工具调用线程）不被慢前端拖住。
+func (a *App) emitAppEvent(name string, payload any) {
+	a.mu.Lock()
+	ctx := a.ctx
+	subs := make([]chan map[string]any, 0, len(a.eventSubs))
+	for _, s := range a.eventSubs {
+		subs = append(subs, s.ch)
+	}
+	a.mu.Unlock()
+	if ctx != nil {
+		runtime.EventsEmit(ctx, name, payload)
+	}
+	ev := map[string]any{"name": name, "payload": payload}
+	for _, ch := range subs {
+		select {
+		case ch <- ev:
+		default:
+		}
 	}
 }
 
@@ -133,6 +166,13 @@ func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.signalQuit = make(chan struct{})
 	a.watchSignals()
+	// T2/T3：把授权 UI 桥与审计器注入内嵌 MCP 服务（开关关时授权链为 nil；审计恒开）。
+	if a.mcpBackend != nil {
+		a.mcpBackend.SetAuthorizer(a.buildMCPAuthorizer())
+		if aud := a.ensureAuditor(); aud != nil {
+			a.mcpBackend.SetAuditor(aud)
+		}
+	}
 	// 设置里启用了 MCP 就随应用起服务；此时通常还没打开集合，状态会提示先打开集合
 	if a.settings.MCP.Enabled {
 		a.applyMCP("")
@@ -351,15 +391,9 @@ func (a *App) watchLoop(c *collection.Collection, root string) {
 			return
 		}
 		a.mu.Lock()
-		ctx := a.ctx
 		// 该集合是否仍是已登记的根（root + 指针身份双保险）：被关掉的根不再上报
 		e := a.colls[root]
 		still := e != nil && e.coll == c
-		payload := map[string]any{"root": root, "paths": ev.Paths}
-		subs := make([]chan map[string]any, 0, len(a.eventSubs))
-		for _, s := range a.eventSubs {
-			subs = append(subs, s.ch)
-		}
 		a.mu.Unlock()
 		if !still {
 			return
@@ -375,16 +409,8 @@ func (a *App) watchLoop(c *collection.Collection, root string) {
 			}
 			a.mu.Unlock()
 		}
-		if ctx != nil {
-			runtime.EventsEmit(ctx, "collection:changed", payload)
-		}
-		// 浏览器态（无 Wails 事件总线）由订阅者自行消费
-		for _, s := range subs {
-			select {
-			case s <- payload:
-			default: // 订阅方堵塞则丢弃本次事件，不阻塞监听循环
-			}
-		}
+		// 桌面 Wails 事件 + 浏览器 SSE 信封统一从 emitAppEvent 下发
+		a.emitAppEvent("collection:changed", map[string]any{"root": root, "paths": ev.Paths})
 	}
 }
 
@@ -641,10 +667,9 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 		}
 	})
 	a.mu.Lock()
-	ctx := a.ctx
 	a.mu.Unlock()
-	if ctx != nil && err == nil {
-		runtime.EventsEmit(ctx, "collection:changed", map[string]any{"root": rootKey(c.Dir), "paths": []string{"sync"}})
+	if err == nil {
+		a.emitAppEvent("collection:changed", map[string]any{"root": rootKey(c.Dir), "paths": []string{"sync"}})
 	}
 	return rep, err
 }

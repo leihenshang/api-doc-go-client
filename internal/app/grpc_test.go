@@ -34,12 +34,16 @@ message HelloReply {
 // 打开一个临时集合（devserver 模式：PickDirectory 直接返回该目录）。
 func newTestApp(t *testing.T) (*App, string) {
 	t.Helper()
+	isolateConfigDir(t) // 索引/配置必须落在测试临时目录，绝不污染真实 %AppData%
 	dir := t.TempDir()
 	core := NewApp()
 	core.SetHeadlessDir(dir)
 	if _, err := core.OpenCollection(dir); err != nil {
 		t.Fatalf("打开集合失败: %v", err)
 	}
+	// 必须显式释放索引/watcher 句柄：否则 watcher 泄漏后会在后续测试的配置目录里
+	// 惰性重开孤儿 sqlite（Windows 下还会锁住别人的 TempDir 清理）。
+	t.Cleanup(core.closeAllCollections)
 	return core, dir
 }
 

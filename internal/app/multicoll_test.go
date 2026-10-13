@@ -289,12 +289,17 @@ draining:
 	for time.Now().Before(deadline) {
 		select {
 		case ev := <-ch:
-			got, _ := ev["root"].(string)
+			// 事件信封：{name, payload}；collection:changed 的 payload 带 root/paths
+			if name, _ := ev["name"].(string); name != "collection:changed" {
+				continue
+			}
+			payload, _ := ev["payload"].(map[string]any)
+			got, _ := payload["root"].(string)
 			if got != alphaRoot {
 				// 其它根/别的时机的残留事件跳过：最终仍要求见到 alpha 自己的事件
 				continue
 			}
-			if _, ok := ev["paths"]; !ok {
+			if _, ok := payload["paths"]; !ok {
 				t.Fatalf("事件应带 paths: %+v", ev)
 			}
 			if core.ActiveCollection() != betaRoot {

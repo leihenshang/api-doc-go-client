@@ -8,6 +8,7 @@ import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import EnvManager from '@/components/EnvManager.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
+import McpConsentDialog from '@/components/McpConsentDialog.vue'
 import MockDialog from '@/components/MockDialog.vue'
 import Overview from '@/components/Overview.vue'
 import RequestBar from '@/components/RequestBar.vue'
@@ -29,7 +30,7 @@ import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } fr
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
-import type { MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
+import type { AuthzRequest, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import {
@@ -120,6 +121,8 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => ({
 
 const showEnvManager = ref(false)
 const showSettings = ref(false)
+// T2：MCP 风险工具授权弹窗（同一时间只展示最新的一个请求；并发同 key 在 Go 侧已去重）。
+const authzReq = ref<AuthzRequest | null>(null)
 const showHistory = ref(false)
 const showCookies = ref(false)
 const showPalette = ref(false)
@@ -671,6 +674,16 @@ onMounted(() => {
   onAppEvent('app:close-requested', () => {
     requestQuit()
   })
+  // T2：外部 AI 调用风险工具 → 弹授权确认；settled 后关闭对应弹窗
+  onAppEvent('mcp:authz-request', (payload) => {
+    authzReq.value = (payload as AuthzRequest) ?? null
+  })
+  onAppEvent('mcp:authz-settled', (payload) => {
+    const p = payload as { requestId?: string } | null
+    if (!p?.requestId || authzReq.value?.requestId === p.requestId) {
+      authzReq.value = null
+    }
+  })
   // 同步状态轮询（状态栏）
   syncTimer = setInterval(() => {
     void refreshSyncStatus()
@@ -1155,6 +1168,7 @@ watch(
       </n-spin>
 
       <env-manager v-model:show="showEnvManager" @saved="envSaved" />
+      <mcp-consent-dialog :req="authzReq" />
       <settings-dialog v-model:show="showSettings" :initial-section="settingsInitial" @saved="loadMcpStatus()" />
       <history-dialog v-model:show="showHistory" @open="openHistoryRequest" />
       <cookie-dialog v-model:show="showCookies" />

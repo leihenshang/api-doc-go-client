@@ -22,14 +22,8 @@ func TestRegisterToolsAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{
-		// 工作目录（白名单 + 默认目标）：AI 先看能访问哪些目录、再选定默认目标
-		"list_workspaces", "use_workspace",
-		"list_projects", "get_project_modules", "get_request_detail", "search_requests",
-		"create_request", "create_module", "create_project", "send_request", "update_request", "delete_request",
-		// 环境变量管理：1 个读 + 5 个写
-		"list_envs", "create_env", "rename_env", "delete_env", "set_env_var", "delete_env_var",
-	}
+	// 期望集合以 meta.go 单一事实源为准（数量与名称的双向一致性由注册自检 + 本测试双锁）。
+	want := ToolNames()
 	if len(names) != len(want) {
 		t.Fatalf("工具数 %d，期望 %d：%v", len(names), len(want), names)
 	}
@@ -42,6 +36,20 @@ func TestRegisterToolsAll(t *testing.T) {
 			t.Errorf("缺少工具 %s", w)
 		}
 	}
+}
+
+// startSelfServer 装配一个注册了全部工具的内存 server（测试共用）。
+func startSelfServer(t *testing.T, readOnly bool) *mcp.Server {
+	t.Helper()
+	root := t.TempDir()
+	newProjectDir(t, root, "demo", "uid-demo")
+	reg, err := NewRegistry(root, testNewApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	RegisterTools(server, NewService(reg), readOnly)
+	return server
 }
 
 func TestRegisterToolsReadOnly(t *testing.T) {

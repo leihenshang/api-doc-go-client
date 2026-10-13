@@ -2,18 +2,35 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"strings"
 	"sync"
+	"time"
+
+	"api-doc-go-client/internal/mcpaudit"
+	"api-doc-go-client/internal/mcpauth"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// guardLogger 记录 guard 拦下的 panic 等内部异常；NewServer 时用 Config.Logger 替换。
+var guardLogger = log.New(io.Discard, "[mcp-guard] ", log.LstdFlags)
 
 // 工具集：把 Service 的方法注册成 MCP 工具。Out 一律用 any（不声明输出 schema），
 // 结果以「人类/AI 可读文本」放进 Content —— AI 工具链里文本比结构化 JSON 更省 token、也更好读。
 type toolSet struct {
 	svc      *Service
 	readOnly bool // 只读模式：不注册写工具，send_request 强制不落盘
+
+	// authz 风险工具交互授权（T2）：nil = 不拦截（stdio 自动化 / 开关关闭）。
+	authz mcpauth.Authorizer
+	// audit 调用审计（T3）：nil = 不落审计（测试 / 未注入）。
+	audit      mcpaudit.Auditor
+	transport  string // 授权弹窗展示："http" | "stdio"
+	clientHint string // 授权弹窗展示的来源线索
 
 	// mu/sel 每个 MCP 会话选定的默认工作目录（use_workspace 的结果），key = 会话 id。
 	// 为什么要按会话：HTTP 传输下同一个进程会同时服务多个客户端（各自带 Mcp-Session-Id），
@@ -57,48 +74,279 @@ func (ts *toolSet) proj(req *mcp.CallToolRequest, project string) string {
 	return ts.workspace(req)
 }
 
-// RegisterTools 把全部工具注册到 server。
+// RegisterTools 把全部工具注册到 server（测试便捷封装：不带交互授权）。
+//
+// 名称、描述、风险与读写标记的单一事实源是 meta.go；这里只负责把 handler 挂上去。
+// 元数据缺失/重复或实际注册集合与 meta 不一致都属于装配缺陷，直接 panic ——
+// 必须在开发期暴露，而不是等外部 AI 调用时才发现契约漂移。
+// toolGuardOpts 注册时的 guard 配置（NewServer 注入；测试走 RegisterTools 零值=不拦截）。
+type toolGuardOpts struct {
+	authorizer mcpauth.Authorizer
+	auditor    mcpaudit.Auditor
+	transport  string
+	clientHint string
+}
+
 func RegisterTools(server *mcp.Server, svc *Service, readOnly bool) {
-	ts := &toolSet{svc: svc, readOnly: readOnly}
+	if err := registerToolsWithOpts(server, svc, readOnly, toolGuardOpts{}); err != nil {
+		panic(err)
+	}
+}
+
+func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts toolGuardOpts) error {
+	if err := ValidateMetas(); err != nil {
+		return err
+	}
+	ts := &toolSet{
+		svc: svc, readOnly: readOnly,
+		authz:      opts.authorizer,
+		audit:      opts.auditor,
+		transport:  opts.transport,
+		clientHint: opts.clientHint,
+	}
 	ts.registerReadTools(server)
 	if readOnly {
 		// 只读模式下仍给 send_request，但明确「不落盘」——AI 仍可试发，只是不污染集合
 		ts.registerSendTool(server, true)
+	} else {
+		ts.registerWriteTools(server)
+		ts.registerSendTool(server, false)
+	}
+	return ts.assertRegistered(server, readOnly)
+}
+
+// addTool 按 meta.go 中的名称取描述注册一个工具；名字不在元数据表里即装配缺陷。
+// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，18 个业务 handler 零改动。
+// 必须在内部构造**字面签名**的闭包交给 mcp.AddTool —— 若用具名 coreHandler[In] 类型，
+// SDK 的 ToolHandlerFor[In,Out] 泛型推断无法把具名类型与类型参数合一。
+func addTool[In any](ts *toolSet, server *mcp.Server, name string,
+	h func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, any, error)) {
+	meta, ok := MetaOf(name)
+	if !ok {
+		panic(fmt.Sprintf("mcp: 工具 %q 缺少 meta.go 元数据", name))
+	}
+	wrapped := func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		return runGuarded(ts, meta, ctx, req, func() (*mcp.CallToolResult, any, error) {
+			return h(ctx, req, in)
+		})
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: meta.Name, Description: meta.Description}, wrapped)
+}
+
+// toolResultCore 已完成授权检查的业务执行单元。
+type toolResultCore func() (*mcp.CallToolResult, any, error)
+
+// runGuarded 执行「recover → 风险授权 → 业务」装饰链，并在收尾写一条 T3 审计；
+// 拒绝/异常统一转成工具级错误（IsError=true），不是协议级 error —— AI 能读到并纠正。
+//
+// 一次调用恰好产生一条审计：ok / biz_error / denied / panic 四出口全覆盖。
+func runGuarded(ts *toolSet, meta ToolMeta, ctx context.Context, req *mcp.CallToolRequest, fn toolResultCore) (res *mcp.CallToolResult, out any, err error) {
+	start := time.Now()
+	kind := mcpaudit.KindOK
+	var azRes mcpauth.Result
+	var project, argsSummary string
+
+	defer func() {
+		if r := recover(); r != nil {
+			guardLogger.Printf("工具 %s 发生 panic: %v", meta.Name, r)
+			kind = mcpaudit.KindPanic
+			res = toolError(fmt.Sprintf("内部错误：工具 %s 执行异常（%v）", meta.Name, r))
+			out, err = nil, nil
+		}
+		ts.auditOne(req, meta, start, kind, azRes, project, argsSummary, res)
+	}()
+
+	if ts.authz != nil && meta.Risk != RiskLow {
+		project = ts.proj(req, argsProject(req))
+		argsSummary = summarizeArgs(meta.Name, req)
+		var denyReason string
+		var azErr error
+		azRes, denyReason, azErr = ts.authorize(ctx, req, meta, project, argsSummary)
+		if azErr != nil {
+			// 授权基础设施异常：fail-closed，记 denied + 原因
+			kind = mcpaudit.KindDenied
+			return toolError(azErr.Error()), nil, nil
+		}
+		if denyReason != "" {
+			kind = mcpaudit.KindDenied
+			return toolError(fmt.Sprintf("用户拒绝了 %s 的授权：%s", meta.Name, denyReason)), nil, nil
+		}
+	}
+
+	res, out, err = fn()
+	if res != nil && res.IsError {
+		kind = mcpaudit.KindBizError
+	}
+	return res, out, err
+}
+
+// authzTimeout 单次交互授权的最长等待：超时按拒绝处理（fail-closed）。
+const authzTimeout = 60 * time.Second
+
+// authorize 构造脱敏授权请求并调用授权器。
+// 返回：授权结论；非空 denyReason=被拒绝的对外文案；err=授权基础设施异常。
+func (ts *toolSet) authorize(ctx context.Context, req *mcp.CallToolRequest, meta ToolMeta,
+	project, argsSummary string) (mcpauth.Result, string, error) {
+	azReq := mcpauth.Request{
+		SessionID:   sessionID(req),
+		Transport:   ts.transport,
+		Tool:        meta.Name,
+		Risk:        mcpauth.Risk(meta.Risk),
+		Write:       meta.Write,
+		NetEgress:   meta.NetEgress,
+		Project:     project,
+		ArgsSummary: argsSummary,
+		ClientHint:  ts.clientHint,
+		CreatedAt:   time.Now().UnixMilli(),
+	}
+	cctx, cancel := context.WithTimeout(ctx, authzTimeout)
+	defer cancel()
+	res, err := ts.authz.Authorize(cctx, azReq)
+	if err != nil {
+		return res, "", fmt.Errorf("授权服务未就绪：%w", err)
+	}
+	if res.Decision == mcpauth.DecisionDeny {
+		reason := map[string]string{
+			"timeout":         "等待确认超时（60 秒未响应，已按拒绝处理）",
+			"cancel":          "调用已取消",
+			"headless-strict": "无头严格模式禁止风险操作（需在客户端界面确认，或去掉 -require-consent）",
+			"user":            "用户拒绝了该操作",
+		}[res.Reason]
+		if reason == "" {
+			reason = "用户拒绝了该操作"
+		}
+		return res, reason, nil
+	}
+	return res, "", nil
+}
+
+// auditOne 收尾写一条审计；auditor=nil 时静默跳过。
+func (ts *toolSet) auditOne(req *mcp.CallToolRequest, meta ToolMeta, start time.Time,
+	kind mcpaudit.ResultKind, az mcpauth.Result, project, argsSummary string, res *mcp.CallToolResult) {
+	if ts.audit == nil {
 		return
 	}
-	ts.registerWriteTools(server)
-	ts.registerSendTool(server, false)
+	now := time.Now()
+	ev := mcpaudit.Event{
+		TS:          now.Format(time.RFC3339Nano),
+		TSMs:        now.UnixMilli(),
+		SessionID:   sessionID(req),
+		Transport:   ts.transport,
+		Client:      ts.clientHint,
+		Tool:        meta.Name,
+		Risk:        string(meta.Risk),
+		Project:     project,
+		ArgsSummary: argsSummary,
+		ResultOK:    kind == mcpaudit.KindOK,
+		ResultKind:  string(kind),
+		DurationMs:  time.Since(start).Milliseconds(),
+	}
+	if kind == mcpaudit.KindPanic {
+		ev.ResultSummary = "panic recovered"
+	} else if res != nil {
+		ev.ResultSummary = mcpaudit.Clamp(mcpaudit.RedactText(textContents(res)), mcpauditResultCap)
+	}
+	// 只有真正走了交互授权链才带审批字段；low 工具/未启用授权时保持空（omitempty）。
+	if ts.authz != nil && meta.Risk != RiskLow {
+		if az.Decision != "" {
+			approved := az.Decision != mcpauth.DecisionDeny
+			ev.Approved = &approved
+			ev.GrantedBy = az.GrantedBy
+			ev.RequestID = az.RequestID
+		}
+	}
+	if ev.Project == "" {
+		ev.Project = ts.proj(req, argsProject(req)) // low 工具也尽量记上目标项目
+	}
+	if ev.ArgsSummary == "" {
+		ev.ArgsSummary = summarizeArgs(meta.Name, req)
+	}
+	ts.audit.Log(ev)
+}
+
+// mcpauditResultCap 结果摘要上限（与 mcpaudit.resultCap 对齐，包间不导出常量，本地镜像）。
+const mcpauditResultCap = 1024
+
+// textContents 拼接工具结果里的全部文本块。
+func textContents(res *mcp.CallToolResult) string {
+	if res == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(tc.Text)
+		}
+	}
+	return sb.String()
+}
+
+// argsProject 从原始入参里只读地取 project（用于授权 key 与弹窗展示，不产生任何副作用）。
+func argsProject(req *mcp.CallToolRequest) string {
+	if req == nil || req.Params == nil {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(req.Params.Arguments, &m); err != nil {
+		return ""
+	}
+	p, _ := m["project"].(string)
+	return p
+}
+
+// toolError 构造工具级错误结果（业务错误的统一表达，与 wrap 同形）。
+func toolError(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: "失败: " + msg}},
+	}
+}
+
+// assertRegistered 断言「实际注册到 server 的工具集合」==「meta 表在该模式下应有的集合」，
+// 双向无漏：meta 有而 handler 没注册、handler 注册了 meta 没有的名字都会失败。
+func (ts *toolSet) assertRegistered(server *mcp.Server, readOnly bool) error {
+	got, err := ListToolNames(context.Background(), server)
+	if err != nil {
+		return fmt.Errorf("mcp: 注册集合自检失败: %w", err)
+	}
+	want := NamesForMode(readOnly)
+	gotSet := make(map[string]bool, len(got))
+	for _, n := range got {
+		gotSet[n] = true
+	}
+	wantSet := make(map[string]bool, len(want))
+	for _, n := range want {
+		wantSet[n] = true
+	}
+	var missing, extra []string
+	for _, n := range want {
+		if !gotSet[n] {
+			missing = append(missing, n)
+		}
+	}
+	for _, n := range got {
+		if !wantSet[n] {
+			extra = append(extra, n)
+		}
+	}
+	if len(missing) > 0 || len(extra) > 0 {
+		return fmt.Errorf("mcp: 注册集合与 meta 表不一致（readOnly=%v），缺少 %v，多出 %v",
+			readOnly, missing, extra)
+	}
+	return nil
 }
 
 func (ts *toolSet) registerReadTools(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_workspaces",
-		Description: "列出 MCP 可访问的工作目录（客户端授权的白名单）与其中的项目、当前默认目标。白名单为空时 AI 无法读写任何集合 —— 需要时请让用户在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加。",
-	}, ts.listWorkspaces)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "use_workspace",
-		Description: "选定默认工作目录：选定后其余工具的 project 参数即可省略。workspace 传 list_workspaces 返回的工作目录 path，或一个项目标识（名称/路径/uid）；不在白名单内会直接拒绝。",
-	}, ts.useWorkspace)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_projects",
-		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。范围仅限客户端授权的 MCP 工作目录（见 list_workspaces）。返回名称、路径、uid、请求数/模块数/环境列表。",
-	}, ts.listProjects)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_project_modules",
-		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。",
-	}, ts.getProjectModules)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_request_detail",
-		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、说明文档（docs）以及已保存的响应示例。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。返回的 hash 可传给 update_request.if_match 做冲突保护。",
-	}, ts.getRequestDetail)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "search_requests",
-		Description: "模糊搜索接口：按名称/URL/方法/路径/header/说明/body 打分排序（分数越高越相关，matched 列出命中字段）。project 省略时在所有已加载项目里搜。适合「记得大概内容但记不清名字」的场景。",
-	}, ts.searchRequests)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_envs",
-		Description: "列出项目的全部环境与其中的变量（敏感变量的值只回掩码 ••••••，拿不到真实密钥）。query 可对环境名与变量名做模糊过滤。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
-	}, ts.listEnvs)
+	addTool(ts, server, "list_workspaces", ts.listWorkspaces)
+	addTool(ts, server, "use_workspace", ts.useWorkspace)
+	addTool(ts, server, "list_projects", ts.listProjects)
+	addTool(ts, server, "get_project_modules", ts.getProjectModules)
+	addTool(ts, server, "get_request_detail", ts.getRequestDetail)
+	addTool(ts, server, "search_requests", ts.searchRequests)
+	addTool(ts, server, "list_envs", ts.listEnvs)
 }
 
 // ---- 工作目录（白名单 + 默认目标）----
@@ -130,76 +378,52 @@ func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in 
 }
 
 func (ts *toolSet) registerWriteTools(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_request",
-		Description: "创建接口请求。支持三种来源：直接给 method/url/headers/body；给 curl（cURL 命令，自动解析）；给 copyFromUid（复制已有请求）。同名会在分组内自动加序号。",
-	}, ts.createRequest)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_module",
-		Description: "创建模块（目录）。parent 为空表示在项目根下建；支持嵌套（如 parent=api 建 api/user）。",
-	}, ts.createModule)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_project",
-		Description: "在**授权且可写**的工作目录下新建一个项目（集合目录 + manifest），建完即可用 list_projects 看到。dir 必须是白名单内的可写目录，留空时用第一个可写目录；白名单外一律拒绝。",
-	}, ts.createProject)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_request",
-		Description: "修改已有接口（只改传入的字段）。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
-	}, ts.updateRequest)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "delete_request",
-		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
-	}, ts.deleteRequest)
+	addTool(ts, server, "create_request", ts.createRequest)
+	addTool(ts, server, "create_module", ts.createModule)
+	addTool(ts, server, "create_project", ts.createProject)
+	addTool(ts, server, "update_request", ts.updateRequest)
+	addTool(ts, server, "delete_request", ts.deleteRequest)
 	ts.registerEnvWriteTools(server)
 }
 
-// registerEnvWriteTools 环境变量的写操作（4 个环境级 + 2 个变量级）。
+// registerEnvWriteTools 环境变量的写操作（5 个环境/变量级写工具）。
 // 单列一个函数：环境变量是一组有共同约定的工具（敏感值掩码、名字规则），放一起更好维护。
 func (ts *toolSet) registerEnvWriteTools(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_env",
-		Description: "新建环境（environments/<name>.yml），可同时写入初始变量。重名会报错，不覆盖已有环境。环境名只允许字母、数字、- 与 _。",
-	}, ts.createEnv)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "rename_env",
-		Description: "给环境改名：按新名写一份（敏感值一起搬过去），再把旧名移入 .trash。目标名已被占用会报错；只改大小写（如 dev→DEV）也会被拒绝——在 Windows 上那是同一个文件，改名会让环境消失。ifMatch 传 list_envs 里的 hash 可检测期间的外部改动并拒绝覆盖。",
-	}, ts.renameEnv)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "delete_env",
-		Description: "删除环境（两个文件都移入集合的 .trash，可人工找回）。删之前建议先 list_envs 确认里面没有还要用的变量。",
-	}, ts.deleteEnv)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "set_env_var",
-		Description: "新增或更新某环境里的一个变量（按变量名 upsert，只改这一条，其它变量与顺序都不动）。强烈建议先 list_envs 拿到该环境的 hash 再带 ifMatch 写入（环境是整份重写，不带校验会覆盖期间的其它改动）。secret=true 时值落盘进 .secrets.yml，之后对外只回掩码；若把掩码原样传回表示「密钥不变」，不会覆盖真值（掩码被改写成 •••• / ????? 这类占位也认）；对已存在的敏感变量传空值会被拒绝，避免误清空密钥。enabled=false 可停用某变量（不参与 {{name}} 解析）。",
-	}, ts.setEnvVar)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "delete_env_var",
-		Description: "从某环境里删掉一个变量。变量不存在会报错（避免「以为删掉了」）。ifMatch 传 list_envs 里该环境的 hash 可获得并发保护。",
-	}, ts.deleteEnvVar)
+	addTool(ts, server, "create_env", ts.createEnv)
+	addTool(ts, server, "rename_env", ts.renameEnv)
+	addTool(ts, server, "delete_env", ts.deleteEnv)
+	addTool(ts, server, "set_env_var", ts.setEnvVar)
+	addTool(ts, server, "delete_env_var", ts.deleteEnvVar)
 }
 
 func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
-	desc := "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 true：把响应存成该请求的响应示例（examples/*.yml，客户端可回看/删除）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例）。"
+	meta, ok := MetaOf("send_request")
+	if !ok {
+		panic("mcp: 工具 send_request 缺少 meta.go 元数据")
+	}
+	desc := meta.Description
 	if forceNoSave {
 		desc = "发送请求并返回结果（只读模式：不会保存响应示例）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求。"
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "send_request",
-		Description: desc,
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in SendRequestInput) (*mcp.CallToolResult, any, error) {
-		if forceNoSave {
-			no := false
-			in.SaveExample = &no
-		}
-		return ts.wrap(func() (string, error) {
-			in.Project = ts.proj(req, in.Project)
-			out, err := ts.svc.SendRequest(in)
-			if err != nil {
-				return "", err
+	// 描述：只读模式用覆盖文案（addTool 默认取 meta 描述），故这里直接 AddTool，
+	// 但仍走同一个 runGuarded 装饰链，保证授权/recover 不缺。
+	handler := func(ctx context.Context, req *mcp.CallToolRequest, in SendRequestInput) (*mcp.CallToolResult, any, error) {
+		return runGuarded(ts, meta, ctx, req, func() (*mcp.CallToolResult, any, error) {
+			if forceNoSave {
+				no := false
+				in.SaveExample = &no
 			}
-			return renderSend(out), nil
+			return ts.wrap(func() (string, error) {
+				in.Project = ts.proj(req, in.Project)
+				out, err := ts.svc.SendRequest(in)
+				if err != nil {
+					return "", err
+				}
+				return renderSend(out), nil
+			})
 		})
-	})
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: meta.Name, Description: desc}, handler)
 }
 
 // ---- 各工具的 handler（统一经 wrap 把 panic/错误转成工具结果） ----

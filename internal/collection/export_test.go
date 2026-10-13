@@ -206,9 +206,9 @@ func TestExportHTMLTOCToggleSearch(t *testing.T) {
 			t.Fatalf("建分组 %s/%s: %v", parent, name, err)
 		}
 	}
-	mustFolder("", "A")     // 第一个顶层目录：默认展开
+	mustFolder("", "A")    // 第一个顶层目录：默认展开
 	mustFolder("A", "A-子") // 嵌套目录：默认折叠
-	mustFolder("", "B")     // 第二个顶层目录：默认折叠
+	mustFolder("", "B")    // 第二个顶层目录：默认折叠
 	if _, err := c.CreateRequest("A", "A 请求", "GET"); err != nil {
 		t.Fatalf("建请求 A: %v", err)
 	}

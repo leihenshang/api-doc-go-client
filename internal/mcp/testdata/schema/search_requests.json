@@ -1,0 +1,17 @@
+{
+  "properties": {
+    "limit": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "type": "object"
+}

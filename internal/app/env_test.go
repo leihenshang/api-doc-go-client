@@ -36,7 +36,7 @@ func TestEnvVarResolvesAndSends(t *testing.T) {
 	}
 
 	req := &collection.Request{
-		Name: "导出模板",
+		Name:   "导出模板",
 		Method: "GET",
 		URL:    "{{host1}}/apis/linkingthing.com/ipam/ipv6-filing/v1/selfownedfilings?action=export_template",
 	}

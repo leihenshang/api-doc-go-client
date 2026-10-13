@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	share "github.com/leihenshang/api-doc-go-share/collection"
@@ -42,6 +43,9 @@ type Collection struct {
 	UID  string
 	Name string
 	idx  *index.DB // 本地 SQLite 索引（C1）；惰性打开
+	// closed：Close 后置位。防止 watcher 关闭竞态下（事件与 done 同时就绪）
+	// 又触发一次 RebuildIndex 在「错误的配置目录」里重开索引（跨测试/Windows 文件锁问题）。
+	idxClosed atomic.Bool
 	// indexKey 索引文件名用的键，空 = 用 UID（见 SetIndexKey：多根并存时同 uid 的拷贝目录要区分开）
 	indexKey string
 	w        *watch.Watcher // 外部改动监听（D1）；惰性启动
@@ -161,6 +165,7 @@ func (c *Collection) StopWatch() {
 // 关闭一个工作目录（多根并存）或退出应用时不释放，用户删目录 / 测试清理临时目录都会失败。
 // 关闭后再用会自动重开（ensureIndex），所以调用方不必关心后续是否还会访问。
 func (c *Collection) Close() error {
+	c.idxClosed.Store(true)
 	c.StopWatch()
 	return c.closeIndex()
 }
@@ -230,6 +235,9 @@ func (c *Collection) closeIndex() error {
 	return err
 }
 
+// errCollectionClosed 集合 Close 后又访问索引（理论上只可能是 watcher 关闭竞态）。
+var errCollectionClosed = errors.New("collection closed")
+
 // indexNameAllowed 索引文件名的合法字符（与 uuid 的字符集一致）。
 var indexNameAllowed = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
@@ -243,8 +251,12 @@ func safeIndexName(uid string) string {
 	return "u" + hex.EncodeToString(sum[:16])
 }
 
-// ensureIndex 惰性打开索引库。
+// ensureIndex 惰性打开索引库。集合 Close 后拒绝重开：关闭竞态残留的 watcher
+// 事件不应再创建索引句柄（否则会在新的配置目录里生成孤儿 sqlite 并锁住文件）。
 func (c *Collection) ensureIndex() (*index.DB, error) {
+	if c.idxClosed.Load() {
+		return nil, errCollectionClosed
+	}
 	if c.idx != nil {
 		return c.idx, nil
 	}

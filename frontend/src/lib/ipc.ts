@@ -17,7 +17,11 @@ import type {
   HistoryEntry,
   ImportSummary,
   IndexNode,
+  MCPGrant,
   MCPStatus,
+  AuthzDecision,
+  McpAuditPage,
+  McpAuditQuery,
   MockStatus,
   RequestDoc,
   ResolveResult,
@@ -130,6 +134,9 @@ function normalizeRequest(r: RequestDoc): RequestDoc {
     body: {
       type: r.body?.type ?? 'none',
       raw: r.body?.raw ?? '',
+      // data（Bruno 结构化 JSON 体）必须原样保留：之前在这里被剥离，
+      // 导致导入 Bruno 后再保存/同步时 body.data 丢失（T5）。
+      data: r.body?.data ?? '',
       form: r.body?.form ?? [],
     },
     // grpc 段的 imports/metadata 同样是可省略字段（Go 侧 omitempty）：归一成数组，界面免判空
@@ -166,7 +173,12 @@ function normalizeExample(ex: ResponseExample): ResponseExample {
     request: {
       ...ex.request,
       headers: ex.request?.headers ?? [],
-      body: { type: ex.request?.body?.type ?? 'none', raw: ex.request?.body?.raw ?? '', form: ex.request?.body?.form ?? [] },
+      body: {
+        type: ex.request?.body?.type ?? 'none',
+        raw: ex.request?.body?.raw ?? '',
+        data: ex.request?.body?.data ?? '',
+        form: ex.request?.body?.form ?? [],
+      },
     },
     response: { ...ex.response, headers: ex.response?.headers ?? [] },
   }
@@ -264,6 +276,18 @@ export const api = {
   mcpStatus: () => call<MCPStatus>('MCPStatusText'),
   applyMCPSettings: () => call<MCPStatus>('ApplyMCPSettings'),
   regenerateMCPToken: () => call<MCPStatus>('RegenerateMCPToken'),
+  /** T2：对风险工具授权弹窗给出决策 */
+  answerMCPAuthz: (id: string, decision: AuthzDecision) =>
+    call<null>('AnswerMCPAuthz', id, decision),
+  /** T2：「始终允许」授权清单管理 */
+  listMCPGrants: () => call<MCPGrant[] | null>('ListMCPGrants').then((v) => v ?? []),
+  removeMCPGrant: (tool: string, project: string) =>
+    call<null>('RemoveMCPGrant', tool, project),
+  clearMCPGrants: () => call<null>('ClearMCPGrants'),
+  /** T3：MCP 调用审计查询/导出/清空 */
+  listMCPAudit: (q: McpAuditQuery) => call<McpAuditPage>('ListMCPAudit', q),
+  exportMCPAudit: (dest = '') => call<string>('ExportMCPAudit', dest),
+  clearMCPAudit: () => call<null>('ClearMCPAudit'),
   listHistory: (limit: number) => call<HistoryEntry[] | null>('ListHistory', limit).then((v) => v ?? []),
   clearHistory: () => call<null>('ClearHistory'),
   replayHistory: (index: number, envName: string) =>

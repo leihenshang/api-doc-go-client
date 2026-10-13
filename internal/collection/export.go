@@ -379,30 +379,30 @@ func (c *Collection) ExportMarkdown() (string, error) {
 			}
 			fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
 			fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
-		writeMDSection(&b, "参数", r.Params)
-		writeMDSection(&b, "请求头", r.Headers)
-		if r.Body.Type != "" && r.Body.Type != "none" {
-			// 请求体：原始内容（JSON/文本）以代码块展示；表单字段另以表格「分开展示」，
-			// 与「参数」（URL 参数）区分——同一请求章节内为两张独立的表格，便于对照阅读。
-			raw := r.Body.Raw
-			var formRows []KV
-			for _, f := range r.Body.Form {
-				if !f.Enabled || f.Name == "" {
-					continue
+			writeMDSection(&b, "参数", r.Params)
+			writeMDSection(&b, "请求头", r.Headers)
+			if r.Body.Type != "" && r.Body.Type != "none" {
+				// 请求体：原始内容（JSON/文本）以代码块展示；表单字段另以表格「分开展示」，
+				// 与「参数」（URL 参数）区分——同一请求章节内为两张独立的表格，便于对照阅读。
+				raw := r.Body.Raw
+				var formRows []KV
+				for _, f := range r.Body.Form {
+					if !f.Enabled || f.Name == "" {
+						continue
+					}
+					formRows = append(formRows, KV{Name: f.Name, Value: f.Value, Enabled: true})
 				}
-				formRows = append(formRows, KV{Name: f.Name, Value: f.Value, Enabled: true})
-			}
-			if len(formRows) > 0 {
-				fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
-				if strings.TrimSpace(raw) != "" {
+				if len(formRows) > 0 {
+					fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
+					if strings.TrimSpace(raw) != "" {
+						fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
+					}
+					writeMDSection(&b, "请求体参数", formRows)
+				} else if strings.TrimSpace(raw) != "" {
+					fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
 					fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
 				}
-				writeMDSection(&b, "请求体参数", formRows)
-			} else if strings.TrimSpace(raw) != "" {
-				fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
-				fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
 			}
-		}
 			if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
 				fmt.Fprintf(&b, "**认证**：%s\n\n", r.Auth.Type)
 			}
@@ -520,20 +520,20 @@ func (c *Collection) ExportHTML() (string, error) {
 				toc.WriteString(`</li>`)
 				continue
 			}
-		// request
-		id := nextID()
-		toc.WriteString(`<li class="toc-request"><a href="#`)
-		toc.WriteString(id)
-		toc.WriteString(`">`)
-		toc.WriteString(html.EscapeString(n.Name))
-		toc.WriteString(`</a></li>`)
-		// 该请求正文之后会紧跟其 Docs 内的标题（被 mdToHTML 占用 toc-N），
-		// 必须把这部分标题数计入计数器，后续节点的 toc-N 才能与正文对齐。
-		if res != nil {
-			if r, ok := res.reqs[n.UID]; ok {
-				tocID += countDocHeadings(r.Docs)
+			// request
+			id := nextID()
+			toc.WriteString(`<li class="toc-request"><a href="#`)
+			toc.WriteString(id)
+			toc.WriteString(`">`)
+			toc.WriteString(html.EscapeString(n.Name))
+			toc.WriteString(`</a></li>`)
+			// 该请求正文之后会紧跟其 Docs 内的标题（被 mdToHTML 占用 toc-N），
+			// 必须把这部分标题数计入计数器，后续节点的 toc-N 才能与正文对齐。
+			if res != nil {
+				if r, ok := res.reqs[n.UID]; ok {
+					tocID += countDocHeadings(r.Docs)
+				}
 			}
-		}
 		}
 	}
 	walkTOC(tree, 0, true)

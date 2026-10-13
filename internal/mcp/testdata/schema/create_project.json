@@ -1,0 +1,17 @@
+{
+  "properties": {
+    "dirName": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "root": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
