@@ -495,6 +495,7 @@ export namespace collection {
 	    uid: string;
 	    tree: Node[];
 	    envs: Env[];
+	    respUids?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new CollectionInfo(source);
@@ -507,6 +508,7 @@ export namespace collection {
 	        this.uid = source["uid"];
 	        this.tree = this.convertValues(source["tree"], Node);
 	        this.envs = this.convertValues(source["envs"], Env);
+	        this.respUids = source["respUids"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

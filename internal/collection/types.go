@@ -130,4 +130,7 @@ type CollectionInfo struct {
 	UID  string  `json:"uid"`
 	Tree []*Node `json:"tree"`
 	Envs []Env   `json:"envs"`
+	// RespUIDs 响应字段表非空（RespDoc.Params 至少一行）的请求 uid 列表。
+	// 前端侧栏据此在请求叶子下挂「Resp」子节点（节点是纯 UI 合成物，不落盘、不进共享 Node）。
+	RespUIDs []string `json:"respUids,omitempty"`
 }

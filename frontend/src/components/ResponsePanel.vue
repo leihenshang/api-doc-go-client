@@ -1,112 +1,78 @@
 <script setup lang="ts">
-// 响应面板（response-panel design-spec §3）：状态栏 → 标签栏 → 操作工具条 → 内容区。
-// 保存▾ 菜单（§4）只保留两个落盘动作：保存响应示例 / 保存响应体为文件（.json），
-// 「保存全部字段为变量 / 保存选中值为变量」与「作用域」chips 已下线（有意差异）；
-// 变量入口只剩字段表的「变量书签」，落点固定为当前环境（映射见 lib/saveVars.ts）。
-import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
+// 响应面板：状态栏 / 页签（响应体 / 响应头 / 尾元数据）/ 工具条 / 内容区。
+// 响应字段表已移到请求编辑器的「响应字段（Resp）」分段（侧栏 Resp 节点入口）：
+// 本面板只保留「更新响应字段」动作 —— 已有字段时先弹覆盖确认（可勾选「值一致时继承说明」），
+// 更新成功后字段表写入请求模型并把编辑器切到 Resp 分段。
+import { NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NAlert, NTag } from 'naive-ui'
 import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
+import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
-import ResponseFields from '@/components/ResponseFields.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
-import { formatBytes, httpStatusText } from '@/lib/format'
-import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
+import { DomHighlighter } from '@/lib/find'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import {
-  loadFields,
-  mergeFields,
-  paramsFromRows,
-  removeFields,
-  rootJsonType,
-  rowsFromDoc,
-  saveFields,
-  type FieldRow,
-} from '@/lib/responseFields'
-import { deriveVarName, removeVar, saveVars, scopeVarNames, type VarScope } from '@/lib/saveVars'
+import { rebuildFields, loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
+import { useCollectionStore } from '@/stores/collection'
+import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
-import type { ResponseDoc, ResponseExample, SendResult } from '@/types'
+import type { ResponseDoc, SendResult } from '@/types'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
-
-/** 变量书签的落点：作用域 chips 下线后固定为「环境」。 */
-const VAR_SCOPE: VarScope = 'env'
+const coll = useCollectionStore()
+const tabs = useTabsStore()
 
 const view = ref<'pretty' | 'raw'>('pretty')
 const wrap = ref(true)
-const seg = ref<'body' | 'headers' | 'trailers' | 'fields'>('body')
+const seg = ref<'body' | 'headers' | 'trailers'>('body')
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
 
-const fields = ref<FieldRow[]>([])
-const examples = ref<ResponseExample[]>([])
-const viewingUid = ref('') // 非空 = 正在回看已保存的示例
-const showSave = ref(false)
-const saveName = ref('')
-const copied = ref(false)
+/** 页内查找 */
+const findOn = ref(false)
+const findKw = ref('')
+const findTotal = ref(0)
+const findIndex = ref(-1)
+const paneRef = ref<HTMLElement | null>(null)
+const findBarRef = ref<InstanceType<typeof FindBar> | null>(null)
+const highlighter = new DomHighlighter()
 
-// 仅在选中了具体示例时才算"在看示例"：uid 为空/缺失一律视为本次响应，防止下拉与提示条状态错位
+/** 覆盖确认（仅当字段表已有内容时弹出） */
+const showOverwrite = ref(false)
+const INHERIT_KEY = 'client.resp.inheritMeaning'
+const inheritMeaning = ref(localStorage.getItem(INHERIT_KEY) !== '0')
+
 const example = computed(() =>
-  viewingUid.value ? (examples.value.find((e) => e.uid === viewingUid.value) ?? null) : null,
+  props.tab.response ? (examples.value.find((e) => e.uid === viewingUid.value) ?? null) : null,
 )
 
-/** 面板展示的响应：回看示例时用示例快照，否则用本次响应。
- *  headers/body 允许缺失（YAML omitempty、二进制等），必须归一成空值——
- *  否则渲染期读 `.length` 会抛错，整个面板（页签内容 + 下拉）都会卡死。 */
 const display = computed<SendResult | null>(() => {
-  const ex = example.value
-  if (!ex) {
-    const r = props.tab.response
-    if (!r) return null
-    // 全字段归一：Go 侧有 omitempty，缺字段时渲染期读属性/取值会得到 undefined（空值展示或 NaN）
-    return {
-      url: r.url ?? '',
-      status: r.status ?? 0,
-      proto: r.proto ?? '',
-      timeMs: r.timeMs ?? 0,
-      size: r.size ?? 0,
-      sentSize: r.sentSize ?? 0,
-      contentType: r.contentType ?? '',
-      binary: !!r.binary,
-      headers: r.headers ?? [],
-      body: r.body ?? '',
-      trailers: r.trailers ?? [],
-      script: r.script ?? null,
-      truncated: !!r.truncated,
-      fullSize: r.fullSize ?? 0,
-      warnings: r.warnings ?? [],
-    }
-  }
+  const r = props.tab.response
+  if (!r) return null
+  // 全字段归一：go 侧有 omitempty，缺字段时归一成空值——否则渲染期读 .length 会抛错
   return {
-    url: ex.request.url ?? '',
-    status: ex.response.status ?? 0,
-    proto: ex.response.proto ?? '',
-    timeMs: ex.response.timeMs ?? 0,
-    size: ex.response.size ?? 0,
-    contentType: ex.response.contentType ?? '',
-    binary: !!ex.response.binary,
-    headers: ex.response.headers ?? [],
-    body: ex.response.body ?? '',
-    trailers: [], // 示例快照不存尾元数据
-    script: null, // example 快照未存脚本产物
-    truncated: false, // 示例快照不记录截断信息（存的就是当时展示的内容）
-    fullSize: 0,
-    warnings: [],
+    url: r.url ?? '',
+    status: r.status ?? 0,
+    proto: r.proto ?? '',
+    timeMs: r.timeMs ?? 0,
+    size: r.size ?? 0,
+    sentSize: r.sentSize ?? 0,
+    contentType: r.contentType ?? '',
+    binary: !!r.binary,
+    headers: r.headers ?? [],
+    body: r.body ?? '',
+    trailers: r.trailers ?? [],
+    warnings: r.warnings ?? [],
+    script: r.script ?? null,
+    truncated: !!r.truncated,
+    fullSize: r.fullSize ?? 0,
   }
 })
-
-/** gRPC 响应：proto 由执行器固定写成 "gRPC"，此时的 status 是 gRPC code（不是 HTTP 状态码）。 */
-const isGrpcRes = computed(() => (display.value?.proto ?? '') === 'gRPC')
-const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
 
 const body = computed(() => display.value?.body ?? '')
 
-const isJson = computed(() => {
-  const text = body.value.trim()
-  if (!text || display.value?.binary) return false
-  return text.startsWith('{') || text.startsWith('[')
-})
+const isJson = computed(() => /^[{[]/.test(body.value.trim()))
 
 const rawText = computed(() => {
   if (view.value === 'raw' || !isJson.value) return body.value
@@ -118,127 +84,28 @@ const rawText = computed(() => {
 })
 
 const headerCount = computed(() => display.value?.headers?.length ?? 0)
+const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
+const isGrpcRes = computed(() => (display.value?.proto ?? '') === 'gRPC')
 
-const statusType = computed<'success' | 'warning' | 'error'>(() => {
-  const s = display.value?.status ?? 0
-  // gRPC：0=OK 绿，取消 / 超时黄，其余红（G8.2）
-  if (isGrpcRes.value) return grpcStatusType(s)
-  if (s >= 200 && s < 300) return 'success'
-  if (s >= 300 && s < 500) return 'warning'
-  return 'error'
-})
-
-const statusLabel = computed(() => {
-  const s = display.value?.status ?? 0
-  // gRPC：状态码名 + 码值（`OK(0)` / `NOT_FOUND(5)`）
-  if (isGrpcRes.value) return grpcCodeLabel(s)
-  return `${s} ${httpStatusText(s)}`.trim()
-})
-
-const meta = computed(() => {
-  const r = display.value
-  if (!r) return ''
-  const out = `${r.timeMs} ms${t('common.sep')}${formatBytes(r.size)}`
-  // gRPC：把发送的请求消息大小也带上（G8.3）
-  const withSent = r.sentSize ? `${out}${t('common.sep')}↑ ${formatBytes(r.sentSize)}` : out
-  // 截断必须显式标注：否则用户会把「前 10MB」当成完整响应体
-  if (!r.truncated) return withSent
-  const label = r.fullSize
-    ? t('resp.truncatedFull', { size: formatBytes(r.fullSize) })
-    : t('resp.truncated')
-  return `${withSent}${t('common.sep')}${label}`
-})
+const examples = ref<any[]>([])
+const viewingUid = ref('')
 
 const exampleOptions = computed(() => [
-  { label: t('resp.liveResponse'), value: '' },
-  ...examples.value.filter((e) => !!e.uid).map((e) => ({ label: e.name, value: e.uid })),
+  { value: '', label: t('resp.liveResponse') },
+  ...examples.value.map((e) => ({ value: e.uid, label: e.name })),
 ])
 
-/** 书签判定依据：当前环境里已存在的变量名。 */
-const scopeNames = computed(() => scopeVarNames(VAR_SCOPE, props.tab))
-/** 已书签的字段路径集合（供字段表点亮）。 */
-const bookmarks = computed(
-  () => new Set(fields.value.filter((f) => scopeNames.value.has(deriveVarName(f.path))).map((f) => f.path)),
-)
-
-/** gRPC 请求不承载响应文档（字段表仍本地可用，不写请求模型）。 */
-const isGrpcReq = computed(() => !!props.tab.request?.grpc)
-
-// 切换请求：字段表真相源是请求模型的 RespDoc；无文档时回退旧 localStorage 存档（一次性迁移）
+// 切换请求：无响应时回到 body 页签。
 watch(
   () => props.tab.uid,
-  (uid, oldUid) => {
-    let rows = rowsFromDoc(props.tab.request?.respDoc)
-    if (!rows.length) rows = loadFields(uid)
-    // 草稿转正：旧 draft uid 下的字段表迁移到真实请求
-    if (!rows.length && oldUid && oldUid !== uid) rows = loadFields(oldUid)
-    fields.value = rows
-    viewingUid.value = ''
+  () => {
     seg.value = 'body'
+    viewingUid.value = ''
     void reloadExamples()
-    // 迁移/转正：把本地字段一次性写进请求模型
-    if (!props.tab.draft && !isGrpcReq.value && rows.length && !props.tab.request?.respDoc?.params?.length) {
-      void persistRows(rows, true)
-    }
-  },
-  { immediate: true },
-)
-
-// 同步/外部改动带回了响应文档（页签内请求被重新载入）时刷新字段表
-watch(
-  () => props.tab.request?.respDoc,
-  (doc) => {
-    fields.value = rowsFromDoc(doc)
   },
 )
 
-/** 含义输入去抖写盘句柄。 */
-let persistTimer: ReturnType<typeof setTimeout> | null = null
-
-onBeforeUnmount(() => {
-  if (persistTimer) clearTimeout(persistTimer)
-})
-
-/**
- * 把字段表写回请求模型 RespDoc（文件即真相源，随后随同步与 Web 端往返）。
- * 未落盘草稿 / gRPC 请求暂存 localStorage；immediate 用于「更新字段」与增删行。
- * 返回是否写成功（本地存档也算成功），供调用方决定成功提示。
- */
-async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean> {
-  const uid = props.tab.uid
-  if (props.tab.draft || isGrpcReq.value || !uid) {
-    saveFields(uid, rows)
-    return true
-  }
-  const apply = async (): Promise<boolean> => {
-    const doc: ResponseDoc = {
-      type: rootJsonType(body.value) || props.tab.request?.respDoc?.type || '',
-      params: paramsFromRows(rows),
-      sample: body.value || props.tab.request?.respDoc?.sample || '',
-    }
-    try {
-      await api.updateResponseDoc(uid, doc)
-      if (props.tab.request) props.tab.request.respDoc = doc
-      removeFields(uid) // 旧本地存档迁移完成后清理
-      return true
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
-      return false
-    }
-  }
-  if (immediate) {
-    if (persistTimer) {
-      clearTimeout(persistTimer)
-      persistTimer = null
-    }
-    return apply()
-  }
-  if (persistTimer) clearTimeout(persistTimer)
-  persistTimer = setTimeout(() => void apply(), 600)
-  return true
-}
-
-// 重新发送后回到本次响应并复位页签，避免新响应体"消失"
+// 重新发送后回到本次响应并复位页签，避免新响应还停在旧页签上
 watch(
   () => props.tab.response,
   () => {
@@ -251,259 +118,315 @@ async function reloadExamples(): Promise<void> {
   try {
     examples.value = await api.listResponseExamples(props.tab.uid)
   } catch {
-    examples.value = [] // 读取失败（集合未就绪等）不应影响响应展示
+    examples.value = []
   }
 }
 
-/** 「更新响应字段」：解析当前响应体并增量合并（只追加新字段与含义），写入请求模型 RespDoc。
- *  字段表只存在于「响应字段」页签（响应体下方不再挂表），所以提示里带上页签名，点了不会「没反应」。
- *  任何失败只提示，不允许抛错中断渲染（否则面板内容与下拉会整体卡死）。 */
+const meta = computed(() => {
+  if (!display.value) return ''
+  const parts = [`${display.value.timeMs} ms`, formatBytes(display.value.size)]
+  if (display.value.sentSize) parts.push(`↑ ${formatBytes(display.value.sentSize)}`)
+  return parts.join(' · ')
+})
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+const statusType = computed<'success' | 'warning' | 'error'>(() => {
+  const s = display.value?.status ?? 0
+  if (isGrpcRes.value) return s === 0 ? 'success' : 'error'
+  if (s >= 200 && s < 300) return 'success'
+  if (s >= 300 && s < 500) return 'warning'
+  return 'error'
+})
+
+const statusLabel = computed(() => {
+  const s = display.value?.status ?? 0
+  if (isGrpcRes.value) return s === 0 ? 'OK(0)' : `NOT_OK(${s})`
+  return `${s} ${httpStatusText(s)}`.trim()
+})
+
+function httpStatusText(s: number): string {
+  const map: Record<number, string> = {
+    200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved', 302: 'Found',
+    304: 'Not Modified', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden',
+    404: 'Not Found', 405: 'Method Not Allowed', 408: 'Timeout', 409: 'Conflict',
+    422: 'Unprocessable', 429: 'Too Many Requests', 500: 'Internal Error',
+    502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout',
+  }
+  return map[s] ?? ''
+}
+
+const copied = ref(false)
+
+// ---- 更新响应字段（覆盖确认 + 值一致继承说明）----
+
+const isGrpcReq = computed(() => !!props.tab.request?.grpc)
+
+/** 当前字段表：已落盘请求取请求模型 RespDoc；草稿 / gRPC 回退一次性本地存档。 */
+function currentRows(): FieldRow[] {
+  const doc = props.tab.request?.respDoc
+  const rows = rowsFromDoc(doc)
+  return rows.length ? rows : loadFields(props.tab.uid)
+}
+
+/**
+ * 「更新响应字段」：解析当前展示的响应体并**覆盖**字段表。
+ * 已有字段时先弹覆盖确认（可勾选「值一致时继承已有说明」）；首次更新或空表直接执行。
+ */
 async function updateFields(): Promise<void> {
+  if (!display.value) return
+  if (!body.value.trim()) {
+    message.info(t('resp.fieldsNeedBody'))
+    return
+  }
+  const old = currentRows()
+  if (old.length > 0) {
+    showOverwrite.value = true
+    return
+  }
+  await doUpdateFields(old, inheritMeaning.value)
+}
+
+async function confirmOverwrite(): Promise<void> {
+  showOverwrite.value = false
+  localStorage.setItem(INHERIT_KEY, inheritMeaning.value ? '1' : '0')
+  await doUpdateFields(currentRows(), inheritMeaning.value)
+}
+
+async function doUpdateFields(old: FieldRow[], inherit: boolean): Promise<void> {
   try {
-    const { rows, added } = mergeFields(fields.value, body.value)
-    fields.value = rows
+    const { rows } = rebuildFields(old, body.value, inherit)
     const ok = await persistRows(rows, true)
     if (!ok) return
-    if (added > 0) {
-      message.success(t('resp.fieldsAdded', { n: added }))
-    } else {
-      message.info(t('resp.fieldsNoChange'))
+    // 字段表已挂到请求模型：侧栏 Resp 节点即时出现 / 消失
+    if (!isGrpcReq.value) {
+      coll.setRespUid(coll.activeRoot, props.tab.uid, rows.length > 0)
+      tabs.focusRespFields(props.tab.key)
     }
+    message.success(t('resp.fieldsUpdated', { n: rows.length }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
-/** 含义编辑：本地立即更新，去抖写盘（避免逐键存盘）。 */
-function setMeaning(path: string, value: string): void {
-  fields.value = fields.value.map((r) => (r.path === path ? { ...r, meaning: value } : r))
-  void persistRows(fields.value)
+/** 含义输入去抖写盘。草稿 / gRPC 请求暂存 localStorage；HTTP 请求写回请求模型 RespDoc（immediate 用于「更新」按钮）。 */
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean> {
+  const uid = props.tab.uid
+  const doc: ResponseDoc = {
+    type: rootJsonType(body.value) || props.tab.request?.respDoc?.type || '',
+    params: paramsFromRows(rows),
+    sample: body.value || props.tab.request?.respDoc?.sample || '',
+  }
+  if (props.tab.draft || isGrpcReq.value || !uid) {
+    saveFields(uid, rows)
+    return true
+  }
+  const apply = async (): Promise<boolean> => {
+    try {
+      await api.updateResponseDoc(uid, doc)
+      if (props.tab.request) props.tab.request.respDoc = doc
+      removeFields(uid)
+      return true
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+      return false
+    }
+  }
+  if (immediate) {
+    if (persistTimer) clearTimeout(persistTimer)
+    return apply()
+  }
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => void apply(), 600)
+  return true
 }
 
-function removeField(path: string): void {
-  fields.value = fields.value.filter((r) => r.path !== path)
-  void persistRows(fields.value, true)
+onBeforeUnmount(() => {
+  if (persistTimer) clearTimeout(persistTimer)
+  highlighter.clear()
+})
+
+async function copyBody(): Promise<void> {
+  if (!(await writeClipboard(body.value))) {
+    message.error(t('resp.copyFailed'))
+    return
+  }
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1200)
 }
 
-function removeMany(paths: string[]): void {
-  const set = new Set(paths)
-  fields.value = fields.value.filter((r) => !set.has(r.path))
-  void persistRows(fields.value, true)
-}
-
-function clearFields(): void {
-  fields.value = []
-  void persistRows([], true)
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard?.writeText(text)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function openSave(): void {
   saveName.value = t('resp.exampleDefault')
   showSave.value = true
 }
+const showSave = ref(false)
+const saveName = ref('')
 
-/** 保存响应示例：请求快照取当前草稿，响应取本次结果（回看示例时不重复保存）。 */
 async function submitSave(): Promise<void> {
   const name = saveName.value.trim()
-  const res = props.tab.response
-  if (!name || !res) return
+  if (!name) return
   try {
-    const saved = await api.saveResponseExample(props.tab.request, name, res)
-    showSave.value = false
+    const saved = await api.saveResponseExample(props.tab.request, name, props.tab.response as SendResult)
     await reloadExamples()
-    viewingUid.value = saved.uid
+    showSave.value = false
     message.success(t('resp.exampleSaved', { name: saved.name }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
-async function removeExample(): Promise<void> {
-  const ex = example.value
-  if (!ex) return
-  try {
-    await api.deleteResponseExample(props.tab.uid, ex.uid)
-    viewingUid.value = ''
-    await reloadExamples()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-/** 写剪贴板：优先异步 Clipboard API（桌面壳/安全上下文），不可用或拒绝时降级 execCommand。
- *  失败必须给出提示 —— 否则点「复制响应体」看起来毫无反应。 */
-async function writeClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // 权限被拒 / 非安全上下文：走下面的兜底
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.setAttribute('readonly', '')
-    ta.style.position = 'fixed'
-    ta.style.top = '-1000px'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    ta.remove()
-    return ok
-  } catch {
-    return false
-  }
-}
-
-async function copyBody(): Promise<void> {
-  const text = display.value?.body
-  if (!text) {
-    message.info(t('resp.copyEmpty'))
-    return
-  }
-  if (!(await writeClipboard(text))) {
-    message.error(t('resp.copyFailed'))
-    return
-  }
-  copied.value = true // 按钮文案切到「已复制」作为反馈
-  setTimeout(() => (copied.value = false), 1200)
-}
-
-/** 保存响应体为文件（JSON → .json，二进制 base64 解码 → .bin）。 */
 async function saveBody(): Promise<void> {
-  const d = display.value
-  if (!d) return
-  const ext = d.binary ? 'bin' : isJson.value ? 'json' : 'txt'
-  const name = `response-${d.status || 'body'}.${ext}`
   try {
-    const path = await api.saveResponseBody(name, d.binary, d.body)
+    const path = await api.saveResponseBody('response.txt', false, body.value)
     if (path) message.success(t('resp.savedFile', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
-/** 字段行「变量书签」：已书签 → 删变量；未书签 → 存成当前环境的变量。
- *  「保存 ▾」里的变量入口与作用域 chips 已下线，变量落点固定为当前环境（映射见 lib/saveVars.ts）。 */
-async function toggleBookmark(path: string): Promise<void> {
-  const name = deriveVarName(path)
+async function removeExample(): Promise<void> {
   try {
-    if (scopeNames.value.has(name)) {
-      await removeVar(VAR_SCOPE, props.tab, name)
-      message.success(t('resp.varRemoved', { name }))
-      return
-    }
-    const row = fields.value.find((r) => r.path === path)
-    if (!row) return
-    if (row.type === 'array' || row.type === 'object') {
-      message.info(t('resp.varBookmarkLeaf'))
-      return
-    }
-    await saveVars(VAR_SCOPE, props.tab, [{ name, value: row.value }])
-    message.success(t('resp.varSaved', { name, scope: t('resp.scopeEnv') }))
+    await api.deleteResponseExample(props.tab.uid, viewingUid.value || (example.value?.uid ?? ''))
+    await reloadExamples()
+    viewingUid.value = ''
+    message.success(t('common.deleted'))
   } catch (e) {
-    if (e instanceof Error && e.message === 'no-env') message.warning(t('resp.varNoEnv'))
-    else message.error(e instanceof Error ? e.message : String(e))
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ---- 查找（内容区高亮 + 上下切换）----
+function openFind(): void {
+  findOn.value = true
+  void nextTick(() => findBarRef.value?.focus())
+}
+
+watch(findOn, (on) => {
+  if (!on) {
+    findKw.value = ''
+    highlighter.clear()
+    findTotal.value = 0
+    findIndex.value = -1
+  } else {
+    void nextTick(() => findBarRef.value?.focus())
+  }
+})
+
+watch(
+  [findKw, seg, view, body, findOn, () => display.value?.headers, () => display.value?.trailers],
+  async () => {
+    if (!findOn.value) return
+    await nextTick() // 等页签 / 美化原始切换渲染完
+    findTotal.value = highlighter.apply(paneRef.value, findKw.value)
+    findIndex.value = findTotal.value ? 0 : -1
+    if (findTotal.value) highlighter.select(0)
+  },
+)
+
+function findNext(): void {
+  if (!findTotal.value) return
+  highlighter.step(1)
+  findIndex.value = highlighter.index
+}
+function findPrev(): void {
+  if (!findTotal.value) return
+  highlighter.step(-1)
+  findIndex.value = highlighter.index
+}
+
+function onPaneKeydown(e: KeyboardEvent): void {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && display.value) {
+    e.preventDefault()
+    openFind()
   }
 }
 </script>
 
 <template>
-  <div class="resp">
-    <n-alert v-if="tab.error" type="error" :bordered="false" class="err">{{ tab.error }}</n-alert>
+  <div class="resp" @keydown="onPaneKeydown">
+    <n-alert v-if="tab.error" type="error" class="err">{{ tab.error }}</n-alert>
 
-    <!-- 状态栏（design-spec §3 第 1 排，h44）在「尚未发送」时也占位：
-         标题与右上角「已保存的响应示例 ▾」的样式、位置与发送后完全一致，
-         没有响应时只是不渲染状态码徽章与耗时/体积（display 为空时这些信息不存在） -->
-    <div v-if="!tab.error" class="status-bar" data-testid="resp.statusbar">
-      <span class="ttl">{{ t('resp.title') }}</span>
-      <n-tag
-        v-if="display"
-        :type="statusType"
-        size="small"
-        :bordered="false"
-        class="badge"
-        data-testid="resp.status"
-        :title="display.proto"
-      >
-        {{ statusLabel }}
-      </n-tag>
-      <span v-if="display" class="meta mono" data-testid="resp.meta">{{ meta }}</span>
-      <span class="sp" />
-      <!-- 删除示例 + 「本次响应 ▾」：发送前后共用这一处，切换时下拉不会跳位置 -->
-      <n-popconfirm v-if="example" @positive-click="removeExample">
-        <template #trigger>
-          <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
-            <n-icon :component="TrashOutline" :size="13" />
-            <span>{{ t('common.delete') }}</span>
-          </button>
-        </template>
-        <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
-      </n-popconfirm>
-      <!-- 无响应又没有已保存示例时不摆下拉（只剩「本次响应」一项没有意义） -->
-      <n-select
-        v-if="display || examples.length"
-        :value="viewingUid"
-        :options="exampleOptions"
-        size="small"
-        class="expick"
-        data-testid="resp.examples"
-        :title="t('resp.examples')"
-        @update:value="viewingUid = String($event ?? '')"
-      />
-    </div>
-
-    <!-- 发送告警（跨域重定向丢弃凭据头、响应体被截断等）：非致命但必须让用户看见 -->
-    <div v-if="display?.warnings?.length" class="warns" data-testid="resp.warnings">
-      <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
-    </div>
-
-    <!-- 内容分支：出错时只留错误条；否则「有响应 → 响应区 / 无响应 → 空态提示」。
-         注意这里必须自己带条件，不能写成 v-else-if/v-else —— 上一版的 v-else-if 挂到了上面
-         状态栏的 v-if 上，链条变成「无错误 ? 状态栏 : …」，导致响应区与空态永远不渲染。 -->
     <template v-if="!tab.error && display">
-      <!-- 标签栏：响应体 / 响应头 N / 响应字段 N + 请求 URL -->
-      <div class="seg">
-        <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body" @click="seg = 'body'">
-          {{ t('resp.body') }}
-        </button>
-        <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab" data-seg="headers" @click="seg = 'headers'">
-          {{ t(isGrpcRes ? 'resp.initialMetadata' : 'resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
-        </button>
-        <!-- 尾元数据只存在于 gRPC（HTTP 响应没有这个概念），故按协议出现（G8.5） -->
-        <button
-          v-if="isGrpcRes"
-          class="seg-tab"
-          :class="{ on: seg === 'trailers' }"
-          type="button"
-          data-testid="resp.tab"
-          data-seg="trailers"
-          @click="seg = 'trailers'"
-        >
-          {{ t('resp.trailers') }}<span v-if="trailerCount" class="num">{{ trailerCount }}</span>
-        </button>
-        <button class="seg-tab" :class="{ on: seg === 'fields' }" type="button" data-testid="resp.tab" data-seg="fields" @click="seg = 'fields'">
-          {{ t('resp.fieldsTab') }}<span v-if="fields.length" class="num">{{ fields.length }}</span>
-        </button>
-        <span class="url mono" data-testid="resp.url" :title="display.url">{{ display.url }}</span>
+      <div v-if="display.warnings?.length" class="warns" data-testid="resp.warnings">
+        <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
+      </div>
+      <div class="status-bar" data-testid="resp.statusbar">
+        <span class="ttl">{{ t('resp.title') }}</span>
+        <n-tag v-if="display.status" :type="statusType" :bordered="false" class="badge" data-testid="resp.status">
+          {{ statusLabel }}
+        </n-tag>
+        <span class="meta mono" data-testid="resp.meta">{{ meta }}</span>
+        <span class="sp" />
+        <n-popconfirm v-if="example" @positive-click="removeExample">
+          <template #trigger>
+            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
+              <n-icon :component="TrashOutline" :size="13" />
+            </button>
+          </template>
+          <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
+        </n-popconfirm>
+        <n-select
+          v-model:value="viewingUid"
+          :options="exampleOptions"
+          size="small"
+          class="expick"
+          data-testid="resp.examples"
+        />
       </div>
 
-      <!-- 操作工具条（design-spec §3 第 3 排）：左侧视图/显示，右侧解析/输出；
-           「本次响应 ▾」按设计稿回到状态栏，工具条不再挂行首插槽 -->
+      <div class="seg">
+        <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body">
+          {{ t('resp.body') }}
+        </button>
+        <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab" data-seg="headers">
+          {{ isGrpcRes ? t('resp.initialMetadata') : t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
+        </button>
+        <button v-if="isGrpcRes" class="seg-tab" :class="{ on: seg === 'trailers' }" type="button" data-testid="resp.tab"
+          data-seg="trailers">
+          {{ t('resp.trailers') }}<span v-if="trailerCount" class="num">{{ trailerCount }}</span>
+        </button>
+      </div>
+
       <response-toolbar
         v-model:view="view"
         v-model:wrap="wrap"
+        v-model:find-on="findOn"
         :is-json="isJson"
         :copied="copied"
-        :can-save-example="!example && !!tab.response"
+        :can-save-example="!example"
+        :findable="!!body"
         @expand-all="jv?.expandAll()"
         @collapse-all="jv?.collapseAll()"
         @update-fields="updateFields"
         @copy-body="copyBody"
         @save-file="saveBody"
         @save-example="openSave"
+        @find="openFind"
+      />
+
+      <find-bar
+        v-if="findOn"
+        ref="findBarRef"
+        v-model:keyword="findKw"
+        :total="findTotal"
+        :index="findIndex"
+        @next="findNext"
+        @prev="findPrev"
+        @close="findOn = false"
       />
 
       <div v-if="example" class="exnote" data-testid="resp.exnote">
@@ -514,52 +437,42 @@ async function toggleBookmark(path: string): Promise<void> {
         </button>
       </div>
 
-      <div class="pane">
+      <div ref="paneRef" class="pane">
         <template v-if="seg === 'body'">
           <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
             {{ display.script.scriptError }}
           </div>
           <div v-if="display.script?.asserts?.length" class="asserts" data-testid="resp.asserts">
-            <div v-for="(a, i) in display.script.asserts" :key="i" class="arow" :class="a.passed ? 'ok' : 'fail'" data-testid="resp.assert">
-              <span class="astate">{{ a.passed ? '✓' : '✗' }}</span>
+            <div v-for="(a, i) in display.script.asserts" :key="i" class="arow" :class="a.passed ? 'ok' : 'fail'">
+              <span class="astate">✓</span>
               <span class="aname">{{ a.name || a.expr }}</span>
               <span class="aexpr mono">{{ a.expr }}</span>
               <span v-if="a.error" class="aerr">{{ a.error }}</span>
             </div>
           </div>
-          <div v-if="display.binary" class="binhint">{{ t('resp.binary') }}</div>
           <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
           <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
         </template>
+
         <div v-else-if="seg === 'headers'" class="hlist">
-          <div v-for="h in display.headers" :key="h.name" class="hrow mono" data-testid="resp.headerRow">
-            <span class="hn">{{ h.name }}</span>
+          <div v-for="h in display.headers" :key="h.name" class="hrow" data-testid="resp.headerRow">
+            <span class="hn mono">{{ h.name }}</span>
             <span class="hv">{{ h.value }}</span>
           </div>
         </div>
-        <div v-else-if="seg === 'trailers'" class="hlist">
-          <div v-for="tr in display.trailers" :key="tr.name" class="hrow mono" data-testid="resp.trailerRow">
-            <span class="hn">{{ tr.name }}</span>
-            <span class="hv">{{ tr.value }}</span>
+
+        <div v-else class="hlist">
+          <div v-for="h in display.trailers" :key="h.name" class="hrow" data-testid="resp.trailerRow">
+            <span class="hn mono">{{ h.name }}</span>
+            <span class="hv">{{ h.value }}</span>
           </div>
         </div>
-        <response-fields
-          v-else
-          :rows="fields"
-          :bookmarks="bookmarks"
-          @meaning="setMeaning"
-          @bookmark="toggleBookmark"
-          @remove="removeField"
-          @remove-many="removeMany"
-          @clear="clearFields"
-        />
       </div>
     </template>
 
     <div v-else-if="!tab.error" class="empty">
-      <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4">
-        <path d="M22 2 11 13" />
-        <path d="M22 2 15 22l-4-9-9-4 20-7Z" />
+      <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
       </svg>
       <p class="etitle">{{ t('resp.empty') }}</p>
       <ul class="shortcuts">
@@ -574,19 +487,31 @@ async function toggleBookmark(path: string): Promise<void> {
     <n-modal v-model:show="showSave" preset="card" :title="t('resp.saveResponse')" style="width: 440px">
       <div class="save-form">
         <span class="flabel">{{ t('resp.exampleName') }}</span>
-        <n-input
-          v-model:value="saveName"
-          size="small"
-          data-testid="resp.exampleNameInput"
-          :placeholder="t('resp.exampleNamePlaceholder')"
-          @keyup.enter="submitSave"
-        />
+        <n-input v-model:value="saveName" size="small" data-testid="resp.exampleNameInput" :placeholder="t('resp.exampleNamePlaceholder')" />
         <p class="fhint">{{ t('resp.exampleHint') }}</p>
       </div>
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" @click="showSave = false">{{ t('common.cancel') }}</n-button>
-          <n-button size="small" type="primary" :disabled="!saveName.trim()" @click="submitSave">{{ t('common.save') }}</n-button>
+          <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
+            {{ t('common.save') }}
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- 覆盖字段表确认：已有字段时更新 = 覆盖重建；勾选后同路径同值的字段沿用旧说明 -->
+    <n-modal v-model:show="showOverwrite" preset="card" :title="t('resp.fieldsOverwriteTitle')" style="width: 440px">
+      <p class="ow-text">{{ t('resp.fieldsOverwriteContent') }}</p>
+      <n-checkbox v-model:checked="inheritMeaning" data-testid="resp.fieldsInherit">
+        {{ t('resp.inheritMeaning') }}
+      </n-checkbox>
+      <template #footer>
+        <div class="modal-ft">
+          <n-button size="small" @click="showOverwrite = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
+            {{ t('resp.fieldsOverwriteOk') }}
+          </n-button>
         </div>
       </template>
     </n-modal>
@@ -606,29 +531,11 @@ async function toggleBookmark(path: string): Promise<void> {
   margin-bottom: 8px;
 }
 
-/* 发送告警：跨域重定向丢弃凭据头、响应体被截断等 —— 用提醒色弱化呈现，不抢状态码的注意力 */
-.warns {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 0 0 auto;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--app-border);
-}
-
-.warn {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--app-warn);
-}
-
-/* 状态栏（design-spec §3 第 1 排，h44）：响应 · 200 OK 徽章 · 12 ms · 145 KB，右侧「本次响应 ▾」 */
 .status-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-width: 0;
   height: 44px;
   border-bottom: 1px solid var(--app-border);
 }
@@ -637,7 +544,6 @@ async function toggleBookmark(path: string): Promise<void> {
   font-size: 13px;
   font-weight: 600;
   color: var(--app-text);
-  flex: 0 0 auto;
 }
 
 .badge {
@@ -652,12 +558,15 @@ async function toggleBookmark(path: string): Promise<void> {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 0 1 auto;
-  min-width: 0;
 }
 
 .sp {
-  flex: 1 1 auto;
+  flex: 1;
+}
+
+.expick {
+  width: 132px;
+  flex: 0 0 auto;
 }
 
 .toggle {
@@ -686,12 +595,6 @@ async function toggleBookmark(path: string): Promise<void> {
   color: var(--app-danger);
 }
 
-/* 状态栏右侧「本次响应 ▾」：描边胶囊，切换历史响应 */
-.expick {
-  width: 132px;
-  flex: 0 0 auto;
-}
-
 .exnote {
   display: flex;
   align-items: center;
@@ -716,7 +619,6 @@ async function toggleBookmark(path: string): Promise<void> {
   cursor: pointer;
 }
 
-/* 标签栏（design-spec §3 第 2 排，h40）：页签间距 20，右侧请求 URL */
 .seg {
   display: flex;
   align-items: center;
@@ -753,14 +655,12 @@ async function toggleBookmark(path: string): Promise<void> {
   background: var(--app-row-hover);
 }
 
-/* 激活页签：绿字 + 2px 绿色下划线 */
 .seg-tab.on {
   color: var(--app-accent);
   font-weight: 600;
   border-bottom-color: var(--app-accent);
 }
 
-/* 计数徽标（灰底胶囊，design-spec §3 第 2 排） */
 .num {
   display: inline-block;
   margin-left: 5px;
@@ -899,9 +799,6 @@ async function toggleBookmark(path: string): Promise<void> {
   word-break: break-all;
 }
 
-/* 尚未发送的提示区：飞机图标 + 快捷键提示常驻。
-   状态栏现在也占一行，面板被拖矮时（竖向布局 20%）内容可能放不下：
-   overflow 兜住滚动，safe center 让内容超出时改为顶部对齐，避免居中把图标/提示裁掉。 */
 .empty {
   flex: 1 1 auto;
   min-height: 0;
@@ -961,6 +858,12 @@ async function toggleBookmark(path: string): Promise<void> {
   margin: 0;
   font-size: 11.5px;
   color: var(--app-muted);
+}
+
+.ow-text {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--app-text-2);
 }
 
 .modal-ft {

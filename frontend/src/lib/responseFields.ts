@@ -85,23 +85,19 @@ export function extractFields(text: string): FieldRow[] {
   return out
 }
 
-/** 合并一次解析结果：已存在的字段只刷新类型（保留含义），新字段追加在末尾。 */
-export function mergeFields(rows: FieldRow[], text: string): { rows: FieldRow[]; added: number } {
-  const merged = rows.map((r) => ({ ...r }))
-  const index = new Map(merged.map((r) => [r.path, r]))
-  let added = 0
-  for (const field of extractFields(text)) {
-    const exist = index.get(field.path)
-    if (exist) {
-      exist.type = field.type
-      exist.value = field.value
-      continue
-    }
-    index.set(field.path, field)
-    merged.push(field)
-    added += 1
-  }
-  return { rows: merged, added }
+/**
+ * 覆盖式重建字段表（「更新响应字段」= 用本次响应体重新解析，响应里已消失的字段不再保留）。
+ * inherit=true 时，仅当旧行「路径相同且取值一致」才继承已填含义 ——
+ * 取值变了（同名字段新值不同）说明语义可能已变，不沿用旧说明；类型/取值一律以本次解析为准。
+ */
+export function rebuildFields(old: FieldRow[], text: string, inherit: boolean): { rows: FieldRow[]; changed: boolean } {
+  const prev = new Map(old.map((r) => [r.path, r]))
+  const rows = extractFields(text).map((f) => {
+    if (!inherit) return f
+    const p = prev.get(f.path)
+    return p && p.value === f.value && p.meaning ? { ...f, meaning: p.meaning } : f
+  })
+  return { rows, changed: rows.length > 0 || old.length > 0 }
 }
 
 /** 读取本地存档；兼容早期「路径 → 含义」的对象格式。 */

@@ -224,6 +224,17 @@ export interface TreeNode {
   children?: TreeNode[]
 }
 
+/**
+ * 侧栏合成的「Resp」子节点（不落盘、不进 Go Node）：挂在带响应字段表的请求叶子下。
+ * type 固定 'resp'，uid = 所属请求的 uid；由前端根据 CollectionInfo.respUids 合成。
+ */
+export interface RespTreeNode {
+  type: 'resp'
+  uid: string
+  name: string
+  path: string
+}
+
 export interface EnvVar {
   name: string
   value: string
@@ -242,6 +253,8 @@ export interface CollectionInfo {
   uid: string
   tree: TreeNode[]
   envs: Env[]
+  /** 响应字段表非空的请求 uid 列表（侧栏据此挂 Resp 子节点） */
+  respUids?: string[]
 }
 
 /**

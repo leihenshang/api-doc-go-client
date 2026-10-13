@@ -1,28 +1,33 @@
 <script setup lang="ts">
 // 请求设置区（design-spec §2 请求面板）：Params / Body / Headers / Auth / Docs。
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
+import FindBar from '@/components/FindBar.vue'
+import { isGrpc } from '@/lib/grpc'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
 import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
+import ResponseFields from '@/components/ResponseFields.vue'
+import { SearchOutline } from '@vicons/ionicons5'
 import { buildApiDoc } from '@/lib/genDocs'
-import { isGrpc } from '@/lib/grpc'
-import { api } from '@/lib/ipc'
-import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
-import { message } from '@/lib/notice'
-import { loadFields } from '@/lib/responseFields'
+import { findInTextareas, selectTextareaMatch, type TextareaMatch } from '@/lib/find'
 import { isDark } from '@/lib/theme'
+import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
+import { api } from '@/lib/ipc'
+import { dialog, message } from '@/lib/notice'
+import { loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields } from '@/lib/responseFields'
+import { deriveVarName, removeVar, saveVars, scopeVarNames } from '@/lib/saveVars'
+import type { FieldRow } from '@/lib/responseFields'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { Auth } from '@/types'
+import type { Auth, ResponseDoc } from '@/types'
 import { MdEditor, MdPreview } from 'md-editor-v3'
-import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { NCheckbox, NInput, NSelect } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
+import { NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -115,18 +120,8 @@ function onParamsChange(): void {
 }
 
 type Seg =
-  | 'schema'
-  | 'message'
-  | 'metadata'
-  | 'options'
-  | 'params'
-  | 'body'
-  | 'headers'
-  | 'auth'
-  | 'vars'
-  | 'script'
-  | 'tests'
-  | 'docs'
+  | 'schema' | 'message' | 'metadata' | 'options'
+  | 'params' | 'body' | 'headers' | 'auth' | 'resp' | 'vars' | 'script' | 'tests' | 'docs'
 
 const isGrpcReq = computed(() => isGrpc(props.tab.request))
 /** gRPC 请求没有 query / 请求头 / 请求体，分段换成「定义 + 协议无关的变量 / 脚本 / 断言 / 文档」。 */
@@ -245,12 +240,31 @@ function toggleDocsEditing(): void {
 /** 预览态是否已有内容：为空时展示空态提示，避免整块空白。 */
 const hasDoc = computed(() => (docs.value ?? '').trim().length > 0)
 
-/** 生成并覆写 Docs：请求示例取 curl 代码；响应字段取该请求已存档的字段表；
- *  响应示例从已保存示例里挑最新一个 JSON 体（否则省略响应节）。成功不提示，失败才提示。 */
+/**
+ * 生成并覆写 Docs：请求示例取 curl 代码；响应字段取**请求模型 RespDoc**（侧栏 Resp 节点同一份，
+ * 草稿 / gRPC 回退本地一次性存档）；响应示例从已保存示例里挑最新一个 JSON 体。
+ * Docs 已有内容时先弹覆盖确认（用户显式同意才重写）。成功不提示，失败才提示。
+ */
 async function genDocs(): Promise<void> {
+  if (hasDoc.value) {
+    const ok = await new Promise<boolean>((resolve) => {
+      dialog.warning({
+        title: t('docs.overwriteTitle'),
+        content: t('docs.overwriteWarn'),
+        positiveText: t('docs.overwriteOk'),
+        negativeText: t('common.cancel'),
+        onPositiveClick: () => resolve(true),
+        onNegativeClick: () => resolve(false),
+        onClose: () => resolve(false),
+        onMaskClick: () => resolve(false),
+      })
+    })
+    if (!ok) return
+  }
   try {
     const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
-    const fields = loadFields(props.tab.uid)
+    const fromModel = rowsFromDoc(props.tab.request.respDoc)
+    const fields = fromModel.length ? fromModel : loadFields(props.tab.uid)
     const examples = await api.listResponseExamples(props.tab.uid)
     const ex = examples.find((e) => !e.response.binary && /^[{[]/.test((e.response.body ?? '').trim()))
     docs.value = buildApiDoc({
@@ -316,6 +330,7 @@ const httpSegments = computed<{ key: Seg; label: string; dot: boolean }[]>(() =>
   { key: 'body', label: t('editor.body'), dot: hasBody.value },
   { key: 'headers', label: t('editor.headers'), dot: hasHeaders.value },
   { key: 'auth', label: t('editor.auth'), dot: hasAuth.value },
+  { key: 'resp', label: t('editor.respFields'), dot: hasResp.value },
   { key: 'vars', label: t('editor.vars'), dot: hasVars.value },
   { key: 'script', label: t('editor.script'), dot: hasScript.value },
   { key: 'tests', label: t('editor.tests'), dot: hasAsserts.value },
@@ -376,20 +391,214 @@ watch(
   () => {
     seg.value = isGrpcReq.value ? 'schema' : 'params'
     tabs.refreshResolve()
+    initFields()
   },
 )
+
+// ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
+// 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
+const hasResp = computed(() => fields.value.length > 0)
+const fields = ref<FieldRow[]>([])
+let fieldTimer: ReturnType<typeof setTimeout> | null = null
+
+function initFields(): void {
+  const fromDoc = rowsFromDoc(props.tab.request.respDoc)
+  fields.value = fromDoc.length ? fromDoc : loadFields(props.tab.uid)
+}
+initFields()
+
+// 外部（响应区更新 / 同步拉取）改写了 respDoc：仅当与本地字段表不同才整体替换，
+// 避免含义输入触发的防抖写回（每次都是新 doc 对象）刚写完就把输入打断。
+watch(
+  () => props.tab.request.respDoc,
+  (doc) => {
+    const incoming = rowsFromDoc(doc)
+    const cur = fields.value
+    const same =
+      incoming.length === cur.length &&
+      incoming.every(
+        (f, i) =>
+          f.path === cur[i]?.path &&
+          f.value === cur[i]?.value &&
+          f.type === cur[i]?.type &&
+          f.meaning === cur[i]?.meaning,
+      )
+    if (!same) fields.value = incoming
+  },
+)
+
+/** 写回：已落盘 HTTP 请求更新模型 respDoc（含义输入防抖；删除/清空立即写）；草稿 / gRPC 只存本地。 */
+async function persistFields(immediate = false): Promise<void> {
+  const uid = props.tab.uid
+  const doc: ResponseDoc = {
+    type: props.tab.request.respDoc?.type || rootJsonType('') || '',
+    params: paramsFromRows(fields.value),
+    sample: props.tab.request.respDoc?.sample || '',
+  }
+  if (props.tab.draft || isGrpcReq.value || !uid) {
+    saveFields(uid, fields.value)
+    return
+  }
+  const apply = async (): Promise<void> => {
+    try {
+      await api.updateResponseDoc(uid, doc)
+      props.tab.request.respDoc = doc
+      removeFields(uid)
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+  if (immediate) {
+    if (fieldTimer) clearTimeout(fieldTimer)
+    await apply()
+    return
+  }
+  if (fieldTimer) clearTimeout(fieldTimer)
+  fieldTimer = setTimeout(() => void apply(), 600)
+}
+
+function setMeaning(path: string, meaning: string): void {
+  const f = fields.value.find((x) => x.path === path)
+  if (f) f.meaning = meaning
+  void persistFields()
+}
+async function removeField(path: string): Promise<void> {
+  fields.value = fields.value.filter((f) => f.path !== path)
+  await persistFields(true)
+}
+async function removeFieldsByPath(paths: string[]): Promise<void> {
+  const drop = new Set(paths)
+  fields.value = fields.value.filter((f) => !drop.has(f.path))
+  await persistFields(true)
+}
+async function clearFields(): Promise<void> {
+  fields.value = []
+  await persistFields(true)
+}
+
+// 变量书签：落点固定为当前环境（与响应区旧实现一致）。
+const scopeNames = computed(() => [...scopeVarNames('env', props.tab)])
+const bookmarks = computed(
+  () =>
+    new Set(
+      fields.value.filter((f) => scopeNames.value.includes(deriveVarName(f.path))).map((f) => f.path),
+    ),
+)
+async function toggleBookmark(path: string): Promise<void> {
+  const row = fields.value.find((f) => f.path === path)
+  if (!row) return
+  const name = deriveVarName(path)
+  if (scopeNames.value.includes(name)) await removeVar('env', props.tab, name)
+  else if (row.type === 'array' || row.type === 'object') message.info(t('resp.varBookmarkLeaf'))
+  else await saveVars('env', props.tab, [{ name, value: row.value }])
+}
+
+// 响应区「更新响应字段」成功后，请求编辑器切到 Resp 分段并展示最新字段表。
+watch(
+  () => tabs.respFocus,
+  (f) => {
+    if (f?.key !== props.tab.key) return
+    seg.value = 'resp'
+    initFields()
+  },
+)
+
+onBeforeUnmount(() => {
+  if (fieldTimer) clearTimeout(fieldTimer)
+})
+
+// ---- 编辑区页内查找（textarea：JSON / 文本请求体、脚本、Docs 源码编辑）----
+const segBodyEl = ref<HTMLElement | null>(null)
+const findOn = ref(false)
+const findKw = ref('')
+const findTotal = ref(0)
+const findIndex = ref(-1)
+const findBarRef = ref<InstanceType<typeof FindBar> | null>(null)
+let findMatches: TextareaMatch[] = []
+
+/** 当前分段是否有可查找的 textarea（Docs 仅编辑态有；预览是渲染 HTML，不接入）。 */
+function findable(): boolean {
+  if (seg.value === 'body') return props.tab.request.body.type === 'json' || props.tab.request.body.type === 'text'
+  if (seg.value === 'script') return true
+  if (seg.value === 'docs') return docsEditing.value
+  return false
+}
+
+function findTargets(): HTMLTextAreaElement[] {
+  if (!segBodyEl.value) return []
+  return Array.from(segBodyEl.value.querySelectorAll('textarea')).filter(
+    (ta) => ta.offsetParent !== null && !ta.disabled,
+  )
+}
+
+async function openFind(): Promise<void> {
+  if (!findable()) return
+  findOn.value = true
+  await nextTick()
+  findBarRef.value?.focus()
+  applyFind()
+}
+
+function applyFind(): void {
+  findMatches = findInTextareas(findTargets(), findKw.value)
+  findTotal.value = findMatches.length
+  findIndex.value = findMatches.length ? 0 : -1
+  if (findMatches.length) selectTextareaMatch(findMatches[0])
+}
+
+function findNext(): void {
+  if (!findMatches.length) return
+  const i = (findIndex.value + 1) % findMatches.length
+  findIndex.value = i
+  selectTextareaMatch(findMatches[i])
+}
+function findPrev(): void {
+  if (!findMatches.length) return
+  const i = (findIndex.value - 1 + findMatches.length) % findMatches.length
+  findIndex.value = i
+  selectTextareaMatch(findMatches[i])
+}
+
+watch(
+  [findKw, seg, docsEditing, () => props.tab.request.body.type, findOn],
+  async () => {
+    if (!findOn.value) {
+      findMatches = []
+      findTotal.value = 0
+      findIndex.value = -1
+      return
+    }
+    await nextTick()
+    applyFind()
+  },
+)
+
+function onEditorKeydown(e: KeyboardEvent): void {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && findable()) {
+    e.preventDefault()
+    void openFind()
+  }
+}
 </script>
 
 <template>
-  <div class="editor">
+  <div class="editor" @keydown="onEditorKeydown">
     <div class="seg">
       <button v-for="s in segments" :key="s.key" class="seg-tab" :class="{ on: seg === s.key }" type="button"
         data-testid="req.tab" :data-seg="s.key" @click="seg = s.key">
         {{ s.label }}<span v-if="s.dot" class="badge" />
       </button>
+      <!-- 当前分段内容支持页内查找时显示（JSON/文本请求体、脚本、Docs 源码编辑） -->
+      <button v-if="findable()" class="find-btn" :class="{ on: findOn }" type="button" data-testid="req.find"
+        :title="t('find.placeholder')" @click="findOn ? (findOn = false) : openFind()">
+        <n-icon :component="SearchOutline" :size="14" />
+      </button>
     </div>
 
-    <div class="seg-body">
+    <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
+      @next="findNext" @prev="findPrev" @close="findOn = false" />
+
+    <div ref="segBodyEl" class="seg-body" @input="findOn ? applyFind() : undefined">
       <!-- gRPC：定义分段（导入 / 更新 / 移除 .proto、服务方法列表） -->
       <grpc-schema-pane v-if="isGrpcReq && seg === 'schema'" :tab="tab" />
       <!-- gRPC：请求消息（生成样例 / 按定义校验 / 字段提示） -->
@@ -500,6 +709,11 @@ watch(
         </div>
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
       </div>
+      <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与侧栏 Resp 节点、生成接口文档同源） -->
+      <div v-else-if="seg === 'resp'">
+        <response-fields :rows="fields" :bookmarks="bookmarks" @meaning="setMeaning" @bookmark="toggleBookmark"
+          @remove="removeField" @remove-many="removeFieldsByPath" @clear="clearFields" />
+      </div>
       <div v-else class="docs-pane">
         <div class="docs-bar">
           <button class="gin" type="button" data-testid="docs.edit" @click="toggleDocsEditing">
@@ -545,6 +759,30 @@ watch(
   flex: 0 0 auto;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* 页内查找按钮：推到分段行最右（与各分段标签同行，不抢位置） */
+.find-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--app-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.find-btn:hover,
+.find-btn.on {
+  background: var(--app-row-hover);
+  color: var(--app-accent);
 }
 
 .seg::-webkit-scrollbar {

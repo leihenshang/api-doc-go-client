@@ -92,6 +92,8 @@ export const useCollectionStore = defineStore('collection', {
     favorites: [] as string[],
     /** 活动根的同步模式：''（未关联）| auto | manual | mirror */
     syncMode: '',
+    /** 各工作目录里「响应字段表非空」的请求 uid 集合（键 = root；随概要刷新，更新字段后乐观维护） */
+    respUids: {} as Record<string, string[]>,
   }),
   getters: {
     /** 活动根的概要（含只读/关联/Mock 等会话态）。 */
@@ -109,6 +111,13 @@ export const useCollectionStore = defineStore('collection', {
       return env?.vars.map((v) => v.name) ?? []
     },
     favSet: (state): Set<string> => new Set(state.favorites),
+    /** 指定根（缺省 = 活动根）下响应字段表非空的请求 uid 集合（侧栏 Resp 节点数据源）。 */
+    respSet(): (root?: string) => Set<string> {
+      return (root?: string) => {
+        const key = root || this.activeRoot
+        return new Set(this.respUids[key] ?? [])
+      }
+    },
     /** mirror 模式只读：仅当活动根已关联且 mode=mirror 时才禁编辑。 */
     isReadOnly: (state): boolean => activeOf(state)?.readOnly ?? state.syncMode === 'mirror',
   },
@@ -183,10 +192,21 @@ export const useCollectionStore = defineStore('collection', {
       const prev = this.currentEnv
       this.currentEnv = prev && this.envNames.includes(prev) ? prev : (this.envNames[0] ?? '')
     },
-    /** 把新的概要写回 roots（按目录匹配，root 标识不变）。 */
+    /** 把新的概要写回 roots（按目录匹配，root 标识不变）；同时同步 Resp 节点集合。 */
     replaceInfo(info: CollectionInfo): void {
       const i = this.roots.findIndex((r) => r.info.dir === info.dir)
-      if (i >= 0) this.roots[i] = { ...this.roots[i], info }
+      if (i >= 0) {
+        const root = this.roots[i].root
+        this.roots[i] = { ...this.roots[i], info }
+        this.respUids[root] = info.respUids ?? []
+      }
+    },
+    /** 更新某个请求的 Resp 节点存在性（更新/清空响应字段后乐观维护，不等磁盘事件）。 */
+    setRespUid(root: string, uid: string, has: boolean): void {
+      const cur = new Set(this.respUids[root] ?? [])
+      if (has) cur.add(uid)
+      else cur.delete(uid)
+      this.respUids[root] = [...cur]
     },
     /** 把「已打开目录 + 当前根」落 localStorage（重启恢复用）。 */
     saveDirs(): void {

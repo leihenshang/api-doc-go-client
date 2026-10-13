@@ -112,8 +112,8 @@ export async function saveSettings(page: Page): Promise<void> {
   await expect(page.getByTestId('settings.theme')).toBeHidden()
 }
 
-/** 响应区：切到某个页签（body / headers / fields） */
-export async function openRespTab(page: Page, seg: 'body' | 'headers' | 'fields'): Promise<void> {
+/** 响应区：切到某个页签（body / headers / trailers；fields 已移到请求编辑器 Resp 分段） */
+export async function openRespTab(page: Page, seg: 'body' | 'headers' | 'trailers'): Promise<void> {
   await page.locator(`[data-testid="resp.tab"][data-seg="${seg}"]`).click()
 }
 
