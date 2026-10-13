@@ -3,6 +3,14 @@
   box-sizing: border-box;
 }
 
+/* 文本选区：品牌绿半透明（明暗各一档，见下方令牌）。**半透明是刻意的**：
+   JsonBodyEditor / VarInput 是「上层透明文字 + 下层着色」的双层编辑器，选区画在上层，
+   不透明的选区底色会把下层彩色文字整个盖住 —— 选中即「消失」。半透明让下层文字透出，
+   普通文本也保持自身颜色叠在面板底上，浅色 / 暗色两种主题都有足够对比。 */
+::selection {
+  background: var(--app-selection);
+}
+
 html,
 body,
 #app {
@@ -64,6 +72,8 @@ body.dragging.row * {
   --app-send-hover: #36ad6a;
   --app-row-hover: #ececec;
   --app-active: #e8f5ee;
+  /* 文本选区：品牌绿低透明度，浅底上足够衬出深色文字 */
+  --app-selection: rgba(24, 160, 88, 0.25);
   /* 层级底板：surface-2 表头/代码块，surface-3 次级块，hover-soft 极浅悬停 */
   --app-surface-2: #fafafa;
   --app-surface-3: #f0f2f4;
@@ -154,6 +164,8 @@ body.dragging.row * {
   --app-send-hover: #36ad6a;
   --app-row-hover: #26282c;
   --app-active: #1e2f26;
+  /* 文本选区：暗底上提亮一档 + 提高不透明度，保证浅色文字看得清 */
+  --app-selection: rgba(54, 173, 106, 0.4);
   --app-surface-2: #202124;
   --app-surface-3: #26282c;
   --app-hover-soft: #232529;
