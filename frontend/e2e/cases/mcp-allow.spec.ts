@@ -48,7 +48,7 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
   expect(cfg.mcp.allow?.[0]?.writable).toBe(true)
 
   // ④ 重新打开：服务运行中，授权与可写仍保持
-  await openMcpSettings()
+  await openMcpSettings(page)
   await expect(page.getByTestId('settings.mcpRunning')).toBeVisible({ timeout: 15_000 })
   await expect(writable).toBeChecked()
 
@@ -60,6 +60,6 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
   }
   expect(cfg2.mcp.allow ?? []).toHaveLength(0)
 
-  await openMcpSettings()
+  await openMcpSettings(page)
   await expect(allowCheck).not.toBeChecked()
 })

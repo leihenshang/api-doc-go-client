@@ -17,7 +17,6 @@ import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { dialog, message } from '@/lib/notice'
 import type { FieldRow } from '@/lib/responseFields'
 import { loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields } from '@/lib/responseFields'
-import { deriveVarName, removeVar, saveVars, scopeVarNames } from '@/lib/saveVars'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
@@ -434,6 +433,9 @@ async function persistFields(immediate = false): Promise<void> {
     type: props.tab.request.respDoc?.type || rootJsonType('') || '',
     params: paramsFromRows(fields.value),
     sample: props.tab.request.respDoc?.sample || '',
+    // 字段表编辑不动快照：状态码/响应头原样带回（item 8）
+    status: props.tab.request.respDoc?.status ?? 0,
+    headers: props.tab.request.respDoc?.headers ?? [],
   }
   if (props.tab.draft || isGrpcReq.value || !uid) {
     saveFields(uid, fields.value)
@@ -476,22 +478,18 @@ async function clearFields(): Promise<void> {
   await persistFields(true)
 }
 
-// 变量书签：落点固定为当前环境（与响应区旧实现一致）。
-const scopeNames = computed(() => [...scopeVarNames('env', props.tab)])
-const bookmarks = computed(
-  () =>
-    new Set(
-      fields.value.filter((f) => scopeNames.value.includes(deriveVarName(f.path))).map((f) => f.path),
-    ),
-)
-async function toggleBookmark(path: string): Promise<void> {
-  const row = fields.value.find((f) => f.path === path)
-  if (!row) return
-  const name = deriveVarName(path)
-  if (scopeNames.value.includes(name)) await removeVar('env', props.tab, name)
-  else if (row.type === 'array' || row.type === 'object') message.info(t('resp.varBookmarkLeaf'))
-  else await saveVars('env', props.tab, [{ name, value: row.value }])
-}
+// 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
+
+// 响应数据快照格式化（item 24）：能 parse 就缩进 2 格美化，否则原文展示。
+const respSnapPretty = computed(() => {
+  const raw = respSnap.value?.sample ?? ''
+  if (!raw.trim()) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+})
 
 // 响应区「更新响应字段」成功后，请求编辑器切到 Resp 分段并展示最新字段表。
 watch(
@@ -502,6 +500,11 @@ watch(
     initFields()
   },
 )
+
+// ---- Resp 分段子页签（item 8）：字段表格 / 当时的响应数据 / 当时的响应头 ----
+type RespView = 'fields' | 'body' | 'headers'
+const respView = ref<RespView>('fields')
+const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
 onBeforeUnmount(() => {
   if (fieldTimer) clearTimeout(fieldTimer)
@@ -722,10 +725,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
         </div>
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
       </div>
-      <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与侧栏 Resp 节点、生成接口文档同源） -->
-      <div v-else-if="seg === 'resp'">
-        <response-fields :rows="fields" :bookmarks="bookmarks" @meaning="setMeaning" @bookmark="toggleBookmark"
-          @remove="removeField" @remove-many="removeFieldsByPath" @clear="clearFields" />
+      <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与生成接口文档同源）；
+           子页签切换字段表格 / 更新时的响应数据与响应头快照（item 8） -->
+      <div v-else-if="seg === 'resp'" class="resp-pane">
+        <div class="resp-sub" role="group">
+          <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" data-testid="resp.segTab"
+            data-view="fields" @click="respView = 'fields'">{{ t('editor.respTabFields') }}</button>
+          <button class="sub-tab" :class="{ on: respView === 'body' }" type="button" data-testid="resp.segTab"
+            data-view="body" @click="respView = 'body'">
+            {{ t('editor.respTabBody') }}<span v-if="respSnap?.status" class="sub-badge">{{ respSnap.status }}</span>
+          </button>
+          <button class="sub-tab" :class="{ on: respView === 'headers' }" type="button" data-testid="resp.segTab"
+            data-view="headers" @click="respView = 'headers'">
+            {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
+              respSnap.headers.length }}</span>
+          </button>
+        </div>
+        <response-fields v-if="respView === 'fields'" :rows="fields" @meaning="setMeaning" @remove="removeField"
+          @remove-many="removeFieldsByPath" @clear="clearFields" />
+        <pre v-else-if="respView === 'body'" class="resp-snap mono" data-testid="resp.segBody">{{ respSnapPretty ||
+          t('editor.respSnapEmpty') }}</pre>
+        <div v-else class="resp-heads" data-testid="resp.segHeaders">
+          <div v-if="!respSnap?.headers?.length" class="resp-heads-empty">{{ t('editor.respSnapEmpty') }}</div>
+          <div v-for="(h, i) in respSnap?.headers ?? []" :key="`${h.name}-${i}`" class="hrow"
+            data-testid="resp.segHeaderRow">
+            <span class="hn mono">{{ h.name }}</span>
+            <span class="hv">{{ h.value }}</span>
+          </div>
+        </div>
       </div>
       <div v-else class="docs-pane">
         <div class="docs-bar">
@@ -914,6 +941,101 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 .md-edit {
   flex: 1 1 auto;
   min-height: 340px;
+}
+
+/* Resp 分段子页签（item 8）：字段表格 / 响应数据 / 响应头 快照切换 */
+.resp-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px 0;
+}
+
+.sub-tab {
+  border: none;
+  background: none;
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--app-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sub-tab:hover {
+  background: var(--app-row-hover);
+  color: var(--app-text);
+}
+
+.sub-tab.on {
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
+  font-weight: 600;
+}
+
+.sub-badge {
+  font-family: var(--app-mono);
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--app-chip);
+  color: var(--app-text-2);
+}
+
+.resp-snap {
+  margin: 8px 12px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-code-bg, var(--app-surface-2, transparent));
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: auto;
+  max-height: calc(100% - 52px);
+}
+
+.resp-heads {
+  margin: 8px 12px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: calc(100% - 52px);
+}
+
+.resp-heads .hrow {
+  display: flex;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.resp-heads .hrow:last-child {
+  border-bottom: none;
+}
+
+.resp-heads .hn {
+  flex: 0 0 auto;
+  min-width: 140px;
+  color: var(--app-text-2);
+}
+
+.resp-heads .hv {
+  flex: 1 1 auto;
+  color: var(--app-text);
+  word-break: break-all;
+}
+
+.resp-heads-empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--app-placeholder);
 }
 
 /* Docs 区：顶部工具条（「生成接口文档」）+ 编辑器纵向撑满 */

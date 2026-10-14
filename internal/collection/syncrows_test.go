@@ -143,6 +143,32 @@ func TestSyncExtra_ResponseDoc(t *testing.T) {
 	}
 }
 
+// 响应快照（状态码/响应头，item 8）不参与同步；样例被服务端改写时本地快照必须清掉，
+// 避免「新样例 + 旧响应头」错位展示。
+func TestApplySyncExtraSnapshotFollowsSample(t *testing.T) {
+	newDoc := func(sample string) *Request {
+		return &Request{RespDoc: &ResponseDoc{
+			Type: "object", Sample: sample, Status: 200,
+			Headers: []KV{{Name: "X-Trace", Value: "t1", Enabled: true}},
+		}}
+	}
+	// 样例变了 → 快照清空
+	r := newDoc(`{"a":1}`)
+	ApplySyncExtra(r, `{"retSample":"{\"a\":2}"}`)
+	if r.RespDoc.Sample != `{"a":2}` {
+		t.Fatalf("样例未更新: %v", r.RespDoc.Sample)
+	}
+	if r.RespDoc.Status != 0 || len(r.RespDoc.Headers) != 0 {
+		t.Fatalf("样例被外部改写后快照应清空: %+v", r.RespDoc)
+	}
+	// 样例没变 → 快照保留
+	r2 := newDoc(`{"a":1}`)
+	ApplySyncExtra(r2, `{"retSample":"{\"a\":1}"}`)
+	if r2.RespDoc.Status != 200 || len(r2.RespDoc.Headers) != 1 {
+		t.Fatalf("样例一致时快照应保留: %+v", r2.RespDoc)
+	}
+}
+
 func TestApplySyncExtra_ResponseDoc(t *testing.T) {
 	retRows := `[{"fieldName":"code","type":"integer","required":true,"description":"状态码","example":"200"},` +
 		`{"fieldName":"data.list[].name","type":"string","required":false,"description":"","example":"n1"}]`

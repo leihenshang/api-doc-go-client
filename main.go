@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"api-doc-go-client/internal/app"
+	"api-doc-go-client/internal/devicon"
 	mcpsrv "api-doc-go-client/internal/mcp"
 	"api-doc-go-client/internal/platform"
 
@@ -27,8 +28,10 @@ func main() {
 	// 内嵌 MCP 服务：实现放在 internal/mcp（那边已经要用 App 的集合运行时，
 	// 反向依赖会成环），这里注入；设置页「MCP 服务」分区靠它启停。
 	core.SetMCPBackend(mcpsrv.NewBackend(log.New(os.Stderr, "mcp ", log.LstdFlags)))
+	// 开发版（dev 标签）Windows：后台把窗口/任务栏图标换成 dev 版（正式版与非 Windows 为空实现）。
+	devicon.Apply(appTitle)
 	err := wails.Run(&options.App{
-		Title: "api-doc-go",
+		Title: appTitle,
 		// 初始尺寸只给「安全下限」：真正尺寸在 DomReady 里按屏幕可用范围决定（见 app.DomReady）——
 		// Width/Height 是逻辑像素，高分屏（125% 缩放）下逻辑屏可能只有 1536×960，
 		// 首选 1600×1000 放不下就会被系统居中到屏幕外（顶部/底部被推出）。

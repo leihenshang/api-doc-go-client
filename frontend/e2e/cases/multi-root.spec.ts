@@ -1,6 +1,6 @@
+import type { Locator } from '@playwright/test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { Locator } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { listCollectionFiles } from '../helpers/fs'
 import { t } from '../helpers/i18n'
@@ -9,14 +9,13 @@ import {
   openReqTab,
   openSettings,
   openSettingsSection,
-  reopenApp,
   saveSettings,
-  treeRow,
+  treeRow
 } from '../helpers/ui'
 
-/** naive popconfirm 的确认按钮：取最后可见的那个（用过的 popconfirm 会留在 DOM 里）。 */
+/** 关闭工作目录的确认按钮：居中 dialog（item 11；取最后可见的一个，关过的弹窗会留在 DOM 里） */
 const confirmButton = (page: import('@playwright/test').Page) =>
-  page.locator('.n-popconfirm:visible').getByRole('button', { name: t('common.confirm') }).last()
+  page.locator('.n-dialog:visible').getByRole('button', { name: t('common.confirm') }).last()
 
 /**
  * 多工作目录（单树多根）。

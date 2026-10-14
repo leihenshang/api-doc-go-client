@@ -116,6 +116,10 @@ func applyResponseDoc(r *Request, m map[string]any) {
 		doc.Params = parseResponseParams(v, doc.Params)
 	}
 	if v, ok := m["retSample"].(string); ok {
+		if doc.Sample != v {
+			// 样例被外部（服务端）改写：本地随样例存的响应快照（状态码/响应头）不再对应，一并清掉
+			doc.Status, doc.Headers = 0, nil
+		}
 		doc.Sample = v
 	}
 	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" {

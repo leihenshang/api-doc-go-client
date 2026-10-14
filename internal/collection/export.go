@@ -366,6 +366,7 @@ func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 				continue
 			}
 			// appendDocs 附加请求文档；HTML 导出时做标题降级（Markdown 导出保持原样）。
+			// item 9：「文档」放在所有生成内容之下，并用分隔线 + 标题 label 与生成内容明显分界。
 			appendDocs := func() {
 				docs := strings.TrimSpace(r.Docs)
 				if docs == "" {
@@ -374,11 +375,44 @@ func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 				if shiftDocs {
 					docs = shiftHeadings(docs, level+1)
 				}
+				b.WriteString("\n---\n\n**文档**\n\n")
 				fmt.Fprintf(&b, "%s\n\n", docs)
+			}
+			// appendRespDoc 补齐响应字段文档（respdoc）：返回类型 / 字段表 / 样例 / 响应头（item 9）。
+			appendRespDoc := func() {
+				d := r.RespDoc
+				if d == nil {
+					return
+				}
+				if strings.TrimSpace(d.Type) != "" {
+					fmt.Fprintf(&b, "**返回类型**：%s\n\n", strings.TrimSpace(d.Type))
+				}
+				if len(d.Params) > 0 {
+					fmt.Fprintf(&b, "**响应字段**\n\n| 参数名 | 必选 | 类型 | 说明 | 示例 |\n|---|---|---|---|---|\n")
+					for _, p := range d.Params {
+						req := "否"
+						if p.Required {
+							req = "是"
+						}
+						fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n",
+							escapePipe(p.FieldName), req, escapePipe(p.Type), escapePipe(p.Description), escapePipe(p.Example))
+					}
+					b.WriteString("\n")
+				}
+				if strings.TrimSpace(d.Sample) != "" {
+					fmt.Fprintf(&b, "**响应样例**\n\n```json\n%s\n```\n\n", strings.TrimSpace(d.Sample))
+				}
+				if len(d.Headers) > 0 {
+					writeMDSection(&b, "响应头", d.Headers)
+				}
 			}
 			// gRPC 请求按协议分节（G11.6）：无 query / 请求头 / 请求体，改展示目标与方法信息
 			if g := r.GRPC; g != nil {
-				fmt.Fprintf(&b, "%s %s `GRPC`\n\n", pad, r.Name)
+				if shiftDocs {
+					fmt.Fprintf(&b, "%s %s %s\n\n", pad, methodBadge("GRPC"), r.Name)
+				} else {
+					fmt.Fprintf(&b, "%s %s `GRPC`\n\n", pad, r.Name)
+				}
 				fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
 				fmt.Fprintf(&b, "**服务方法**：`%s/%s`（%s）\n\n", g.Service, g.Method, grpcStreamLabel(g.Stream))
 				if strings.TrimSpace(g.Proto) != "" {
@@ -400,7 +434,13 @@ func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 				fmt.Fprintf(&b, "---\n\n")
 				continue
 			}
-			fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
+			// HTML 导出（shiftDocs）：正文 API 标题也用方法徽标前置，与客户端集合树/TOC 同源同色；
+			// Markdown 导出保持原样（名称 + 尾部 `METHOD` 行内码，纯文本工具链友好）。
+			if shiftDocs {
+				fmt.Fprintf(&b, "%s %s %s\n\n", pad, methodBadge(r.Method), r.Name)
+			} else {
+				fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
+			}
 			fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
 			writeMDSection(&b, "参数", r.Params)
 			writeMDSection(&b, "请求头", r.Headers)
@@ -429,6 +469,7 @@ func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 			if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
 				fmt.Fprintf(&b, "**认证**：%s\n\n", r.Auth.Type)
 			}
+			appendRespDoc()
 			appendDocs()
 			fmt.Fprintf(&b, "---\n\n")
 		}
@@ -465,7 +506,7 @@ func escapePipe(s string) string {
 }
 
 // ExportHTML 导出单文件 HTML（内联样式，可直接浏览器打开/分享）。
-// 左侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
+// 右侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
 // 正文每个标题带 toc-N 锚点（由 mdToHTML 分配），与 TOC 链接一一对应。
 func (c *Collection) ExportHTML() (string, error) {
 	// Docs 标题降级到请求标题之下（否则单节展示会把 Docs 整段排除在 API 小节之外）
@@ -578,7 +619,7 @@ func (c *Collection) ExportHTML() (string, error) {
   body { font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
          margin: 0; padding: 0; color: #202124; background: #fff; }
   .layout { display: flex; gap: 24px; max-width: 1100px; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
-  /* 左侧 sticky 目录树：窄栏、浅底卡片，滚动时固定 */
+  /* 左侧 sticky 目录树（集合树）：窄栏、浅底卡片，滚动时固定 */
   .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
          border: 1px solid #e3e3e3; border-radius: 10px; background: #f5f6f8; padding: 12px 14px; font-size: 13px; }
   .toc-title { font-weight: 600; color: #202124; margin-bottom: 8px; }
@@ -624,9 +665,14 @@ func (c *Collection) ExportHTML() (string, error) {
   .toc-root > a { font-weight: 600; }
   .toc-folder > a { font-weight: 600; color: #18a058; }
   .toc a:target, .toc a.current { background: #18a058; color: #fff; }
-  /* 请求条目：方法徽标 + 名称横排（对齐客户端集合树 MethodTag：等宽小字、语义色，无底色） */
-  .toc-request { display: flex; align-items: center; gap: 6px; }
-  .toc-request > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 请求条目：方法徽标 + 名称横排（对齐客户端集合树 MethodTag：等宽小字、语义色，无底色）；
+     item 10：hover / 选中时**整行**（含徽标）上绿底，名称反白；徽标做反色处理 ——
+     白底胶囊 + 方法原色文字（各方法颜色不同，白底对全部语义色都有对比度） */
+  .toc-request { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
+  .toc-request > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; padding: 0; }
+  .toc-request:hover, .toc-request.selected { background: #18a058; }
+  .toc-request:hover > a, .toc-request.selected > a { color: #fff; }
+  .toc-request:hover .tm, .toc-request.selected .tm { background: #fff; border-radius: 3px; padding: 0 4px; }
   .tm { flex: 0 0 auto; min-width: 34px; font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
         font-size: 10px; font-weight: 600; letter-spacing: 0.4px; line-height: 16px; }
   .m-get { color: #18a058; }
@@ -636,7 +682,17 @@ func (c *Collection) ExportHTML() (string, error) {
   .m-patch { color: #8a2be2; }
   .m-grpc { color: #0e94a8; }
   .m-other { color: #8a9199; }
+  /* 正文 API 标题内的方法徽标：与标题文字拉开间距（TOC 里由 flex gap 控制，不叠加） */
+  h1 .tm, h2 .tm, h3 .tm, h4 .tm, h5 .tm, h6 .tm { margin-right: 8px; }
   .content { flex: 1 1 auto; min-width: 0; }
+  /* 当前请求的右侧大纲（item 9 正解：URL/参数/请求头/文档内容等小节，点击跳转）；
+     内容由 JS 在单节展示时动态生成，不足两项时隐藏 */
+  .ol { flex: 0 0 180px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
+        font-size: 12px; padding: 2px 0 12px 12px; border-left: 1px solid #e3e3e3; }
+  .ol-title { font-weight: 600; color: #6b7280; margin-bottom: 6px; }
+  .ol a { display: block; color: #555; text-decoration: none; padding: 2px 6px; border-radius: 4px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ol a:hover { background: #f0faf3; color: #18a058; }
   h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; scroll-margin-top: 16px; }
   h1 { font-size: 1.8em; border-bottom: 1px solid #e3e3e3; padding-bottom: 0.3em; }
   code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -649,10 +705,11 @@ func (c *Collection) ExportHTML() (string, error) {
   hr { border: none; border-top: 1px solid #e3e3e3; margin: 1.6em 0; }
   blockquote { margin: 0.6em 0; padding: 0.4em 1em; border-left: 3px solid #18a058; background: #f5f6f8; color: #555; }
   strong { font-weight: 600; }
-  /* 窄屏：目录树移到正文上方、不再 sticky */
+  /* 窄屏：集合树排到正文上方、右侧大纲隐藏（小节跳转在窄屏价值低） */
   @media (max-width: 720px) {
     .layout { flex-direction: column; gap: 12px; padding: 16px 14px; }
     .toc { flex: 0 0 auto; position: static; max-height: none; width: 100%; }
+    .ol { display: none; }
   }
 </style>
 </head>
@@ -662,7 +719,10 @@ func (c *Collection) ExportHTML() (string, error) {
 	b.WriteString(toc.String())
 	b.WriteString(`<main class="content">`)
 	b.WriteString(body)
-	b.WriteString(`</main></div>`)
+	b.WriteString(`</main>`)
+	// 当前请求的右侧大纲：.ol-list 由 JS 在单节展示时按小节/生成标签动态填充
+	b.WriteString(`<nav class="ol" aria-label="当前页目录"><div class="ol-title">目录</div><div class="ol-list"></div></nav>`)
+	b.WriteString(`</div>`)
 	b.WriteString(`
 <script>
 (function(){
@@ -737,12 +797,64 @@ func (c *Collection) ExportHTML() (string, error) {
 
   function clearCurrent(){
     for(var i=0;i<tocLinks.length;i++){ tocLinks[i].classList.remove('current'); }
+    // 请求行整行选中态（item 10）：随行清除
+    var rows = list.querySelectorAll('.toc-request.selected');
+    for(var j=0;j<rows.length;j++){ rows[j].classList.remove('selected'); }
   }
+
+  // ---- 当前请求的右侧大纲（item 9）：单节展示时把节内小节/生成标签收集成可点击目录 ----
+  var olNav = document.querySelector('.ol');
+  var olList = olNav ? olNav.querySelector('.ol-list') : null;
+  var olSeq = 0;
+  function olId(el){ if(!el.id){ el.id = 'ol-' + (++olSeq); } return el.id; }
+  function olEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+  function clearOutline(){
+    if(olList){ olList.innerHTML = ''; }
+    if(olNav){ olNav.style.display = 'none'; }
+  }
+  // buildOutline 扫描当前节的块级元素：标题（h*）与「以粗体标签开头的段落」（**参数** 等生成内容）
+  // 都进大纲；紧跟标题的代码块是请求 URL，补一个合成条目。不足两项时隐藏。
+  function buildOutline(nodes){
+    if(!olList || !olNav) return;
+    var items = [];
+    for(var i=0;i<nodes.length;i++){
+      var el = nodes[i], tag = el.tagName;
+      if(/^H[1-6]$/.test(tag)){
+        items.push({el:el, text:el.textContent.trim(), lv:parseInt(tag.charAt(1),10)});
+      } else if(tag === 'PRE' && i === 1){
+        items.push({el:el, text:'URL', lv:0});
+      } else if(tag === 'P' && el.firstElementChild && el.firstElementChild.tagName === 'STRONG'){
+        items.push({el:el, text:el.textContent.trim().slice(0,24), lv:0});
+      }
+    }
+    var html = '';
+    for(var j=0;j<items.length;j++){
+      var it = items[j];
+      // 文档子标题按层级缩进（h3 一级、h4 二级），生成标签与节标题不缩进
+      var pad = it.lv >= 3 ? ' style="padding-left:' + ((it.lv - 2) * 12 + 6) + 'px"' : '';
+      html += '<a href="#' + olId(it.el) + '"' + pad + '>' + olEsc(it.text) + '</a>';
+    }
+    olList.innerHTML = html;
+    olNav.style.display = items.length > 1 ? '' : 'none';
+  }
+  if(olNav){
+    olNav.addEventListener('click', function(e){
+      var a = e.target && e.target.closest ? e.target.closest('a') : null;
+      if(!a) return;
+      var href = a.getAttribute('href') || '';
+      if(href.charAt(0) !== '#') return;
+      e.preventDefault();
+      var t = document.getElementById(href.slice(1));
+      if(t) t.scrollIntoView({ behavior:'smooth', block:'start' });
+    });
+  }
+
   function showAll(){
     if(!content) return;
     var kids = content.children;
     for(var i=0;i<kids.length;i++){ kids[i].style.display = ''; }
     clearCurrent();
+    clearOutline(); // 「显示全部」下大纲失去归属，隐藏
   }
   // 仅展示 id 对应的那一节：从目标标题起，到下一个同级或更高级标题为止（含其间的所有子节点）。
   function showSection(id){
@@ -763,9 +875,14 @@ func (c *Collection) ExportHTML() (string, error) {
     var kids = content.children;
     for(var i=0;i<kids.length;i++){ kids[i].style.display = 'none'; }
     for(var j=0;j<nodes.length;j++){ nodes[j].style.display = ''; }
+    buildOutline(nodes); // 右侧大纲跟着当前节重建
     clearCurrent();
     var cur = document.querySelector('.toc a[href="#' + id + '"]');
-    if(cur) cur.classList.add('current');
+    if(cur){
+      cur.classList.add('current');
+      var row = cur.parentElement;
+      if(row && row.classList.contains('toc-request')) row.classList.add('selected');
+    }
     if(target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 

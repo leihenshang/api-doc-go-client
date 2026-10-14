@@ -173,6 +173,37 @@
     },
     "respDoc": {
       "properties": {
+        "headers": {
+          "items": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "params": {
           "items": {
             "properties": {
@@ -208,6 +239,9 @@
         },
         "sample": {
           "type": "string"
+        },
+        "status": {
+          "type": "integer"
         },
         "type": {
           "type": "string"

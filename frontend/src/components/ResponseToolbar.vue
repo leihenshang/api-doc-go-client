@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 响应操作工具条（response-panel design-spec §3 第 3 排）：
-// 左「视图→显示」：美化/原始 分段控件、展开全部、换行开关态胶囊；
+// 左「视图→显示」：美化/原始 分段控件、换行开关（图标态胶囊）；
 // 右「解析→输出」：更新响应字段、竖分隔线、复制响应体（幽灵）、保存▾（唯一主按钮）。
-import { NIcon } from 'naive-ui'
-import { ChevronDownOutline, CopyOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5'
-import { useI18n } from 'vue-i18n'
-import SaveDropdown from '@/components/SaveDropdown.vue'
+import SaveDropdown from '@/components/SaveDropdown.vue';
+import { CopyOutline, RefreshOutline, ReturnUpBackOutline, SearchOutline } from '@vicons/ionicons5';
+import { NIcon } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 
 const view = defineModel<'pretty' | 'raw'>('view', { required: true })
 const wrap = defineModel<boolean>('wrap', { required: true })
@@ -20,8 +20,6 @@ const props = defineProps<{
   findable?: boolean
 }>()
 const emit = defineEmits<{
-  'expand-all': []
-  'collapse-all': []
   'update-fields': []
   'copy-body': []
   'save-file': []
@@ -29,79 +27,37 @@ const emit = defineEmits<{
   find: []
 }>()
 const { t } = useI18n()
-
-const showTreeOps = () => props.isJson && view.value === 'pretty'
 </script>
 
 <template>
   <div class="bar">
     <div class="grp">
       <div class="seg" role="group">
-        <button
-          class="seg-item"
-          :class="{ on: view === 'pretty' }"
-          type="button"
-          data-testid="resp.pretty"
-          @click="view = 'pretty'"
-        >
+        <button class="seg-item" :class="{ on: view === 'pretty' }" type="button" data-testid="resp.pretty"
+          @click="view = 'pretty'">
           {{ t('resp.pretty') }}
         </button>
-        <button
-          class="seg-item"
-          :class="{ on: view === 'raw' }"
-          type="button"
-          data-testid="resp.raw"
-          @click="view = 'raw'"
-        >
+        <button class="seg-item" :class="{ on: view === 'raw' }" type="button" data-testid="resp.raw"
+          @click="view = 'raw'">
           {{ t('resp.raw') }}
         </button>
       </div>
-      <!-- ② 展开全部：灰底圆角 6 的图标+文字 chip（design-spec §3 只有这一个树操作按钮，
-           留位给右侧输出组，工具条才能在同一排 44px 内放下；节点折叠仍可点 JSON 树箭头） -->
-      <button
-        v-if="showTreeOps()"
-        class="chip-btn"
-        type="button"
-        data-testid="resp.expandAll"
-        :title="t('json.expandAll')"
-        @click="emit('expand-all')"
-      >
-        <n-icon :component="ChevronDownOutline" :size="13" />
-        {{ t('json.expandAll') }}
-      </button>
-      <button
-        class="chip-btn wrap-btn"
-        :class="{ on: wrap }"
-        type="button"
-        data-testid="resp.wrap"
-        :aria-pressed="wrap"
-        @click="wrap = !wrap"
-      >
-        {{ t('resp.wrap') }}
+      <!-- 换行开关：图标态胶囊（折行符号 + 悬停文案），激活浅绿底深绿字；
+           节点展开/收起仍走 JSON 树箭头，不再提供「全部展开」工具条按钮 -->
+      <button class="chip-btn wrap-btn" :class="{ on: wrap }" type="button" data-testid="resp.wrap"
+        :title="t('resp.wrap')" :aria-label="t('resp.wrap')" :aria-pressed="wrap" @click="wrap = !wrap">
+        <n-icon :component="ReturnUpBackOutline" :size="14" />
       </button>
       <!-- 在响应内容中查找（响应区页内搜索，Ctrl+F 亦可） -->
-      <button
-        v-if="findable"
-        class="chip-btn"
-        :class="{ on: findOn }"
-        type="button"
-        data-testid="resp.find"
-        :title="t('resp.findInResponse')"
-        @click="emit('find')"
-      >
+      <button v-if="findable" class="chip-btn" :class="{ on: findOn }" type="button" data-testid="resp.find"
+        :title="t('resp.findInResponse')" @click="emit('find')">
         <n-icon :component="SearchOutline" :size="13" />
       </button>
     </div>
     <!-- 输出组（design-spec §3 第 3 排右侧）：更新响应字段 / 竖分隔线 / 复制响应体 / 保存▾ -->
     <div class="grp acts">
-      <button
-        v-if="isJson"
-        class="outline-btn"
-        type="button"
-        data-testid="resp.updateFields"
-        :title="t('resp.updateFieldsHint')"
-        @click="emit('update-fields')"
-      >
+      <button v-if="isJson" class="outline-btn" type="button" data-testid="resp.updateFields"
+        :title="t('resp.updateFieldsHint')" @click="emit('update-fields')">
         <n-icon :component="RefreshOutline" :size="13" />
         {{ t('resp.updateFields') }}
       </button>
@@ -110,11 +66,8 @@ const showTreeOps = () => props.isJson && view.value === 'pretty'
         <n-icon :component="CopyOutline" :size="13" />
         {{ copied ? t('common.copied') : t('resp.copyBody') }}
       </button>
-      <save-dropdown
-        :can-save-example="props.canSaveExample"
-        @save-file="emit('save-file')"
-        @save-example="emit('save-example')"
-      />
+      <save-dropdown :can-save-example="props.canSaveExample" @save-file="emit('save-file')"
+        @save-example="emit('save-example')" />
     </div>
   </div>
 </template>

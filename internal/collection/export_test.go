@@ -297,15 +297,16 @@ func TestExportHTMLTOCWithDocHeadings(t *testing.T) {
 
 	// 编号推演：toc-0=集合名；toc-1=请求一(其后 Docs 占 2 个序号 → tocID+2)；toc-4=请求二。
 	// 正文实际标题：toc-0 集合 / toc-1 请求一 / toc-2 文档标题A / toc-3 文档标题B / toc-4 请求二。
+	// 请求标题带前置方法徽标（item 6：与客户端一致展示 HTTP 方法）。
 	wants := []struct {
 		id   string
 		text string
 	}{
 		{"toc-0", "带文档标题的集合"},
-		{"toc-1", "请求一"},
+		{"toc-1", `<span class="tm m-get">GET</span> 请求一`},
 		{"toc-2", "文档标题A"},
 		{"toc-3", "文档标题B"},
-		{"toc-4", "请求二"},
+		{"toc-4", `<span class="tm m-get">GET</span> 请求二`},
 	}
 	for _, w := range wants {
 		if !strings.Contains(htmlOut, `id="`+w.id+`">`+w.text) {
@@ -444,6 +445,14 @@ func TestExportHTMLDocsNestedUnderRequest(t *testing.T) {
 	}
 	r.URL = "{{host}}/api/user/list"
 	r.Docs = "## 简要描述\n- **名称**: 用户列表\n- 分页查询\n\n## 响应字段\n\n| 参数名 | 必选 | 类型 | 说明 |\n| --- | --- | --- | --- |\n| id | 是 | string | 用户ID |\n"
+	// item 8/9：带响应字段文档与快照的请求，导出必须把「响应字段/样例/响应头」补进生成内容
+	r.RespDoc = &ResponseDoc{
+		Type:    "object",
+		Params:  []ResponseParam{{FieldName: "total", Type: "number", Required: true, Description: "总数", Example: "66"}},
+		Sample:  `{"total":66}`,
+		Status:  200,
+		Headers: []KV{{Name: "Content-Type", Value: "application/json", Enabled: true}},
+	}
 	if err := c.SaveRequest(r); err != nil {
 		t.Fatalf("保存: %v", err)
 	}
@@ -464,14 +473,24 @@ func TestExportHTMLDocsNestedUnderRequest(t *testing.T) {
 	if !strings.Contains(md, "## 简要描述") {
 		t.Fatalf("Markdown 导出不应改动 Docs 标题层级:\n%s", md)
 	}
+	// item 9：响应字段表/样例/响应头进生成内容，且「文档」分节在生成内容之下（带分隔线 label）
+	for _, want := range []string{"**响应字段**", "| `total` | 是 | number | 总数 | 66 |", "**响应样例**", "**响应头**", "**文档**"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("Markdown 导出缺少 %q:\n%s", want, md)
+		}
+	}
+	if strings.Index(md, "**响应字段**") > strings.Index(md, "**文档**") {
+		t.Fatalf("「文档」应在生成的响应内容之后:\n%s", md)
+	}
 
 	htmlOut, err := c.ExportHTML()
 	if err != nil {
 		t.Fatalf("ExportHTML: %v", err)
 	}
-	// 请求标题仍是 <h2>，Docs 标题降为 <h3>（toc 顺序：集合 h1 / 请求 h2 / 两个 Docs h3…）
-	if !strings.Contains(htmlOut, `<h2 id="toc-1">用户-列表 <code>GET</code></h2>`) {
-		t.Fatalf("请求标题不是预期的 h2:\n%s", htmlOut)
+	// 请求标题仍是 <h2>，Docs 标题降为 <h3>（toc 顺序：集合 h1 / 请求 h2 / 两个 Docs h3…）；
+	// HTML 正文标题的方法徽标前置且与 TOC 同源（item 6：同客户端一致展示 HTTP 方法）
+	if !strings.Contains(htmlOut, `<h2 id="toc-1"><span class="tm m-get">GET</span> 用户-列表</h2>`) {
+		t.Fatalf("请求标题不是预期的 h2（徽标前置）:\n%s", htmlOut)
 	}
 	if !strings.Contains(htmlOut, `<h3 id="toc-2">简要描述</h3>`) {
 		t.Fatalf("Docs 标题未降级嵌套到请求下（应出现 h3「简要描述」）:\n%s", htmlOut)
@@ -486,6 +505,17 @@ func TestExportHTMLDocsNestedUnderRequest(t *testing.T) {
 	// Docs 字段表格仍在
 	if !strings.Contains(htmlOut, "<td>id</td>") || !strings.Contains(htmlOut, "<td>用户ID</td>") {
 		t.Fatalf("Docs 响应字段表格内容缺失:\n%s", htmlOut)
+	}
+	// item 9/10：集合树在左；右侧是「当前请求」的小节大纲（URL/参数/请求头/文档内容等，JS 动态生成可点击跳转）；
+	// 请求行整行选中态 + 徽标反色（CSS 与 JS 都要在）。
+	if strings.Contains(htmlOut, "order: 2") || !strings.Contains(htmlOut, `<nav class="ol" aria-label="当前页目录">`) ||
+		!strings.Contains(htmlOut, "function buildOutline") {
+		t.Fatalf("缺少右侧当前请求大纲或集合树未回左侧:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, ".toc-request:hover, .toc-request.selected { background: #18a058; }") ||
+		!strings.Contains(htmlOut, ".toc-request:hover .tm, .toc-request.selected .tm { background: #fff") ||
+		!strings.Contains(htmlOut, "classList.add('selected')") {
+		t.Fatalf("请求行选中态/徽标反色缺失:\n%s", htmlOut)
 	}
 	// TOC 方法徽标：GET 绿 / POST 蓝（class 与客户端 token 同名）
 	if !strings.Contains(htmlOut, `<span class="tm m-get">GET</span>`) {

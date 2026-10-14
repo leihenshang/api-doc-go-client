@@ -3,6 +3,7 @@
 //   - 浏览器开发：POST /api/App/<Method>（vite 代理到 cmd/devserver）
 // 两态走同一套 App 方法，前端无感知。
 import type {
+  AuthzDecision,
   CollectionInfo,
   CollectionSummary,
   ConflictDetail,
@@ -17,11 +18,10 @@ import type {
   HistoryEntry,
   ImportSummary,
   IndexNode,
-  MCPGrant,
-  MCPStatus,
-  AuthzDecision,
   McpAuditPage,
   McpAuditQuery,
+  MCPGrant,
+  MCPStatus,
   MockStatus,
   RequestDoc,
   ResolveResult,
@@ -185,6 +185,8 @@ function normalizeExample(ex: ResponseExample): ResponseExample {
 }
 
 export const api = {
+  /** 是否开发版构建（dev 标签）：标题栏 dev 气泡与 -dev 窗口标题用。 */
+  isDev: () => call<boolean>('IsDev'),
   pickDirectory: () => call<string>('PickDirectory'),
   pickFile: () => call<string>('PickFile'),
   /** 打开工作目录（多根：追加并置为活动根；同一目录重复打开是幂等的）。 */
@@ -268,7 +270,16 @@ export const api = {
     call<null>('DeleteResponseExample', reqUid, exampleUid),
   // 响应字段 UI → 请求模型 RespDoc（落盘并随同步往返）
   updateResponseDoc: (uid: string, doc: ResponseDoc) =>
-    call<null>('UpdateResponseDoc', { uid, type: doc.type, params: doc.params, sample: doc.sample }),
+    // 快照字段必须一并下发（item 18）：曾因只重建 type/params/sample 而丢 status/headers，
+    // 关标签重开磁盘上就没有响应头。
+    call<null>('UpdateResponseDoc', {
+      uid,
+      type: doc.type,
+      params: doc.params,
+      sample: doc.sample,
+      status: doc.status,
+      headers: doc.headers,
+    }),
   resolveText: (text: string, envName: string) =>
     call<ResolveResult>('ResolveText', text, envName).then(normalizeResolve),
   getSettings: () => call<Settings>('GetSettings'),

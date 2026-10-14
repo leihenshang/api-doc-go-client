@@ -215,6 +215,8 @@ export namespace app {
 	    type: string;
 	    params: collection.ResponseParam[];
 	    sample: string;
+	    status?: number;
+	    headers?: collection.KV[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ResponseDocInput(source);
@@ -226,6 +228,8 @@ export namespace app {
 	        this.type = source["type"];
 	        this.params = this.convertValues(source["params"], collection.ResponseParam);
 	        this.sample = source["sample"];
+	        this.status = source["status"];
+	        this.headers = this.convertValues(source["headers"], collection.KV);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -837,6 +841,8 @@ export namespace collection {
 	    type: string;
 	    params: ResponseParam[];
 	    sample: string;
+	    status?: number;
+	    headers?: KV[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ResponseDoc(source);
@@ -847,6 +853,8 @@ export namespace collection {
 	        this.type = source["type"];
 	        this.params = this.convertValues(source["params"], ResponseParam);
 	        this.sample = source["sample"];
+	        this.status = source["status"];
+	        this.headers = this.convertValues(source["headers"], KV);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
