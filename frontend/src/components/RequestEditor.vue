@@ -2,7 +2,6 @@
 // 请求设置区（design-spec §2 请求面板）：Params / Body / Headers / Auth / Docs。
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
 import FindBar from '@/components/FindBar.vue'
-import { isGrpc } from '@/lib/grpc'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
@@ -10,24 +9,25 @@ import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
-import { SearchOutline } from '@vicons/ionicons5'
-import { buildApiDoc } from '@/lib/genDocs'
 import { findInTextareas, selectTextareaMatch, type TextareaMatch } from '@/lib/find'
-import { isDark } from '@/lib/theme'
-import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
+import { buildApiDoc } from '@/lib/genDocs'
+import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
+import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { dialog, message } from '@/lib/notice'
+import type { FieldRow } from '@/lib/responseFields'
 import { loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields } from '@/lib/responseFields'
 import { deriveVarName, removeVar, saveVars, scopeVarNames } from '@/lib/saveVars'
-import type { FieldRow } from '@/lib/responseFields'
+import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { Auth, ResponseDoc } from '@/types'
+import { SearchOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -521,6 +521,8 @@ function findable(): boolean {
   if (seg.value === 'body') return props.tab.request.body.type === 'json' || props.tab.request.body.type === 'text'
   if (seg.value === 'script') return true
   if (seg.value === 'docs') return docsEditing.value
+  // gRPC 请求消息是 JSON textarea，同样支持查找
+  if (seg.value === 'message') return isGrpcReq.value
   return false
 }
 
@@ -562,6 +564,11 @@ function findPrev(): void {
 watch(
   [findKw, seg, docsEditing, () => props.tab.request.body.type, findOn],
   async () => {
+    // 切到没有可查找 textarea 的分段（或 Docs 切回预览）：查找条自动收起
+    if (findOn.value && !findable()) {
+      findOn.value = false
+      return
+    }
     if (!findOn.value) {
       findMatches = []
       findTotal.value = 0
@@ -573,16 +580,22 @@ watch(
   },
 )
 
-function onEditorKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && findable()) {
-    e.preventDefault()
-    void openFind()
-  }
+// window 级监听：编辑器根 div 不可聚焦，焦点在 body / 表格输入框时元素上的 @keydown 收不到
+// 事件（Ctrl+F 不会冒泡经过根 div）。编辑器为活动 tab 单实例，挂 window 安全；
+// 当前分段没有可查找 textarea 时不拦截，交回浏览器原生查找。
+function onGlobalKeydown(e: KeyboardEvent): void {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || !findable()) return
+  // 焦点在响应区内时交给 ResponsePanel（两侧都挂了 window 监听，避免双开）
+  if ((e.target as HTMLElement | null)?.closest('.resp')) return
+  e.preventDefault()
+  void openFind()
 }
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
-  <div class="editor" @keydown="onEditorKeydown">
+  <div class="editor">
     <div class="seg">
       <button v-for="s in segments" :key="s.key" class="seg-tab" :class="{ on: seg === s.key }" type="button"
         data-testid="req.tab" :data-seg="s.key" @click="seg = s.key">

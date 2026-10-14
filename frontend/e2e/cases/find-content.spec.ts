@@ -61,9 +61,11 @@ test.describe('页内查找', () => {
     await page.getByTestId('req.find').click()
     await expect(page.getByTestId('find.bar')).toBeVisible()
     await page.getByTestId('find.input').fill('world')
-    await expect(page.getByTestId('find.count')).toHaveText('2/2')
-    // Enter = 下一个：选区落到第二处
+    // 计数沿用浏览器约定：当前/总数（打开即定位第一处）
+    await expect(page.getByTestId('find.count')).toHaveText('1/2')
+    // Enter = 下一个：计数翻到 2/2 且选区落到第二处
     await page.getByTestId('find.input').press('Enter')
+    await expect(page.getByTestId('find.count')).toHaveText('2/2')
     await expect
       .poll(async () =>
         page.locator('textarea:focus').evaluate((el) => {
@@ -73,8 +75,9 @@ test.describe('页内查找', () => {
       )
       .toMatchObject({ s: json.indexOf('world', json.indexOf('world') + 1), e: json.indexOf('world', json.indexOf('world') + 1) + 5 })
 
-    // Shift+Enter = 上一个
+    // Shift+Enter = 上一个（计数回到 1/2）
     await page.getByTestId('find.input').press('Shift+Enter')
+    await expect(page.getByTestId('find.count')).toHaveText('1/2')
     await expect
       .poll(async () =>
         page.locator('textarea:focus').evaluate((el) => {
@@ -88,7 +91,7 @@ test.describe('页内查找', () => {
     await pickBodyType(page, t('editor.bodyText'))
     await page.locator('.raw textarea').fill('abc abc')
     await page.getByTestId('find.input').fill('abc')
-    await expect(page.getByTestId('find.count')).toHaveText('2/2')
+    await expect(page.getByTestId('find.count')).toHaveText('1/2')
 
     // Params 分段没有 textarea：不显示查找入口，Ctrl+F 不拦截
     await openReqTab(page, 'params')
@@ -96,14 +99,15 @@ test.describe('页内查找', () => {
     await page.locator('.editor').press('Control+f')
     await expect(page.getByTestId('find.bar')).toHaveCount(0)
 
-    // 脚本分段：pre / post 两个 textarea 跨域计数
+    // 脚本分段：pre / post 两个 textarea 跨域计数（非重叠命中：pre 1 处 + post 2 处）
     await openReqTab(page, 'script')
-    const pre = page.getByTestId('script.pre')
+    const pre = page.getByTestId('script.pre').locator('textarea')
     await pre.fill('aaa')
-    const post = page.getByTestId('script.post')
-    await post.fill('aaaa')
+    const post = page.getByTestId('script.post').locator('textarea')
+    await post.fill('aaa aaa')
     await page.locator('.editor').press('Control+f')
+    await expect(page.getByTestId('find.input')).toBeVisible()
     await page.getByTestId('find.input').fill('aaa')
-    await expect(page.getByTestId('find.count')).toHaveText('7/7') // pre 3 + post 4
+    await expect(page.getByTestId('find.count')).toHaveText('1/3') // 共 3 处，定位第一处
   })
 })

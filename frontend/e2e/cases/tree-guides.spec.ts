@@ -1,8 +1,7 @@
+import type { Locator, Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
-import { t } from '../helpers/i18n'
 import { openCollection, treeRowByUid } from '../helpers/ui'
 
 /**
@@ -136,11 +135,13 @@ test('[B16] 集合树连接线：深度缩进 / 祖先竖线延续 / └ 收线 
   expect(await padOf(INNER_UID)).toBe(`${8 + 4 * INDENT}px`)
 
   // 全部收起后子行消失、展开回来连接线照旧（连接线随行渲染，不留残影）。
-  // 注意：分组行的展开箭头也用「全部展开」这个 title，所以必须限定在工具条里点。
-  const head = page.locator('.sidebar .head')
-  await head.getByTitle(t('tree.collapseAll')).click()
+  // 入口在根行「···」菜单内（同一选项随状态切换「全部收起 / 全部展开」）。
+  const basicRootMenu = page.getByTestId('tree.root').filter({ hasText: 'e2e-basic' }).getByTestId('tree.root.menu')
+  await basicRootMenu.click()
+  await page.getByTestId('tree.root.collapseAll').click()
   await expect(treeRowByUid(page, INNER_UID)).toHaveCount(0)
-  await head.getByTitle(t('tree.expandAll')).click()
+  await basicRootMenu.click()
+  await page.getByTestId('tree.root.expandAll').click()
   await expect(treeRowByUid(page, INNER_UID)).toBeVisible()
   await expect(ancestors(page, INNER_UID)).toHaveCount(2)
   expect(await offsetLeft(stub(page, INNER_UID))).toBe(3 * INDENT + GUIDE_OFFSET)

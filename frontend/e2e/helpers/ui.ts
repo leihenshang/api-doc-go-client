@@ -38,6 +38,15 @@ export const treeRowByUid = (page: Page, uid: string): Locator =>
   page.locator(`[data-testid="tree.row"][data-uid="${uid}"]`)
 
 /**
+ * 详情区切场有 rb-fade 过渡（mode=out-in，旧详情先退场、新详情再进场）。
+ * 过渡期间旧的 req.url 还留在 DOM 里，机器速度的 fill 可能打到即将卸载的旧输入上（改动丢失）。
+ * 切换已打开的页签 / 从树里打开请求后，先等过渡类名全部消失再操作。
+ */
+export async function settleDetail(page: Page): Promise<void> {
+  await expect(page.locator('[class*="rb-fade"]')).toHaveCount(0)
+}
+
+/**
  * 侧栏：打开某个请求（行内名称按钮）。
  * 打开是异步的（读盘 → 建 tab → 渲染编辑器），这里等到请求栏就绪：
  * 不等的话，紧接着量布局会量到「请求列还没渲染」的空档（A4 曾因此偶发失败）。
@@ -45,6 +54,7 @@ export const treeRowByUid = (page: Page, uid: string): Locator =>
 export async function openRequest(page: Page, name: string): Promise<void> {
   await page.getByTestId('tree.row').filter({ hasText: name }).getByTestId('tree.row.name').click()
   await expect(page.getByTestId('req.url')).toBeVisible()
+  await settleDetail(page)
 }
 
 /**
@@ -96,12 +106,17 @@ export async function openSettings(page: Page): Promise<void> {
 
 /**
  * 设置弹窗：切到指定分区（左侧竖向菜单）。
- * 设置项按类型分了区（界面 / 网络与安全 / 本地数据 / MCP 服务），右侧只渲染当前分区，
- * 所以操作别的分区的字段前必须先切过去。
+ * MCP 分区已不在左侧菜单里（改由底栏 MCP 入口直达），见 openMcpSettings。
  */
-export async function openSettingsSection(page: Page, key: 'appearance' | 'network' | 'local' | 'mcp'): Promise<void> {
+export async function openSettingsSection(page: Page, key: 'appearance' | 'network' | 'local'): Promise<void> {
   await page.getByTestId(`settings.nav.${key}`).click()
   await expect(page.getByTestId(`settings.pane.${key}`)).toBeVisible()
+}
+
+/** 底栏 MCP 入口：直达设置弹窗的 MCP 分区（左侧导航不展示该分区）。 */
+export async function openMcpSettings(page: Page): Promise<void> {
+  await page.getByTestId('statusbar.mcp').click()
+  await expect(page.getByTestId('settings.pane.mcp')).toBeVisible()
 }
 
 /** 设置弹窗：保存并等待关闭 */

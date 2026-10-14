@@ -7,6 +7,7 @@ import { listCollectionFiles } from '../helpers/fs'
 import { t } from '../helpers/i18n'
 import {
   openCollection,
+  openMcpSettings,
   openRequest,
   openSettings,
   openSettingsSection,
@@ -283,15 +284,18 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(page.locator('.n-message').last()).toContainText(t('tab.savedAll'))
     await expect(tab('ping').locator('.dot')).toHaveCount(0)
 
-    // 关闭全部：已落盘的关掉，**草稿跳过**并提示
+    // 关闭全部：已落盘的先关掉，剩余草稿弹「批量丢弃」确认；选取消则草稿保留，不静默丢失
     await page.keyboard.press('Control+n')
     await expect(tabs).toHaveCount(2)
     await tab('ping').click({ button: 'right' })
     await option(t('tab.closeAll')).click()
-    await expect(page.locator('.n-message').last()).toContainText(t('tab.closedSkipDraft', { n: 1 }))
+    const draftDialog = page.locator('.n-dialog:visible').filter({ hasText: t('prompt.draftBatchTitle', { n: 1 }) })
+    await expect(draftDialog).toBeVisible()
+    await draftDialog.locator('.n-button').filter({ hasText: t('common.cancel') }).click()
+    await expect(page.locator('.n-message').last()).toContainText(t('tab.closeAborted', { n: 1 }))
     await expect(tabs).toHaveCount(1) // 只剩那张草稿
     await expect(tabs.locator('.dot')).toHaveCount(1)
-    await expect(page.getByTestId('tab.overview')).toBeVisible()
+    await expect(page.getByTestId('tab.overview')).toHaveCount(0)
   })
   // 设置弹窗改为「左侧竖向分区菜单 + 右侧只显示当前分区」，这里钉住两件事：
   // ① 分区可切换且只有当前分区可见（字段散落在不同分区时别把人绕进去）
@@ -301,10 +305,11 @@ test.describe('外壳、布局与命令面板', () => {
     await openCollection(page, app)
     await openSettings(page)
 
-    // ① 四个分区都在左侧菜单里，右侧默认只显示第一个分区
-    for (const key of ['appearance', 'network', 'local', 'mcp'] as const) {
+    // ① 三个分区都在左侧菜单里（MCP 已移到底栏入口，不在导航内），右侧默认只显示第一个分区
+    for (const key of ['appearance', 'network', 'local'] as const) {
       await expect(page.getByTestId(`settings.nav.${key}`)).toBeVisible()
     }
+    await expect(page.getByTestId('settings.nav.mcp')).toHaveCount(0)
     await expect(page.getByTestId('settings.pane.appearance')).toBeVisible()
     await expect(page.getByTestId('settings.pane.network')).toBeHidden()
     await expect(page.getByTestId('settings.lang')).toBeVisible()
@@ -316,9 +321,12 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(page.getByTestId('settings.lang')).toBeHidden()
     await expect(page.getByTestId('settings.nav.network')).toHaveClass(/on/)
 
-    // ② MCP 分区：启用 + 只读 + **勾选一个工作目录授权** + 保存 → 后端起服务，状态回显「运行中」与连接地址
+    // ② MCP 分区（底栏 MCP 入口直达，弹窗遮罩会挡住底栏，先关掉设置）：启用 + 只读 +
+    //    **勾选一个工作目录授权** + 保存 → 后端起服务，状态回显「运行中」与连接地址
     //    （白名单为空是安全默认：启用但没授权任何目录时服务不会监听，见 mcp-allow 用例）
-    await openSettingsSection(page, 'mcp')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('settings.pane.network')).toBeHidden()
+    await openMcpSettings(page)
     await page.getByTestId('settings.mcpEnabled').check()
     // 随机端口：避免本机已跑的实例占用默认 8189 导致服务起不来
     await page.getByTestId('settings.mcpPort').locator('input').fill(String(12000 + Math.floor(Math.random() * 30000)))
@@ -326,8 +334,7 @@ test.describe('外壳、布局与命令面板', () => {
     await page.getByTestId('settings.mcpAllowCheck').click() // 勾选当前打开的工作目录加入白名单
     await saveSettings(page)
 
-    await openSettings(page)
-    await openSettingsSection(page, 'mcp')
+    await openMcpSettings(page)
     await expect(page.getByTestId('settings.mcpRunning')).toBeVisible()
     await expect(page.getByTestId('settings.mcpRunning')).toContainText('/mcp')
     const token = await page.getByTestId('settings.mcpToken').locator('input').inputValue()

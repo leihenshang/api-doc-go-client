@@ -5,7 +5,7 @@ import path from 'node:path'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openSettings, saveSettings } from '../helpers/ui'
+import { openCollection, openRequest, openSettings, saveSettings, settleDetail } from '../helpers/ui'
 
 
 async function editUrl(page: import('@playwright/test').Page, url: string) {
@@ -139,10 +139,11 @@ test.describe('保存模型与冲突检测', () => {
     // 只是打开/切换页签不算脏：URL 的 watch 会随 props.tab 变化触发，旧实现会在这里凭空标脏
     await expect(tabs.locator('.dot')).toHaveCount(0)
 
-    // 两张页签都改脏
-    await page.getByTestId('req.url').fill('{{host}}/json/nested')
+    // 两张页签都改脏（直接点页签切换后先等 rb-fade 过渡结束，否则 fill 可能落在退场中的旧输入上）
+    await page.getByTestId('req.url').fill('{{host}}/json/abc')
     await page.getByTestId('req.url').blur()
     await page.getByTestId('tab.item').filter({ hasText: 'ping' }).click()
+    await settleDetail(page)
     await page.getByTestId('req.url').fill('{{host}}/json/fewer')
     await page.getByTestId('req.url').blur()
     await expect(tabs.locator('.dot')).toHaveCount(2)
@@ -172,9 +173,10 @@ test.describe('保存模型与冲突检测', () => {
     // ③ 混着选：第一个「保存并关闭」→ 落盘后继续问第二个
     await openRequest(page, 'ping')
     await openRequest(page, 'pong')
-    await page.getByTestId('req.url').fill('{{host}}/json/nested')
+    await page.getByTestId('req.url').fill('{{host}}/json/abc')
     await page.getByTestId('req.url').blur()
     await page.getByTestId('tab.item').filter({ hasText: 'ping' }).click()
+    await settleDetail(page)
     await page.getByTestId('req.url').fill('{{host}}/json/fewer')
     await page.getByTestId('req.url').blur()
     await closeAll()
