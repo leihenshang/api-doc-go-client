@@ -1,11 +1,11 @@
 // 回归：响应字段覆盖式更新（值一致时继承说明）、Resp 树节点与保存响应示例（Bruno 的 Save Response）。
+import type { Page } from '@playwright/test'
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
+import { openCollection, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 

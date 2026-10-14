@@ -2,10 +2,10 @@
 // JSON 树（response-panel design-spec §3/§4）：行高 24、每级缩进 20px、hover 行圆角 4；
 // key 绿 / 字符串橙 / 数组索引蓝 / 折叠箭头灰 10×10。非 JSON 由调用方回退纯文本。
 // 大响应保留行数上限，避免一次渲染上万行卡住界面。
-import { NIcon } from 'naive-ui'
-import { ChevronDownOutline, ChevronForwardOutline } from '@vicons/ionicons5'
-import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { ChevronDownOutline, ChevronForwardOutline } from '@vicons/ionicons5';
+import { NIcon } from 'naive-ui';
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const MAX_ROWS = 2000
 
@@ -137,11 +137,7 @@ defineExpose({ collapseAll, expandAll })
       <div v-for="(row, i) in rows" :key="i" class="jr" :title="row.path">
         <span class="indent" :style="{ width: row.depth * 20 + 'px' }" />
         <span class="caret" :class="{ dim: !row.expandable }" @click="toggle(row)">
-          <n-icon
-            v-if="row.expandable"
-            :component="row.open ? ChevronDownOutline : ChevronForwardOutline"
-            :size="10"
-          />
+          <n-icon v-if="row.expandable" :component="row.open ? ChevronDownOutline : ChevronForwardOutline" :size="10" />
         </span>
         <span v-if="row.key !== ''" class="k" :class="{ idx: row.isIndex }">{{ row.key }}</span>
         <span v-if="row.key !== ''" class="colon">:</span>
