@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"api-doc-go-client/internal/app"
+	"api-doc-go-client/internal/appicon"
 	"api-doc-go-client/internal/devicon"
 	mcpsrv "api-doc-go-client/internal/mcp"
 	"api-doc-go-client/internal/platform"
@@ -60,6 +61,8 @@ func main() {
 		Windows: &windows.Options{WindowIsTranslucent: true, WebviewIsTransparent: true},
 		Mac:     &mac.Options{WindowIsTranslucent: true, WebviewIsTransparent: true},
 		Linux: &linux.Options{
+			Icon:                appicon.Data,
+			ProgramName:         appicon.ProgramName,
 			WindowIsTranslucent: true,
 			WebviewGpuPolicy:    linux.WebviewGpuPolicyOnDemand,
 		},
