@@ -176,6 +176,9 @@
     },
     "respDoc": {
       "properties": {
+        "contentType": {
+          "type": "string"
+        },
         "headers": {
           "items": {
             "properties": {

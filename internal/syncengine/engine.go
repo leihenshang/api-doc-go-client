@@ -14,6 +14,7 @@ import (
 
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/config"
+	"api-doc-go-client/internal/index"
 )
 
 // Engine 一轮同步的编排：先 pull 后 push。
@@ -495,125 +496,146 @@ func (e *Engine) pushDirty(rep *Report) error {
 		return typeRank(dirty[i].Type) < typeRank(dirty[j].Type)
 	})
 
-	ops := make([]Op, 0, len(dirty)+len(pendingDel))
-	meta := make(map[string]dirtyMeta, len(dirty)+len(pendingDel))
+	b := newPushBatch(len(dirty) + len(pendingDel))
 	for _, n := range dirty {
 		if n.UID == "" {
 			continue
 		}
-		var (
-			op      Op
-			payload Payload
-		)
 		switch n.Type {
 		case "folder":
-			payload = Payload{Title: n.Title}
-			op = Op{OpID: newOpID(), Op: "upsert", Type: "group", UID: n.UID}
+			e.addFolderOp(b, n)
 		case "request":
-			req, err := e.Coll.ReadRequest(n.UID)
-			if err != nil {
-				continue
-			}
-			// extra 聚合请求头 / 请求参数（query + JSON 体展平）/ 说明，
-			// 口径见 collection.SyncExtra（与服务端 Bruno 导入一致）。
-			payload = Payload{
-				Name:   req.Name,
-				Method: req.Method,
-				URL:    req.URL,
-				Extra:  collection.SyncExtra(req),
-			}
-			op = Op{OpID: newOpID(), Op: "upsert", Type: "api", UID: n.UID, BaseRev: n.BaseRev}
-		default:
-			continue
+			e.addRequestOp(b, n)
 		}
-		b, _ := json.Marshal(payload)
-		op.Payload = b
-		ops = append(ops, op)
-		meta[op.OpID] = dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type}
 	}
-	// tombstone：本地已删除的请求/文档
-	for _, uid := range pendingDel {
-		oid := newOpID()
-		ops = append(ops, Op{OpID: oid, Op: "delete", Type: "api", UID: uid})
-		meta[oid] = dirtyMeta{uid: uid, typ: "api", isDelete: true}
-	}
-	// 文档条目（B13）
-	docs, _ := e.Coll.ListDocs()
-	for _, d := range docs {
-		if d.UID == "" {
-			continue
-		}
-		// 只推有变化的（用内容 hash）
-		oid := newOpID()
-		payload := Payload{Name: d.Name, Content: d.Content, Icon: d.Icon}
-		b, _ := json.Marshal(payload)
-		ops = append(ops, Op{OpID: oid, Op: "upsert", Type: "doc", UID: d.UID, Payload: b})
-		meta[oid] = dirtyMeta{uid: d.UID, hash: e.Coll.FileHashOf(d.Path), typ: "doc"}
-	}
-	// 响应示例：按 hash 脏检测推送；「有推送记录但文件已不在」视为本地删除 → tombstone
-	examples, _ := e.Coll.ListAllResponseExamples()
-	liveExampleUIDs := make(map[string]string, len(examples)) // uid → file hash
-	for _, ex := range examples {
-		if ex.UID == "" {
-			continue
-		}
-		h := e.Coll.FileHashOf(ex.Path)
-		liveExampleUIDs[ex.UID] = h
-		if prev, seen := e.Bind.ExampleHashes[ex.UID]; seen && prev == h && h != "" {
-			continue // 未变化
-		}
-		oid := newOpID()
-		payload := Payload{
-			Name: ex.Name, ApiUID: ex.RequestUID, Sample: ex.Response.Body,
-			Status: ex.Response.Status, ContentType: ex.Response.ContentType, Seq: ex.Seq,
-		}
-		b, _ := json.Marshal(payload)
-		ops = append(ops, Op{OpID: oid, Op: "upsert", Type: "example", UID: ex.UID, Payload: b})
-		meta[oid] = dirtyMeta{uid: ex.UID, hash: h, typ: "example"}
-	}
-	for uid := range e.Bind.ExampleHashes {
-		if _, ok := liveExampleUIDs[uid]; ok {
-			continue
-		}
-		oid := newOpID()
-		ops = append(ops, Op{OpID: oid, Op: "delete", Type: "example", UID: uid})
-		meta[oid] = dirtyMeta{uid: uid, typ: "example", isDelete: true}
-	}
-	if len(ops) == 0 {
+	b.collectTombstoneOps(pendingDel)
+	e.collectDocOps(b)
+	e.collectExampleOps(b)
+	if len(b.ops) == 0 {
 		return nil
 	}
 	resp, err := e.CLI.Push(&PushReq{
 		ProjectID:  e.Bind.ProjectID,
 		DeviceID:   e.CLI.Device,
 		DeviceName: e.CLI.Device,
-		Ops:        ops,
+		Ops:        b.ops,
 	})
 	if err != nil {
 		return err
 	}
+	allOk := e.applyPushResults(rep, resp, b.meta)
+	// 删除全部推送成功后才清 pendingDeletes
+	if allOk && len(pendingDel) > 0 {
+		e.Coll.ClearPendingDeletes()
+	}
+	if resp.Cursor > e.Bind.Cursor {
+		e.Bind.Cursor = resp.Cursor
+	}
+	return nil
+}
+
+// pushBatch 一批待推送操作及其元信息（回执按 OpID 反查条目）。
+// ops 与 meta 必须同步登记，故用一个结构承载，避免调用方漏写其中一边。
+type pushBatch struct {
+	ops  []Op
+	meta map[string]dirtyMeta
+}
+
+func newPushBatch(capacity int) *pushBatch {
+	return &pushBatch{ops: make([]Op, 0, capacity), meta: make(map[string]dirtyMeta, capacity)}
+}
+
+// add 登记一条操作及其元信息。
+func (b *pushBatch) add(op Op, m dirtyMeta) {
+	b.ops = append(b.ops, op)
+	b.meta[op.OpID] = m
+}
+
+// addFolderOp 分组：payload 只带标题；分组无文件 hash，回执用哨兵值标同步。
+func (e *Engine) addFolderOp(b *pushBatch, n index.Node) {
+	op := Op{OpID: newOpID(), Op: "upsert", Type: "group", UID: n.UID}
+	op.Payload, _ = json.Marshal(Payload{Title: n.Title})
+	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
+}
+
+// addRequestOp 请求：extra 聚合请求头 / 请求参数（query + JSON 体展平）/ 说明，
+// 口径见 collection.SyncExtra（与服务端 Bruno 导入一致）。读取失败则跳过本条。
+func (e *Engine) addRequestOp(b *pushBatch, n index.Node) {
+	req, err := e.Coll.ReadRequest(n.UID)
+	if err != nil {
+		return
+	}
+	op := Op{OpID: newOpID(), Op: "upsert", Type: "api", UID: n.UID, BaseRev: n.BaseRev}
+	op.Payload, _ = json.Marshal(Payload{
+		Name:   req.Name,
+		Method: req.Method,
+		URL:    req.URL,
+		Extra:  collection.SyncExtra(req),
+	})
+	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
+}
+
+// collectTombstoneOps 本地已删除请求的墓碑（delete），全部推送成功后才清 pendingDeletes。
+func (b *pushBatch) collectTombstoneOps(pendingDel []string) {
+	for _, uid := range pendingDel {
+		b.add(Op{OpID: newOpID(), Op: "delete", Type: "api", UID: uid},
+			dirtyMeta{uid: uid, typ: "api", isDelete: true})
+	}
+}
+
+// collectDocOps 文档条目（B13）：整量推送，由服务端按内容判重 ——
+// 文档体量小且无独立脏标记，逐个比对 hash 的收益不抵一次全量写入。
+func (e *Engine) collectDocOps(b *pushBatch) {
+	docs, _ := e.Coll.ListDocs()
+	for _, d := range docs {
+		if d.UID == "" {
+			continue
+		}
+		op := Op{OpID: newOpID(), Op: "upsert", Type: "doc", UID: d.UID}
+		op.Payload, _ = json.Marshal(Payload{Name: d.Name, Content: d.Content, Icon: d.Icon})
+		b.add(op, dirtyMeta{uid: d.UID, hash: e.Coll.FileHashOf(d.Path), typ: "doc"})
+	}
+}
+
+// collectExampleOps 响应示例：按 hash 脏检测推 upsert；
+// 「有推送记录但文件已不在」视为本地删除 → tombstone。
+func (e *Engine) collectExampleOps(b *pushBatch) {
+	examples, _ := e.Coll.ListAllResponseExamples()
+	live := make(map[string]string, len(examples)) // uid → 文件 hash
+	for _, ex := range examples {
+		if ex.UID == "" {
+			continue
+		}
+		h := e.Coll.FileHashOf(ex.Path)
+		live[ex.UID] = h
+		if prev, seen := e.Bind.ExampleHashes[ex.UID]; seen && prev == h && h != "" {
+			continue // 未变化
+		}
+		op := Op{OpID: newOpID(), Op: "upsert", Type: "example", UID: ex.UID}
+		op.Payload, _ = json.Marshal(Payload{
+			Name: ex.Name, ApiUID: ex.RequestUID, Sample: ex.Response.Body,
+			Status: ex.Response.Status, ContentType: ex.Response.ContentType, Seq: ex.Seq,
+		})
+		b.add(op, dirtyMeta{uid: ex.UID, hash: h, typ: "example"})
+	}
+	for uid := range e.Bind.ExampleHashes {
+		if _, ok := live[uid]; ok {
+			continue
+		}
+		b.add(Op{OpID: newOpID(), Op: "delete", Type: "example", UID: uid},
+			dirtyMeta{uid: uid, typ: "example", isDelete: true})
+	}
+}
+
+// applyPushResults 处理推送回执；返回 allOk（删除类操作是否全部成功，决定能否清 pendingDeletes）。
+func (e *Engine) applyPushResults(rep *Report, resp *PushResp, meta map[string]dirtyMeta) bool {
 	allOk := true
 	for _, r := range resp.Results {
 		m := meta[r.OpID]
 		switch r.Status {
 		case "ok":
 			rep.Pushed++
-			if m.typ == "example" {
-				// 示例不进索引：用 Bind.ExampleHashes 记录推送状态（upsert 记 hash，删除清记录）
-				if m.isDelete {
-					delete(e.Bind.ExampleHashes, m.uid)
-				} else if m.hash != "" {
-					if e.Bind.ExampleHashes == nil {
-						e.Bind.ExampleHashes = map[string]string{}
-					}
-					e.Bind.ExampleHashes[m.uid] = m.hash
-				}
-			} else if m.uid != "" && !m.isDelete {
-				h := m.hash
-				if h == "" {
-					h = "synced" // 分组等无文件 hash 的条目用哨兵值
-				}
-				_ = e.Coll.MarkSynced(m.uid, h, r.ItemRev)
-			}
+			e.applyPushed(m, r)
 		case "conflict":
 			rep.Conflicts++
 			e.writeConflictCopy(m.uid, r)
@@ -631,14 +653,31 @@ func (e *Engine) pushDirty(rep *Report) error {
 			}
 		}
 	}
-	// 删除全部推送成功后才清 pendingDeletes
-	if allOk && len(pendingDel) > 0 {
-		e.Coll.ClearPendingDeletes()
+	return allOk
+}
+
+// applyPushed 单条成功回执：示例不进索引，改用 Bind.ExampleHashes 记录推送状态
+// （upsert 记 hash、删除清记录）；其余条目 MarkSynced，无文件 hash 的（分组）用哨兵值。
+func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
+	if m.typ == "example" {
+		if m.isDelete {
+			delete(e.Bind.ExampleHashes, m.uid)
+		} else if m.hash != "" {
+			if e.Bind.ExampleHashes == nil {
+				e.Bind.ExampleHashes = map[string]string{}
+			}
+			e.Bind.ExampleHashes[m.uid] = m.hash
+		}
+		return
 	}
-	if resp.Cursor > e.Bind.Cursor {
-		e.Bind.Cursor = resp.Cursor
+	if m.uid == "" || m.isDelete {
+		return
 	}
-	return nil
+	h := m.hash
+	if h == "" {
+		h = "synced" // 分组等无文件 hash 的条目用哨兵值
+	}
+	_ = e.Coll.MarkSynced(m.uid, h, r.ItemRev)
 }
 
 // dirtyMeta 一条 dirty 节点的推送元信息。

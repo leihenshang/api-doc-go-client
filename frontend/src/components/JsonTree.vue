@@ -136,7 +136,7 @@ defineExpose({ collapseAll, expandAll })
     <template v-else>
       <div v-for="(row, i) in rows" :key="i" class="jr" :title="row.path">
         <span class="indent" :style="{ width: row.depth * 20 + 'px' }" />
-        <span class="caret" :class="{ dim: !row.expandable }" @click="toggle(row)">
+        <span class="caret" :class="{ dim: !row.expandable }" data-testid="json.caret" @click="toggle(row)">
           <n-icon v-if="row.expandable" :component="row.open ? ChevronDownOutline : ChevronForwardOutline" :size="10" />
         </span>
         <span v-if="row.key !== ''" class="k" :class="{ idx: row.isIndex }">{{ row.key }}</span>

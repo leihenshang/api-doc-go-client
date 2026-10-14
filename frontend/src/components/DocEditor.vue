@@ -1,5 +1,10 @@
 <script setup lang="ts">
 // 文档条目编辑器（B13）：Markdown 编辑 + 预览。
+//
+// 预留组件：当前 frontend/src 与 frontend/e2e 均无引用。原因是主文档 B9「文档条目」
+// 在客户端没有入口，配套 IPC（listDocs/createDoc/saveDoc/deleteDoc）也未接 UI。
+// 保留而非删除：后端能力已就绪（含 SyncDocAssets，见《客户端代码分析问题》F-03 / G-04），
+// 侧栏或文档入口上线后直接挂载即可。在此之前不要在别处重写一套编辑器。
 import { NButton, NInput } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

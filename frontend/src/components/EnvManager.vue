@@ -98,7 +98,7 @@ function close(): void {
     <div class="wrap">
       <div class="list">
         <div v-for="e in coll.envNames" :key="e" class="erow" :class="{ on: e === selected }">
-          <button class="env" type="button" @click="select(e)">{{ e }}</button>
+          <button class="env" type="button" data-testid="env.item" @click="select(e)">{{ e }}</button>
           <n-popconfirm @positive-click="delEnv(e)">
             <template #trigger>
               <button class="del" type="button" data-testid="env.del" :title="t('env.deleteEnv')"
@@ -121,7 +121,7 @@ function close(): void {
         <template v-if="selected">
           <div class="hd">
             <span class="lb">{{ t('env.name') }}</span>
-            <n-input v-model:value="working.name" size="small" class="nm" />
+            <n-input v-model:value="working.name" size="small" class="nm" data-testid="env.name" />
           </div>
 
           <!-- 敏感值存放说明：放在变量表上方，先说明再编辑 -->
@@ -136,21 +136,21 @@ function close(): void {
               <span />
             </div>
             <div v-for="(v, i) in working.vars" :key="i" class="row">
-              <n-checkbox v-model:checked="v.enabled" size="small" class="ctr" />
-              <n-input v-model:value="v.name" size="small" placeholder="name" />
-              <n-input v-model:value="v.value" size="small" placeholder="value"
+              <n-checkbox v-model:checked="v.enabled" size="small" class="ctr" data-testid="env.varEnabled" />
+              <n-input v-model:value="v.name" size="small" placeholder="name" data-testid="env.varName" />
+              <n-input v-model:value="v.value" size="small" placeholder="value" data-testid="env.varValue"
                 :type="v.secret ? 'password' : 'text'" />
               <n-checkbox v-model:checked="v.secret" size="small" class="ctr" :title="t('env.secret')"
-                :aria-label="t('env.secret')" />
-              <button class="act" type="button" :title="t('common.delete')" @click="delVar(i)">
+                :aria-label="t('env.secret')" data-testid="env.varSecret" />
+              <button class="act" type="button" :title="t('common.delete')" data-testid="env.varDel" @click="delVar(i)">
                 <n-icon :component="CloseOutline" :size="13" />
               </button>
             </div>
           </div>
-          <n-button text size="tiny" type="primary" class="add" @click="addVar">{{ t('env.addVar') }}</n-button>
+          <n-button text size="tiny" type="primary" class="add" data-testid="env.addVar" @click="addVar">{{ t('env.addVar') }}</n-button>
 
           <div class="ft">
-            <n-button size="small" @click="close">{{ t('common.cancel') }}</n-button>
+            <n-button size="small" data-testid="env.cancel" @click="close">{{ t('common.cancel') }}</n-button>
             <n-button size="small" type="primary" :disabled="!canSave" data-testid="env.save" @click="save">
               {{ t('common.save') }}
             </n-button>

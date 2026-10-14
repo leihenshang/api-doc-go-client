@@ -152,7 +152,7 @@ async function submit(): Promise<void> {
     </div>
     <template #footer>
       <div class="ft">
-        <n-button size="small" @click="emit('update:show', false)">{{ t('common.cancel') }}</n-button>
+        <n-button size="small" data-testid="import.cancel" @click="emit('update:show', false)">{{ t('common.cancel') }}</n-button>
         <n-button size="small" type="primary" :loading="importing" data-testid="import.ok" @click="submit">
           {{ t('import.submit') }}
         </n-button>

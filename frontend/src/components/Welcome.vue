@@ -20,9 +20,9 @@ const { t } = useI18n()
       </span>
       <h1>{{ t('welcome.title') }}</h1>
       <p class="hint">{{ t('welcome.hint') }}</p>
-      <n-button type="primary" size="large" @click="emit('open', '')">{{ t('welcome.open') }}</n-button>
+      <n-button type="primary" size="large" data-testid="welcome.open" @click="emit('open', '')">{{ t('welcome.open') }}</n-button>
       <p v-if="lastDir" class="last">
-        <button class="link" type="button" @click="emit('open', lastDir)">
+        <button class="link" type="button" data-testid="welcome.lastOpened" @click="emit('open', lastDir)">
           {{ t('welcome.lastOpened', { dir: lastDir }) }}
         </button>
       </p>

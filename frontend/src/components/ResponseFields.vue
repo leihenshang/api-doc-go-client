@@ -71,7 +71,8 @@ function removeChecked(): void {
     <div v-for="f in rows" :key="f.path" class="tr" data-testid="resp.fields.row" :data-path="f.path"
       :class="{ on: checked.has(f.path) }">
       <span class="ckcol">
-        <input type="checkbox" :checked="checked.has(f.path)" @change="toggle(f.path)" />
+        <input type="checkbox" :checked="checked.has(f.path)" data-testid="resp.fields.check"
+            @change="toggle(f.path)" />
       </span>
       <span class="mono fp" data-testid="resp.fields.path" :title="f.path">{{ f.path }}</span>
       <span class="mono ftype">{{ f.type }}</span>
