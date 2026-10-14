@@ -87,7 +87,7 @@ var toolMetas = []ToolMeta{
 	// ---- 5 个集合写工具（只读模式不注册）----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段文档：返回类型/字段表含说明/样例；gRPC 拒绝）与 docs（结构先取 get_doc_template）。同名会在分组内自动加序号。",
+		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。同名会在分组内自动加序号。",
 	},
 	{
 		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -99,7 +99,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 写响应字段表（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
+		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
 	},
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",

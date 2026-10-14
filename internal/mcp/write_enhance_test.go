@@ -120,6 +120,43 @@ func TestUpdateRequestParamsSettingsRespDoc(t *testing.T) {
 	}
 }
 
+// item 13：respDoc 按子项合并——只传 params 补字段说明时，已有的样例/状态码/响应头不动。
+func TestUpdateRespDocMergesPartial(t *testing.T) {
+	_, svc := setup(t)
+	r, err := svc.CreateRequest(CreateRequestInput{
+		Project: "demo", Name: "merge", Method: "GET", URL: "http://127.0.0.1/m",
+		RespDoc: sampleRespDoc(), // 带样例的完整文档
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.RespDoc == nil || r.RespDoc.Sample == "" {
+		t.Fatalf("前置条要求样例已写: %+v", r.RespDoc)
+	}
+
+	// 只写字段表（无 sample/status/headers）
+	up, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, RespDoc: &collection.ResponseDoc{
+		Params: []collection.ResponseParam{{FieldName: "code", Type: "number", Description: "业务码（新说明）"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up.RespDoc.Sample != `{"code":0,"data":[]}` {
+		t.Errorf("缺省样例应保留原值: %q", up.RespDoc.Sample)
+	}
+	if len(up.RespDoc.Params) != 1 || up.RespDoc.Params[0].Description != "业务码（新说明）" {
+		t.Errorf("params 应被覆盖: %+v", up.RespDoc.Params)
+	}
+	// 回读磁盘：合并结果已落盘
+	d, err := svc.GetRequestDetail("demo", r.UID, DetailOptions{IncludeBody: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.RespDoc == nil || d.RespDoc.Sample == "" {
+		t.Fatalf("落盘后样例丢失: %+v", d.RespDoc)
+	}
+}
+
 func TestGRPCRejectsRespDoc(t *testing.T) {
 	root, svc := setup(t)
 	// 用集合层直接种一个 gRPC 请求（MCP 暂不创建 gRPC，绕开创建路径只测拒绝逻辑）

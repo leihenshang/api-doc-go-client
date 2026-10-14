@@ -104,6 +104,8 @@ function onDrop(i: number, e: DragEvent): void {
 const scroller = ref<HTMLElement | null>(null)
 const canLeft = ref(false)
 const canRight = ref(false)
+/** 标签轨是否溢出（只要溢出，两个滚动钮就常驻；到端点只变暗不消失） */
+const scrollable = ref(false)
 let resizeObs: ResizeObserver | undefined
 
 /** 一次切换的滚动距离：约 4 个标签宽，最小 160px。 */
@@ -114,6 +116,7 @@ function refreshArrows(): void {
   if (!el) return
   canLeft.value = el.scrollLeft > 2
   canRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+  scrollable.value = el.scrollWidth > el.clientWidth + 2
 }
 
 function scrollBy(dir: -1 | 1): void {
@@ -169,9 +172,9 @@ onBeforeUnmount(() => {
       <span class="tt">{{ t('tab.collection') }}</span>
     </button>
 
-    <!-- 标签排满溢出时的左右手动切换钮（不溢出自动隐藏） -->
-    <button v-show="canLeft" class="nav nav-left" type="button" data-testid="tab.scrollLeft"
-      :title="t('tab.scrollLeft')" @click="scrollBy(-1)">
+    <!-- 标签排满溢出时的左右手动切换钮：溢出即常驻（不随滚动到端点消失），不溢出才隐藏 -->
+    <button v-show="scrollable" class="nav nav-left" :class="{ dim: !canLeft }" type="button"
+      data-testid="tab.scrollLeft" :title="t('tab.scrollLeft')" @click="scrollBy(-1)">
       <n-icon :component="ChevronBackCircleOutline" :size="24" />
     </button>
 
@@ -202,8 +205,8 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <button v-show="canRight" class="nav nav-right" type="button" data-testid="tab.scrollRight"
-      :title="t('tab.scrollRight')" @click="scrollBy(1)">
+    <button v-show="scrollable" class="nav nav-right" :class="{ dim: !canRight }" type="button"
+      data-testid="tab.scrollRight" :title="t('tab.scrollRight')" @click="scrollBy(1)">
       <n-icon :component="ChevronForwardCircleOutline" :size="24" />
     </button>
 
@@ -262,6 +265,12 @@ onBeforeUnmount(() => {
 
 .nav:hover {
   color: var(--app-accent);
+}
+
+/* 已到该方向的头：保留可见但变暗且不可点（位置反馈不靠消失） */
+.nav.dim {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .nav-left {
@@ -375,6 +384,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
   padding: 0 10px;
   flex: 0 0 auto;
+  /* 轨道是 align-items:stretch，按钮被拉满 38px 高：图标必须自己 flex 居中，否则停在行首 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .add:hover {

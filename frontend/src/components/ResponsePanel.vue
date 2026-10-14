@@ -10,7 +10,6 @@ import { DomHighlighter } from '@/lib/find'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { loadFields, paramsFromRows, rebuildFields, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
-import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { ResponseDoc, SendResult } from '@/types'
@@ -21,11 +20,11 @@ import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
-const coll = useCollectionStore()
 const tabs = useTabsStore()
 
+// 默认不换行：长值横向滚动看全，需要时用工具条换行图标开关
 const view = ref<'pretty' | 'raw'>('pretty')
-const wrap = ref(true)
+const wrap = ref(false)
 const seg = ref<'body' | 'headers' | 'trailers'>('body')
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
 
@@ -204,9 +203,8 @@ async function doUpdateFields(old: FieldRow[], inherit: boolean): Promise<void> 
     const { rows } = rebuildFields(old, body.value, inherit)
     const ok = await persistRows(rows, true)
     if (!ok) return
-    // 字段表已挂到请求模型：侧栏 Resp 节点即时出现 / 消失
+    // 字段表已挂到请求模型：直接把编辑器切到「响应字段」分段（集合树不再挂 Resp 节点）
     if (!isGrpcReq.value) {
-      coll.setRespUid(coll.activeRoot, props.tab.uid, rows.length > 0)
       tabs.focusRespFields(props.tab.key)
     }
     message.success(t('resp.fieldsUpdated', { n: rows.length }))
@@ -223,6 +221,9 @@ async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean
     type: rootJsonType(body.value) || props.tab.request?.respDoc?.type || '',
     params: paramsFromRows(rows),
     sample: body.value || props.tab.request?.respDoc?.sample || '',
+    // 快照（item 8）：有本次响应就用当时的状态码/响应头，否则保留旧快照
+    status: display.value?.status ?? props.tab.request?.respDoc?.status ?? 0,
+    headers: display.value?.headers?.length ? display.value.headers : (props.tab.request?.respDoc?.headers ?? []),
   }
   if (props.tab.draft || isGrpcReq.value || !uid) {
     saveFields(uid, rows)
@@ -417,9 +418,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
         </div>
 
         <response-toolbar v-model:view="view" v-model:wrap="wrap" v-model:find-on="findOn" :is-json="isJson"
-          :copied="copied" :can-save-example="!example" :findable="!!body" @expand-all="jv?.expandAll()"
-          @collapse-all="jv?.collapseAll()" @update-fields="updateFields" @copy-body="copyBody" @save-file="saveBody"
-          @save-example="openSave" @find="openFind" />
+          :copied="copied" :can-save-example="!example" :findable="!!body" @update-fields="updateFields"
+          @copy-body="copyBody" @save-file="saveBody" @save-example="openSave" @find="openFind" />
 
         <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
           @next="findNext" @prev="findPrev" @close="findOn = false" />
@@ -448,7 +448,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
               </div>
             </div>
             <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
-            <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
+            <!-- 原始视图固定折行（item 17）：minify 后的一行 JSON 不折会溢出视框；
+                 「换行」开关只作用于美化树 -->
+            <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
           </template>
 
           <div v-else-if="seg === 'headers'" class="hlist">
@@ -764,11 +766,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.raw.nowrap {
-  white-space: pre;
-  word-break: normal;
 }
 
 .hlist {

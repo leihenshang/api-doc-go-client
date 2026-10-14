@@ -170,6 +170,9 @@ export interface ResponseDoc {
   type: string
   params: ResponseParam[]
   sample: string
+  /** 更新字段时的响应快照（item 8）：状态码与当时的响应头，随 respdoc 落盘 */
+  status?: number
+  headers?: KV[]
 }
 
 /** 响应参数行（fieldName 为 a.b / a[].c 嵌套路径）。 */
@@ -222,17 +225,6 @@ export interface TreeNode {
   path: string
   method?: string
   children?: TreeNode[]
-}
-
-/**
- * 侧栏合成的「Resp」子节点（不落盘、不进 Go Node）：挂在带响应字段表的请求叶子下。
- * type 固定 'resp'，uid = 所属请求的 uid；由前端根据 CollectionInfo.respUids 合成。
- */
-export interface RespTreeNode {
-  type: 'resp'
-  uid: string
-  name: string
-  path: string
 }
 
 export interface EnvVar {

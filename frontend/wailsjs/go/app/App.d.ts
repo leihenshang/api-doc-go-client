@@ -88,6 +88,8 @@ export function ImportCollection(arg1:string,arg2:string,arg3:string):Promise<co
 
 export function ImportGrpcProtos(arg1:Array<string>,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
 
+export function IsDev():Promise<boolean>;
+
 export function ListCollections():Promise<Array<app.CollectionSummary>>;
 
 export function ListConflicts():Promise<Array<collection.ConflictItem>>;

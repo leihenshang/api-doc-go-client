@@ -150,6 +150,10 @@ export function ImportGrpcProtos(arg1, arg2) {
   return window['go']['app']['App']['ImportGrpcProtos'](arg1, arg2);
 }
 
+export function IsDev() {
+  return window['go']['app']['App']['IsDev']();
+}
+
 export function ListCollections() {
   return window['go']['app']['App']['ListCollections']();
 }

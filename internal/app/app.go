@@ -1100,6 +1100,9 @@ type ResponseDocInput struct {
 	Type   string                     `json:"type"`
 	Params []collection.ResponseParam `json:"params"`
 	Sample string                     `json:"sample"`
+	// Status/Headers：更新字段时的响应快照（状态码/响应头），随 respdoc 一并落盘（item 8）。
+	Status  int             `json:"status,omitempty"`
+	Headers []collection.KV `json:"headers,omitempty"`
 }
 
 // UpdateResponseDoc 把响应字段表与响应样例写入请求的 RespDoc 并落盘（文件即真相源，随后可同步）。
@@ -1124,7 +1127,7 @@ func (a *App) UpdateResponseDoc(in ResponseDocInput) error {
 	if strings.TrimSpace(in.Type) == "" && len(in.Params) == 0 && strings.TrimSpace(in.Sample) == "" {
 		r.RespDoc = nil
 	} else {
-		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample}
+		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample, Status: in.Status, Headers: in.Headers}
 	}
 	return c.SaveRequest(r)
 }

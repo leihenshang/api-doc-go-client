@@ -82,24 +82,13 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await overwriteModal(page).getByRole('button', { name: t('common.cancel') }).click()
     await expect(rows).toHaveCount(arrayCount) // 取消后字段表不变
 
-    // 取消后字段表停留在 fewer（覆盖未执行）：respdoc 段随 fewer 字段落盘，侧栏 Resp 节点仍在
+    // 取消后字段表停留在 fewer（覆盖未执行）：respdoc 段随 fewer 字段落盘
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('respdoc')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('fieldName: total')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).not.toContain('业务主体')
-    // 若 api 分组处于折叠态则展开（默认是展开；仅当 ping 行不在 DOM 时点 caret，避免把展开的折叠掉）。
-    // 注意 Resp 合成子行 data-uid 与请求相同，须用 data-kind="request" 精确定位请求行。
-    const pingRow = page.locator('[data-testid="tree.row"][data-kind="request"][data-uid="33333333-3333-4333-8333-333333333333"]')
-    if ((await pingRow.count()) === 0) {
-      await page.locator('[data-testid="tree.row"][data-kind="folder"][data-path="api"] .caret').click()
-    }
-    await pingRow.scrollIntoViewIfNeeded()
-    await expect(pingRow).toBeVisible()
-    const respName = page.getByTestId('tree.resp.name')
-    await respName.scrollIntoViewIfNeeded()
-    await expect(respName).toBeVisible()
-
-    // 点侧栏 Resp 节点：定位到请求的「响应字段」分段
-    await respName.click()
+    // 集合树不再合成 Resp 子节点（item 7）：请求行下没有任何子行入口
+    await expect(page.getByTestId('tree.resp.name')).toHaveCount(0)
+    // 请求编辑器仍在「响应字段」分段（由「更新响应字段」成功后的自动切换维持）
     await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
   })
 
@@ -294,5 +283,22 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     // 值真的折出了多行（换行功能本身没被破坏）
     const vh = await row.locator('.v').evaluate((el) => el.getBoundingClientRect().height)
     expect(vh).toBeGreaterThan(28)
+  })
+
+  test('[E23c] 原始视图固定折行：长 JSON 向下展开不横向溢出（回归 item 17）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    // echo 回显长 query：响应体是一行超长单行 JSON
+    await sendUrl(page, app, '{{host}}/echo?q=' + 'x'.repeat(300))
+    await page.getByTestId('resp.raw').click()
+    const raw = page.getByTestId('resp.rawBody')
+    await expect(raw).toContainText('xxx')
+    const geo = await raw.evaluate((el) => ({
+      overflowX: el.scrollWidth - el.clientWidth,
+      lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)),
+    }))
+    expect(geo.overflowX).toBeLessThanOrEqual(2) // 不再一行溢出展示框
+    expect(geo.lines).toBeGreaterThan(2) // 向下折行展开
   })
 })

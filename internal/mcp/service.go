@@ -665,7 +665,7 @@ type CreateRequestInput struct {
 	BodyRaw     string                      `json:"bodyRaw,omitempty"`
 	Body        *collection.Body            `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；传了就覆盖 bodyType/bodyRaw"`
 	Settings    *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档：返回类型 + 返回参数表（fieldName/type/required/description/example）+ 响应样例；gRPC 请求不支持"`
+	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档：可只写 params 字段表（补说明）；type/sample/status/headers 缺省不动，传了才覆盖；gRPC 请求不支持"`
 	Auth        *collection.Auth            `json:"auth,omitempty"`
 	Docs        string                      `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	Curl        string                      `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
@@ -723,7 +723,7 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 		if draft.IsGRPC() {
 			return nil, errRespDocGRPC
 		}
-		draft.RespDoc = in.RespDoc
+		draft.RespDoc = mergeRespDoc(draft.RespDoc, in.RespDoc)
 	}
 	if in.Auth != nil {
 		draft.Auth = in.Auth
@@ -742,6 +742,32 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	}
 	_ = e
 	return created, nil
+}
+
+// mergeRespDoc 把传入的 respDoc 合到已有文档上（item 13）：允许只写字段表——
+// 未传的字段（空类型/nil 参数表/空样例/零状态码/nil 响应头）保留原值，传了则覆盖；
+// params 传空数组即清空字段表。这样 AI 补「字段说明」不会误伤已有的响应数据/响应头快照。
+func mergeRespDoc(old, in *collection.ResponseDoc) *collection.ResponseDoc {
+	if old == nil {
+		return in
+	}
+	out := *old
+	if in.Type != "" {
+		out.Type = in.Type
+	}
+	if in.Params != nil {
+		out.Params = in.Params
+	}
+	if in.Sample != "" {
+		out.Sample = in.Sample
+	}
+	if in.Status != 0 {
+		out.Status = in.Status
+	}
+	if in.Headers != nil {
+		out.Headers = in.Headers
+	}
+	return &out
 }
 
 // CreateModule 创建模块（目录），parent 为空表示根目录下新建。
@@ -775,7 +801,7 @@ type UpdateRequestInput struct {
 	Headers  []collection.KV             `json:"headers,omitempty"`
 	Body     *collection.Body            `json:"body,omitempty"`
 	Settings *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc  *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档（返回类型/字段表/样例）；传了整张覆盖；gRPC 请求拒绝"`
+	RespDoc  *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并——可只传 params 补字段说明，样例/响应头/状态码缺省保留原值；gRPC 请求拒绝"`
 	Auth     *collection.Auth            `json:"auth,omitempty"`
 	Docs     *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	Folder   *string                     `json:"folder,omitempty"` // 移动到别的模块
@@ -819,7 +845,7 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 		if r.IsGRPC() {
 			return nil, errRespDocGRPC
 		}
-		r.RespDoc = in.RespDoc
+		r.RespDoc = mergeRespDoc(r.RespDoc, in.RespDoc)
 	}
 	if in.Auth != nil {
 		r.Auth = in.Auth

@@ -340,4 +340,19 @@ test.describe('外壳、布局与命令面板', () => {
     const token = await page.getByTestId('settings.mcpToken').locator('input').inputValue()
     expect(token).toHaveLength(32) // 后端自动生成并回填
   })
+
+  test('标签栏「＋」新建按钮垂直居中（图标几何中心与按钮中线偏差 ≤2px）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    const add = page.getByTestId('tab.new')
+    await expect(add).toBeVisible()
+    const off = await add.evaluate((el) => {
+      const btn = el.getBoundingClientRect()
+      const icon = el.querySelector('svg')?.getBoundingClientRect()
+      if (!icon) return Number.NaN
+      return Math.abs((btn.top + btn.bottom) / 2 - (icon.top + icon.bottom) / 2)
+    })
+    expect(off).toBeLessThanOrEqual(2)
+  })
 })

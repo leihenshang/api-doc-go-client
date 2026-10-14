@@ -1,18 +1,15 @@
 <script setup lang="ts">
-// 「响应字段」页签的表格：字段 / 类型 / 含义 + 删除操作。
-// 字段来自用户点击「更新响应字段」后的解析结果（由 ResponsePanel 持有并落 localStorage），
-// 本组件只负责展示与编辑含义，不自行解析响应体。
-import { NButton, NIcon, NInput, NPopconfirm } from 'naive-ui'
-import { Bookmark, BookmarkOutline } from '@vicons/ionicons5'
-import { ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import type { FieldRow } from '@/lib/responseFields'
+// 「响应字段」分段的字段表：字段 / 类型 / 含义 + 删除操作。
+// item 24：值列与变量书签已移除——当时的响应数据/响应头改在「响应数据 / 响应头」子页签看；
+// 字段来自用户点击「更新响应字段」后的解析结果，本组件只负责展示与编辑含义。
+import type { FieldRow } from '@/lib/responseFields';
+import { NButton, NInput, NPopconfirm } from 'naive-ui';
+import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
-/** bookmarks：当前作用域下已保存为变量的字段路径（书签点亮态）。 */
-defineProps<{ rows: FieldRow[]; bookmarks: Set<string> }>()
+defineProps<{ rows: FieldRow[] }>()
 const emit = defineEmits<{
   meaning: [path: string, value: string]
-  bookmark: [path: string]
   remove: [path: string]
   removeMany: [paths: string[]]
   clear: []
@@ -67,47 +64,22 @@ function removeChecked(): void {
     <div class="tr th">
       <span class="ckcol" />
       <span>{{ t('resp.field') }}</span>
-      <span>{{ t('resp.value') }}</span>
       <span>{{ t('resp.type') }}</span>
       <span>{{ t('resp.meaning') }}</span>
-      <span class="bmcol">{{ t('resp.varBookmark') }}</span>
       <span class="opcol" />
     </div>
-    <div
-      v-for="f in rows"
-      :key="f.path"
-      class="tr"
-      data-testid="resp.fields.row"
-      :data-path="f.path"
-      :class="{ on: checked.has(f.path) }"
-    >
+    <div v-for="f in rows" :key="f.path" class="tr" data-testid="resp.fields.row" :data-path="f.path"
+      :class="{ on: checked.has(f.path) }">
       <span class="ckcol">
         <input type="checkbox" :checked="checked.has(f.path)" @change="toggle(f.path)" />
       </span>
       <span class="mono fp" data-testid="resp.fields.path" :title="f.path">{{ f.path }}</span>
-      <span class="mono fval" data-testid="resp.fields.value" :title="f.value">{{ f.value }}</span>
       <span class="mono ftype">{{ f.type }}</span>
-      <n-input
-        :value="f.meaning"
-        size="small"
-        data-testid="resp.fields.meaning"
-        :placeholder="t('common.optional')"
-        @update:value="emit('meaning', f.path, $event)"
-      />
-      <span class="bmcol">
-        <button
-          class="bm"
-          :class="{ on: bookmarks.has(f.path) }"
-          type="button"
-          data-testid="resp.fields.bookmark"
-          :title="t('resp.varBookmarkHint')"
-          @click="emit('bookmark', f.path)"
-        >
-          <n-icon :component="bookmarks.has(f.path) ? Bookmark : BookmarkOutline" :size="13" />
-        </button>
-      </span>
+      <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning" :placeholder="t('common.optional')"
+        @update:value="emit('meaning', f.path, $event)" />
       <span class="opcol">
-        <button class="rm" type="button" :title="t('common.delete')" data-testid="resp.fields.remove" @click="removeOne(f.path)">
+        <button class="rm" type="button" :title="t('common.delete')" data-testid="resp.fields.remove"
+          @click="removeOne(f.path)">
           ×
         </button>
       </span>
@@ -157,7 +129,7 @@ function removeChecked(): void {
 
 .tr {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1.1fr) minmax(0, 1.1fr) 70px minmax(0, 1.2fr) 28px 24px;
+  grid-template-columns: 24px minmax(0, 1.4fr) 70px minmax(0, 1.4fr) 24px;
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
@@ -194,40 +166,6 @@ function removeChecked(): void {
 
 .ftype {
   color: var(--app-muted);
-}
-
-/* 值列：截断显示，完整值挂 title */
-.fval {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--app-json-str);
-}
-
-.bmcol {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.bm {
-  border: none;
-  background: none;
-  color: var(--app-placeholder);
-  cursor: pointer;
-  padding: 2px;
-  line-height: 1;
-  display: inline-flex;
-  border-radius: 4px;
-}
-
-.bm:hover {
-  color: var(--app-accent);
-  background: var(--app-row-hover);
-}
-
-.bm.on {
-  color: var(--app-accent);
 }
 
 .opcol {

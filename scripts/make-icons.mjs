@@ -1,34 +1,39 @@
 // 从 design/icon/api-color.svg 生成应用图标资产：
 //   build/appicon.png            1024×1024（Wails 构建源）
 //   build/windows/icon.ico       Windows exe 图标（16/32/48/64/128/256，PNG 条目）
+//   build/windows/icon-dev.ico   开发版图标（源：build/windows/dev_api.svg）；同步一份到 internal/devicon/ 供运行时嵌入
 //   frontend/public/favicon.svg  浏览器 / 开发态标签页图标（直接复制 SVG）
 //
 // 用法：node scripts/make-icons.mjs
 // 用 Chromium 光栅化的原因：本机没有 rsvg / inkscape / ImageMagick / Pillow。
-import { createRequire } from 'node:module'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = join(root, 'design', 'icon', 'api-color.svg')
+// 开发版图标独立源文件（用户提供）：不再用正式版图标叠徽章，直接整图栅格化
+const DEV_SRC = join(root, 'build', 'windows', 'dev_api.svg')
 const ICO_SIZES = [256, 128, 64, 48, 32, 16]
 
 const require = createRequire(join(root, 'frontend', 'package.json'))
 const { chromium } = require('playwright')
 
 const svg = readFileSync(SRC, 'utf8')
+// 开发版变体（item 12）：直接用 dev_api.svg
+const devSvg = readFileSync(DEV_SRC, 'utf8')
 const tmp = join(root, '.tmp', 'icons')
 mkdirSync(tmp, { recursive: true })
 
 /** 透明底渲染指定边长的 PNG：大图留 10% 边距，小尺寸留 8%（小图下更满）。 */
-async function render(page, size) {
+async function render(page, size, source) {
   const pad = size >= 512 ? 0.1 : 0.08
   await page.setViewportSize({ width: size, height: size })
   await page.setContent(
     '<style>html,body{margin:0;padding:0;background:transparent}' +
-      '#b{width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center}' +
-      '#b>svg{width:' + Math.round((1 - pad * 2) * 100) + '%;height:auto;display:block}</style><div id="b">' + svg + '</div>',
+    '#b{width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center}' +
+    '#b>svg{width:' + Math.round((1 - pad * 2) * 100) + '%;height:auto;display:block}</style><div id="b">' + source + '</div>',
   )
   return page.screenshot({ omitBackground: true })
 }
@@ -58,16 +63,27 @@ function packIco(images) {
 
 const browser = await chromium.launch()
 const page = await browser.newPage()
-const images = []
-for (const size of [1024].concat(ICO_SIZES)) {
-  const data = await render(page, size)
-  writeFileSync(join(tmp, size + '.png'), data)
-  console.log('  ' + size + 'px  ' + data.length + ' bytes')
-  if (size !== 1024) images.push({ size, data })
+
+/** 把一套 SVG 渲染成 ICO 条目集（非 1024 的方尺寸）。 */
+async function renderSet(source) {
+  const images = []
+  for (const size of [1024].concat(ICO_SIZES)) {
+    const data = await render(page, size, source)
+    writeFileSync(join(tmp, (source === svg ? '' : 'dev-') + size + '.png'), data)
+    if (size !== 1024) images.push({ size, data })
+  }
+  return images
 }
+
+const images = await renderSet(svg)
+const devImages = await renderSet(devSvg)
 await browser.close()
 
 writeFileSync(join(root, 'build', 'appicon.png'), readFileSync(join(tmp, '1024.png')))
 writeFileSync(join(root, 'build', 'windows', 'icon.ico'), packIco(images))
+const devIco = packIco(devImages)
+writeFileSync(join(root, 'build', 'windows', 'icon-dev.ico'), devIco)
+// 开发版运行时换图标靠嵌入这份（internal/devicon 的 //go:embed 要求与包同目录）
+writeFileSync(join(root, 'internal', 'devicon', 'icon-dev.ico'), devIco)
 copyFileSync(SRC, join(root, 'frontend', 'public', 'favicon.svg'))
-console.log('已更新 build/appicon.png、build/windows/icon.ico、frontend/public/favicon.svg')
+console.log('已更新 build/appicon.png、build/windows/icon.ico、build/windows/icon-dev.ico、internal/devicon/icon-dev.ico、frontend/public/favicon.svg')

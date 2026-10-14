@@ -1,10 +1,8 @@
 // [E25] 响应面板「保存 ▾」：菜单只保留「保存响应示例」与「保存响应体为文件（.json）」。
-// 「保存全部字段为变量 / 保存选中值为变量」与「作用域」chips 已下线，变量入口只剩字段表的
-// 「变量书签」，落点固定为当前环境 —— 本用例同时钉住这两件事。
-// 用例只从语言包取文案。
+// item 24：字段表的「值列 / 变量书签」已移除——当时的响应数据与响应头在编辑器
+// 「响应字段」分段的子页签里看；变量入口不再挂在字段表上。
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
-import { t } from '../helpers/i18n'
 import { openCollection, openRequest, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
@@ -17,8 +15,8 @@ async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url
   await send(page)
 }
 
-test.describe('响应区：保存▾与变量书签', () => {
-  test('[E25] 保存▾只剩响应示例与响应体文件，变量书签写入当前环境', async ({ page, app }) => {
+test.describe('响应区：保存▾与字段表（瘦身版）', () => {
+  test('[E25] 保存▾只剩响应示例与响应体文件；字段表无值列/书签，快照看子页签', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
@@ -33,21 +31,16 @@ test.describe('响应区：保存▾与变量书签', () => {
     await expect(page.getByTestId('resp.scope')).toHaveCount(0)
     await page.keyboard.press('Escape')
 
-    // 字段表书签：点亮 = 该字段值存成当前环境的变量，再点 = 删除。
-    // 不假设环境里是否已存在同名变量（fixture 的 env 可能已定义），只断言「点一下翻转、再点回来」。
+    // 更新响应字段后：字段表在编辑器分段渲染，但不再有值列与变量书签（item 24）
     await page.getByTestId('resp.updateFields').click()
-    // 字段表已移到请求编辑器「响应字段（Resp）」分段：更新后自动切过去
-    await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
-    const bm = page.getByTestId('resp.fields.bookmark').first()
-    const lit = async (): Promise<boolean> => ((await bm.getAttribute('class')) ?? '').includes('on')
-    const before = await lit()
+    await expect(page.getByTestId('resp.fields.value')).toHaveCount(0)
+    await expect(page.getByTestId('resp.fields.bookmark')).toHaveCount(0)
 
-    await bm.click()
-    await expect.poll(lit).toBe(!before)
-    if (!before) await expect(page.locator('.n-message').last()).toContainText(t('resp.scopeEnv'))
-
-    await bm.click()
-    await expect.poll(lit).toBe(before)
+    // 当时的响应数据/响应头改由子页签承载，且响应数据是格式化（缩进）展示的
+    await page.locator('[data-testid="resp.segTab"][data-view="body"]').click()
+    await expect(page.getByTestId('resp.segBody')).toContainText('"flat": true')
+    await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
+    await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
   })
 })

@@ -23,6 +23,9 @@ func TestUpdateResponseDoc(t *testing.T) {
 			{FieldName: "code", Type: "number", Description: "业务码", Example: "0"},
 			{FieldName: "data[].id", Type: "string", Description: "ID", Example: "x1"},
 		},
+		// item 8：更新字段时一并留存响应快照（状态码 + 当时的响应头）
+		Status:  201,
+		Headers: []collection.KV{{Name: "Content-Type", Value: "application/json", Enabled: true}},
 	}
 	if err := core.UpdateResponseDoc(in); err != nil {
 		t.Fatalf("写响应文档失败: %v", err)
@@ -40,6 +43,9 @@ func TestUpdateResponseDoc(t *testing.T) {
 	}
 	if len(got.RespDoc.Params) != 2 || got.RespDoc.Params[1].FieldName != "data[].id" {
 		t.Errorf("返回参数行不符: %+v", got.RespDoc.Params)
+	}
+	if got.RespDoc.Status != 201 || len(got.RespDoc.Headers) != 1 || got.RespDoc.Headers[0].Name != "Content-Type" {
+		t.Errorf("响应快照（状态码/响应头）未随 respdoc 落盘: %+v", got.RespDoc)
 	}
 	// 同步 extra 应带响应侧字段（respdoc → retType/retParams/retSample）
 	extra := collection.SyncExtra(got)

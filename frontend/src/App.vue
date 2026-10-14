@@ -453,17 +453,6 @@ async function openHistoryRequest(uid: string): Promise<void> {
   await openRequestInRoot(uid, findRootOfUid(uid))
 }
 
-/**
- * 侧栏 Resp 子节点：打开所属请求（需要时先切工作目录），再把请求编辑器定位到「响应字段」分段。
- */
-async function openRespNode(uid: string, root?: string): Promise<void> {
-  if (root && root !== coll.activeRoot) await activateRoot(root)
-  await tabs.openRequest(uid)
-  const tab = tabs.tabs.find((x) => x.uid === uid)
-  if (tab) tabs.focusRespFields(tab.key)
-  treeRevealTick.value++
-}
-
 /** 重载某个根（外部改动 / 手工触发）：只刷新它的树，不动其它根。 */
 async function reloadRoot(root: string): Promise<void> {
   try {
@@ -1117,7 +1106,6 @@ watch(
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
                 :reveal-tick="treeRevealTick" :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
                 @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
-                @open-resp="openRespNode"
                 @new-request="newDraft" @new-grpc-request="newGrpcDraft" @import-curl="openCurl"
                 @sync="openSyncSettings()" @sync-root="syncRootNow" @open-collection="openCollection('')"
                 @create-collection="openCollection" />

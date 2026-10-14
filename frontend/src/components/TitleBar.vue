@@ -6,7 +6,7 @@
 // （runtime 里 flags.deferDragToMouseMove = true），静止双击不会进入系统移动循环，
 // 所以这里能正常收到 dblclick，直接调 WindowToggleMaximise 即可 —— 注意这不是「真全屏」，
 // 行为与系统标题栏一致（占满工作区，不盖任务栏）。
-import { hasWailsRuntime, windowCtl } from '@/lib/ipc'
+import { api, hasWailsRuntime, windowCtl } from '@/lib/ipc'
 import { requestQuit } from '@/lib/quit'
 import { isDark } from '@/lib/theme'
 import { CloseOutline, CopyOutline, MoonOutline, RemoveOutline, SquareOutline, SunnyOutline } from '@vicons/ionicons5'
@@ -21,6 +21,14 @@ const emit = defineEmits<{ 'toggle-theme': []; 'set-layout': [layout: 'right' | 
 const { t } = useI18n()
 const customChrome = hasWailsRuntime()
 const maximised = ref(false)
+
+// 开发版标识（item 12）：dev 标签构建下后端返回 true —— 标题栏加绿色气泡，document.title 换 -dev 后缀。
+// 拿不到（非桌面壳/旧后端）就当正式版，不打气泡。
+const isDev = ref(false)
+api.isDev().then((v) => {
+  isDev.value = v
+  if (v) document.title = 'api-doc-go-dev'
+}).catch(() => { })
 
 // 与 frontend/package.json 的 version 保持一致（不引 JSON 模块，避免额外构建配置）
 const VERSION = 'v0.0.1'
@@ -94,6 +102,7 @@ onBeforeUnmount(() => {
         </svg>
       </span>
       <span class="brand">{{ t('app.brand') }}</span>
+      <span v-if="isDev" class="dev-badge" data-testid="title.devBadge" title="开发版（wails dev）">dev</span>
       <span class="ver mono">{{ VERSION }}</span>
     </div>
     <!-- 中间插槽：集合切换 / 环境切换 / 本地搜索（原先独占一行的工具栏，2026-10-03 并入标题栏） -->
@@ -178,6 +187,19 @@ onBeforeUnmount(() => {
   font-weight: 600;
   letter-spacing: 0.2px;
   color: var(--app-text);
+}
+
+/* 开发版绿色气泡（item 12）：dev 标签构建才渲染 */
+.dev-badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--app-accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 15px;
 }
 
 /* 版本号：紧跟品牌名（原先在状态栏最右下角） */
