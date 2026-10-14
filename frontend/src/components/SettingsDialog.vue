@@ -610,9 +610,9 @@ function close(): void {
     <template #footer>
       <div class="ft">
         <span class="sp" />
-        <n-button size="small" @click="close">{{ t('common.cancel') }}</n-button>
-        <n-button size="small" :loading="saving" @click="saveApply">{{ t('settings.saveApply') }}</n-button>
-        <n-button size="small" type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+        <n-button size="small" data-testid="settings.cancel" @click="close">{{ t('common.cancel') }}</n-button>
+        <n-button size="small" :loading="saving" data-testid="settings.saveApply" @click="saveApply">{{ t('settings.saveApply') }}</n-button>
+        <n-button size="small" type="primary" :loading="saving" data-testid="settings.save" @click="save">{{ t('common.save') }}</n-button>
       </div>
     </template>
   </n-modal>

@@ -853,91 +853,138 @@ type scanResult struct {
 }
 
 func (c *Collection) scan() (*scanResult, error) {
-	res := &scanResult{
-		reqs: map[string]*Request{}, reqByPath: map[string]*Request{},
-		uidByDir: map[string]string{}, nameByDir: map[string]string{},
-		docs: map[string]*DocEntry{},
-	}
+	res := newScanResult()
 	err := filepath.WalkDir(c.Dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, rerr := filepath.Rel(c.Dir, path)
-		if rerr != nil {
-			return rerr
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == "." {
-			return nil
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if reserved[name] || strings.HasPrefix(name, ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		dir := filepath.ToSlash(filepath.Dir(rel))
-		if dir == "." {
-			dir = ""
-		}
-		// 扩展名白名单：yml/yaml 是请求与环境文件；docs/*.md 是文档条目（B13）——
-		// 之前这里把 .md 一并挡掉，导致 ListDocs 永远扫不到任何文档（含客户端自己创建的）。
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".yml" && ext != ".yaml" && !(ext == ".md" && dir == docsDir) {
-			return nil
-		}
-		data, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return rerr
-		}
-		if strings.Contains(name, ".secrets.") {
-			return nil // secret 文件随主环境文件一起处理
-		}
-		var head struct {
-			Info struct {
-				Type string `yaml:"type"`
-				Name string `yaml:"name"`
-				Seq  int    `yaml:"seq"`
-			} `yaml:"info"`
-			Meta struct {
-				UID string `yaml:"uid"`
-			} `yaml:"meta"`
-		}
-		if yaml.Unmarshal(data, &head) != nil {
-			return nil // 非法 YAML：跳过（不中断整个扫描）
-		}
-		switch head.Info.Type {
-		case TypeHTTP, TypeGRPC:
-			var f requestFile
-			if yaml.Unmarshal(data, &f) != nil || f.Meta.UID == "" {
-				return nil
-			}
-			r := fromFile(rel, &f)
-			c.applyGrpcDefault(r) // 没写 proto 的 gRPC 请求回落到集合默认定义（P8）
-			res.reqs[r.UID] = r
-			res.reqByPath[rel] = r
-		case "folder":
-			if head.Meta.UID != "" {
-				res.uidByDir[dir] = head.Meta.UID
-			}
-			if head.Info.Name != "" {
-				res.nameByDir[dir] = head.Info.Name
-			}
-		default:
-			// B13 文档条目：docs/*.md
-			if dir == docsDir && strings.HasSuffix(strings.ToLower(name), ".md") {
-				if d, err := parseDocFile(rel, data); err == nil {
-					res.docs[d.UID] = d
-				}
-			}
-		}
-		return nil
+		return c.scanFile(res, path, d)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+// newScanResult 构造空的扫描结果容器。
+func newScanResult() *scanResult {
+	return &scanResult{
+		reqs: map[string]*Request{}, reqByPath: map[string]*Request{},
+		uidByDir: map[string]string{}, nameByDir: map[string]string{},
+		docs: map[string]*DocEntry{},
+	}
+}
+
+// scanFile 处理扫描到的单个目录项：跳过无关路径 → 读取并解析文件头 → 按类型入库。
+// 单独成函数是为了让 scan 只剩「遍历 + 收尾」，也便于针对某类文件单独补测。
+func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error {
+	rel, err := filepath.Rel(c.Dir, path)
+	if err != nil {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return nil
+	}
+	if d.IsDir() {
+		return skipReservedDir(d.Name())
+	}
+	dir := relDir(rel)
+	if !scanExtAllowed(d.Name(), dir) {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(d.Name(), ".secrets.") {
+		return nil // secret 文件随主环境文件一起处理
+	}
+	head, ok := parseScanHead(data)
+	if !ok {
+		return nil // 非法 YAML：跳过（不中断整个扫描）
+	}
+	switch head.Info.Type {
+	case TypeHTTP, TypeGRPC:
+		c.scanRequestFile(res, rel, data)
+	case "folder":
+		scanFolderFile(res, dir, head)
+	default:
+		// B13 文档条目：docs/*.md
+		if dir == docsDir && strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+			if doc, err := parseDocFile(rel, data); err == nil {
+				res.docs[doc.UID] = doc
+			}
+		}
+	}
+	return nil
+}
+
+// relDir 取相对路径所属目录；集合根（"."）归一为 ""。
+func relDir(rel string) string {
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	if dir == "." {
+		return ""
+	}
+	return dir
+}
+
+// skipReservedDir 保留名或隐藏目录：整棵子树跳过。
+func skipReservedDir(name string) error {
+	if reserved[name] || strings.HasPrefix(name, ".") {
+		return filepath.SkipDir
+	}
+	return nil
+}
+
+// scanExtAllowed 扩展名白名单：yml/yaml 是请求与环境文件；docs/*.md 是文档条目（B13）——
+// 之前这里把 .md 一并挡掉，导致 ListDocs 永远扫不到任何文档（含客户端自己创建的）。
+func scanExtAllowed(name, dir string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".yml" || ext == ".yaml" || (ext == ".md" && dir == docsDir)
+}
+
+// scanHead 文件头：判断类型与取 uid 只需这几项，不必整体反序列化。
+type scanHead struct {
+	Info struct {
+		Type string `yaml:"type"`
+		Name string `yaml:"name"`
+		Seq  int    `yaml:"seq"`
+	} `yaml:"info"`
+	Meta struct {
+		UID string `yaml:"uid"`
+	} `yaml:"meta"`
+}
+
+// parseScanHead 解析文件头；非法 YAML 返回 ok=false（调用方跳过该文件，不中断扫描）。
+func parseScanHead(data []byte) (scanHead, bool) {
+	var head scanHead
+	if yaml.Unmarshal(data, &head) != nil {
+		return head, false
+	}
+	return head, true
+}
+
+// scanRequestFile 解析请求文件（HTTP / gRPC）并入库。
+func (c *Collection) scanRequestFile(res *scanResult, rel string, data []byte) {
+	var f requestFile
+	if yaml.Unmarshal(data, &f) != nil || f.Meta.UID == "" {
+		return
+	}
+	r := fromFile(rel, &f)
+	c.applyGrpcDefault(r) // 没写 proto 的 gRPC 请求回落到集合默认定义（P8）
+	res.reqs[r.UID] = r
+	res.reqByPath[rel] = r
+}
+
+// scanFolderFile 记录目录的 uid 与显示名（重命名后显示名与目录名不同）。
+func scanFolderFile(res *scanResult, dir string, head scanHead) {
+	if head.Meta.UID != "" {
+		res.uidByDir[dir] = head.Meta.UID
+	}
+	if head.Info.Name != "" {
+		res.nameByDir[dir] = head.Info.Name
+	}
 }
 
 // Tree 扫描集合并构建树（分组在前，组内按 seq / 名称排序；含文档条目 B13）。

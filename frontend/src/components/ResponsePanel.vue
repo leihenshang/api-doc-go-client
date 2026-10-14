@@ -7,6 +7,8 @@ import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
 import { DomHighlighter } from '@/lib/find'
+import { formatBytes, httpStatusText } from '@/lib/format'
+import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { loadFields, paramsFromRows, rebuildFields, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
@@ -130,15 +132,11 @@ const meta = computed(() => {
   return parts.join(' · ')
 })
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
+// gRPC 的码名与徽章语义统一走 lib/grpc.ts：此前这里把所有非零码一律显示成
+// NOT_OK(n)，掩盖了真实码（如 NOT_FOUND(5)），且与别处的码表是两份真相。
 const statusType = computed<'success' | 'warning' | 'error'>(() => {
   const s = display.value?.status ?? 0
-  if (isGrpcRes.value) return s === 0 ? 'success' : 'error'
+  if (isGrpcRes.value) return grpcStatusType(s)
   if (s >= 200 && s < 300) return 'success'
   if (s >= 300 && s < 500) return 'warning'
   return 'error'
@@ -146,20 +144,9 @@ const statusType = computed<'success' | 'warning' | 'error'>(() => {
 
 const statusLabel = computed(() => {
   const s = display.value?.status ?? 0
-  if (isGrpcRes.value) return s === 0 ? 'OK(0)' : `NOT_OK(${s})`
+  if (isGrpcRes.value) return grpcCodeLabel(s)
   return `${s} ${httpStatusText(s)}`.trim()
 })
-
-function httpStatusText(s: number): string {
-  const map: Record<number, string> = {
-    200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved', 302: 'Found',
-    304: 'Not Modified', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden',
-    404: 'Not Found', 405: 'Method Not Allowed', 408: 'Timeout', 409: 'Conflict',
-    422: 'Unprocessable', 429: 'Too Many Requests', 500: 'Internal Error',
-    502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout',
-  }
-  return map[s] ?? ''
-}
 
 const copied = ref(false)
 
@@ -494,7 +481,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
       </div>
       <template #footer>
         <div class="modal-ft">
-          <n-button size="small" @click="showSave = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel') }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
           </n-button>
@@ -510,7 +497,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
       </n-checkbox>
       <template #footer>
         <div class="modal-ft">
-          <n-button size="small" @click="showOverwrite = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel') }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
             {{ t('resp.fieldsOverwriteOk') }}
           </n-button>

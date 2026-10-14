@@ -37,7 +37,10 @@ type syncParamRow struct {
 // SyncExtra 把请求的可同步字段聚合成服务端 extra JSON（SyncPayload.extra）。
 // 始终输出 desc/headers/params/retType/retParams/retSample 六个键（无内容时为空串），
 // 表示整份覆盖：服务端只在键存在且为字符串时覆盖对应列，空串即清空，删除能正常传播。
-// gRPC 请求没有 HTTP 参数/头/响应文档，只同步说明。
+// gRPC 请求没有 HTTP 参数/头/响应文档，只同步说明（扩展键同样不下发）。
+//
+// 扩展键（请求体 / 认证 / 请求设置 / 脚本 / 变量 / 断言 / 响应内容类型）见
+// sync_extra_fields.go；HTTP 请求一律整份下发，保证「本地删掉的东西服务端也删掉」。
 func SyncExtra(r *Request) string {
 	extra := map[string]any{
 		"desc":      r.Docs,
@@ -57,13 +60,23 @@ func SyncExtra(r *Request) string {
 	if s := marshalParamRows(r); s != "" {
 		extra["params"] = s
 	}
+	extra[extraKeyRetContentType] = ""
 	if d := r.RespDoc; d != nil {
 		extra["retType"] = d.Type
 		extra["retSample"] = d.Sample
+		extra[extraKeyRetContentType] = d.ContentType
 		if b, err := json.Marshal(d.Params); err == nil && len(d.Params) > 0 {
 			extra["retParams"] = string(b)
 		}
 	}
+	extra[extraKeyBodyType] = r.Body.Type
+	extra[extraKeyBody] = bodyTextOf(r.Body)
+	extra[extraKeyBodyForm] = marshalFormRows(r.Body.Form)
+	extra[extraKeyAuth] = marshalAuth(r.Auth)
+	extra[extraKeySettings] = marshalSettings(r.Settings)
+	extra[extraKeyScript] = marshalScript(r.Script)
+	extra[extraKeyVars] = marshalRows(r.VarsPreRequest)
+	extra[extraKeyAsserts] = marshalRows(r.Asserts)
 	b, _ := json.Marshal(extra)
 	return string(b)
 }
@@ -93,6 +106,7 @@ func ApplySyncExtra(r *Request, extraJSON string) {
 		applyParamRows(r, v)
 	}
 	applyResponseDoc(r, m)
+	applyExtendedFields(r, m)
 }
 
 // applyResponseDoc 应用响应文档三键（retType/retParams/retSample）：
@@ -102,7 +116,8 @@ func applyResponseDoc(r *Request, m map[string]any) {
 	_, hasType := m["retType"]
 	_, hasParams := m["retParams"]
 	_, hasSample := m["retSample"]
-	if !hasType && !hasParams && !hasSample {
+	_, hasContentType := m[extraKeyRetContentType]
+	if !hasType && !hasParams && !hasSample && !hasContentType {
 		return
 	}
 	doc := r.RespDoc
@@ -111,6 +126,9 @@ func applyResponseDoc(r *Request, m map[string]any) {
 	}
 	if v, ok := m["retType"].(string); ok {
 		doc.Type = v
+	}
+	if v, ok := m[extraKeyRetContentType].(string); ok {
+		doc.ContentType = v
 	}
 	if v, ok := m["retParams"].(string); ok {
 		doc.Params = parseResponseParams(v, doc.Params)
@@ -122,7 +140,7 @@ func applyResponseDoc(r *Request, m map[string]any) {
 		}
 		doc.Sample = v
 	}
-	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" {
+	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" && doc.ContentType == "" {
 		r.RespDoc = nil
 		return
 	}

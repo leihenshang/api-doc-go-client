@@ -170,6 +170,12 @@ export interface ResponseDoc {
   type: string
   params: ResponseParam[]
   sample: string
+  /**
+   * 响应内容类型：json / text / xml / html / binary（对齐 Go 的 contentType、同步键 retContentType）。
+   * 与 type 分叉：type 是 JSON 根类型（object/array），contentType 是整体格式；
+   * 非 JSON 时样例不做缩进格式化。
+   */
+  contentType?: string
   /** 更新字段时的响应快照（item 8）：状态码与当时的响应头，随 respdoc 落盘 */
   status?: number
   headers?: KV[]

@@ -64,28 +64,28 @@ const shortcuts = computed(() => [
         </div>
       </div>
       <div class="acts">
-        <n-button class="act" size="medium" type="primary" @click="emit('new-request')">
+        <n-button class="act" size="medium" type="primary" data-testid="overview.newRequest" @click="emit('new-request')">
           {{ t('overview.newRequest') }}
         </n-button>
-        <n-button class="act" size="medium" secondary @click="emit('import')">
+        <n-button class="act" size="medium" secondary data-testid="overview.import" @click="emit('import')">
           <template #icon>
             <n-icon :component="CloudDownloadOutline" :size="14" />
           </template>
           {{ t('import.title') }}
         </n-button>
-        <n-button class="act" size="medium" secondary @click="emit('export', 'markdown')">
+        <n-button class="act" size="medium" secondary data-testid="overview.exportMd" @click="emit('export', 'markdown')">
           <template #icon>
             <n-icon :component="CloudUploadOutline" :size="14" />
           </template>
           {{ t('export.markdown') }}
         </n-button>
-        <n-button class="act" size="medium" secondary @click="emit('export', 'html')">
+        <n-button class="act" size="medium" secondary data-testid="overview.exportHtml" @click="emit('export', 'html')">
           <template #icon>
             <n-icon :component="CloudUploadOutline" :size="14" />
           </template>
           {{ t('export.html') }}
         </n-button>
-        <n-button class="act" size="medium" secondary @click="emit('mock')">
+        <n-button class="act" size="medium" secondary data-testid="overview.mock" @click="emit('mock')">
           <template #icon>
             <n-icon :component="PlayOutline" :size="14" />
           </template>

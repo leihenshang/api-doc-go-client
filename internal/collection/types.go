@@ -84,6 +84,11 @@ type ResponseDoc struct {
 	Type   string          `json:"type"`   // 返回类型徽标（JSON 类型：object/array/...）
 	Params []ResponseParam `json:"params"` // 返回参数行（对齐 Web ApiParam 契约）
 	Sample string          `json:"sample"` // 响应样例原文（通常是 JSON 文本）
+	// ContentType 响应内容的媒体类型：json / text / xml / html / binary。
+	// 与 Type 分叉：Type 是 JSON 根类型（object/array），ContentType 是整体格式 ——
+	// 服务端已有 http_return_type 存的是 "JSON" 字符串，语义不同，故另立 extra 键 retContentType。
+	// 非 JSON 时样例不做缩进格式化。落盘走 respDocExtra 的 json.Marshal，加字段即生效。
+	ContentType string `json:"contentType,omitempty"`
 	// Status/Headers 是「更新响应字段时」一并留存的响应快照（实际问题记录 item 8）：
 	// 状态码与当时的响应头，随 respdoc 段落盘；不参与服务端同步（同步只认 retType/retParams/retSample，
 	// 样例被外部改写时本地快照会被清空以免错位）。

@@ -164,7 +164,8 @@ function toggle(): void {
       </div>
       <div v-for="(row, i) in rows" :key="i" class="row" :class="{ typed: showType }"
         :style="{ gridTemplateColumns: gridCols }" data-testid="kv.row">
-        <n-checkbox v-model:checked="row.enabled" size="small" @update:checked="emit('change')" />
+        <n-checkbox v-model:checked="row.enabled" size="small" data-testid="kv.enabled"
+          @update:checked="emit('change')" />
         <div class="cell">
           <n-input v-model:value="row.name" data-testid="kv.name" size="small" placeholder="name"
             @input="emit('change')" />

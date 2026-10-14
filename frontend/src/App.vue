@@ -700,6 +700,9 @@ onMounted(() => {
   void settingsReady.then(() => restoreRoots())
 })
 
+// 唯一的卸载清理入口：keydown / resize 监听与两个轮询定时器都在这里收尾。
+// 曾出现过第二个 onBeforeUnmount 重复摘 keydown（《客户端代码分析问题》F-04），
+// 摘除本身幂等但会让「监听在哪收尾」变成两处真相，故合并为此一处。
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onHotkey)
   window.removeEventListener('resize', clampSideWidth)
@@ -749,8 +752,6 @@ function onExternalChange(root: string): void {
     if (conflicts > 0) message.warning(t('conflict.external', { n: conflicts }), { duration: 6000 })
   })()
 }
-
-onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
 
 // ---- 新建请求：直接开一个未落盘的空 tab；名称与分组在**关闭时**才问 ----
 // 分组用 n-tree-select 树形选择：key=目录相对路径；根目录用 sentinel 避免空串被当成无效 key

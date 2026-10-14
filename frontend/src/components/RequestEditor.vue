@@ -630,38 +630,39 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
       <div v-else-if="seg === 'auth'" class="auth-pane">
         <div class="arow">
           <span class="lbl">{{ t('auth.type') }}</span>
-          <n-select v-model:value="authType" :options="authOptions" size="small" class="atype" />
+          <n-select v-model:value="authType" :options="authOptions" size="small" class="atype"
+            data-testid="auth.type" />
         </div>
         <template v-if="authType === 'basic'">
           <div class="arow">
             <span class="lbl">{{ t('auth.username') }}</span>
-            <n-input v-model:value="auth.username" size="small" @input="touch" />
+            <n-input v-model:value="auth.username" size="small" data-testid="auth.username" @input="touch" />
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.password') }}</span>
             <n-input v-model:value="auth.password" size="small" type="password" show-password-on="click"
-              @input="touch" />
+              data-testid="auth.password" @input="touch" />
           </div>
         </template>
         <template v-else-if="authType === 'bearer'">
           <div class="arow">
             <span class="lbl">{{ t('auth.token') }}</span>
-            <n-input v-model:value="auth.token" size="small" @input="touch" />
+            <n-input v-model:value="auth.token" size="small" data-testid="auth.token" @input="touch" />
           </div>
         </template>
         <template v-else-if="authType === 'apikey'">
           <div class="arow">
             <span class="lbl">{{ t('auth.key') }}</span>
-            <n-input v-model:value="auth.key" size="small" @input="touch" />
+            <n-input v-model:value="auth.key" size="small" data-testid="auth.key" @input="touch" />
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.value') }}</span>
-            <n-input v-model:value="auth.value" size="small" @input="touch" />
+            <n-input v-model:value="auth.value" size="small" data-testid="auth.value" @input="touch" />
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.in') }}</span>
             <n-select v-model:value="auth.in" :options="authInOptions" size="small" class="atype"
-              @update:value="touch" />
+              data-testid="auth.in" @update:value="touch" />
           </div>
         </template>
       </div>
@@ -674,7 +675,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
               { label: t('editor.bodyText'), value: 'text' },
               { label: t('editor.bodyForm'), value: 'form' },
               { label: t('editor.bodyMultipart'), value: 'multipart' },
-            ]" size="small" class="btype" @update:value="bodyType = $event" />
+            ]" size="small" class="btype" data-testid="body.type" @update:value="bodyType = $event" />
             <button v-if="bodyType === 'json'" class="fmt" type="button" @click="formatJson">
               {{ t('editor.formatJson') }}
             </button>

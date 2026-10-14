@@ -342,140 +342,172 @@ func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", c.Name)
 	fmt.Fprintf(&b, "> 由 api-doc-go 客户端导出；集合目录 `%s`\n\n", c.Dir)
-
-	var walk func(nodes []*Node, depth int)
-	walk = func(nodes []*Node, depth int) {
-		for _, n := range nodes {
-			if depth > 6 {
-				depth = 6
-			}
-			level := depth + 2
-			if shiftDocs && level > 5 {
-				level = 5 // 封顶 h5：Docs 至少要能深一级（h6），否则单节展示仍会把 Docs 排除在节外
-			}
-			pad := strings.Repeat("#", level)
-			if n.Type == "folder" {
-				fmt.Fprintf(&b, "%s %s\n\n", pad, n.Name)
-				if n.Children != nil {
-					walk(n.Children, depth+1)
-				}
-				continue
-			}
-			r, ok := res.reqs[n.UID]
-			if !ok {
-				continue
-			}
-			// appendDocs 附加请求文档；HTML 导出时做标题降级（Markdown 导出保持原样）。
-			// item 9：「文档」放在所有生成内容之下，并用分隔线 + 标题 label 与生成内容明显分界。
-			appendDocs := func() {
-				docs := strings.TrimSpace(r.Docs)
-				if docs == "" {
-					return
-				}
-				if shiftDocs {
-					docs = shiftHeadings(docs, level+1)
-				}
-				b.WriteString("\n---\n\n**文档**\n\n")
-				fmt.Fprintf(&b, "%s\n\n", docs)
-			}
-			// appendRespDoc 补齐响应字段文档（respdoc）：返回类型 / 字段表 / 样例 / 响应头（item 9）。
-			appendRespDoc := func() {
-				d := r.RespDoc
-				if d == nil {
-					return
-				}
-				if strings.TrimSpace(d.Type) != "" {
-					fmt.Fprintf(&b, "**返回类型**：%s\n\n", strings.TrimSpace(d.Type))
-				}
-				if len(d.Params) > 0 {
-					fmt.Fprintf(&b, "**响应字段**\n\n| 参数名 | 必选 | 类型 | 说明 | 示例 |\n|---|---|---|---|---|\n")
-					for _, p := range d.Params {
-						req := "否"
-						if p.Required {
-							req = "是"
-						}
-						fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n",
-							escapePipe(p.FieldName), req, escapePipe(p.Type), escapePipe(p.Description), escapePipe(p.Example))
-					}
-					b.WriteString("\n")
-				}
-				if strings.TrimSpace(d.Sample) != "" {
-					fmt.Fprintf(&b, "**响应样例**\n\n```json\n%s\n```\n\n", strings.TrimSpace(d.Sample))
-				}
-				if len(d.Headers) > 0 {
-					writeMDSection(&b, "响应头", d.Headers)
-				}
-			}
-			// gRPC 请求按协议分节（G11.6）：无 query / 请求头 / 请求体，改展示目标与方法信息
-			if g := r.GRPC; g != nil {
-				if shiftDocs {
-					fmt.Fprintf(&b, "%s %s %s\n\n", pad, methodBadge("GRPC"), r.Name)
-				} else {
-					fmt.Fprintf(&b, "%s %s `GRPC`\n\n", pad, r.Name)
-				}
-				fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
-				fmt.Fprintf(&b, "**服务方法**：`%s/%s`（%s）\n\n", g.Service, g.Method, grpcStreamLabel(g.Stream))
-				if strings.TrimSpace(g.Proto) != "" {
-					fmt.Fprintf(&b, "**定义**：`%s`\n\n", g.Proto)
-				}
-				if mode := grpcTLSMode(g.TLS); mode != "" && mode != "none" && mode != "plaintext" {
-					fmt.Fprintf(&b, "**连接**：%s\n\n", mode)
-				}
-				writeMDSection(&b, "Metadata", g.Metadata)
-				if strings.TrimSpace(g.Message) != "" {
-					body := strings.TrimSpace(g.Message)
-					if json.Valid([]byte(body)) {
-						fmt.Fprintf(&b, "**请求消息**\n\n```json\n%s\n```\n\n", body)
-					} else {
-						fmt.Fprintf(&b, "**请求消息**\n\n```\n%s\n```\n\n", body)
-					}
-				}
-				appendDocs()
-				fmt.Fprintf(&b, "---\n\n")
-				continue
-			}
-			// HTML 导出（shiftDocs）：正文 API 标题也用方法徽标前置，与客户端集合树/TOC 同源同色；
-			// Markdown 导出保持原样（名称 + 尾部 `METHOD` 行内码，纯文本工具链友好）。
-			if shiftDocs {
-				fmt.Fprintf(&b, "%s %s %s\n\n", pad, methodBadge(r.Method), r.Name)
-			} else {
-				fmt.Fprintf(&b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
-			}
-			fmt.Fprintf(&b, "```\n%s\n```\n\n", r.URL)
-			writeMDSection(&b, "参数", r.Params)
-			writeMDSection(&b, "请求头", r.Headers)
-			if r.Body.Type != "" && r.Body.Type != "none" {
-				// 请求体：原始内容（JSON/文本）以代码块展示；表单字段另以表格「分开展示」，
-				// 与「参数」（URL 参数）区分——同一请求章节内为两张独立的表格，便于对照阅读。
-				raw := r.Body.Raw
-				var formRows []KV
-				for _, f := range r.Body.Form {
-					if !f.Enabled || f.Name == "" {
-						continue
-					}
-					formRows = append(formRows, KV{Name: f.Name, Value: f.Value, Enabled: true})
-				}
-				if len(formRows) > 0 {
-					fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
-					if strings.TrimSpace(raw) != "" {
-						fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
-					}
-					writeMDSection(&b, "请求体参数", formRows)
-				} else if strings.TrimSpace(raw) != "" {
-					fmt.Fprintf(&b, "**请求体**（%s）\n\n", r.Body.Type)
-					fmt.Fprintf(&b, "```\n%s\n```\n\n", raw)
-				}
-			}
-			if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
-				fmt.Fprintf(&b, "**认证**：%s\n\n", r.Auth.Type)
-			}
-			appendRespDoc()
-			appendDocs()
-			fmt.Fprintf(&b, "---\n\n")
-		}
-	}
-	walk(tree, 0)
+	walkMDTree(&b, tree, res, shiftDocs, 0)
 	return b.String(), nil
+}
+
+// walkMDTree 按集合树先序输出 Markdown：folder 只出标题并递归，request 交给 writeMDRequest。
+// 标题级别由 depth 推导（depth+2），shiftDocs 时封顶 5 —— 给 Docs 留出再深一级（h6）的位置，
+// 否则 HTML 单节展示按标题级别圈定一节时会把 Docs 整段排除在节外。
+func walkMDTree(b *strings.Builder, nodes []*Node, res *scanResult, shiftDocs bool, depth int) {
+	if depth > 6 {
+		depth = 6
+	}
+	level := depth + 2
+	if shiftDocs && level > 5 {
+		level = 5
+	}
+	pad := strings.Repeat("#", level)
+	for _, n := range nodes {
+		if n.Type == "folder" {
+			fmt.Fprintf(b, "%s %s\n\n", pad, n.Name)
+			if n.Children != nil {
+				walkMDTree(b, n.Children, res, shiftDocs, depth+1)
+			}
+			continue
+		}
+		r, ok := res.reqs[n.UID]
+		if !ok {
+			continue
+		}
+		writeMDRequest(b, r, pad, level, shiftDocs)
+	}
+}
+
+// writeMDRequest 输出单个请求：协议相关分节（gRPC / HTTP）→ 文档段 → 分隔线。
+// 响应字段文档（respdoc）只属于 HTTP 请求，故放在 HTTP 分支内。
+func writeMDRequest(b *strings.Builder, r *Request, pad string, level int, shiftDocs bool) {
+	if r.GRPC != nil {
+		writeMDGRPCRequest(b, r, pad, shiftDocs)
+	} else {
+		writeMDHTTPRequest(b, r, pad, shiftDocs)
+		appendMDRespDoc(b, r.RespDoc)
+	}
+	appendMDDocs(b, r.Docs, level, shiftDocs)
+	fmt.Fprintf(b, "---\n\n")
+}
+
+// writeMDGRPCRequest 输出 gRPC 请求（G11.6）：无 query / 请求头 / 请求体，
+// 改展示目标地址、服务方法、proto 定义、连接模式与 Metadata。
+func writeMDGRPCRequest(b *strings.Builder, r *Request, pad string, shiftDocs bool) {
+	g := r.GRPC
+	// HTML 导出用方法徽标前置（与集合树 / TOC 同源同色）；Markdown 导出保持纯文本
+	if shiftDocs {
+		fmt.Fprintf(b, "%s %s %s\n\n", pad, methodBadge("GRPC"), r.Name)
+	} else {
+		fmt.Fprintf(b, "%s %s `GRPC`\n\n", pad, r.Name)
+	}
+	fmt.Fprintf(b, "```\n%s\n```\n\n", r.URL)
+	fmt.Fprintf(b, "**服务方法**：`%s/%s`（%s）\n\n", g.Service, g.Method, grpcStreamLabel(g.Stream))
+	if strings.TrimSpace(g.Proto) != "" {
+		fmt.Fprintf(b, "**定义**：`%s`\n\n", g.Proto)
+	}
+	if mode := grpcTLSMode(g.TLS); mode != "" && mode != "none" && mode != "plaintext" {
+		fmt.Fprintf(b, "**连接**：%s\n\n", mode)
+	}
+	writeMDSection(b, "Metadata", g.Metadata)
+	writeMDMessage(b, g.Message)
+}
+
+// writeMDMessage 输出 gRPC 请求消息：合法 JSON 用 json 代码块，否则退回普通代码块。
+func writeMDMessage(b *strings.Builder, message string) {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		return
+	}
+	lang := ""
+	if json.Valid([]byte(msg)) {
+		lang = "json"
+	}
+	fmt.Fprintf(b, "**请求消息**\n\n```%s\n%s\n```\n\n", lang, msg)
+}
+
+// writeMDHTTPRequest 输出 HTTP 请求：地址、参数、请求头、请求体与认证。
+// 标题形态两种：HTML 导出用方法徽标前置，Markdown 导出用「名称 + 尾部 METHOD 行内码」
+// （纯文本工具链友好）。
+func writeMDHTTPRequest(b *strings.Builder, r *Request, pad string, shiftDocs bool) {
+	if shiftDocs {
+		fmt.Fprintf(b, "%s %s %s\n\n", pad, methodBadge(r.Method), r.Name)
+	} else {
+		fmt.Fprintf(b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
+	}
+	fmt.Fprintf(b, "```\n%s\n```\n\n", r.URL)
+	writeMDSection(b, "参数", r.Params)
+	writeMDSection(b, "请求头", r.Headers)
+	writeMDBody(b, r.Body)
+	if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
+		fmt.Fprintf(b, "**认证**：%s\n\n", r.Auth.Type)
+	}
+}
+
+// writeMDBody 输出请求体：原始内容（JSON/文本）以代码块展示，表单字段另起一张表
+// 「分开展示」，与 URL「参数」区分 —— 同一请求章节内两张独立表格便于对照阅读。
+func writeMDBody(b *strings.Builder, body Body) {
+	if body.Type == "" || body.Type == "none" {
+		return
+	}
+	// 空判断用 TrimSpace，但写入保持原文（含首尾空白）：与既有输出逐字一致
+	raw := body.Raw
+	var formRows []KV
+	for _, f := range body.Form {
+		if !f.Enabled || f.Name == "" {
+			continue
+		}
+		formRows = append(formRows, KV{Name: f.Name, Value: f.Value, Enabled: true})
+	}
+	if len(formRows) == 0 {
+		if strings.TrimSpace(raw) != "" {
+			fmt.Fprintf(b, "**请求体**（%s）\n\n```\n%s\n```\n\n", body.Type, raw)
+		}
+		return
+	}
+	fmt.Fprintf(b, "**请求体**（%s）\n\n", body.Type)
+	if strings.TrimSpace(raw) != "" {
+		fmt.Fprintf(b, "```\n%s\n```\n\n", raw)
+	}
+	writeMDSection(b, "请求体参数", formRows)
+}
+
+// appendMDRespDoc 补齐响应字段文档（respdoc）：返回类型 / 字段表 / 样例 / 响应头（item 9）。
+func appendMDRespDoc(b *strings.Builder, d *ResponseDoc) {
+	if d == nil {
+		return
+	}
+	if strings.TrimSpace(d.Type) != "" {
+		fmt.Fprintf(b, "**返回类型**：%s\n\n", strings.TrimSpace(d.Type))
+	}
+	if len(d.Params) > 0 {
+		fmt.Fprintf(b, "**响应字段**\n\n| 参数名 | 必选 | 类型 | 说明 | 示例 |\n|---|---|---|---|---|\n")
+		for _, p := range d.Params {
+			req := "否"
+			if p.Required {
+				req = "是"
+			}
+			fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n",
+				escapePipe(p.FieldName), req, escapePipe(p.Type), escapePipe(p.Description), escapePipe(p.Example))
+		}
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(d.Sample) != "" {
+		fmt.Fprintf(b, "**响应样例**\n\n```json\n%s\n```\n\n", strings.TrimSpace(d.Sample))
+	}
+	if len(d.Headers) > 0 {
+		writeMDSection(b, "响应头", d.Headers)
+	}
+}
+
+// appendMDDocs 附加请求文档。item 9：「文档」放在所有生成内容之下，并用分隔线 +
+// 标题 label 与生成内容明显分界；HTML 导出（shiftDocs）时整体降级嵌到请求标题之下。
+func appendMDDocs(b *strings.Builder, docs string, level int, shiftDocs bool) {
+	doc := strings.TrimSpace(docs)
+	if doc == "" {
+		return
+	}
+	if shiftDocs {
+		doc = shiftHeadings(doc, level+1)
+	}
+	b.WriteString("\n---\n\n**文档**\n\n")
+	fmt.Fprintf(b, "%s\n\n", doc)
 }
 
 func writeMDSection(b *strings.Builder, title string, rows []KV) {
@@ -508,6 +540,13 @@ func escapePipe(s string) string {
 // ExportHTML 导出单文件 HTML（内联样式，可直接浏览器打开/分享）。
 // 右侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
 // 正文每个标题带 toc-N 锚点（由 mdToHTML 分配），与 TOC 链接一一对应。
+// ExportHTML 导出单文件 HTML（内联样式，可直接浏览器打开/分享）。
+// 右侧 sticky 的目录树（TOC）按集合树 DFS 先序列出 folder/request，点击跳转到正文标题；
+// 正文每个标题带 toc-N 锚点（由 mdToHTML 分配），与 TOC 链接一一对应。
+//
+// 文档骨架（内联 CSS 与交互脚本）抽到 export_template.go：单文件交付必须内联资源，
+// 但把 ~300 行样式/脚本留在函数体里会让本函数无法维护，故按块拆成包级常量，
+// 这里只保留「取数据 → 装配」。
 func (c *Collection) ExportHTML() (string, error) {
 	// Docs 标题降级到请求标题之下（否则单节展示会把 Docs 整段排除在 API 小节之外）
 	md, err := c.exportMarkdown(true)
@@ -521,11 +560,32 @@ func (c *Collection) ExportHTML() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 请求正文（含 Docs）会被 mdToHTML 分配 toc-N 锚点；TOC 只给 folder/request 编号。
-	// 因此这里用 scan 拿到每个请求的 Docs，给请求编号后把其 Docs 内的标题数计入计数器，
-	// 使 TOC 的 toc-N 与正文实际标题顺序（含文档子标题）严格对应，避免点选错位。
+	// scan 拿到每个请求的 Docs：TOC 需为请求之后的文档标题预留 toc-N（见 buildExportTOC）
 	res, _ := c.scan()
 
+	var b strings.Builder
+	b.WriteString(htmlDocHead)
+	b.WriteString(html.EscapeString(c.Name))
+	b.WriteString(htmlStyleBlock)
+	b.WriteString(`<div class="layout">`)
+	b.WriteString(buildExportTOC(c.Name, tree, res))
+	b.WriteString(`<main class="content">`)
+	b.WriteString(body)
+	b.WriteString(`</main>`)
+	// 当前请求的右侧大纲：.ol-list 由 JS 在单节展示时按小节/生成标签动态填充
+	b.WriteString(`<nav class="ol" aria-label="当前页目录"><div class="ol-title">目录</div><div class="ol-list"></div></nav>`)
+	b.WriteString(`</div>`)
+	b.WriteString(htmlScriptBlock)
+	return b.String(), nil
+}
+
+// buildExportTOC 生成左侧可折叠目录树（TOC）的 HTML 片段。
+//
+// 锚点分配顺序必须与 mdToHTML 输出正文标题的顺序完全一致：
+// 集合名 → 树先序的 folder/request，且每个 request 之后紧跟其 Docs 内的标题。
+// 所以 res（scan 结果）用来把每个请求其下 Docs 的标题数计入计数器 ——
+// 正文里这些标题同样会被分配 toc-N，不计入会让后续节点的链接整体错位。
+func buildExportTOC(name string, tree []*Node, res *scanResult) string {
 	// TOC：id 分配顺序必须与 mdToHTML 输出正文标题的顺序完全一致
 	// （集合名 → 树先序 folder/request，且每个 request 之后紧跟其 Docs 内的标题）。
 	// 先消耗 toc-0 给集合名，再 DFS 遍历节点；doc 节点不生成标题，跳过。
@@ -547,7 +607,7 @@ func (c *Collection) ExportHTML() (string, error) {
 	toc.WriteString(`<li class="toc-root"><a href="#`)
 	toc.WriteString(nextID())
 	toc.WriteString(`">`)
-	toc.WriteString(html.EscapeString(c.Name))
+	toc.WriteString(html.EscapeString(name))
 	toc.WriteString(`</a></li>`)
 
 	// walkTOC 生成可折叠的目录树；isTop 标记顶层，仅第一个顶层目录默认展开（data-default / aria-expanded），
@@ -603,325 +663,7 @@ func (c *Collection) ExportHTML() (string, error) {
 	}
 	walkTOC(tree, 0, true)
 	toc.WriteString(`</ul></nav>`)
-
-	var b strings.Builder
-	b.WriteString(`<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>`)
-	b.WriteString(html.EscapeString(c.Name))
-	b.WriteString(`</title>
-<style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  body { font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-         margin: 0; padding: 0; color: #202124; background: #fff; }
-  .layout { display: flex; gap: 24px; max-width: 1100px; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
-  /* 左侧 sticky 目录树（集合树）：窄栏、浅底卡片，滚动时固定 */
-  .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
-         border: 1px solid #e3e3e3; border-radius: 10px; background: #f5f6f8; padding: 12px 14px; font-size: 13px; }
-  .toc-title { font-weight: 600; color: #202124; margin-bottom: 8px; }
-  /* 目录搜索框 */
-  .toc-search { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 6px 8px;
-    border: 1px solid #e3e3e3; border-radius: 6px; font-size: 13px; font-family: inherit;
-    color: #202124; background: #fff; outline: none; }
-  .toc-search:focus { border-color: #18a058; }
-  /* 显示全部：退出单节展示模式 */
-  .toc-all { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 5px 8px;
-    border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #18a058;
-    font-size: 12px; font-family: inherit; cursor: pointer; }
-  .toc-all:hover { border-color: #18a058; background: #f0faf3; }
-  .toc-list, .toc ul { list-style: none; margin: 0; padding: 0; }
-  /* 嵌套目录：保留左侧缩进，并加树形连接线（风格对齐 client 侧栏树） */
-  .toc ul { padding-left: 14px; }
-  .toc li { margin: 2px 0; }
-  /* 连接线：每个嵌套 li 画一段竖线（拼接成连续竖线），再用 ::after 画短横线连到文字；
-     末项的竖线只到横线（中线），形成 └ 形，不向下多余延伸 */
-  .toc-list ul > li { position: relative; }
-  .toc-list ul > li::before {
-    content: ""; position: absolute; top: -3px; bottom: 0; left: -8px;
-    border-left: 1px solid #e3e3e3;
-  }
-  .toc-list ul > li::after {
-    content: ""; position: absolute; top: 11px; left: -8px; width: 8px;
-    border-top: 1px solid #e3e3e3;
-  }
-  .toc-list ul > li:last-child::before { bottom: auto; height: 14px; }
-  /* 折叠/展开：文件夹默认展开（aria-expanded=true）才显示子列表；折叠时隐藏 */
-  .toc-folder[aria-expanded="false"] > ul { display: none; }
-  /* 文件夹开关：右侧三角形，展开时旋转 90° 指向下方；
-     用 -1px 微调使其与文字视觉居中（三角形几何中心略低于文本中线） */
-  .toc-toggle { display: inline-block; width: 0; height: 0; margin: 0 6px 0 2px;
-    border-style: solid; border-width: 4px 0 4px 6px; border-color: transparent transparent transparent #6b7280;
-    vertical-align: middle; position: relative; top: -1px; cursor: pointer; transition: transform .15s ease; }
-  .toc-folder[aria-expanded="true"] > .toc-toggle { transform: rotate(90deg); }
-  .toc a { color: #202124; text-decoration: none; display: block; padding: 3px 6px; border-radius: 4px; line-height: 1.4; }
-  .toc a:hover { background: #18a058; color: #fff; }
-  /* 必须放在 .toc a 的块级规则之后并用更高优先级覆盖，否则 folder 标题会被
-     覆盖回 display:block，导致开关与文字各占一行（错位） */
-  .toc li.toc-folder > a { display: inline; }
-  .toc-root > a { font-weight: 600; }
-  .toc-folder > a { font-weight: 600; color: #18a058; }
-  .toc a:target, .toc a.current { background: #18a058; color: #fff; }
-  /* 请求条目：方法徽标 + 名称横排（对齐客户端集合树 MethodTag：等宽小字、语义色，无底色）；
-     item 10：hover / 选中时**整行**（含徽标）上绿底，名称反白；徽标做反色处理 ——
-     白底胶囊 + 方法原色文字（各方法颜色不同，白底对全部语义色都有对比度） */
-  .toc-request { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
-  .toc-request > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; padding: 0; }
-  .toc-request:hover, .toc-request.selected { background: #18a058; }
-  .toc-request:hover > a, .toc-request.selected > a { color: #fff; }
-  .toc-request:hover .tm, .toc-request.selected .tm { background: #fff; border-radius: 3px; padding: 0 4px; }
-  .tm { flex: 0 0 auto; min-width: 34px; font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-        font-size: 10px; font-weight: 600; letter-spacing: 0.4px; line-height: 16px; }
-  .m-get { color: #18a058; }
-  .m-post { color: #2080f0; }
-  .m-put { color: #f0a020; }
-  .m-delete { color: #d03050; }
-  .m-patch { color: #8a2be2; }
-  .m-grpc { color: #0e94a8; }
-  .m-other { color: #8a9199; }
-  /* 正文 API 标题内的方法徽标：与标题文字拉开间距（TOC 里由 flex gap 控制，不叠加） */
-  h1 .tm, h2 .tm, h3 .tm, h4 .tm, h5 .tm, h6 .tm { margin-right: 8px; }
-  .content { flex: 1 1 auto; min-width: 0; }
-  /* 当前请求的右侧大纲（item 9 正解：URL/参数/请求头/文档内容等小节，点击跳转）；
-     内容由 JS 在单节展示时动态生成，不足两项时隐藏 */
-  .ol { flex: 0 0 180px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
-        font-size: 12px; padding: 2px 0 12px 12px; border-left: 1px solid #e3e3e3; }
-  .ol-title { font-weight: 600; color: #6b7280; margin-bottom: 6px; }
-  .ol a { display: block; color: #555; text-decoration: none; padding: 2px 6px; border-radius: 4px;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ol a:hover { background: #f0faf3; color: #18a058; }
-  h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; scroll-margin-top: 16px; }
-  h1 { font-size: 1.8em; border-bottom: 1px solid #e3e3e3; padding-bottom: 0.3em; }
-  code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-         background: #f5f6f8; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.92em; }
-  pre { background: #f5f6f8; padding: 12px 14px; border-radius: 8px; overflow: auto; }
-  pre code { background: none; padding: 0; }
-  table { border-collapse: collapse; width: 100%; margin: 0.6em 0 1em; font-size: 13px; }
-  th, td { border: 1px solid #e3e3e3; padding: 6px 10px; text-align: left; }
-  th { background: #fafafa; font-weight: 500; }
-  hr { border: none; border-top: 1px solid #e3e3e3; margin: 1.6em 0; }
-  blockquote { margin: 0.6em 0; padding: 0.4em 1em; border-left: 3px solid #18a058; background: #f5f6f8; color: #555; }
-  strong { font-weight: 600; }
-  /* 窄屏：集合树排到正文上方、右侧大纲隐藏（小节跳转在窄屏价值低） */
-  @media (max-width: 720px) {
-    .layout { flex-direction: column; gap: 12px; padding: 16px 14px; }
-    .toc { flex: 0 0 auto; position: static; max-height: none; width: 100%; }
-    .ol { display: none; }
-  }
-</style>
-</head>
-<body>
-`)
-	b.WriteString(`<div class="layout">`)
-	b.WriteString(toc.String())
-	b.WriteString(`<main class="content">`)
-	b.WriteString(body)
-	b.WriteString(`</main>`)
-	// 当前请求的右侧大纲：.ol-list 由 JS 在单节展示时按小节/生成标签动态填充
-	b.WriteString(`<nav class="ol" aria-label="当前页目录"><div class="ol-title">目录</div><div class="ol-list"></div></nav>`)
-	b.WriteString(`</div>`)
-	b.WriteString(`
-<script>
-(function(){
-  var list = document.querySelector('.toc-list');
-  var box = document.querySelector('.toc-search');
-  if(!list || !box) return;
-
-  // 折叠 / 展开：点击开关切换 aria-expanded，CSS 据此隐藏子列表（点击不会触发跳转）
-  list.addEventListener('click', function(e){
-    var t = e.target;
-    if(t && t.classList && t.classList.contains('toc-toggle')){
-      var li = t.parentElement;
-      li.setAttribute('aria-expanded', li.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
-    }
-  });
-  list.addEventListener('keydown', function(e){
-    var t = e.target;
-    if(t && t.classList && t.classList.contains('toc-toggle') && (e.key === 'Enter' || e.key === ' ')){
-      e.preventDefault();
-      t.click();
-    }
-  });
-
-  // 搜索：隐藏不匹配条目，自动展开命中节点的祖先目录，命中目录时一并展开其子节点
-  function reset(){
-    var lis = list.querySelectorAll('li');
-    for(var i=0;i<lis.length;i++){
-      lis[i].style.display = '';
-      if(lis[i].classList.contains('toc-folder')){
-        lis[i].setAttribute('aria-expanded', lis[i].getAttribute('data-default') || 'false');
-      }
-    }
-  }
-  function filter(q){
-    if(!q){ reset(); return; }
-    q = q.toLowerCase();
-    var all = list.querySelectorAll('li');
-    var i, a, node, cur, ul, parent, k, desc;
-    for(i=0;i<all.length;i++){ all[i].dataset.shown = ''; }
-    for(i=0;i<all.length;i++){
-      a = all[i].querySelector(':scope > a');
-      if(a && a.textContent.toLowerCase().indexOf(q) !== -1){
-        node = all[i];
-        node.dataset.shown = '1';
-        if(node.classList.contains('toc-folder')){
-          node.setAttribute('aria-expanded', 'true');
-          desc = node.querySelectorAll('li');
-          for(k=0;k<desc.length;k++){ desc[k].dataset.shown = '1'; }
-        }
-        cur = node;
-        while(cur){
-          ul = cur.parentElement;
-          parent = ul ? ul.parentElement : null;
-          if(parent && parent !== list && parent.tagName === 'LI'){
-            parent.dataset.shown = '1';
-            if(parent.classList.contains('toc-folder')) parent.setAttribute('aria-expanded', 'true');
-            cur = parent;
-          } else { cur = null; }
-        }
-      }
-    }
-    for(i=0;i<all.length;i++){
-      all[i].style.display = all[i].dataset.shown ? '' : 'none';
-    }
-  }
-  box.addEventListener('input', function(){ filter(box.value.trim()); });
-
-  // 单节展示：点击目录项时，右侧仅显示该项对应的 API（含其下子节点），其余隐藏。
-  // 这样导出的 HTML 不再一屏铺满全部 API，而是像文档站一样「左侧选、右侧看一节」。
-  var content = document.querySelector('.content');
-  var tocLinks = list.querySelectorAll('.toc a');
-
-  function clearCurrent(){
-    for(var i=0;i<tocLinks.length;i++){ tocLinks[i].classList.remove('current'); }
-    // 请求行整行选中态（item 10）：随行清除
-    var rows = list.querySelectorAll('.toc-request.selected');
-    for(var j=0;j<rows.length;j++){ rows[j].classList.remove('selected'); }
-  }
-
-  // ---- 当前请求的右侧大纲（item 9）：单节展示时把节内小节/生成标签收集成可点击目录 ----
-  var olNav = document.querySelector('.ol');
-  var olList = olNav ? olNav.querySelector('.ol-list') : null;
-  var olSeq = 0;
-  function olId(el){ if(!el.id){ el.id = 'ol-' + (++olSeq); } return el.id; }
-  function olEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-  function clearOutline(){
-    if(olList){ olList.innerHTML = ''; }
-    if(olNav){ olNav.style.display = 'none'; }
-  }
-  // buildOutline 扫描当前节的块级元素：标题（h*）与「以粗体标签开头的段落」（**参数** 等生成内容）
-  // 都进大纲；紧跟标题的代码块是请求 URL，补一个合成条目。不足两项时隐藏。
-  function buildOutline(nodes){
-    if(!olList || !olNav) return;
-    var items = [];
-    for(var i=0;i<nodes.length;i++){
-      var el = nodes[i], tag = el.tagName;
-      if(/^H[1-6]$/.test(tag)){
-        items.push({el:el, text:el.textContent.trim(), lv:parseInt(tag.charAt(1),10)});
-      } else if(tag === 'PRE' && i === 1){
-        items.push({el:el, text:'URL', lv:0});
-      } else if(tag === 'P' && el.firstElementChild && el.firstElementChild.tagName === 'STRONG'){
-        items.push({el:el, text:el.textContent.trim().slice(0,24), lv:0});
-      }
-    }
-    var html = '';
-    for(var j=0;j<items.length;j++){
-      var it = items[j];
-      // 文档子标题按层级缩进（h3 一级、h4 二级），生成标签与节标题不缩进
-      var pad = it.lv >= 3 ? ' style="padding-left:' + ((it.lv - 2) * 12 + 6) + 'px"' : '';
-      html += '<a href="#' + olId(it.el) + '"' + pad + '>' + olEsc(it.text) + '</a>';
-    }
-    olList.innerHTML = html;
-    olNav.style.display = items.length > 1 ? '' : 'none';
-  }
-  if(olNav){
-    olNav.addEventListener('click', function(e){
-      var a = e.target && e.target.closest ? e.target.closest('a') : null;
-      if(!a) return;
-      var href = a.getAttribute('href') || '';
-      if(href.charAt(0) !== '#') return;
-      e.preventDefault();
-      var t = document.getElementById(href.slice(1));
-      if(t) t.scrollIntoView({ behavior:'smooth', block:'start' });
-    });
-  }
-
-  function showAll(){
-    if(!content) return;
-    var kids = content.children;
-    for(var i=0;i<kids.length;i++){ kids[i].style.display = ''; }
-    clearCurrent();
-    clearOutline(); // 「显示全部」下大纲失去归属，隐藏
-  }
-  // 仅展示 id 对应的那一节：从目标标题起，到下一个同级或更高级标题为止（含其间的所有子节点）。
-  function showSection(id){
-    if(!content) return;
-    var target = document.getElementById(id);
-    if(!target) return;
-    var lvl = parseInt(target.tagName.charAt(1), 10); // 1..6
-    var nodes = [];
-    var sib = target;
-    while(sib){
-      nodes.push(sib);
-      sib = sib.nextElementSibling;
-      if(sib && sib.tagName.charAt(0) === 'H'){
-        var nlvl = parseInt(sib.tagName.charAt(1), 10);
-        if(nlvl <= lvl) break; // 遇到同级或更高级标题 => 超出本节范围
-      }
-    }
-    var kids = content.children;
-    for(var i=0;i<kids.length;i++){ kids[i].style.display = 'none'; }
-    for(var j=0;j<nodes.length;j++){ nodes[j].style.display = ''; }
-    buildOutline(nodes); // 右侧大纲跟着当前节重建
-    clearCurrent();
-    var cur = document.querySelector('.toc a[href="#' + id + '"]');
-    if(cur){
-      cur.classList.add('current');
-      var row = cur.parentElement;
-      if(row && row.classList.contains('toc-request')) row.classList.add('selected');
-    }
-    if(target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  // 点击目录链接：目录(fodler)只在左侧展开/收起子树，右侧不展示其下 API；
-  // 只有点击具体的 API(request) 才在右侧单节展示，集合根点击可看全部。
-  for(var li=0; li<tocLinks.length; li++){
-    tocLinks[li].addEventListener('click', function(e){
-      var href = this.getAttribute('href') || '';
-      if(href.charAt(0) !== '#') return;
-      e.preventDefault();
-      var item = this.parentElement; // 该链接所在的 <li>
-      if(item && item.classList.contains('toc-folder')){
-        // 目录：仅切换 TOC 展开/折叠，便于展开后点选其下的 API；右侧内容不变
-        var expanded = item.getAttribute('aria-expanded') === 'true';
-        item.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-        return;
-      }
-      showSection(href.slice(1));
-    });
-  }
-  // 显示全部按钮
-  var allBtn = document.querySelector('.toc-all');
-  if(allBtn){ allBtn.addEventListener('click', showAll); }
-
-  // 默认进入单节展示：优先展示第一个 API（request），避免一屏铺满；无 API 时退回第一个标题
-  var firstReq = list.querySelector('.toc-request a');
-  if(firstReq && firstReq.getAttribute('href')){
-    var fid = firstReq.getAttribute('href').slice(1);
-    if(document.getElementById(fid)){ showSection(fid); }
-  } else {
-    var firstHeading = content ? content.querySelector('h2,h3,h4,h5,h6') : null;
-    if(firstHeading && firstHeading.id){ showSection(firstHeading.id); }
-  }
-})();
-</script>
-</body>
-</html>
-`)
-	return b.String(), nil
+	return toc.String()
 }
 
 // mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、`行内代码`、表格、
@@ -933,159 +675,208 @@ func (c *Collection) ExportHTML() (string, error) {
 //   - 白名单内的标签（无 script/iframe/form 等危险项，属性经 sanitizeHTMLAttrs 清洗）原样输出；
 //   - 其余 `<...>` 一律按文本转义显示 —— 既不吞内容，也不让注入标记活下来。
 func mdToHTML(src string) string {
+	r := &mdRenderer{}
 	lines := strings.Split(src, "\n")
-	var b strings.Builder
-	inCode := false
-	inTable := false
-	inQuote := false
-	listTag := "" // "" | "ul" | "ol"
-	// 标题锚点计数器：与 ExportHTML 生成 TOC 的顺序一致（集合名 → 树先序 folder/request）。
-	hID := 0
-
-	closeTable := func() {
-		if inTable {
-			b.WriteString("</table>\n")
-			inTable = false
-		}
-	}
-	closeQuote := func() {
-		if inQuote {
-			b.WriteString("</blockquote>\n")
-			inQuote = false
-		}
-	}
-	closeList := func() {
-		if listTag != "" {
-			b.WriteString("</" + listTag + ">\n")
-			listTag = ""
-		}
-	}
-	// 任何块级元素切换前都先收起全部打开中的块。
-	closeBlocks := func() {
-		closeTable()
-		closeQuote()
-		closeList()
-	}
-
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trim := strings.TrimSpace(line)
 
-		if strings.HasPrefix(trim, "```") {
-			closeBlocks()
-			if !inCode {
-				b.WriteString("<pre><code>")
-				inCode = true
-			} else {
-				b.WriteString("</code></pre>\n")
-				inCode = false
-			}
+		if r.renderCodeFence(trim) {
 			continue
 		}
-		if inCode {
-			b.WriteString(html.EscapeString(line))
-			b.WriteString("\n")
+		if r.inCode {
+			// 围栏内一切原样转义（含 <tag>），不解析任何标签
+			r.b.WriteString(html.EscapeString(line))
+			r.b.WriteString("\n")
 			continue
 		}
-
 		if trim == "" {
-			closeBlocks()
+			r.closeBlocks()
 			continue
 		}
 		if trim == "---" {
-			closeBlocks()
-			b.WriteString("<hr>\n")
+			r.closeBlocks()
+			r.b.WriteString("<hr>\n")
 			continue
 		}
-		if strings.HasPrefix(trim, "#") {
-			closeBlocks()
-			level := headingLevel(trim)
-			text := strings.TrimSpace(trim[level:])
-			id := fmt.Sprintf("toc-%d", hID)
-			hID++
-			fmt.Fprintf(&b, "<h%d id=\"%s\">%s</h%d>\n", level, id, inlineMD(text), level)
+		if r.renderHeading(trim) || r.renderQuote(trim) || r.renderBlockTag(trim) || r.renderListItem(trim) {
 			continue
 		}
-		if strings.HasPrefix(trim, ">") {
-			closeTable()
-			closeList()
-			if !inQuote {
-				b.WriteString("<blockquote>\n")
-				inQuote = true
-			}
-			fmt.Fprintf(&b, "<p>%s</p>\n", inlineMD(strings.TrimSpace(strings.TrimPrefix(trim, ">"))))
+		// 表格行可能顺带吞掉紧随其后的分隔行，故由它回传新的行下标
+		if ni, ok := r.renderTableRow(lines, i); ok {
+			i = ni
 			continue
 		}
-		// 独占一行的白名单 HTML 块标签（<br>、</details>、<img …>）：原样输出，不包 <p>
-		if m := blockTagOnlyRE.FindStringSubmatch(trim); m != nil && htmlAllowedTags[strings.ToLower(m[1])] {
-			closeBlocks()
-			if clean, ok := sanitizeHTMLTag(trim); ok {
-				b.WriteString(clean)
-				b.WriteString("\n")
-			} else {
-				fmt.Fprintf(&b, "<p>%s</p>\n", html.EscapeString(trim))
-			}
-			continue
-		}
-		// 列表：- / * / + 起头为无序，数字+./) 起头为有序（生成的 Docs 大量使用 - 列表）
-		if m := ulItemRE.FindStringSubmatch(trim); m != nil {
-			closeTable()
-			closeQuote()
-			if listTag != "ul" {
-				closeList()
-				b.WriteString("<ul>\n")
-				listTag = "ul"
-			}
-			fmt.Fprintf(&b, "<li>%s</li>\n", inlineMD(m[1]))
-			continue
-		}
-		if m := olItemRE.FindStringSubmatch(trim); m != nil {
-			closeTable()
-			closeQuote()
-			if listTag != "ol" {
-				closeList()
-				b.WriteString("<ol>\n")
-				listTag = "ol"
-			}
-			fmt.Fprintf(&b, "<li>%s</li>\n", inlineMD(m[1]))
-			continue
-		}
-		closeQuote()
-		// 表格
-		if strings.HasPrefix(trim, "|") {
-			closeList()
-			cells := splitRow(trim)
-			// 分隔行 |---|---|：必须整行都是表格分隔语法，
-			// 只判断「下一行含 ---」会把普通正文误当表头（后续内容被吞进表里）
-			if i+1 < len(lines) && isTableSeparator(lines[i+1]) {
-				if !inTable {
-					b.WriteString("<table>\n<thead><tr>")
-					for _, c := range cells {
-						fmt.Fprintf(&b, "<th>%s</th>", inlineMD(c))
-					}
-					b.WriteString("</tr></thead>\n<tbody>\n")
-					inTable = true
-				}
-				i++ // 跳过分隔行
-				continue
-			}
-			if inTable {
-				b.WriteString("<tr>")
-				for _, c := range cells {
-					fmt.Fprintf(&b, "<td>%s</td>", inlineMD(c))
-				}
-				b.WriteString("</tr>\n")
-				continue
-			}
-		}
-		closeBlocks()
-		fmt.Fprintf(&b, "<p>%s</p>\n", inlineMD(trim))
+		r.closeBlocks()
+		fmt.Fprintf(&r.b, "<p>%s</p>\n", inlineMD(trim))
 	}
-	closeBlocks()
-	if inCode {
-		b.WriteString("</code></pre>\n")
+	r.closeBlocks()
+	if r.inCode {
+		r.b.WriteString("</code></pre>\n")
 	}
-	return b.String()
+	return r.b.String()
+}
+
+// mdRenderer 是 mdToHTML 的行级状态机：块与块之间靠「是否处于代码块 / 表格 /
+// 引用 / 列表」这几个开关联动，把它们收进结构里，主循环才能只按块类型分派，
+// 而不必把 5 个可变状态在 helper 之间来回传。
+type mdRenderer struct {
+	b       strings.Builder
+	inCode  bool
+	inTable bool
+	inQuote bool
+	listTag string // "" | "ul" | "ol"
+	hID     int    // 标题锚点 toc-N 计数器，顺序须与 ExportHTML 的 TOC 一致
+}
+
+// closeTable / closeQuote / closeList 收起各自打开中的块；closeBlocks 在任何块级
+// 元素切换前调用，保证不会遗留未闭合标签。
+func (r *mdRenderer) closeTable() {
+	if r.inTable {
+		r.b.WriteString("</table>\n")
+		r.inTable = false
+	}
+}
+
+func (r *mdRenderer) closeQuote() {
+	if r.inQuote {
+		r.b.WriteString("</blockquote>\n")
+		r.inQuote = false
+	}
+}
+
+func (r *mdRenderer) closeList() {
+	if r.listTag != "" {
+		r.b.WriteString("</" + r.listTag + ">\n")
+		r.listTag = ""
+	}
+}
+
+func (r *mdRenderer) closeBlocks() {
+	r.closeTable()
+	r.closeQuote()
+	r.closeList()
+}
+
+// renderCodeFence 切换 ``` 代码围栏状态；返回该行是否已处理。
+func (r *mdRenderer) renderCodeFence(trim string) bool {
+	if !strings.HasPrefix(trim, "```") {
+		return false
+	}
+	r.closeBlocks()
+	if !r.inCode {
+		r.b.WriteString("<pre><code>")
+		r.inCode = true
+	} else {
+		r.b.WriteString("</code></pre>\n")
+		r.inCode = false
+	}
+	return true
+}
+
+// renderHeading 渲染 # 标题并分配 toc-N 锚点（序号与 ExportHTML 的 TOC 严格对应）。
+func (r *mdRenderer) renderHeading(trim string) bool {
+	if !strings.HasPrefix(trim, "#") {
+		return false
+	}
+	r.closeBlocks()
+	level := headingLevel(trim)
+	text := strings.TrimSpace(trim[level:])
+	fmt.Fprintf(&r.b, "<h%d id=\"toc-%d\">%s</h%d>\n", level, r.hID, inlineMD(text), level)
+	r.hID++
+	return true
+}
+
+// renderQuote 渲染 > 引用：连续引用行合并进同一个 <blockquote>。
+func (r *mdRenderer) renderQuote(trim string) bool {
+	if !strings.HasPrefix(trim, ">") {
+		return false
+	}
+	r.closeTable()
+	r.closeList()
+	if !r.inQuote {
+		r.b.WriteString("<blockquote>\n")
+		r.inQuote = true
+	}
+	fmt.Fprintf(&r.b, "<p>%s</p>\n", inlineMD(strings.TrimSpace(strings.TrimPrefix(trim, ">"))))
+	return true
+}
+
+// renderBlockTag 渲染独占一行且在白名单内的 HTML 块标签（<br>、</details>、<img …>）：
+// 原样输出不包 <p>；清洗失败则退化为转义文本（既不吞内容，也不放过注入标记）。
+func (r *mdRenderer) renderBlockTag(trim string) bool {
+	m := blockTagOnlyRE.FindStringSubmatch(trim)
+	if m == nil || !htmlAllowedTags[strings.ToLower(m[1])] {
+		return false
+	}
+	r.closeBlocks()
+	if clean, ok := sanitizeHTMLTag(trim); ok {
+		r.b.WriteString(clean)
+		r.b.WriteString("\n")
+	} else {
+		fmt.Fprintf(&r.b, "<p>%s</p>\n", html.EscapeString(trim))
+	}
+	return true
+}
+
+// renderListItem 渲染列表项：按起头字符定 ul / ol，连续同类项合并进同一个列表。
+func (r *mdRenderer) renderListItem(trim string) bool {
+	m := ulItemRE.FindStringSubmatch(trim)
+	tag := "ul"
+	if m == nil {
+		m = olItemRE.FindStringSubmatch(trim)
+		tag = "ol"
+		if m == nil {
+			return false
+		}
+	}
+	r.closeTable()
+	r.closeQuote()
+	if r.listTag != tag {
+		r.closeList()
+		r.b.WriteString("<" + tag + ">\n")
+		r.listTag = tag
+	}
+	fmt.Fprintf(&r.b, "<li>%s</li>\n", inlineMD(m[1]))
+	return true
+}
+
+// renderTableRow 渲染表格的表头行或数据行，返回 (新行下标, 是否已处理)。
+// 表头行必须紧跟分隔行（|---|---|）：命中时要把它一并吞掉（回传 i+1）；
+// 只判断「下一行含 ---」会把普通正文误当表头，导致后续内容被吞进表里。
+func (r *mdRenderer) renderTableRow(lines []string, i int) (int, bool) {
+	trim := strings.TrimSpace(lines[i])
+	r.closeQuote() // 与进入表格分支前先收起引用块的原有顺序保持一致
+	if !strings.HasPrefix(trim, "|") {
+		return i, false
+	}
+	r.closeList()
+	cells := splitRow(trim)
+	if i+1 < len(lines) && isTableSeparator(lines[i+1]) {
+		if !r.inTable {
+			r.writeTableHead(cells)
+		}
+		return i + 1, true // 跳过分隔行
+	}
+	if !r.inTable {
+		return i, false
+	}
+	r.b.WriteString("<tr>")
+	for _, c := range cells {
+		fmt.Fprintf(&r.b, "<td>%s</td>", inlineMD(c))
+	}
+	r.b.WriteString("</tr>\n")
+	return i, true
+}
+
+// writeTableHead 输出表头并置 inTable。
+func (r *mdRenderer) writeTableHead(cells []string) {
+	r.b.WriteString("<table>\n<thead><tr>")
+	for _, c := range cells {
+		fmt.Fprintf(&r.b, "<th>%s</th>", inlineMD(c))
+	}
+	r.b.WriteString("</tr></thead>\n<tbody>\n")
+	r.inTable = true
 }
 
 // countDocHeadings 统计一段 Markdown 里「标题」的数量，规则与 mdToHTML 完全一致

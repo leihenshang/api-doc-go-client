@@ -934,7 +934,8 @@ watch(
     </div>
 
     <div class="search">
-      <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')" />
+      <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')"
+        data-testid="sidebar.search" />
     </div>
 
     <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">

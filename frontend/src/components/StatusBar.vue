@@ -206,11 +206,11 @@ function clock(ms: number): string {
 
 /* MCP 入口状态：运行中绿、出错红、未启用灰；小圆点直观反映运行状态 */
 .act.ok {
-  color: #18a058;
+  color: var(--app-accent);
 }
 
 .act.err {
-  color: #d03050;
+  color: var(--app-danger);
 }
 
 .dot {
@@ -222,11 +222,11 @@ function clock(ms: number): string {
 }
 
 .act.ok .dot {
-  background: #18a058;
+  background: var(--app-accent);
 }
 
 .act.err .dot {
-  background: #d03050;
+  background: var(--app-danger);
 }
 
 .lb {
