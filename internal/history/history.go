@@ -33,6 +33,9 @@ type Entry struct {
 	Root string `json:"root,omitempty"`
 	// Request 发送时的草稿快照（JSON 的 collection.Request）；旧记录可为空
 	Request json.RawMessage `json:"request,omitempty"`
+	// Response 发送后的响应快照（JSON 的 {status,headers,body}；body 有截断）。
+	// item 19：历史要能回看「请求参数与响应」，重放功能下线后快照只作展示。
+	Response json.RawMessage `json:"response,omitempty"`
 }
 
 func path() (string, error) {

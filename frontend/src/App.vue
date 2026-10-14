@@ -21,6 +21,7 @@ import SyncDialog from '@/components/SyncDialog.vue'
 import TabBar from '@/components/TabBar.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
+import TrashDialog from '@/components/TrashDialog.vue'
 import Welcome from '@/components/Welcome.vue'
 import { api, onAppEvent } from '@/lib/ipc'
 import { dialog, message } from '@/lib/notice'
@@ -124,6 +125,7 @@ const showSettings = ref(false)
 // T2：MCP 风险工具授权弹窗（同一时间只展示最新的一个请求；并发同 key 在 Go 侧已去重）。
 const authzReq = ref<AuthzRequest | null>(null)
 const showHistory = ref(false)
+const showTrash = ref(false)
 const showCookies = ref(false)
 const showPalette = ref(false)
 const showImport = ref(false)
@@ -1160,7 +1162,7 @@ watch(
 
           <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus" :mcp="mcpStatus"
             :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="openSyncSettings()"
-            @history="showHistory = true" @cookies="showCookies = true" @settings="showSettings = true"
+            @history="showHistory = true" @trash="showTrash = true" @cookies="showCookies = true" @settings="showSettings = true"
             @mcp="openMcpSettings" />
         </template>
 
@@ -1171,6 +1173,7 @@ watch(
       <mcp-consent-dialog :req="authzReq" />
       <settings-dialog v-model:show="showSettings" :initial-section="settingsInitial" @saved="loadMcpStatus()" />
       <history-dialog v-model:show="showHistory" @open="openHistoryRequest" />
+      <trash-dialog v-model:show="showTrash" />
       <cookie-dialog v-model:show="showCookies" />
       <import-dialog v-model:show="showImport" @imported="imported" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />

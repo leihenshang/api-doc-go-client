@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 底部状态栏：左侧同步状态，中间集合规模/保存状态，右侧全局设置、请求历史、Cookie 管理入口。
+// 底部状态栏：左侧同步状态，中间集合规模/保存状态，右侧全局设置、请求历史、回收站、Cookie 管理入口。
 import type { MCPStatus, SyncStatus } from '@/types'
-import { CodeSlashOutline, LockClosedOutline, SettingsOutline, TimeOutline } from '@vicons/ionicons5'
+import { CodeSlashOutline, LockClosedOutline, SettingsOutline, TimeOutline, TrashOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -17,7 +17,7 @@ const props = defineProps<{
   /** 内嵌 MCP 服务运行状态（运行中 / 出错 / 未启用）；null 视为未启用 */
   mcp?: MCPStatus | null
 }>()
-const emit = defineEmits<{ 'open-sync': []; history: []; cookies: []; settings: []; mcp: [] }>()
+const emit = defineEmits<{ 'open-sync': []; history: []; trash: []; cookies: []; settings: []; mcp: [] }>()
 const { t } = useI18n()
 
 /** MCP 入口状态：运行中=ok、出错=err、其它（未启用/未加载）=off。 */
@@ -75,6 +75,11 @@ function clock(ms: number): string {
       <button class="act" type="button" data-testid="statusbar.history" @click="emit('history')">
         <n-icon :component="TimeOutline" :size="14" />
         <span class="lb">{{ t('history.title') }}</span>
+      </button>
+      <!-- 回收站：当前工作区 .trash 的入口（item 20） -->
+      <button class="act" type="button" data-testid="statusbar.trash" @click="emit('trash')">
+        <n-icon :component="TrashOutline" :size="14" />
+        <span class="lb">{{ t('trash.title') }}</span>
       </button>
       <button class="act" type="button" data-testid="statusbar.cookies" @click="emit('cookies')">
         <n-icon :component="LockClosedOutline" :size="14" />

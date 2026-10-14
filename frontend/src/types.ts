@@ -520,8 +520,42 @@ export interface HistoryEntry {
   timeMs: number
   size: number
   error?: string
-  /** 发送时请求快照（原样重放用；旧记录可缺） */
+  /** 发送时请求快照（含参数/头/体；旧记录可缺） */
   request?: RequestDoc | null
+  /** 发送后的响应快照（item 19：历史回看用；body 有截断；旧记录可缺） */
+  response?: HistoryResponse | null
+}
+
+/** 历史里的响应快照（internal/app recordHistory 的匿名结构）。 */
+export interface HistoryResponse {
+  status: number
+  headers: KV[]
+  body: string
+}
+
+/** 回收站条目（internal/collection.TrashEntry，item 20）。 */
+export interface TrashEntry {
+  /** .trash 内文件名（操作句柄） */
+  file: string
+  /** 原相对路径；空 = 旧条目未知 */
+  origin: string
+  /** folder | env | request | file */
+  kind: string
+  /** 展示名（原 basename） */
+  name: string
+  /** 删除时间（Unix 毫秒；0 = 旧条目未知） */
+  deletedAt: number
+}
+
+/** 回收站条目预览（internal/collection.TrashPreview，item 21）。 */
+export interface TrashPreview {
+  /** file | folder */
+  kind: string
+  /** 文件内容（截断后） */
+  content: string
+  /** 目录条目的文件清单 */
+  files: string[] | null
+  truncated: boolean
 }
 
 /** Cookie 罐条目（internal/cookiejar.Info）。 */

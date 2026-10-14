@@ -134,8 +134,9 @@ func TestDeleteResponseExampleMovesToTrash(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("删除后仍能列出: %+v", list)
 	}
-	entries, _ := os.ReadDir(filepath.Join(c.Dir, ".trash"))
-	if len(entries) != 1 {
-		t.Fatalf(".trash 应有 1 个文件: %d", len(entries))
+	// 回收站应有 1 条可恢复记录（ListTrash 会排除 .index.jsonl 索引本身）
+	trash, terr := c.ListTrash()
+	if terr != nil || len(trash) != 1 {
+		t.Fatalf(".trash 应有 1 条回收记录: %+v %v", trash, terr)
 	}
 }

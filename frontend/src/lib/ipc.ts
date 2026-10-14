@@ -33,6 +33,8 @@ import type {
   SyncBindReq,
   SyncReport,
   SyncStatus,
+  TrashEntry,
+  TrashPreview,
 } from '@/types'
 
 type WailsMethods = Record<string, (...args: unknown[]) => Promise<unknown>>
@@ -301,8 +303,15 @@ export const api = {
   clearMCPAudit: () => call<null>('ClearMCPAudit'),
   listHistory: (limit: number) => call<HistoryEntry[] | null>('ListHistory', limit).then((v) => v ?? []),
   clearHistory: () => call<null>('ClearHistory'),
-  replayHistory: (index: number, envName: string) =>
-    call<SendResult>('ReplayHistory', index, envName).then(normalizeSend),
+  /** 回收站列表（item 20；root 空 = 活动工作区）。 */
+  listTrash: (root = '') => call<TrashEntry[] | null>('ListTrashFor', root).then((v) => v ?? []),
+  /** 预览回收站条目（item 21）：文件给内容（截断），目录给文件清单。 */
+  previewTrash: (file: string, root = '') => call<TrashPreview | null>('PreviewTrashFor', root, file),
+  /** 彻底删除回收站条目（item 21；不可恢复，调用前必须二次确认）。 */
+  deleteFromTrash: (file: string, root = '') => call<null>('DeleteFromTrash', file, root),
+  /** 恢复回收站条目：targetRoot 空 = 原工作区原位；否则恢复到指定（已打开）工作区的同一相对路径。 */
+  restoreTrash: (file: string, root = '', targetRoot = '') =>
+    call<string>('RestoreTrash', file, root, targetRoot),
   listCookies: () => call<CookieInfo[] | null>('ListCookies').then((v) => v ?? []),
   clearCookies: () => call<null>('ClearCookies'),
   deleteCookie: (domain: string, name: string, path: string) =>

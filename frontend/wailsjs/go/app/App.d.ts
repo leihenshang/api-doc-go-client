@@ -54,6 +54,8 @@ export function DeleteEnv(arg1:string):Promise<void>;
 
 export function DeleteFolder(arg1:string):Promise<void>;
 
+export function DeleteFromTrash(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
@@ -112,6 +114,8 @@ export function ListMCPGrants():Promise<Array<app.MCPGrant>>;
 
 export function ListResponseExamples(arg1:string):Promise<Array<collection.ResponseExample>>;
 
+export function ListTrashFor(arg1:string):Promise<Array<collection.TrashEntry>>;
+
 export function LoadGrpcSchema(arg1:string,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
 
 export function MCPStatusText():Promise<app.MCPStatus>;
@@ -135,6 +139,8 @@ export function PickDirectory():Promise<string>;
 export function PickFile():Promise<string>;
 
 export function PickGrpcProtoFiles():Promise<Array<string>>;
+
+export function PreviewTrashFor(arg1:string,arg2:string):Promise<collection.TrashPreview>;
 
 export function Quit():Promise<void>;
 
@@ -160,13 +166,13 @@ export function RenameFolder(arg1:string,arg2:string):Promise<void>;
 
 export function RenameRequest(arg1:string,arg2:string):Promise<void>;
 
-export function ReplayHistory(arg1:number,arg2:string):Promise<runner.Result>;
-
 export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
 export function ResolveConflictFor(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ResolveText(arg1:string,arg2:string):Promise<app.ResolveResult>;
+
+export function RestoreTrash(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function RevealInFolder(arg1:string):Promise<void>;
 
