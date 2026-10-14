@@ -205,6 +205,15 @@ defineExpose({ collapseAll, expandAll })
   color: var(--app-json-key);
 }
 
+/* 折行模式专属：.jr 开了 word-break: break-all，flex 项默认可收缩时，
+   字段名/冒号/逗号会被超长值挤到逐字换行（min-content = 1 字符）。
+   这三段不参与收缩，只允许值自己折行 */
+.k,
+.colon,
+.tail {
+  flex: 0 0 auto;
+}
+
 .k.idx {
   color: var(--app-json-idx);
 }

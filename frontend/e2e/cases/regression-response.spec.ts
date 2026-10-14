@@ -273,4 +273,26 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await expect(page.getByTestId('resp.exnote')).toBeVisible()
     await expect(page.getByTestId('resp.json')).toBeVisible()
   })
+
+  test('[E23b] 折行模式：超长值逐行折，字段名/冒号不被挤成逐字换行（回归）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    // echo 回显 query：超长字段名 + 超长值那一行，正是截图里的复现形态
+    await sendUrl(page, app, '{{host}}/echo?someExtremelyLongQueryParameterNameABCDEFGHIJKLMNOPQRSTUVWXYZ=' + 'x'.repeat(300))
+    await expect(page.getByTestId('resp.json')).toBeVisible()
+
+    // 换行开关默认开；不在态就点开
+    const wrapBtn = page.getByTestId('resp.wrap')
+    if (!(await wrapBtn.evaluate((el) => el.classList.contains('on')))) await wrapBtn.click()
+
+    const row = page.locator('.jr').filter({ hasText: 'someExtremelyLongQueryParameterName' }).first()
+    await expect(row).toBeVisible()
+    // 行高 24：字段名仍占一行（修复前 break-all 把它挤成 1 字符/行，高度远超）
+    const kh = await row.locator('.k').evaluate((el) => el.getBoundingClientRect().height)
+    expect(kh).toBeLessThanOrEqual(28)
+    // 值真的折出了多行（换行功能本身没被破坏）
+    const vh = await row.locator('.v').evaluate((el) => el.getBoundingClientRect().height)
+    expect(vh).toBeGreaterThan(28)
+  })
 })
