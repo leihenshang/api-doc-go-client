@@ -1054,6 +1054,45 @@ export namespace collection {
 	
 	
 	
+	
+	export class TrashEntry {
+	    file: string;
+	    origin: string;
+	    kind: string;
+	    name: string;
+	    deletedAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrashEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.origin = source["origin"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.deletedAt = source["deletedAt"];
+	    }
+	}
+	export class TrashPreview {
+	    kind: string;
+	    content: string;
+	    files: string[];
+	    truncated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrashPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.content = source["content"];
+	        this.files = source["files"];
+	        this.truncated = source["truncated"];
+	    }
+	}
 
 }
 
@@ -1217,6 +1256,7 @@ export namespace history {
 	    error?: string;
 	    root?: string;
 	    request?: number[];
+	    response?: number[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Entry(source);
@@ -1235,6 +1275,7 @@ export namespace history {
 	        this.error = source["error"];
 	        this.root = source["root"];
 	        this.request = source["request"];
+	        this.response = source["response"];
 	    }
 	}
 

@@ -82,6 +82,10 @@ export function DeleteFolder(arg1) {
   return window['go']['app']['App']['DeleteFolder'](arg1);
 }
 
+export function DeleteFromTrash(arg1, arg2) {
+  return window['go']['app']['App']['DeleteFromTrash'](arg1, arg2);
+}
+
 export function DeleteRequest(arg1) {
   return window['go']['app']['App']['DeleteRequest'](arg1);
 }
@@ -198,6 +202,10 @@ export function ListResponseExamples(arg1) {
   return window['go']['app']['App']['ListResponseExamples'](arg1);
 }
 
+export function ListTrashFor(arg1) {
+  return window['go']['app']['App']['ListTrashFor'](arg1);
+}
+
 export function LoadGrpcSchema(arg1, arg2) {
   return window['go']['app']['App']['LoadGrpcSchema'](arg1, arg2);
 }
@@ -244,6 +252,10 @@ export function PickFile() {
 
 export function PickGrpcProtoFiles() {
   return window['go']['app']['App']['PickGrpcProtoFiles']();
+}
+
+export function PreviewTrashFor(arg1, arg2) {
+  return window['go']['app']['App']['PreviewTrashFor'](arg1, arg2);
 }
 
 export function Quit() {
@@ -294,10 +306,6 @@ export function RenameRequest(arg1, arg2) {
   return window['go']['app']['App']['RenameRequest'](arg1, arg2);
 }
 
-export function ReplayHistory(arg1, arg2) {
-  return window['go']['app']['App']['ReplayHistory'](arg1, arg2);
-}
-
 export function ResolveConflict(arg1, arg2) {
   return window['go']['app']['App']['ResolveConflict'](arg1, arg2);
 }
@@ -308,6 +316,10 @@ export function ResolveConflictFor(arg1, arg2, arg3) {
 
 export function ResolveText(arg1, arg2) {
   return window['go']['app']['App']['ResolveText'](arg1, arg2);
+}
+
+export function RestoreTrash(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RestoreTrash'](arg1, arg2, arg3);
 }
 
 export function RevealInFolder(arg1) {

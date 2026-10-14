@@ -1586,7 +1586,7 @@ func (a *App) ensureJar() {
 	}
 }
 
-// recordHistory 落一条历史：失败也记，便于回溯排查；带请求快照供原样重放。
+// recordHistory 落一条历史：失败也记，便于回溯排查；带请求快照与响应快照供回看（item 19）。
 //
 // 条目带「所属工作目录」：多根并存后历史按目录隔离展示（切到哪个根只看哪个根的记录）。
 func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr error) {
@@ -1608,26 +1608,20 @@ func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr e
 	case res != nil:
 		entry.URL, entry.Status = res.URL, res.Status
 		entry.TimeMS, entry.Size = res.TimeMS, res.Size
+		// 响应快照：body 截断到 8KB（历史是单文件，防大响应撑爆）；headers 全量
+		resSnap := struct {
+			Status  int             `json:"status"`
+			Headers []collection.KV `json:"headers"`
+			Body    string          `json:"body"`
+		}{res.Status, res.Headers, res.Body}
+		if len(resSnap.Body) > 8192 {
+			resSnap.Body = resSnap.Body[:8192] + "\n…（已截断）"
+		}
+		if b, err := json.Marshal(resSnap); err == nil {
+			entry.Response = b
+		}
 	}
 	_ = history.Append(entry, limit)
-}
-
-// ReplayHistory 用历史里的请求快照原样重发（E22）；index 为 ListHistory 的下标。
-// 列表与 ListHistory 同源（都按活动根过滤），因此下标一一对应。
-func (a *App) ReplayHistory(index int, envName string) (*runner.Result, error) {
-	items, err := history.List(0, a.activeRootID())
-	if err != nil {
-		return nil, err
-	}
-	// List 返回新→旧，与前端展示一致
-	if index < 0 || index >= len(items) {
-		return nil, fmt.Errorf("历史记录不存在")
-	}
-	var r collection.Request
-	if err := json.Unmarshal(items[index].Request, &r); err != nil || r.URL == "" {
-		return nil, fmt.Errorf("该历史没有请求快照，无法原样重放")
-	}
-	return a.SendRequest(&r, envName)
 }
 
 // GetSettings 读取全局设置（以磁盘为准）。
@@ -1671,6 +1665,76 @@ func (a *App) ListHistory(limit int) ([]history.Entry, error) {
 // ClearHistory 清空**活动根**的发送历史（其它工作目录的记录保留）。
 func (a *App) ClearHistory() error {
 	return history.Clear(a.activeRootID())
+}
+
+// ---------- 回收站（item 20）----------
+
+// trashColl 按 root 取集合（空 = 活动根）。
+func (a *App) trashColl(root string) (*collection.Collection, error) {
+	if strings.TrimSpace(root) == "" {
+		return a.requireCollection()
+	}
+	return a.collOf(root)
+}
+
+// ListTrashFor 列出指定工作目录（空 = 活动根）的回收站条目，新→旧。
+func (a *App) ListTrashFor(root string) ([]collection.TrashEntry, error) {
+	c, err := a.trashColl(root)
+	if err != nil {
+		return nil, err
+	}
+	return c.ListTrash()
+}
+
+// PreviewTrashFor 预览回收站条目（item 21）：文件给内容（截断），目录给文件清单。
+func (a *App) PreviewTrashFor(root, file string) (*collection.TrashPreview, error) {
+	c, err := a.trashColl(root)
+	if err != nil {
+		return nil, err
+	}
+	return c.PreviewTrash(file)
+}
+
+// DeleteFromTrash 彻底删除一条回收站记录（item 21；不可恢复，前端必须先二次确认）。
+func (a *App) DeleteFromTrash(file, root string) error {
+	c, err := a.trashColl(root)
+	if err != nil {
+		return err
+	}
+	return c.RemoveTrash(file)
+}
+
+// RestoreTrash 恢复一条回收站记录：targetRoot 空 = 恢复到原工作区原路径；
+// 否则复制到指定（已打开）工作区的同一相对路径（目标重名拒绝），成功后从源回收站移除。
+// 返回恢复后的相对路径（相对目标集合）。
+func (a *App) RestoreTrash(file, root, targetRoot string) (string, error) {
+	src, err := a.trashColl(root)
+	if err != nil {
+		return "", err
+	}
+	srcRoot := strings.TrimSpace(root)
+	if srcRoot == "" {
+		srcRoot = a.activeRootID()
+	}
+	if t := strings.TrimSpace(targetRoot); t == "" || t == srcRoot {
+		return src.RestoreTrash(file, "")
+	}
+	dst, err := a.collOf(targetRoot)
+	if err != nil {
+		return "", err
+	}
+	e, err := src.TrashInfo(file)
+	if err != nil {
+		return "", err
+	}
+	got, err := dst.ImportFromAbs(src.TrashAbs(file), collection.TrashRestoreRel(e, ""))
+	if err != nil {
+		return "", err
+	}
+	if err := src.RemoveTrash(file); err != nil {
+		return got, err
+	}
+	return got, nil
 }
 
 // ListCookies 当前 Cookie 罐内容。

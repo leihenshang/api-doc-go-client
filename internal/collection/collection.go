@@ -1903,13 +1903,7 @@ func (c *Collection) ClearPendingDeletes() {
 
 // ---------- 通用 ----------
 
-func (c *Collection) moveToTrash(full string) error {
-	trash := filepath.Join(c.Dir, ".trash")
-	if err := os.MkdirAll(trash, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(full, filepath.Join(trash, share.TrashName(filepath.Base(full), time.Now())))
-}
+// moveToTrash 的实现与回收站索引在 trash.go（item 20：移入时记原路径，支持列表与恢复）。
 
 func joinRel(folder, name string) string {
 	if folder == "" {
