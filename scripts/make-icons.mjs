@@ -2,6 +2,8 @@
 //   build/appicon.png            1024×1024（Wails 构建源）
 //   build/windows/icon.ico       Windows exe 图标（16/32/48/64/128/256，PNG 条目）
 //   build/windows/icon-dev.ico   开发版图标（源：build/windows/dev_api.svg）；同步一份到 internal/devicon/ 供运行时嵌入
+//   internal/appicon/appicon.png     1024×1024（Linux 窗口图标，prod）
+//   internal/appicon/appicon_dev.png 256×256（Linux 窗口图标，dev）
 //   frontend/public/favicon.svg  浏览器 / 开发态标签页图标（直接复制 SVG）
 //
 // 用法：node scripts/make-icons.mjs
@@ -85,5 +87,9 @@ const devIco = packIco(devImages)
 writeFileSync(join(root, 'build', 'windows', 'icon-dev.ico'), devIco)
 // 开发版运行时换图标靠嵌入这份（internal/devicon 的 //go:embed 要求与包同目录）
 writeFileSync(join(root, 'internal', 'devicon', 'icon-dev.ico'), devIco)
+// Linux 窗口图标按 dev/!dev 构建标签分别嵌入，任务栏/WM 靠 ProgramName 匹配 StartupWMClass
+mkdirSync(join(root, 'internal', 'appicon'), { recursive: true })
+writeFileSync(join(root, 'internal', 'appicon', 'appicon.png'), readFileSync(join(tmp, '1024.png')))
+writeFileSync(join(root, 'internal', 'appicon', 'appicon_dev.png'), readFileSync(join(tmp, 'dev-256.png')))
 copyFileSync(SRC, join(root, 'frontend', 'public', 'favicon.svg'))
-console.log('已更新 build/appicon.png、build/windows/icon.ico、build/windows/icon-dev.ico、internal/devicon/icon-dev.ico、frontend/public/favicon.svg')
+console.log('已更新 build/appicon.png、build/windows/icon.ico、build/windows/icon-dev.ico、internal/devicon/icon-dev.ico、internal/appicon/appicon.png、internal/appicon/appicon_dev.png、frontend/public/favicon.svg')
