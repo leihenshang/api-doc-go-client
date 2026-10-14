@@ -9,30 +9,30 @@ import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, RespTreeNode, TreeNode } from '@/types'
 import {
-    AddOutline,
-    ArrowDownOutline,
-    ArrowUpOutline,
-    CheckmarkOutline,
-    ChevronDownOutline,
-    ChevronForwardOutline,
-    CloseOutline,
-    CodeOutline,
-    ContractOutline,
-    CreateOutline,
-    EllipsisHorizontalOutline,
-    ExpandOutline,
-    FolderOpenOutline,
-    GitNetworkOutline,
-    OpenOutline,
-    RefreshOutline,
-    Star,
-    StarOutline,
-    SwapVerticalOutline,
-    SyncOutline,
-    TerminalOutline,
-    TrashOutline
+  AddOutline,
+  ArrowDownOutline,
+  ArrowUpOutline,
+  CheckmarkOutline,
+  ChevronDownOutline,
+  ChevronForwardOutline,
+  CloseOutline,
+  CodeOutline,
+  ContractOutline,
+  CreateOutline,
+  EllipsisHorizontalOutline,
+  ExpandOutline,
+  FolderOpenOutline,
+  GitNetworkOutline,
+  OpenOutline,
+  RefreshOutline,
+  Star,
+  StarOutline,
+  SwapVerticalOutline,
+  SyncOutline,
+  TerminalOutline,
+  TrashOutline
 } from '@vicons/ionicons5'
-import type { InputInst } from 'naive-ui'
+import type { DropdownOption, InputInst } from 'naive-ui'
 import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
 import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -137,16 +137,17 @@ const rootMenu = computed(() => [
     key: 'all',
     label: allCollapsed.value ? t('tree.expandAll') : t('tree.collapseAll'),
     icon: () => h(NIcon, { component: allCollapsed.value ? ExpandOutline : ContractOutline }),
+    testid: allCollapsed.value ? 'tree.root.expandAll' : 'tree.root.collapseAll',
   },
-  { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
-  { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }) },
-  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
-  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
-  { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }) },
+  { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }), testid: 'tree.root.newFolder' },
+  { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }), testid: 'tree.root.newRequest' },
+  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }), testid: 'tree.root.newGrpc' },
+  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }), testid: 'tree.root.importCurl' },
+  { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }), testid: 'tree.root.sync' },
   { type: 'divider', key: 'd1' },
-  { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }) },
-  { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }) },
-  { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }) },
+  { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }), testid: 'tree.root.reveal' },
+  { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }), testid: 'tree.root.reload' },
+  { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }), testid: 'tree.root.close' },
 ])
 
 /** 集合级动作先切到被点击的工作目录（写操作作用于它），再分发各分支。 */
@@ -306,9 +307,13 @@ function rootHasVisibleKids(root: string): boolean {
 
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
-  // 各工作目录「响应字段表非空」的请求 uid 集合（CollectionInfo.respUids，随概要刷新）
+  // 各工作目录「响应字段表非空」的请求 uid 集合：优先用 store 的乐观维护值（更新/清空字段后
+  // 立即反映），未维护过的根回落到概要扫描结果 CollectionInfo.respUids
   const respSets: Record<string, Set<string>> = {}
-  for (const r of props.roots) respSets[r.root] = new Set(r.info.respUids ?? [])
+  for (const r of props.roots) {
+    const live = coll.respUids[r.root]
+    respSets[r.root] = new Set(live ?? r.info.respUids ?? [])
+  }
   // H5：收藏的请求置顶展示（不改变磁盘顺序）；置顶区只显示活动根的
   const favUids = coll.favSet
   const favRows: Row[] = []
@@ -598,6 +603,17 @@ function rowMenuOptions(row: Row): any[] {
     { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
     { key: 'delete', label: t('tree.delApi'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
   ]
+}
+
+/**
+ * 菜单 label 渲染：naive-ui 2.45 的 NDropdown 不再透传 `#option` 插槽（只吃 render-label/render-option
+ * 属性），故用 render-label 把 testid 带到 DOM；图标仍由下拉自身的 prefix 位渲染。
+ * 参数必须声明为官方的 DropdownOption（2.45 起 MenuOption 变为 title/label 联合型，
+ * 自定义窄参数会因 contravariance 检查不过而报 TS2322）；testid 经索引签名透传。
+ */
+function renderMenuLabel(option: DropdownOption) {
+  const o = option as unknown as { label?: string; testid?: string }
+  return h('div', { class: 'row-menu-item', 'data-testid': o.testid }, [h('span', { class: 'lbl' }, o.label ?? '')])
 }
 
 async function onRowMenu(row: Row, key: string | number): Promise<void> {
@@ -970,7 +986,7 @@ watch(
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-            }}</span>
+              }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -978,7 +994,7 @@ watch(
                 @click.stop="onSyncRoot(row.root)">
                 <n-icon :component="SyncOutline" :size="13" :class="{ spin: rootSyncing(row.root) }" />
               </button>
-              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu"
+              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu" :render-label="renderMenuLabel"
                 @select="onRootMenu(row.root, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
                 <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')"
@@ -1048,18 +1064,12 @@ watch(
               <span v-else class="fname" data-testid="tree.row.name">{{ row.node!.name }}</span>
               <span class="actions">
                 <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
-                  @select="onRowMenu(row, $event)">
+                  :render-label="renderMenuLabel" @select="onRowMenu(row, $event)">
                   <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
                   <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
                     :aria-label="t('tree.more')">
                     <n-icon :component="EllipsisHorizontalOutline" :size="13" />
                   </button>
-                  <template #option="{ option }">
-                    <div class="row-menu-item" :data-testid="(option as any).testid">
-                      <component :is="(option as any).icon" v-if="(option as any).icon" class="ric" />
-                      <span class="lbl">{{ (option as any).label }}</span>
-                    </div>
-                  </template>
                 </n-dropdown>
               </span>
             </template>
@@ -1074,18 +1084,12 @@ watch(
               </button>
               <span class="actions">
                 <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
-                  @select="onRowMenu(row, $event)">
+                  :render-label="renderMenuLabel" @select="onRowMenu(row, $event)">
                   <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
                   <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
                     :aria-label="t('tree.more')">
                     <n-icon :component="EllipsisHorizontalOutline" :size="13" />
                   </button>
-                  <template #option="{ option }">
-                    <div class="row-menu-item" :data-testid="(option as any).testid">
-                      <component :is="(option as any).icon" v-if="(option as any).icon" class="ric" />
-                      <span class="lbl">{{ (option as any).label }}</span>
-                    </div>
-                  </template>
                 </n-dropdown>
               </span>
             </template>

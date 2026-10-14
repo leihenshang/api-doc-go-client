@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, reopenApp, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -86,27 +86,20 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('respdoc')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('fieldName: total')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).not.toContain('业务主体')
-    // 若 api 分组处于折叠态则展开（默认是展开；仅当 ping 行不可见时点 caret，避免把展开的折叠掉）
-    const pingRows = page.locator('[data-testid="tree.row"][data-uid="33333333-3333-4333-8333-333333333333"]')
-    const pingVisible = await pingRows.count()
-    console.log('DEBUG ping rows:', pingVisible, await pingRows.evaluateAll((els) => els.map((e) => {
-      let p = e as HTMLElement
-      const hiddenBy: string[] = []
-      for (let cur = p.parentElement; cur && cur !== document.body; cur = cur.parentElement) {
-        if (getComputedStyle(cur).display === 'none') hiddenBy.push(cur.className + '/' + (cur as HTMLElement).dataset.testid)
-      }
-      return { kind: (e as HTMLElement).dataset.kind, vis: getComputedStyle(e).display, hiddenBy }
-    }))))
-    if (pingVisible === 0) {
-      const caret = page.locator('[data-testid="tree.row"][data-kind="folder"][data-path="api"] .caret')
-      console.log('DEBUG caret count/class:', await caret.count(), await caret.getAttribute('class'))
-      await caret.click()
+    // 若 api 分组处于折叠态则展开（默认是展开；仅当 ping 行不在 DOM 时点 caret，避免把展开的折叠掉）。
+    // 注意 Resp 合成子行 data-uid 与请求相同，须用 data-kind="request" 精确定位请求行。
+    const pingRow = page.locator('[data-testid="tree.row"][data-kind="request"][data-uid="33333333-3333-4333-8333-333333333333"]')
+    if ((await pingRow.count()) === 0) {
+      await page.locator('[data-testid="tree.row"][data-kind="folder"][data-path="api"] .caret').click()
     }
-    await expect(page.locator('[data-testid="tree.row"][data-uid="33333333-3333-4333-8333-333333333333"]')).toBeVisible()
-    await expect(page.getByTestId('tree.resp.name')).toBeVisible()
+    await pingRow.scrollIntoViewIfNeeded()
+    await expect(pingRow).toBeVisible()
+    const respName = page.getByTestId('tree.resp.name')
+    await respName.scrollIntoViewIfNeeded()
+    await expect(respName).toBeVisible()
 
     // 点侧栏 Resp 节点：定位到请求的「响应字段」分段
-    await page.getByTestId('tree.resp.name').click()
+    await respName.click()
     await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
   })
 

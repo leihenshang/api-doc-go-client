@@ -1,14 +1,14 @@
 // 对应 doc §5 回归要点 18（主题）、19（窗口圆角）、7（Markdown 预览与转义）与 H11（语言切换）。
+import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import type { Page } from '@playwright/test'
 import { expect, test, type AppFixture } from '../helpers/app'
 import { t, tEn } from '../helpers/i18n'
 import {
   openCollection,
+  openReqTab,
   openRequest,
   openSettings,
-  openReqTab,
   reopenApp,
   saveNow,
   saveSettings,
@@ -106,9 +106,12 @@ test.describe('主题与多语言', () => {
     await page.locator('.n-base-select-option').filter({ hasText: 'English' }).click()
     await saveSettings(page)
 
-    // 即时生效：主题按钮提示、侧栏按钮提示都变英文
+    // 即时生效：主题按钮提示变英文；「新建分组」已收进根行「···」菜单，打开后选项文案也应是英文
     await expect(page.getByTestId('titlebar.theme')).toHaveAttribute('aria-label', tEn('app.themeToDark'))
-    await expect(page.locator('.sidebar').getByTitle(tEn('tree.newFolder'))).toBeVisible()
+    await page.getByTestId('tree.root.menu').first().click()
+    await expect(page.getByTestId('tree.root.newFolder')).toBeVisible()
+    await expect(page.getByTestId('tree.root.newFolder')).toContainText(tEn('tree.newFolder'))
+    await page.keyboard.press('Escape')
 
     // 渗漏扫描：标题/占位符/内联文本都不应出现中文（集合与请求名是 ASCII 种子数据）
     const leaked = await page.evaluate(() => {
@@ -136,6 +139,8 @@ test.describe('主题与多语言', () => {
     await openRequest(page, 'ping')
     await openReqTab(page, 'docs')
 
+    // Docs 分段默认是查看态（MdPreview），先切到编辑态才挂 MdEditor
+    await page.getByTestId('docs.edit').click()
     const md = ['## 标题', '', '- 列表项一', '- 列表项二', '', '<script>window.__xss = 1</script>'].join('\n')
     await page.locator('.md-editor .cm-content').click()
     await page.keyboard.type(md)

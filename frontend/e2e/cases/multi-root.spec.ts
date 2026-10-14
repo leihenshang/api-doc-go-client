@@ -97,8 +97,9 @@ test('[M1] 多工作目录：工具条菜单可切换 / 根可折叠 / 可关闭
   await bruno.getByTestId('tree.root.caret').click()
   await expect(treeRow(page, '用户-列表')).toHaveCount(1)
 
-  // 关闭一个根：另一个继续可用；关掉活动根时活动标记回到剩余根
-  await bruno.getByTestId('tree.root.close').click()
+  // 关闭一个根：入口在根行「···」菜单内（关闭后另一个继续可用；关掉活动根时活动标记回到剩余根）
+  await bruno.getByTestId('tree.root.menu').click()
+  await page.getByTestId('tree.root.close').click()
   await confirmButton(page).click()
   await expect(roots).toHaveCount(1)
   await expect(basic).toHaveClass(/root-active/)

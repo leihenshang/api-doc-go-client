@@ -3,8 +3,8 @@
 // dot 表示有未落盘编辑，method 前置按语义色着色，响应状态码跟随 tab 展示。
 // G7：请求 tab 可拖拽排序（HTML5 DnD）。
 // 右键 tab 弹上下文菜单：关闭当前 / 关闭左侧所有 / 关闭右侧所有 / 复制新建 / 保存所有 / 关闭全部。
-import { NDropdown, NIcon } from 'naive-ui'
-import type { DropdownOption } from 'naive-ui'
+import MethodTag from '@/components/MethodTag.vue'
+import type { Tab } from '@/stores/tabs'
 import {
   AddOutline,
   ChevronBackCircleOutline,
@@ -17,10 +17,10 @@ import {
   LayersOutline,
   SaveOutline,
 } from '@vicons/ionicons5'
+import type { DropdownOption } from 'naive-ui'
+import { NDropdown, NIcon } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import MethodTag from '@/components/MethodTag.vue'
-import type { Tab } from '@/stores/tabs'
 
 const props = defineProps<{ tabs: Tab[]; activeKey: string }>()
 const emit = defineEmits<{
@@ -104,8 +104,6 @@ function onDrop(i: number, e: DragEvent): void {
 const scroller = ref<HTMLElement | null>(null)
 const canLeft = ref(false)
 const canRight = ref(false)
-/** 标签是否已排满到需要横向滚动（决定滚动钮与轨道末尾留白的显示）。 */
-const overflow = ref(false)
 let resizeObs: ResizeObserver | undefined
 
 /** 一次切换的滚动距离：约 4 个标签宽，最小 160px。 */
@@ -116,7 +114,6 @@ function refreshArrows(): void {
   if (!el) return
   canLeft.value = el.scrollLeft > 2
   canRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
-  overflow.value = canLeft.value || canRight.value
 }
 
 function scrollBy(dir: -1 | 1): void {
@@ -166,7 +163,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tabbar">
-    <button class="tab coll" :class="{ active: !activeKey }" type="button" data-testid="tab.overview" @click="emit('select-overview')">
+    <button class="tab coll" :class="{ active: !activeKey }" type="button" data-testid="tab.overview"
+      @click="emit('select-overview')">
       <n-icon :component="LayersOutline" :size="13" />
       <span class="tt">{{ t('tab.collection') }}</span>
     </button>
@@ -174,67 +172,44 @@ onBeforeUnmount(() => {
     <!-- 标签排满溢出时的左右手动切换钮（不溢出自动隐藏） -->
     <button v-show="canLeft" class="nav nav-left" type="button" data-testid="tab.scrollLeft"
       :title="t('tab.scrollLeft')" @click="scrollBy(-1)">
-      <n-icon :component="ChevronBackCircleOutline" :size="16" />
+      <n-icon :component="ChevronBackCircleOutline" :size="24" />
     </button>
 
     <div ref="scroller" class="tabs" @scroll.passive="refreshArrows" @wheel="onWheel">
-      <div
-        v-for="(tab, i) in tabs"
-        :key="tab.key"
-        class="tab"
-        :class="{ active: tab.key === activeKey, dragging: i === dragFrom }"
-        role="button"
-        :tabindex="0"
-        data-testid="tab.item"
-        :data-tab-key="tab.key"
-        :data-tab-title="tab.title"
-        :draggable="true"
-        :title="tab.draft ? t('prompt.saveDraftHint') : tab.request.path"
-        @click="emit('select', tab.key)"
-        @keydown.enter="emit('select', tab.key)"
-        @contextmenu.prevent="openMenu(i, $event)"
-        @dragstart="onDragStart(i, $event)"
-        @dragover.prevent="onDragOver($event)"
-        @drop="onDrop(i, $event)"
-        @dragend="dragFrom = -1"
-      >
+      <div v-for="(tab, i) in tabs" :key="tab.key" class="tab"
+        :class="{ active: tab.key === activeKey, dragging: i === dragFrom }" role="button" :tabindex="0"
+        data-testid="tab.item" :data-tab-key="tab.key" :data-tab-title="tab.title" :draggable="true"
+        :title="tab.draft ? t('prompt.saveDraftHint') : tab.request.path" @click="emit('select', tab.key)"
+        @keydown.enter="emit('select', tab.key)" @contextmenu.prevent="openMenu(i, $event)"
+        @dragstart="onDragStart(i, $event)" @dragover.prevent="onDragOver($event)" @drop="onDrop(i, $event)"
+        @dragend="dragFrom = -1">
         <method-tag :method="tab.request.method" />
         <span v-if="tab.dirty || tab.draft" class="dot" :title="t('tab.unsaved')" />
         <span class="tt">{{ tab.title }}</span>
         <span v-if="tab.response" class="st" :class="tab.response.status < 400 ? 'ok' : 'err'">
           {{ tab.response.status }}
         </span>
-        <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')" @click.stop="emit('close', tab.key)">
+        <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')"
+          @click.stop="emit('close', tab.key)">
           <n-icon :component="CloseOutline" :size="13" />
         </button>
       </div>
 
-      <!-- 「＋」＝新建 HTTP 请求：常驻标签末尾，紧贴最后一个标签（随标签一起滚） -->
+      <!-- 「＋」＝新建 HTTP 请求：未溢出时紧贴最后一个标签；溢出时粘滞在轨道右端
+           （右滚动钮之前）常驻，滚到末尾自然落回标签尾，无需末尾留白补丁 -->
       <button class="add" type="button" data-testid="tab.new" :title="t('tab.newHint')" @click="emit('new')">
         <n-icon :component="AddOutline" :size="16" />
       </button>
-
-      <!-- 溢出时右滚动钮会压在轨道右端，末尾留白保证「＋」完整可见 -->
-      <div v-if="overflow" class="end-gap" aria-hidden="true" />
     </div>
 
     <button v-show="canRight" class="nav nav-right" type="button" data-testid="tab.scrollRight"
       :title="t('tab.scrollRight')" @click="scrollBy(1)">
-      <n-icon :component="ChevronForwardCircleOutline" :size="16" />
+      <n-icon :component="ChevronForwardCircleOutline" :size="24" />
     </button>
 
     <!-- 右键 tab 的上下文菜单（手动定位到鼠标处；点外面自动收起） -->
-    <n-dropdown
-      trigger="manual"
-      placement="bottom-start"
-      :x="menuX"
-      :y="menuY"
-      :show="menuKey !== ''"
-      :options="menuOptions"
-      data-testid="tab.menu"
-      @select="onMenuSelect"
-      @clickoutside="closeMenu"
-    />
+    <n-dropdown trigger="manual" placement="bottom-start" :x="menuX" :y="menuY" :show="menuKey !== ''"
+      :options="menuOptions" data-testid="tab.menu" @select="onMenuSelect" @clickoutside="closeMenu" />
   </div>
 </template>
 
@@ -259,24 +234,29 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   scrollbar-width: none;
   scroll-behavior: smooth;
+  /* 右侧给粘滞的「＋」留位：激活标签 scrollIntoView 后不被它盖住 */
+  scroll-padding: 0 40px;
 }
 
 .tabs::-webkit-scrollbar {
   height: 0;
 }
 
-/* 左右切换钮：压在标签轨两端（不额外占布局位），有溢出方向才显示 */
+/* 左右切换钮：压在标签轨两端（不额外占布局位），有溢出方向才显示；
+   尺寸加大到 1.5×，高度约为标签栏（38px）的 75% */
 .nav {
   flex: 0 0 auto;
   align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
   background: var(--app-panel);
   color: var(--app-muted);
   cursor: pointer;
-  padding: 2px 1px;
+  padding: 0;
   line-height: 0;
 }
 
@@ -384,8 +364,12 @@ onBeforeUnmount(() => {
 }
 
 .add {
+  /* 粘滞钉在轨道右端：溢出时挡住滑过的标签常驻可见，不溢出时自然贴在最后一个标签后 */
+  position: sticky;
+  right: 2px;
+  z-index: 1;
   border: none;
-  background: transparent;
+  background: var(--app-panel);
   font-size: 16px;
   color: var(--app-muted);
   cursor: pointer;
@@ -395,10 +379,5 @@ onBeforeUnmount(() => {
 
 .add:hover {
   color: var(--app-accent);
-}
-
-/* 标签溢出时右滚动钮压在轨道右端，末尾留白让「＋」完整可见 */
-.end-gap {
-  flex: 0 0 18px;
 }
 </style>

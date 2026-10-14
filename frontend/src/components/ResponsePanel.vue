@@ -3,20 +3,20 @@
 // 响应字段表已移到请求编辑器的「响应字段（Resp）」分段（侧栏 Resp 节点入口）：
 // 本面板只保留「更新响应字段」动作 —— 已有字段时先弹覆盖确认（可勾选「值一致时继承说明」），
 // 更新成功后字段表写入请求模型并把编辑器切到 Resp 分段。
-import { NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NAlert, NTag } from 'naive-ui'
-import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
 import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
 import { DomHighlighter } from '@/lib/find'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { rebuildFields, loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
+import { loadFields, paramsFromRows, rebuildFields, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
 import { useCollectionStore } from '@/stores/collection'
-import { useTabsStore } from '@/stores/tabs'
 import type { Tab } from '@/stores/tabs'
+import { useTabsStore } from '@/stores/tabs'
 import type { ResponseDoc, SendResult } from '@/types'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
+import { NAlert, NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -43,12 +43,12 @@ const showOverwrite = ref(false)
 const INHERIT_KEY = 'client.resp.inheritMeaning'
 const inheritMeaning = ref(localStorage.getItem(INHERIT_KEY) !== '0')
 
-const example = computed(() =>
-  props.tab.response ? (examples.value.find((e) => e.uid === viewingUid.value) ?? null) : null,
-)
+// 正在回看的已保存示例（不依赖本次响应：刷新后没有实时响应也能回看快照）
+const example = computed(() => examples.value.find((e) => e.uid === viewingUid.value) ?? null)
 
 const display = computed<SendResult | null>(() => {
-  const r = props.tab.response
+  // 回看示例时整个面板展示快照；否则展示本次实时响应
+  const r = (example.value?.response as SendResult | undefined) ?? props.tab.response
   if (!r) return null
   // 全字段归一：go 侧有 omitempty，缺字段时归一成空值——否则渲染期读 .length 会抛错
   return {
@@ -95,7 +95,8 @@ const exampleOptions = computed(() => [
   ...examples.value.map((e) => ({ value: e.uid, label: e.name })),
 ])
 
-// 切换请求：无响应时回到 body 页签。
+// 切换请求：无响应时回到 body 页签。immediate：会话恢复直接打开的 tab 不会再触发 uid 变化，
+// 挂载时也要拉一次示例列表（否则「已保存的响应示例」下拉在无响应态是空的）
 watch(
   () => props.tab.uid,
   () => {
@@ -103,6 +104,7 @@ watch(
     viewingUid.value = ''
     void reloadExamples()
   },
+  { immediate: true },
 )
 
 // 重新发送后回到本次响应并复位页签，避免新响应还停在旧页签上
@@ -283,6 +285,8 @@ async function submitSave(): Promise<void> {
     const saved = await api.saveResponseExample(props.tab.request, name, props.tab.response as SendResult)
     await reloadExamples()
     showSave.value = false
+    // 保存后自动切到该示例快照（与「回看只读」交互一致，可经「回到本次响应」返回）
+    viewingUid.value = saved.uid
     message.success(t('resp.exampleSaved', { name: saved.name }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -348,146 +352,142 @@ function findPrev(): void {
   findIndex.value = highlighter.index
 }
 
-function onPaneKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && display.value) {
-    e.preventDefault()
-    openFind()
-  }
+// window 级监听：面板根 div 不可聚焦，Playwright/用户在非按钮焦点下按 Ctrl+F 时事件落在
+// body，元素上的 @keydown 收不到冒泡。面板为活动 tab 单实例，挂 window 安全。
+function onGlobalKeydown(e: KeyboardEvent): void {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || !display.value) return
+  const target = e.target as HTMLElement | null
+  // 焦点在请求编辑器内（含编辑器自己的查找条）时交给 RequestEditor
+  if (target?.closest('.editor')) return
+  // 焦点在中性区域（页签栏 / 空白处 / body）：编辑器当前分段可查找时优先让给编辑器，避免两个查找条同开
+  if (!target?.closest('.resp') && document.querySelector('.editor .find-btn')) return
+  e.preventDefault()
+  openFind()
 }
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
-  <div class="resp" @keydown="onPaneKeydown">
+  <div class="resp">
     <n-alert v-if="tab.error" type="error" class="err">{{ tab.error }}</n-alert>
 
-    <template v-if="!tab.error && display">
-      <div v-if="display.warnings?.length" class="warns" data-testid="resp.warnings">
-        <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
-      </div>
+    <template v-if="!tab.error">
+      <!-- 状态栏常驻：尚未发送 / 回看示例时都在同一位置；无内容时只隐藏状态码与耗时/体积。
+           示例下拉也留在这里 —— 没有本次响应时仍可直接切到已保存的示例快照。 -->
       <div class="status-bar" data-testid="resp.statusbar">
         <span class="ttl">{{ t('resp.title') }}</span>
-        <n-tag v-if="display.status" :type="statusType" :bordered="false" class="badge" data-testid="resp.status">
+        <n-tag v-if="display?.status" :type="statusType" :bordered="false" class="badge" data-testid="resp.status">
           {{ statusLabel }}
         </n-tag>
-        <span class="meta mono" data-testid="resp.meta">{{ meta }}</span>
+        <span v-if="display" class="meta mono" data-testid="resp.meta">{{ meta }}</span>
         <span class="sp" />
         <n-popconfirm v-if="example" @positive-click="removeExample">
           <template #trigger>
-            <button class="toggle danger" type="button" data-testid="resp.exampleDelete" :title="t('resp.deleteExample')">
+            <button class="toggle danger" type="button" data-testid="resp.exampleDelete"
+              :title="t('resp.deleteExample')">
               <n-icon :component="TrashOutline" :size="13" />
             </button>
           </template>
           <span>{{ t('resp.deleteConfirm', { name: example.name }) }}</span>
         </n-popconfirm>
-        <n-select
-          v-model:value="viewingUid"
-          :options="exampleOptions"
-          size="small"
-          class="expick"
-          data-testid="resp.examples"
-        />
+        <n-select v-model:value="viewingUid" :options="exampleOptions" size="small" class="expick"
+          data-testid="resp.examples" />
       </div>
 
-      <div class="seg">
-        <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body">
-          {{ t('resp.body') }}
-        </button>
-        <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab" data-seg="headers">
-          {{ isGrpcRes ? t('resp.initialMetadata') : t('resp.headers') }}<span v-if="headerCount" class="num">{{ headerCount }}</span>
-        </button>
-        <button v-if="isGrpcRes" class="seg-tab" :class="{ on: seg === 'trailers' }" type="button" data-testid="resp.tab"
-          data-seg="trailers">
-          {{ t('resp.trailers') }}<span v-if="trailerCount" class="num">{{ trailerCount }}</span>
-        </button>
-      </div>
+      <template v-if="display">
+        <div v-if="display.warnings?.length" class="warns" data-testid="resp.warnings">
+          <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
+        </div>
 
-      <response-toolbar
-        v-model:view="view"
-        v-model:wrap="wrap"
-        v-model:find-on="findOn"
-        :is-json="isJson"
-        :copied="copied"
-        :can-save-example="!example"
-        :findable="!!body"
-        @expand-all="jv?.expandAll()"
-        @collapse-all="jv?.collapseAll()"
-        @update-fields="updateFields"
-        @copy-body="copyBody"
-        @save-file="saveBody"
-        @save-example="openSave"
-        @find="openFind"
-      />
+        <div class="seg">
+          <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body"
+            @click="seg = 'body'">
+            {{ t('resp.body') }}
+          </button>
+          <button class="seg-tab" :class="{ on: seg === 'headers' }" type="button" data-testid="resp.tab"
+            data-seg="headers" @click="seg = 'headers'">
+            {{ isGrpcRes ? t('resp.initialMetadata') : t('resp.headers') }}<span v-if="headerCount" class="num">{{
+              headerCount }}</span>
+          </button>
+          <button v-if="isGrpcRes" class="seg-tab" :class="{ on: seg === 'trailers' }" type="button"
+            data-testid="resp.tab" data-seg="trailers" @click="seg = 'trailers'">
+            {{ t('resp.trailers') }}<span v-if="trailerCount" class="num">{{ trailerCount }}</span>
+          </button>
+        </div>
 
-      <find-bar
-        v-if="findOn"
-        ref="findBarRef"
-        v-model:keyword="findKw"
-        :total="findTotal"
-        :index="findIndex"
-        @next="findNext"
-        @prev="findPrev"
-        @close="findOn = false"
-      />
+        <response-toolbar v-model:view="view" v-model:wrap="wrap" v-model:find-on="findOn" :is-json="isJson"
+          :copied="copied" :can-save-example="!example" :findable="!!body" @expand-all="jv?.expandAll()"
+          @collapse-all="jv?.collapseAll()" @update-fields="updateFields" @copy-body="copyBody" @save-file="saveBody"
+          @save-example="openSave" @find="openFind" />
 
-      <div v-if="example" class="exnote" data-testid="resp.exnote">
-        <n-icon :component="BookmarkOutline" :size="13" />
-        <span>{{ t('resp.viewingExample', { name: example.name }) }}</span>
-        <button class="link" type="button" data-testid="resp.backToLive" @click="viewingUid = ''">
-          {{ t('resp.backToLive') }}
-        </button>
-      </div>
+        <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
+          @next="findNext" @prev="findPrev" @close="findOn = false" />
 
-      <div ref="paneRef" class="pane">
-        <template v-if="seg === 'body'">
-          <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
-            {{ display.script.scriptError }}
-          </div>
-          <div v-if="display.script?.asserts?.length" class="asserts" data-testid="resp.asserts">
-            <div v-for="(a, i) in display.script.asserts" :key="i" class="arow" :class="a.passed ? 'ok' : 'fail'">
-              <span class="astate">✓</span>
-              <span class="aname">{{ a.name || a.expr }}</span>
-              <span class="aexpr mono">{{ a.expr }}</span>
-              <span v-if="a.error" class="aerr">{{ a.error }}</span>
+        <div v-if="example" class="exnote" data-testid="resp.exnote">
+          <n-icon :component="BookmarkOutline" :size="13" />
+          <span>{{ t('resp.viewingExample', { name: example.name }) }}</span>
+          <button class="link" type="button" data-testid="resp.backToLive" @click="viewingUid = ''">
+            {{ t('resp.backToLive') }}
+          </button>
+        </div>
+
+        <div ref="paneRef" class="pane">
+          <template v-if="seg === 'body'">
+            <!-- 二进制响应：body 是 base64 文本，给明确提示再展示原文 -->
+            <div v-if="display.binary" class="binhint" data-testid="resp.binaryHint">{{ t('resp.binary') }}</div>
+            <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
+              {{ display.script.scriptError }}
+            </div>
+            <div v-if="display.script?.asserts?.length" class="asserts" data-testid="resp.asserts">
+              <div v-for="(a, i) in display.script.asserts" :key="i" class="arow" :class="a.passed ? 'ok' : 'fail'">
+                <span class="astate">✓</span>
+                <span class="aname">{{ a.name || a.expr }}</span>
+                <span class="aexpr mono">{{ a.expr }}</span>
+                <span v-if="a.error" class="aerr">{{ a.error }}</span>
+              </div>
+            </div>
+            <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
+            <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
+          </template>
+
+          <div v-else-if="seg === 'headers'" class="hlist">
+            <div v-for="h in display.headers" :key="h.name" class="hrow" data-testid="resp.headerRow">
+              <span class="hn mono">{{ h.name }}</span>
+              <span class="hv">{{ h.value }}</span>
             </div>
           </div>
-          <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
-          <pre v-else class="raw mono" :class="{ nowrap: !wrap }" data-testid="resp.rawBody">{{ rawText }}</pre>
-        </template>
 
-        <div v-else-if="seg === 'headers'" class="hlist">
-          <div v-for="h in display.headers" :key="h.name" class="hrow" data-testid="resp.headerRow">
-            <span class="hn mono">{{ h.name }}</span>
-            <span class="hv">{{ h.value }}</span>
+          <div v-else class="hlist">
+            <div v-for="h in display.trailers" :key="h.name" class="hrow" data-testid="resp.trailerRow">
+              <span class="hn mono">{{ h.name }}</span>
+              <span class="hv">{{ h.value }}</span>
+            </div>
           </div>
         </div>
-
-        <div v-else class="hlist">
-          <div v-for="h in display.trailers" :key="h.name" class="hrow" data-testid="resp.trailerRow">
-            <span class="hn mono">{{ h.name }}</span>
-            <span class="hv">{{ h.value }}</span>
-          </div>
-        </div>
+      </template>
+      <!-- 无本次响应也未回看示例：空态（状态栏仍在上方常驻） -->
+      <div v-else class="empty">
+        <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.4">
+          <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
+        </svg>
+        <p class="etitle">{{ t('resp.empty') }}</p>
+        <ul class="shortcuts">
+          <li><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>{{ t('resp.sendHint') }}</span></li>
+          <li><kbd>Ctrl</kbd> + <kbd>N</kbd><span>{{ t('resp.newHint') }}</span></li>
+          <li><kbd>Ctrl</kbd> + <kbd>E</kbd><span>{{ t('resp.envHint') }}</span></li>
+          <li><kbd>Ctrl</kbd> + <kbd>W</kbd><span>{{ t('resp.closeHint') }}</span></li>
+          <li><kbd>Ctrl</kbd> + <kbd>S</kbd><span>{{ t('resp.saveNowHint') }}</span></li>
+        </ul>
       </div>
     </template>
-
-    <div v-else-if="!tab.error" class="empty">
-      <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
-      </svg>
-      <p class="etitle">{{ t('resp.empty') }}</p>
-      <ul class="shortcuts">
-        <li><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>{{ t('resp.sendHint') }}</span></li>
-        <li><kbd>Ctrl</kbd> + <kbd>N</kbd><span>{{ t('resp.newHint') }}</span></li>
-        <li><kbd>Ctrl</kbd> + <kbd>E</kbd><span>{{ t('resp.envHint') }}</span></li>
-        <li><kbd>Ctrl</kbd> + <kbd>W</kbd><span>{{ t('resp.closeHint') }}</span></li>
-        <li><kbd>Ctrl</kbd> + <kbd>S</kbd><span>{{ t('resp.saveNowHint') }}</span></li>
-      </ul>
-    </div>
 
     <n-modal v-model:show="showSave" preset="card" :title="t('resp.saveResponse')" style="width: 440px">
       <div class="save-form">
         <span class="flabel">{{ t('resp.exampleName') }}</span>
-        <n-input v-model:value="saveName" size="small" data-testid="resp.exampleNameInput" :placeholder="t('resp.exampleNamePlaceholder')" />
+        <n-input v-model:value="saveName" size="small" data-testid="resp.exampleNameInput"
+          :placeholder="t('resp.exampleNamePlaceholder')" />
         <p class="fhint">{{ t('resp.exampleHint') }}</p>
       </div>
       <template #footer>
@@ -812,6 +812,10 @@ function onPaneKeydown(e: KeyboardEvent): void {
 }
 
 .plane {
+  /* SVG 只有 viewBox 时浏览器按默认 300×150 渲染，必须显式定尺寸 */
+  width: 40px;
+  height: 40px;
+  flex: none;
   color: var(--app-border-strong);
   margin-bottom: 6px;
 }

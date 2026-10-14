@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '../helpers/app'
-import { openCollection, openSettings, openSettingsSection, saveSettings } from '../helpers/ui'
+import { openCollection, openMcpSettings, saveSettings } from '../helpers/ui'
 
 /**
  * MCP 工作目录白名单（设置页）。
@@ -13,8 +13,7 @@ import { openCollection, openSettings, openSettingsSection, saveSettings } from 
 test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可写）/ 可写受只读控制 / 取消勾选移除', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   await openCollection(page, app)
-  await openSettings(page)
-  await openSettingsSection(page, 'mcp')
+  await openMcpSettings(page)
 
   const allowCheck = page.getByTestId('settings.mcpAllowCheck')
   const writable = page.getByTestId('settings.mcpAllowWritable')
@@ -49,8 +48,7 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
   expect(cfg.mcp.allow?.[0]?.writable).toBe(true)
 
   // ④ 重新打开：服务运行中，授权与可写仍保持
-  await openSettings(page)
-  await openSettingsSection(page, 'mcp')
+  await openMcpSettings()
   await expect(page.getByTestId('settings.mcpRunning')).toBeVisible({ timeout: 15_000 })
   await expect(writable).toBeChecked()
 
@@ -62,7 +60,6 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
   }
   expect(cfg2.mcp.allow ?? []).toHaveLength(0)
 
-  await openSettings(page)
-  await openSettingsSection(page, 'mcp')
+  await openMcpSettings()
   await expect(allowCheck).not.toBeChecked()
 })
