@@ -812,9 +812,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 }
 
 .plane {
-  /* SVG 只有 viewBox 时浏览器按默认 300×150 渲染，必须显式定尺寸 */
-  width: 40px;
-  height: 40px;
+  /* SVG 只有 viewBox 时浏览器按默认 300×150 渲染，必须显式定尺寸（40 的 1.5 倍） */
+  width: 60px;
+  height: 60px;
   flex: none;
   color: var(--app-border-strong);
   margin-bottom: 6px;

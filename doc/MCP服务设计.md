@@ -59,7 +59,7 @@ Claude Desktop 配置：
 - **懒加载**：首次访问某项目才 `OpenCollection` 并起该项目的 fsnotify 监听；`refresh=true` 重新扫描。
 - 读操作前 `ReloadCollection`（重扫 + 重建索引），因为扫描与索引是「打开时快照」。
 
-## 三、工具清单（18 个）
+## 三、工具清单（19 个）
 
 | 工具 | 作用 | 关键入参 |
 |---|---|---|
@@ -67,13 +67,14 @@ Claude Desktop 配置：
 | `use_workspace` | 选定**本会话**的默认工作目录（选定后可省略 `project`） | `workspace` |
 | `list_projects` | 项目列表（模糊过滤/刷新） | `project?`、`refresh?` |
 | `get_project_modules` | 模块结构 + 每模块请求数 | `project?`、`query?`、`includeRequests?` |
-| `get_request_detail` | 接口详情（请求/headers/docs/示例） | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
+| `get_request_detail` | 接口详情（请求/headers/docs/respDoc/示例） | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
 | `search_requests` | 模糊搜索（可跨项目） | `query`、`project?`、`limit?` |
-| `create_request` | 创建请求（手填 / cURL / 复制） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
+| `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐前端 buildApiDoc） | — |
+| `create_request` | 创建请求（手填 / cURL / 复制；可带完整 body/settings/respDoc） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
 | `create_module` | 创建模块（支持嵌套） | `project?`、`name`、`parent?` |
 | `create_project` | 新建项目（目录 + manifest） | `name`、`dirName?`、`root?` |
 | `send_request` | 发送并可选保存示例 | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
-| `update_request` | 局部修改 / 移动模块 | `project?`、`uid`、各可选字段、`ifMatch?` |
+| `update_request` | 局部修改（含 params/settings/respDoc）/ 移动模块 | `project?`、`uid`、各可选字段、`ifMatch?` |
 | `delete_request` | 移除请求（进 `.trash`） | `project?`、`uid` |
 | `list_envs` | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
 | `create_env` | 新建环境（可带初始变量） | `project?`、`name`、`vars?` |
@@ -146,8 +147,9 @@ Claude Desktop 配置：
 ```
 cmd/mcpserver/main.go       flag + 传输选择（stdio / HTTP）；-require-consent 无头严格模式（T2）
 internal/mcp/server.go      装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层）
-internal/mcp/meta.go        18 个工具的元数据单一事实源（name/description/risk/write/InReadOnly，T1）
-internal/mcp/tools.go       18 个工具的注册（meta 驱动）与 guard 装饰器（授权 T2 + recover + 审计 T3）
+internal/mcp/meta.go        19 个工具的元数据单一事实源（name/description/risk/write/InReadOnly，T1）
+internal/mcp/tools.go       19 个工具的注册（meta 驱动）与 guard 装饰器（授权 T2 + recover + 审计 T3）
+internal/mcp/doctpl.go      get_doc_template 的 docs 结构契约文案（对齐前端 lib/genDocs.ts，变更需两侧同步）
 internal/mcp/authz_args.go  授权弹窗的入参脱敏（T2）
 internal/mcp/service.go     语义实现（不 import SDK，可单测/复用）
 internal/mcp/registry.go    多项目 registry（只读扫描、懒打开、三种定位、创建项目）

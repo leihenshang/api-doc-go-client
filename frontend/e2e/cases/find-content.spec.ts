@@ -28,8 +28,15 @@ test.describe('页内查找', () => {
     await expect(page.getByTestId('find.bar')).toBeVisible()
     await page.getByTestId('find.input').fill('flat')
     await expect(page.getByTestId('find.count')).toHaveText('1/1')
-    // 当前命中加 .on（琥珀实色）
-    await expect(page.locator('mark.find-hit.on')).toHaveCount(1)
+    // 当前命中落在 find-current 命名高亮层（Highlight API 零 DOM 改动，不再包 <mark>）
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { CSS: { highlights?: Map<string, { size: number }> } }).CSS.highlights?.get('find-current')?.size ?? 0,
+        ),
+      )
+      .toBe(1)
 
     // 切原始视图：同一份文本仍命中（不重新打开查找条）
     await page.getByTestId('resp.raw').click()
@@ -46,6 +53,34 @@ test.describe('页内查找', () => {
     // Ctrl+F 在响应区内重新唤起
     await page.locator('.resp').press('Control+f')
     await expect(page.getByTestId('find.input')).toBeVisible()
+  })
+
+  test('响应区：多命中搜索后切原始 / 页签切换 / 切回美化全部有效（回归：DOM 改写打断 Vue patch）', async ({ page, app }) => {
+    const errs: string[] = []
+    page.on('pageerror', (e) => errs.push(String(e)))
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await sendUrl(page, app, '{{host}}/json/withArray')
+
+    // 美化态 JSON 树上多命中（row- 命中两个字符串值）
+    await page.getByTestId('resp.find').click()
+    await page.getByTestId('find.input').fill('row-')
+    await expect(page.getByTestId('find.count')).toHaveText('1/2')
+
+    // 切原始：渲染出原文（曾症状：标记破坏文本节点后视图不再更新）
+    await page.getByTestId('resp.raw').click()
+    await expect(page.getByTestId('resp.rawBody')).toContainText('row-0')
+
+    // 切响应头：头部行渲染出来
+    await page.locator('[data-testid="resp.tab"][data-seg="headers"]').click()
+    await expect(page.getByTestId('resp.headerRow').first()).toBeVisible()
+
+    // 切回响应体 + 美化：JSON 树完整回来，且全程无页面异常
+    await page.locator('[data-testid="resp.tab"][data-seg="body"]').click()
+    await page.getByTestId('resp.pretty').click()
+    await expect(page.getByTestId('resp.json')).toBeVisible()
+    expect(errs).toEqual([])
   })
 
   test('请求编辑区：JSON / 文本请求体、脚本区 textarea 选区查找；Params 无编辑区不唤起', async ({ page, app }) => {

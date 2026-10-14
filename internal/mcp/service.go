@@ -19,6 +19,7 @@ var (
 	errEmptyDraft      = errors.New("没有可用的请求内容")
 	errNeedUID         = errors.New("缺少 uid：请用 search_requests 或 get_project_modules 找到目标请求")
 	errConflict        = errors.New("文件已被外部修改，本次保存被拒绝：请重新 get_request_detail 读取最新内容，合并后再试（或用 create_request 另存为新请求）")
+	errRespDocGRPC     = errors.New("gRPC 请求不承载响应字段文档（respDoc）：与客户端 UpdateResponseDoc 的限制一致")
 )
 
 // Service 是 MCP 工具的语义实现（不依赖 SDK，便于单测与将来复用到 CLI）。
@@ -553,6 +554,7 @@ type RequestDetail struct {
 	Settings    *collection.RequestSettings `json:"settings,omitempty"`
 	GRPC        *collection.GrpcBlock       `json:"grpc,omitempty"`
 	Docs        string                      `json:"docs,omitempty"`        // 请求自带说明（Markdown）
+	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty"`     // 响应字段文档（返回类型/字段表/样例；样例按 includeBody 裁剪）
 	RelatedDocs []DocBrief                  `json:"relatedDocs,omitempty"` // 集合里与该请求相关的 docs/*.md 条目
 	Examples    []ExampleItem               `json:"examples,omitempty"`    // 已保存的响应示例
 }
@@ -586,6 +588,16 @@ func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*Re
 		Project: e.Path, UID: r.UID, Hash: hash, Name: r.Name, Method: r.Method, URL: r.URL, Path: r.Path,
 		Params: r.Params, Headers: r.Headers, Body: r.Body, Auth: r.Auth,
 		Settings: r.Settings, GRPC: r.GRPC, Docs: r.Docs,
+	}
+	// 响应字段文档：字段表全量返回（AI 要「读了再改整张表」）；样例原文按 includeBody 裁剪，避免大体撞爆上下文
+	if r.RespDoc != nil {
+		rd := *r.RespDoc
+		if opts.IncludeBody {
+			rd.Sample, _, _ = Truncate(rd.Sample, opts.MaxBodyBytes)
+		} else {
+			rd.Sample, _, _ = Truncate(rd.Sample, DefaultMaxBodyBytes/4)
+		}
+		d.RespDoc = &rd
 	}
 	// 集合级文档：按 query 或请求名做模糊关联（docs 是集合级条目，没有直接外键）
 	docs, _ := a.ListDocs()
@@ -642,19 +654,22 @@ func matchDoc(name, path, reqName, query string) bool {
 
 // CreateRequestInput create_request 的入参。
 type CreateRequestInput struct {
-	Project     string           `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	Folder      string           `json:"folder,omitempty"`
-	Name        string           `json:"name"`
-	Method      string           `json:"method,omitempty"`
-	URL         string           `json:"url,omitempty"`
-	Headers     []collection.KV  `json:"headers,omitempty"`
-	Params      []collection.KV  `json:"params,omitempty"`
-	BodyType    string           `json:"bodyType,omitempty"`
-	BodyRaw     string           `json:"bodyRaw,omitempty"`
-	Auth        *collection.Auth `json:"auth,omitempty"`
-	Docs        string           `json:"docs,omitempty"`
-	Curl        string           `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
-	CopyFromUID string           `json:"copyFromUid,omitempty"` // 复制另一个请求再改名
+	Project     string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Folder      string                      `json:"folder,omitempty"`
+	Name        string                      `json:"name"`
+	Method      string                      `json:"method,omitempty"`
+	URL         string                      `json:"url,omitempty"`
+	Headers     []collection.KV             `json:"headers,omitempty"`
+	Params      []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；行可带 description（说明列）与 type（multipart 文件行）"`
+	BodyType    string                      `json:"bodyType,omitempty"`
+	BodyRaw     string                      `json:"bodyRaw,omitempty"`
+	Body        *collection.Body            `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；传了就覆盖 bodyType/bodyRaw"`
+	Settings    *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
+	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档：返回类型 + 返回参数表（fieldName/type/required/description/example）+ 响应样例；gRPC 请求不支持"`
+	Auth        *collection.Auth            `json:"auth,omitempty"`
+	Docs        string                      `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
+	Curl        string                      `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
+	CopyFromUID string                      `json:"copyFromUid,omitempty"` // 复制已有请求；grpc 源不支持 respDoc
 }
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
@@ -697,6 +712,19 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if in.BodyType != "" || in.BodyRaw != "" {
 		draft.Body = collection.Body{Type: in.BodyType, Raw: in.BodyRaw}
 	}
+	// 完整 body（含 form/multipart 行）：比 bodyType/bodyRaw 表达力强，传了就覆盖
+	if in.Body != nil {
+		draft.Body = *in.Body
+	}
+	if in.Settings != nil {
+		draft.Settings = in.Settings
+	}
+	if in.RespDoc != nil {
+		if draft.IsGRPC() {
+			return nil, errRespDocGRPC
+		}
+		draft.RespDoc = in.RespDoc
+	}
 	if in.Auth != nil {
 		draft.Auth = in.Auth
 	}
@@ -738,16 +766,19 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
-	Project string           `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string           `json:"uid"`
-	Name    *string          `json:"name,omitempty"`
-	Method  *string          `json:"method,omitempty"`
-	URL     *string          `json:"url,omitempty"`
-	Headers []collection.KV  `json:"headers,omitempty"`
-	Body    *collection.Body `json:"body,omitempty"`
-	Auth    *collection.Auth `json:"auth,omitempty"`
-	Docs    *string          `json:"docs,omitempty"`
-	Folder  *string          `json:"folder,omitempty"` // 移动到别的模块
+	Project  string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID      string                      `json:"uid"`
+	Name     *string                     `json:"name,omitempty"`
+	Method   *string                     `json:"method,omitempty"`
+	URL      *string                     `json:"url,omitempty"`
+	Params   []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
+	Headers  []collection.KV             `json:"headers,omitempty"`
+	Body     *collection.Body            `json:"body,omitempty"`
+	Settings *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
+	RespDoc  *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档（返回类型/字段表/样例）；传了整张覆盖；gRPC 请求拒绝"`
+	Auth     *collection.Auth            `json:"auth,omitempty"`
+	Docs     *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
+	Folder   *string                     `json:"folder,omitempty"` // 移动到别的模块
 	// IfMatch 冲突检测：传 get_request_detail / search_requests 返回的 hash，
 	// 若磁盘文件在此期间被外部改动则拒绝写入（不传 = 不做保护，行为同客户端「最后写者赢」）。
 	IfMatch string `json:"ifMatch,omitempty"`
@@ -775,8 +806,20 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	if in.Headers != nil {
 		r.Headers = in.Headers
 	}
+	if in.Params != nil {
+		r.Params = in.Params
+	}
 	if in.Body != nil {
 		r.Body = *in.Body
+	}
+	if in.Settings != nil {
+		r.Settings = in.Settings
+	}
+	if in.RespDoc != nil {
+		if r.IsGRPC() {
+			return nil, errRespDocGRPC
+		}
+		r.RespDoc = in.RespDoc
 	}
 	if in.Auth != nil {
 		r.Auth = in.Auth
