@@ -1,6 +1,6 @@
 package mcp_test
 
-// 18 个 Tool 的 inputSchema 契约快照：只锁「对外契约面」——属性名、JSON 类型、
+// 正式 Tool（数量由 meta.go 锁定）的 inputSchema 契约快照：只锁「对外契约面」——属性名、JSON 类型、
 // required、enum、数组元素类型；不锁 description 文案（文案改动不构成契约漂移）。
 //
 // 新增/改名工具或改动入参字段时，必须显式更新快照：

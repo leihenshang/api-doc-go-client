@@ -140,8 +140,120 @@
         "string"
       ]
     },
+    "params": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "project": {
       "type": "string"
+    },
+    "respDoc": {
+      "properties": {
+        "params": {
+          "items": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "example": {
+                "type": "string"
+              },
+              "fieldName": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "fieldName",
+              "type",
+              "required",
+              "description",
+              "example"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "sample": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "params",
+        "sample"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "settings": {
+      "properties": {
+        "encodeUrl": {
+          "type": "boolean"
+        },
+        "followRedirects": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "insecureSsl": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "maxRedirects": {
+          "type": "integer"
+        },
+        "timeoutSec": {
+          "type": "integer"
+        }
+      },
+      "type": [
+        "null",
+        "object"
+      ]
     },
     "uid": {
       "type": "string"

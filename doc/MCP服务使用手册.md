@@ -6,19 +6,20 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **16 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **19 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
 | 查询 | `list_projects` | 有哪些项目（集合） |
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
-| 查询 | `get_request_detail` | 某接口的完整详情 + 已保存的响应示例（返回 `hash` 供冲突保护） |
+| 查询 | `get_request_detail` | 某接口的完整详情 + 响应字段文档（respDoc）+ 已保存的响应示例（返回 `hash` 供冲突保护） |
 | 查询 | `search_requests` | 模糊搜索（「记得内容、记不清名字」时最该用） |
 | 查询 | `list_envs` | 有哪些环境与变量（**敏感值只回掩码**，每个环境带 `hash`） |
-| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有） |
+| 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
+| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带完整 body/settings/respDoc） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest） |
-| 写 | `update_request` | 改请求 / 移动模块（支持 `ifMatch` 冲突保护） |
+| 写 | `update_request` | 改请求（params/settings/respDoc 均可局部更新）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
@@ -121,7 +122,8 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.3 `get_request_detail`
 `project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）。
-返回 method/url/params/headers/body/auth/settings/grpc + 请求内 `docs` + 关联的 `docs/*.md` + **已保存响应示例列表**
+返回 method/url/params/headers/body/auth/settings/grpc + 请求内 `docs` + **响应字段文档 `respDoc`**
+（返回类型/字段表全量；样例不传 includeBody 时只回前 2048 字节）+ 关联的 `docs/*.md` + **已保存响应示例列表**
 + **`hash`**（演示为前 12 位）——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
 
 ### 4.4 `search_requests`
@@ -134,12 +136,14 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 方式 | 参数 | 说明 |
 |---|---|---|
-| 手填 | `name` ✅ + `method`/`url`/`headers`/`params`/`bodyType`+`bodyRaw`/`auth`/`docs`/`folder` | `{"project":"shop","folder":"api/user","name":"login","method":"POST","url":"{{host}}/api/login"}` |
+| 手填 | `name` ✅ + `method`/`url`/`headers`/`params`/`bodyType`+`bodyRaw` 或 `body`/`auth`/`docs`/`settings`/`respDoc`/`folder` | `{"project":"shop","folder":"api/user","name":"login","method":"POST","url":"{{host}}/api/login"}` |
 | cURL 导入 | `name` ✅ + `curl` | `{"project":"shop","name":"from-curl","curl":"curl -X POST https://x/api/login -H 'Content-Type: application/json' -d '{\"u\":\"a\"}'"}` |
 | 复制现有 | `name` ✅ + `copyFromUid` | `{"project":"shop","name":"login-copy","copyFromUid":"<uid>"}` |
 
-同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true}`；
-`bodyType` 取 `none`/`raw`/`form`；返回落盘后的 `uid` 与 `path`。
+同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
+`body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），传了就覆盖 `bodyType`/`bodyRaw`；
+`settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（gRPC 拒绝）；
+`docs` 结构先取 `get_doc_template`；返回落盘后的 `uid` 与 `path`。
 
 ### 4.6 `create_module` / `create_project`
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
@@ -151,7 +155,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
 ### 4.8 `update_request`
-`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`headers`/`body`/`auth`/`docs`，`folder` 移动到别的模块。
+`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
+`params` 整表覆盖（传空数组 = 清空）；`respDoc` 整张覆盖（先 `get_request_detail` 读旧表再改；gRPC 拒绝）；
+`settings` 仅单请求级，不碰全局配置。
 `ifMatch` 传详情里的 `hash`（12 位前缀即可，服务端按 git 风格前缀比对，≥8 位有效）→ 磁盘文件在此期间被外部改动就
 **拒绝写入**；**不传 = 最后写者赢**（与桌面端一致）。改名会自动同步文件名。
 
@@ -190,6 +196,13 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 停用的变量（`enabled: false`）仍在文件里、也会被 `list_envs` 列出，但不参与 `{{name}}` 解析（输出里标「已停用」）。
 
 > 客户端第一次打开集合会自动建 `dev` 环境（含 `host=http://127.0.0.1:8080`），所以直接 `create_env("dev")` 会报已存在。
+
+### 4.11 `get_doc_template`
+无入参（不需要项目上下文）。返回接口说明（`docs` 字段）的 **Markdown 分节结构契约**：
+固定小节顺序（简要描述 / 请求URI / 请求方式 / 请求头 / 请求参数表 / 请求示例 / 响应字段表 / 响应示例 / 备注）、
+表列（参数名 | 必选 | 类型 | 说明）与 `{{host}}` 掩码规则，与客户端一键「生成接口文档」（`lib/genDocs.ts#buildApiDoc`）逐节对齐。
+`docs` 本身是自由文本不做强校验，但 AI 写 docs 前先取本模板可保证客户端展示与导出渲染一致；
+模板里「响应字段」一节与 `respDoc` 同源，两边都写时内容需一致。
 
 ## 五、典型工作流（可以直接对 AI 这么说）
 

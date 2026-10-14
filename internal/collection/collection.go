@@ -1295,6 +1295,7 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 		Auth:           src.Auth,
 		Settings:       src.Settings,
 		Docs:           src.Docs,
+		RespDoc:        src.RespDoc,
 		VarsPreRequest: src.VarsPreRequest,
 		Script:         src.Script,
 		Asserts:        src.Asserts,

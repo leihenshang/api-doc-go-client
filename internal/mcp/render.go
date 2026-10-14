@@ -158,6 +158,24 @@ func renderDetail(d *RequestDetail) string {
 	if d.Docs != "" {
 		fmt.Fprintf(&sb, "\n说明文档：\n%s\n", d.Docs)
 	}
+	if d.RespDoc != nil {
+		fmt.Fprintf(&sb, "\n响应字段文档（返回类型 %s，共 %d 个字段）：\n", d.RespDoc.Type, len(d.RespDoc.Params))
+		for _, p := range d.RespDoc.Params {
+			req := "可选"
+			if p.Required {
+				req = "必选"
+			}
+			fmt.Fprintf(&sb, "  %s: %s（%s，%s）", p.FieldName, p.Description, p.Type, req)
+			if p.Example != "" {
+				fmt.Fprintf(&sb, " 示例 %s", p.Example)
+			}
+			sb.WriteString("\n")
+		}
+		if d.RespDoc.Sample != "" {
+			fmt.Fprintf(&sb, "响应样例：\n%s\n", d.RespDoc.Sample)
+		}
+		fmt.Fprintln(&sb, "（整表回写：改字段说明用 update_request.respDoc，传完整的新表）")
+	}
 	if len(d.RelatedDocs) > 0 {
 		sb.WriteString("\n相关文档条目：\n")
 		for _, r := range d.RelatedDocs {

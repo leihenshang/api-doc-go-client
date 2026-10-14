@@ -116,7 +116,7 @@ func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts
 }
 
 // addTool 按 meta.go 中的名称取描述注册一个工具；名字不在元数据表里即装配缺陷。
-// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，18 个业务 handler 零改动。
+// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，19 个业务 handler 零改动。
 // 必须在内部构造**字面签名**的闭包交给 mcp.AddTool —— 若用具名 coreHandler[In] 类型，
 // SDK 的 ToolHandlerFor[In,Out] 泛型推断无法把具名类型与类型参数合一。
 func addTool[In any](ts *toolSet, server *mcp.Server, name string,
@@ -347,6 +347,7 @@ func (ts *toolSet) registerReadTools(server *mcp.Server) {
 	addTool(ts, server, "get_request_detail", ts.getRequestDetail)
 	addTool(ts, server, "search_requests", ts.searchRequests)
 	addTool(ts, server, "list_envs", ts.listEnvs)
+	addTool(ts, server, "get_doc_template", ts.getDocTemplate)
 }
 
 // ---- 工作目录（白名单 + 默认目标）----
@@ -541,6 +542,15 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 				m.Method, m.Name, m.URL, m.Project, m.Path, m.UID, m.Score, strings.Join(m.Matched, "/"))
 		}
 		return sb.String(), nil
+	})
+}
+
+// getDocTemplateIn get_doc_template 无入参。
+type getDocTemplateIn struct{}
+
+func (ts *toolSet) getDocTemplate(_ context.Context, _ *mcp.CallToolRequest, _ getDocTemplateIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		return ts.svc.DocTemplate(), nil
 	})
 }
 
