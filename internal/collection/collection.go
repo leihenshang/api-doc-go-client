@@ -57,7 +57,7 @@ type Collection struct {
 // ---------- 集合清单（opencollection.yml） ----------
 
 const gitignoreContent = "# 客户端自动维护\n" +
-	"environments/*.secrets.yml\n*.local.yml\n.trash/\n.conflicts/\nnode_modules/\n"
+	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.trash/\n.conflicts/\nnode_modules/\n"
 
 // Open 打开（不存在则初始化）一个集合目录。
 // 原生 Bruno 目录（含 bruno.json 或 .bru）不能直接打开，须走导入流程。
