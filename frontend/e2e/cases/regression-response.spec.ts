@@ -301,4 +301,16 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     expect(geo.overflowX).toBeLessThanOrEqual(2) // 不再一行溢出展示框
     expect(geo.lines).toBeGreaterThan(2) // 向下折行展开
   })
+
+  test('[E24] 文件类响应（.md / Content-Disposition）提示下载、不解析内容', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await sendUrl(page, app, '{{host}}/files/readme.md')
+    // 命中下载卡片 + 下载按钮；内容不再被当接口结果解析/展示（无原始 body 区、无工具条）
+    await expect(page.getByTestId('resp.fileCard')).toBeVisible()
+    await expect(page.getByTestId('resp.downloadFile')).toBeVisible()
+    await expect(page.getByTestId('resp.rawBody')).toHaveCount(0)
+    await expect(page.getByTestId('resp.pretty')).toHaveCount(0)
+  })
 })

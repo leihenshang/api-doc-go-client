@@ -87,52 +87,12 @@ func (e *Engine) RunOne() (*Report, error) {
 	if err := e.negotiate(); err != nil {
 		return rep, err
 	}
-	// 1. 探测游标
-	st, err := e.CLI.State(e.Bind.ProjectID)
-	if err != nil {
+	// 1~2. 探测游标并按增量/全量拉取（stop=true 表示超页数上限，提前结束本轮、不 push）。
+	if stop, err := e.pull(rep); err != nil {
 		return rep, err
+	} else if stop {
+		return rep, nil
 	}
-	// 2. 增量 / 或 gap 时全量
-	if e.Bind.Cursor > 0 && st.Cursor > e.Bind.Cursor {
-		ch, err := e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
-		if err != nil {
-			return rep, err
-		}
-		if ch.Gap {
-			rep.Gap = true
-			if err := e.pullSnapshot(rep); err != nil {
-				return rep, err
-			}
-		} else {
-			if err := e.applyItems(ch.Items, rep); err != nil {
-				return rep, err
-			}
-			e.Bind.Cursor = ch.Cursor
-			// has_more 时继续拉（带上限：服务端恒返回 has_more 或游标不前进时不能无限循环）
-			for pages := 1; ch.HasMore; pages++ {
-				if pages >= maxPullPages {
-					rep.Errors = append(rep.Errors, fmt.Sprintf("增量拉取超过 %d 页，已停止（服务端可能未推进游标）", maxPullPages))
-					return rep, nil
-				}
-				next, cerr := e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
-				if cerr != nil {
-					break
-				}
-				_ = e.applyItems(next.Items, rep)
-				if next.Cursor <= e.Bind.Cursor {
-					// 游标没有推进：继续循环只会重复拉同一批数据
-					rep.Errors = append(rep.Errors, "服务端游标未推进，已停止增量拉取")
-					break
-				}
-				ch, e.Bind.Cursor = next, next.Cursor
-			}
-		}
-	} else if e.Bind.Cursor == 0 {
-		if err := e.pullSnapshot(rep); err != nil {
-			return rep, err
-		}
-	}
-
 	// 3. push（mirror 只拉不推）
 	if e.Bind.Mode != ModeMirror {
 		if err := e.pushDirty(rep); err != nil {
@@ -141,6 +101,63 @@ func (e *Engine) RunOne() (*Report, error) {
 	}
 	rep.Cursor = e.Bind.Cursor
 	return rep, nil
+}
+
+// pull 探测服务端游标并按需拉取：本地游标落后则增量（gap 降级全量），首次（cursor=0）全量。
+// 返回 stop=true 表示增量翻页超上限，RunOne 应提前结束本轮（不再 push）。
+func (e *Engine) pull(rep *Report) (bool, error) {
+	st, err := e.CLI.State(e.Bind.ProjectID)
+	if err != nil {
+		return false, err
+	}
+	if e.Bind.Cursor > 0 && st.Cursor > e.Bind.Cursor {
+		return e.pullIncremental(rep)
+	}
+	if e.Bind.Cursor == 0 {
+		if err := e.pullSnapshot(rep); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// pullIncremental 按游标增量拉取；服务端返回 gap 时降级为全量快照。
+// 翻页带上限（maxPullPages）：服务端恒返回 has_more 或游标不前进时不能无限循环。
+func (e *Engine) pullIncremental(rep *Report) (bool, error) {
+	ch, err := e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
+	if err != nil {
+		return false, err
+	}
+	if ch.Gap {
+		rep.Gap = true
+		if err := e.pullSnapshot(rep); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := e.applyItems(ch.Items, rep); err != nil {
+		return false, err
+	}
+	e.Bind.Cursor = ch.Cursor
+	// has_more 时继续拉（带上限：服务端恒返回 has_more 或游标不前进时不能无限循环）
+	for pages := 1; ch.HasMore; pages++ {
+		if pages >= maxPullPages {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("增量拉取超过 %d 页，已停止（服务端可能未推进游标）", maxPullPages))
+			return true, nil
+		}
+		next, cerr := e.CLI.Changes(e.Bind.ProjectID, e.Bind.Cursor, 500)
+		if cerr != nil {
+			break
+		}
+		_ = e.applyItems(next.Items, rep)
+		if next.Cursor <= e.Bind.Cursor {
+			// 游标没有推进：继续循环只会重复拉同一批数据
+			rep.Errors = append(rep.Errors, "服务端游标未推进，已停止增量拉取")
+			break
+		}
+		ch, e.Bind.Cursor = next, next.Cursor
+	}
+	return false, nil
 }
 
 // maxPullPages 单轮同步最多拉取的页数（增量与全量共用）。

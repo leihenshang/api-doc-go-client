@@ -41,6 +41,14 @@ func registerShapeRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(latin1Bytes)
 	})
+	// 文件类响应：markdown 文档 + Content-Disposition 附件名（明确下载意图）。
+	// 客户端应提示「下载查看」而非把内容当接口结果解析展示。
+	mux.HandleFunc("/files/readme.md", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="readme.md"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("# 标题\n\n这是 **markdown** 正文，客户端不应在线解析它。\n"))
+	})
 }
 
 // gzipHandler 返回 gzip 压缩过的 JSON（Go 的 http.Transport 会自动解压，

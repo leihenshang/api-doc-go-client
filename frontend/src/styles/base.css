@@ -90,6 +90,9 @@ body.dragging.row * {
   --app-accent: #18a058;
   --app-accent-dark: #0e7a3e;
   --app-accent-tint: #e8f5ee;
+  /* 应用图标（品牌 logo）双色：插头暗件 + 蓝件；蓝件是 logo 专有色（非 --app-accent，勿混用） */
+  --app-logo-plug: #231815;
+  --app-logo-blue: #3390FF;
   --app-info: #2080f0;
   --app-info-dark: #1060c0;
   --app-info-tint: #e8f0fe;
@@ -182,6 +185,9 @@ body.dragging.row * {
   --app-accent: #36ad6a;
   --app-accent-dark: #7ed6a5;
   --app-accent-tint: #1b2b22;
+  /* 暗色下近黑的插头提亮为浅灰，蓝件保持品牌蓝（两套通用） */
+  --app-logo-plug: #d7dbe0;
+  --app-logo-blue: #3390FF;
   --app-info: #4098fc;
   --app-info-dark: #7cb8ff;
   --app-info-tint: #16283d;

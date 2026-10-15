@@ -23,7 +23,9 @@ import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
 import TrashDialog from '@/components/TrashDialog.vue'
 import Welcome from '@/components/Welcome.vue'
+import { useSplitLayout } from '@/composables/useSplitLayout'
 import { api, onAppEvent } from '@/lib/ipc'
+import { buildThemeOverrides } from '@/lib/naiveTheme'
 import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
@@ -33,7 +35,6 @@ import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { AuthzRequest, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
-import type { GlobalThemeOverrides } from 'naive-ui'
 import {
     NButton,
     NConfigProvider,
@@ -61,64 +62,9 @@ const { t, locale } = useI18n()
 const naiveLocale = computed(() => (locale.value === 'en-US' ? enUS : zhCN))
 const naiveDateLocale = computed(() => (locale.value === 'en-US' ? dateEnUS : dateZhCN))
 
-// 主题令牌取自 design-spec §1：控件圆角 6px、主色 #18a058、信息色 #2080f0、底 #f5f5f5；
-// 暗色沿用同一套语义，只把底色/边框换成 base.css 里 --app-* 的深夜配值（主色提亮一档）。
-const commonBase: GlobalThemeOverrides['common'] = {
-  fontSize: '13px',
-  borderRadius: '6px',
-  borderRadiusSmall: '4px',
-  fontFamily:
-    "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
-}
-const commonLight: GlobalThemeOverrides['common'] = {
-  ...commonBase,
-  primaryColor: '#18a058',
-  primaryColorHover: '#36ad6a',
-  primaryColorPressed: '#0c7a43',
-  primaryColorSuppl: '#18a058',
-  infoColor: '#2080f0',
-  infoColorHover: '#4098fc',
-  infoColorPressed: '#1060c0',
-  borderColor: '#e3e3e3',
-  bodyColor: '#f5f5f5',
-  cardColor: '#ffffff',
-  textColorBase: '#202124',
-}
-const commonDark: GlobalThemeOverrides['common'] = {
-  ...commonBase,
-  primaryColor: '#36ad6a',
-  primaryColorHover: '#4cc47c',
-  primaryColorPressed: '#2a9a5c',
-  primaryColorSuppl: '#36ad6a',
-  infoColor: '#4098fc',
-  infoColorHover: '#5ea9ff',
-  infoColorPressed: '#2a7fd4',
-  borderColor: '#2b2d31',
-  bodyColor: '#17181a',
-  cardColor: '#1e1f22',
-  textColorBase: '#e6e7e9',
-}
-
+// naive 主题覆盖（明暗两套色值）集中在 lib/naiveTheme —— 色值与 base.css 的 --app-* 令牌同源，改其一须同步另一。
 const naiveTheme = computed(() => (isDark.value ? darkTheme : null))
-const themeOverrides = computed<GlobalThemeOverrides>(() => ({
-  common: isDark.value ? commonDark : commonLight,
-  Card: {
-    paddingMedium: '16px 20px',
-    borderRadiusMedium: '10px',
-  },
-  DataTable: {
-    thColor: isDark.value ? '#202124' : '#fafafa',
-    thFontWeight: '500',
-  },
-  // 浮层（保存▾ 等）：naive 默认那套 `0 9px 28px` 浓投影看着像"大边框盒子"，
-  // 换成 app 的轻投影令牌 + 8px 圆角；底色浅色用面板白、暗色用 surface-3（否则与面板同色，糊在一起）
-  Popover: {
-    borderRadius: '8px',
-    boxShadow: 'var(--app-shadow-menu)',
-    color: isDark.value ? 'var(--app-surface-3)' : 'var(--app-panel)',
-    padding: '4px',
-  },
-}))
+const themeOverrides = computed(() => buildThemeOverrides(isDark.value))
 
 const showEnvManager = ref(false)
 const showSettings = ref(false)
@@ -163,28 +109,9 @@ const requestCount = computed(() => {
   return walk(coll.tree)
 })
 
-// ---- 请求区 / 响应区分栏 ----
-const workEl = ref<HTMLElement | null>(null)
-const editorEl = ref<HTMLElement | null>(null)
-const respEl = ref<HTMLElement | null>(null)
-const respSize = ref(settings.responseSize)
-// 拖动中不覆盖本地值，避免落盘往返把拖动位置"回跳"
-let resizing = false
-
-watch(
-  () => settings.responseSize,
-  (v) => {
-    if (!resizing) respSize.value = v
-  },
-)
-
-// 响应区尺寸：flex-basis 百分比（right 生效为宽度、bottom 生效为高度）
-const respStyle = computed(() => ({ flexBasis: `${respSize.value}%` }))
-
-function setLayout(layout: 'right' | 'bottom'): void {
-  if (settings.responseLayout === layout) return
-  void settings.save({ ...settings.form, responseLayout: layout })
-}
+// ---- 请求区 / 响应区分栏 + 侧栏拖宽（逻辑见 composables/useSplitLayout）----
+const { workEl, editorEl, respEl, respStyle, setLayout, startResize, startSideResize, clampSideWidth } =
+  useSplitLayout()
 
 // 主题切换：界面立即生效并落盘（原生窗口底色由 Go 侧 SaveSettings 同步）
 async function toggleTheme(): Promise<void> {
@@ -193,96 +120,6 @@ async function toggleTheme(): Promise<void> {
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
-}
-
-function startResize(e: PointerEvent): void {
-  const box = workEl.value
-  if (!box) return
-  e.preventDefault()
-  resizing = true
-  const horizontal = settings.responseLayout === 'right'
-  // 四舍五入 + 20~80 夹取，与 Go 侧 config.Normalize 的范围一致
-  const clamp = (n: number): number => Math.min(80, Math.max(20, Math.round(n)))
-
-  const move = (ev: PointerEvent): void => {
-    const r = box.getBoundingClientRect()
-    respSize.value = horizontal
-      ? clamp(((r.right - ev.clientX) / r.width) * 100)
-      : clamp(((r.bottom - ev.clientY) / r.height) * 100)
-  }
-  const stop = (): void => {
-    resizing = false
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', stop)
-    window.removeEventListener('pointercancel', stop)
-    document.body.classList.remove('dragging', 'col', 'row')
-    void settings.save({ ...settings.form, responseSize: respSize.value })
-  }
-
-  document.body.classList.add('dragging', horizontal ? 'col' : 'row')
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', stop)
-  window.addEventListener('pointercancel', stop)
-}
-
-// ---- 侧栏拖宽：min = 根标题自然宽（标题不被截断），max = 页面 50%；松手记 localStorage ----
-
-const SIDE_W_KEY = 'apidoc.sideW'
-/** 标题测不出来时的兜底最小宽（与默认 260 同量级） */
-const SIDE_W_MIN_FALLBACK = 200
-/** 根行右侧操作区的固定占位（同步钮 + ··· 钮 + 行内边距）：actions hover 才渲染，量不到，按占位估 */
-const SIDE_W_ROW_CHROME = 8 + 16 + 6 + 44 + 16
-
-function minSideWidth(): number {
-  let min = SIDE_W_MIN_FALLBACK
-  const rows = document.querySelectorAll<HTMLElement>('.side .row.root')
-  if (!rows.length) return min
-  // .rname 有 ellipsis，被截断后 DOM 读不到完整文本宽 —— 用 canvas 按标题字体量
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) return min
-  rows.forEach((row) => {
-    const name = row.querySelector<HTMLElement>('.rname')
-    if (!name) return
-    ctx.font = getComputedStyle(name).font
-    let w = SIDE_W_ROW_CHROME + ctx.measureText(name.textContent ?? '').width
-    const badge = row.querySelector<HTMLElement>('.badge')
-    if (badge) w += badge.offsetWidth + 4
-    min = Math.max(min, Math.ceil(w))
-  })
-  return min
-}
-
-function maxSideWidth(): number {
-  return Math.round(document.documentElement.clientWidth / 2)
-}
-
-/** 写入 --app-side-w（TitleBar 左侧标识区引用同一变量，宽度变化后自动保持对齐）。 */
-function applySideWidth(w: number): void {
-  const clamped = Math.min(maxSideWidth(), Math.max(minSideWidth(), Math.round(w)))
-  document.documentElement.style.setProperty('--app-side-w', `${clamped}px`)
-}
-
-function startSideResize(e: PointerEvent): void {
-  e.preventDefault()
-  const move = (ev: PointerEvent): void => applySideWidth(ev.clientX)
-  const stop = (): void => {
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', stop)
-    window.removeEventListener('pointercancel', stop)
-    document.body.classList.remove('dragging', 'col', 'side-resizing')
-    const cur = parseFloat(document.documentElement.style.getPropertyValue('--app-side-w'))
-    if (cur > 0) localStorage.setItem(SIDE_W_KEY, String(cur))
-  }
-  document.body.classList.add('dragging', 'col', 'side-resizing')
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', stop)
-  window.addEventListener('pointercancel', stop)
-}
-
-/** 窗口缩放后把已保存的侧栏宽夹回 [标题宽, 50%]（如放大后再缩小窗口）。 */
-function clampSideWidth(): void {
-  const saved = Number(localStorage.getItem(SIDE_W_KEY))
-  if (saved > 0) applySideWidth(saved)
 }
 
 // ---- 打开 / 切换工作目录（多根）----

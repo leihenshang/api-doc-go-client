@@ -2,6 +2,9 @@
 // 请求设置区（design-spec §2 请求面板）：Params / Body / Headers / Auth / Docs。
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
 import FindBar from '@/components/FindBar.vue'
+import { useUrlParamsSync } from '@/composables/useUrlParamsSync'
+import { useResponseFields } from '@/composables/useResponseFields'
+import { useTextareaFind } from '@/composables/useTextareaFind'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
@@ -9,14 +12,12 @@ import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
-import { findInTextareas, selectTextareaMatch, type TextareaMatch } from '@/lib/find'
 import { buildApiDoc } from '@/lib/genDocs'
 import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { dialog, message } from '@/lib/notice'
-import type { FieldRow } from '@/lib/responseFields'
-import { buildRespDoc, loadFields, persistRespDoc, rowsFromDoc, type PersistTimer } from '@/lib/responseFields'
+import { loadFields, rowsFromDoc } from '@/lib/responseFields'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
@@ -26,7 +27,7 @@ import { SearchOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -37,97 +38,15 @@ const { t, locale } = useI18n()
 // mirror 模式只读（mode 限制，T38）
 const readonly = computed(() => coll.isReadOnly)
 
-// ---- Params ↔ URL 双向联动（syncingFrom 防循环） ----
-const syncingFrom = ref<'url' | 'params' | null>(null)
-
-/** 从 URL 的 query 段回填 params（URL 编辑时调用）。 */
-function syncParamsFromUrl(): void {
-  syncingFrom.value = 'url'
-  try {
-    const raw = props.tab.request.url
-    const idx = raw.indexOf('?')
-    const queryStr = idx >= 0 ? raw.slice(idx + 1) : ''
-    const existing = new Map(props.tab.request.params.map((p) => [p.name, p]))
-    const next: typeof props.tab.request.params = []
-    if (queryStr) {
-      for (const pair of queryStr.split('&')) {
-        if (!pair) continue
-        const eq = pair.indexOf('=')
-        const name = decodeURIComponent(eq < 0 ? pair : pair.slice(0, eq))
-        const value = eq < 0 ? '' : decodeURIComponent(pair.slice(eq + 1))
-        if (!name) continue
-        const old = existing.get(name)
-        next.push({ name, value, enabled: old?.enabled ?? true, description: old?.description })
-      }
-    }
-    // 保留表格里手动加的、URL 里没有的未启用行
-    for (const p of props.tab.request.params) {
-      if (p.name && !queryStr.includes(encodeURIComponent(p.name))) {
-        next.push(p)
-      }
-    }
-    props.tab.request.params.splice(0, props.tab.request.params.length, ...next)
-  } finally {
-    setTimeout(() => (syncingFrom.value = null), 0)
-  }
-}
-
-/** 从 params 重拼 URL 的 query 段（参数表编辑时调用）。 */
-function syncUrlFromParams(): void {
-  syncingFrom.value = 'params'
-  try {
-    const raw = props.tab.request.url
-    const idx = raw.indexOf('?')
-    const base = idx >= 0 ? raw.slice(0, idx) : raw
-    const parts: string[] = []
-    for (const p of props.tab.request.params) {
-      if (!p.enabled || !p.name.trim()) continue
-      const k = encodeURIComponent(p.name.trim())
-      const v = encodeURIComponent(p.value ?? '')
-      parts.push(`${k}=${v}`)
-    }
-    props.tab.request.url = parts.length ? `${base}?${parts.join('&')}` : base
-  } finally {
-    setTimeout(() => (syncingFrom.value = null), 0)
-  }
-}
-
-/** 各页签上一次见到的 URL：用来区分「用户改了 URL」与「切页签导致取值自然变化」 */
-const lastUrlByTab = new Map<string, string>()
-
-// URL 改了 → 回填 params（gRPC 没有 query 段，跳过）。
-// 切页签同样会走到这里 —— 这个 watch 的取值是「当前 tab 的 url」，props.tab 一换取值就变了 ——
-// 但那是换了个请求、不是编辑：只重建参数表，不标脏。否则什么都没改也会冒出未保存圆点
-// （实测打开第二个请求、右键切换页签都会触发），关闭页签时还会为此多问一次。
-watch(
-  () => [props.tab.key, props.tab.request.url] as const,
-  ([key, url]) => {
-    const known = lastUrlByTab.get(key)
-    const edited = known !== undefined && known !== url
-    // 记录必须放在守卫之前：被守卫挡掉的那次也要更新基线，否则下次会被误判成编辑
-    lastUrlByTab.set(key, url)
-    if (isGrpcReq.value || readonly.value || syncingFrom.value === 'params') return
-    syncParamsFromUrl()
-    if (edited) touch()
-  },
-)
-
-// 模块级 Map 跨组件实例常驻：页签关闭后要回收对应 key，否则长期使用会累积已关闭页签的条目。
-watch(
-  () => tabs.tabs.map((t) => t.key),
-  (keys) => {
-    const alive = new Set(keys)
-    for (const k of lastUrlByTab.keys()) {
-      if (!alive.has(k)) lastUrlByTab.delete(k)
-    }
-  },
-)
-
-function onParamsChange(): void {
-  if (readonly.value || syncingFrom.value === 'url') return
-  syncUrlFromParams()
-  touch()
-}
+// ---- Params ↔ URL 双向联动（syncingFrom 防循环；逻辑见 composables/useUrlParamsSync）----
+const { onParamsChange } = useUrlParamsSync({
+  getRequest: () => props.tab.request,
+  getKey: () => props.tab.key,
+  isGrpc: () => isGrpcReq.value,
+  isReadonly: () => readonly.value,
+  openKeys: () => tabs.tabs.map((t) => t.key),
+  touch,
+})
 
 type Seg =
   | 'schema' | 'message' | 'metadata' | 'options'
@@ -407,70 +326,13 @@ watch(
 
 // ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
 // 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
-const hasResp = computed(() => fields.value.length > 0)
-const fields = ref<FieldRow[]>([])
-const fieldTimer: PersistTimer = { current: null }
-
-function initFields(): void {
-  const fromDoc = rowsFromDoc(props.tab.request.respDoc)
-  fields.value = fromDoc.length ? fromDoc : loadFields(props.tab.uid)
-}
-initFields()
-
-// 外部（响应区更新 / 同步拉取）改写了 respDoc：仅当与本地字段表不同才整体替换，
-// 避免含义输入触发的防抖写回（每次都是新 doc 对象）刚写完就把输入打断。
-watch(
-  () => props.tab.request.respDoc,
-  (doc) => {
-    const incoming = rowsFromDoc(doc)
-    const cur = fields.value
-    const same =
-      incoming.length === cur.length &&
-      incoming.every(
-        (f, i) =>
-          f.path === cur[i]?.path &&
-          f.value === cur[i]?.value &&
-          f.type === cur[i]?.type &&
-          f.meaning === cur[i]?.meaning,
-      )
-    if (!same) fields.value = incoming
-  },
-)
-
-/** 写回：已落盘 HTTP 请求更新模型 respDoc（含义输入防抖；删除/清空立即写）；草稿 / gRPC 只存本地。 */
-async function persistFields(immediate = false): Promise<void> {
-  // 字段表编辑不动快照：type/sample/status/headers 一律回退既有 respDoc（live 传空）。
-  await persistRespDoc({
-    uid: props.tab.uid,
-    draft: props.tab.draft,
-    grpc: isGrpcReq.value,
-    rows: fields.value,
-    doc: buildRespDoc(fields.value, props.tab.request.respDoc, {}),
-    immediate,
-    timer: fieldTimer,
-    attach: (doc) => { props.tab.request.respDoc = doc },
+// 字段表状态与「防抖写回 respDoc」逻辑见 composables/useResponseFields。
+const { fields, hasResp, initFields, setMeaning, removeField, removeFieldsByPath, clearFields } =
+  useResponseFields({
+    getTab: () => props.tab,
+    isGrpc: () => isGrpcReq.value,
     onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
   })
-}
-
-function setMeaning(path: string, meaning: string): void {
-  const f = fields.value.find((x) => x.path === path)
-  if (f) f.meaning = meaning
-  void persistFields()
-}
-async function removeField(path: string): Promise<void> {
-  fields.value = fields.value.filter((f) => f.path !== path)
-  await persistFields(true)
-}
-async function removeFieldsByPath(paths: string[]): Promise<void> {
-  const drop = new Set(paths)
-  fields.value = fields.value.filter((f) => !drop.has(f.path))
-  await persistFields(true)
-}
-async function clearFields(): Promise<void> {
-  fields.value = []
-  await persistFields(true)
-}
 
 // 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
 
@@ -500,95 +362,14 @@ type RespView = 'fields' | 'body' | 'headers'
 const respView = ref<RespView>('fields')
 const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
-onBeforeUnmount(() => {
-  if (fieldTimer.current) clearTimeout(fieldTimer.current)
-})
-
-// ---- 编辑区页内查找（textarea：JSON / 文本请求体、脚本、Docs 源码编辑）----
-const segBodyEl = ref<HTMLElement | null>(null)
-const findOn = ref(false)
-const findKw = ref('')
-const findTotal = ref(0)
-const findIndex = ref(-1)
-const findBarRef = ref<InstanceType<typeof FindBar> | null>(null)
-let findMatches: TextareaMatch[] = []
-
-/** 当前分段是否有可查找的 textarea（Docs 仅编辑态有；预览是渲染 HTML，不接入）。 */
-function findable(): boolean {
-  if (seg.value === 'body') return props.tab.request.body.type === 'json' || props.tab.request.body.type === 'text'
-  if (seg.value === 'script') return true
-  if (seg.value === 'docs') return docsEditing.value
-  // gRPC 请求消息是 JSON textarea，同样支持查找
-  if (seg.value === 'message') return isGrpcReq.value
-  return false
-}
-
-function findTargets(): HTMLTextAreaElement[] {
-  if (!segBodyEl.value) return []
-  return Array.from(segBodyEl.value.querySelectorAll('textarea')).filter(
-    (ta) => ta.offsetParent !== null && !ta.disabled,
-  )
-}
-
-async function openFind(): Promise<void> {
-  if (!findable()) return
-  findOn.value = true
-  await nextTick()
-  findBarRef.value?.focus()
-  applyFind()
-}
-
-function applyFind(): void {
-  findMatches = findInTextareas(findTargets(), findKw.value)
-  findTotal.value = findMatches.length
-  findIndex.value = findMatches.length ? 0 : -1
-  if (findMatches.length) selectTextareaMatch(findMatches[0])
-}
-
-function findNext(): void {
-  if (!findMatches.length) return
-  const i = (findIndex.value + 1) % findMatches.length
-  findIndex.value = i
-  selectTextareaMatch(findMatches[i])
-}
-function findPrev(): void {
-  if (!findMatches.length) return
-  const i = (findIndex.value - 1 + findMatches.length) % findMatches.length
-  findIndex.value = i
-  selectTextareaMatch(findMatches[i])
-}
-
-watch(
-  [findKw, seg, docsEditing, () => props.tab.request.body.type, findOn],
-  async () => {
-    // 切到没有可查找 textarea 的分段（或 Docs 切回预览）：查找条自动收起
-    if (findOn.value && !findable()) {
-      findOn.value = false
-      return
-    }
-    if (!findOn.value) {
-      findMatches = []
-      findTotal.value = 0
-      findIndex.value = -1
-      return
-    }
-    await nextTick()
-    applyFind()
-  },
-)
-
-// window 级监听：编辑器根 div 不可聚焦，焦点在 body / 表格输入框时元素上的 @keydown 收不到
-// 事件（Ctrl+F 不会冒泡经过根 div）。编辑器为活动 tab 单实例，挂 window 安全；
-// 当前分段没有可查找 textarea 时不拦截，交回浏览器原生查找。
-function onGlobalKeydown(e: KeyboardEvent): void {
-  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || !findable()) return
-  // 焦点在响应区内时交给 ResponsePanel（两侧都挂了 window 监听，避免双开）
-  if ((e.target as HTMLElement | null)?.closest('.resp')) return
-  e.preventDefault()
-  void openFind()
-}
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
+// ---- 编辑区页内查找（textarea 版；逻辑见 composables/useTextareaFind）----
+const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, openFind, applyFind, findNext, findPrev } =
+  useTextareaFind({
+    getSeg: () => seg.value,
+    getDocsEditing: () => docsEditing.value,
+    getBodyType: () => props.tab.request.body.type,
+    isGrpc: () => isGrpcReq.value,
+  })
 </script>
 
 <template>

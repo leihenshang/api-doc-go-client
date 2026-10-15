@@ -57,7 +57,7 @@ func TestFromFileParsesAuthAndSettings(t *testing.T) {
 	if r.Auth == nil || r.Auth.Type != "inherit" {
 		t.Fatalf("auth 未解析: %+v", r.Auth)
 	}
-	if r.Settings == nil || !r.Settings.EncodeURL || r.Settings.MaxRedirects != 5 || r.Settings.FollowRedirects == nil {
+	if r.Settings == nil || r.Settings.EncodeURL == nil || !*r.Settings.EncodeURL || r.Settings.MaxRedirects != 5 || r.Settings.FollowRedirects == nil {
 		t.Fatalf("settings 未解析: %+v", r.Settings)
 	}
 	if r.Method != "GET" || r.UID != "0f5c2d7a-9b31-4c8e-a2f1-7d0e5b6a1c33" || r.BaseRev != 4211 {

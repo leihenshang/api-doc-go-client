@@ -6,18 +6,19 @@
 import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
-import { DomHighlighter } from '@/lib/find'
+import { useDomFind } from '@/composables/useDomFind'
 import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { buildRespDoc, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
+import { detectFileResponse } from '@/lib/responseFile'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
-import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
+import { BookmarkOutline, DownloadOutline, TrashOutline } from '@vicons/ionicons5'
 import { NAlert, NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -29,15 +30,6 @@ const view = ref<'pretty' | 'raw'>('pretty')
 const wrap = ref(false)
 const seg = ref<'body' | 'headers' | 'trailers'>('body')
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
-
-/** 页内查找 */
-const findOn = ref(false)
-const findKw = ref('')
-const findTotal = ref(0)
-const findIndex = ref(-1)
-const paneRef = ref<HTMLElement | null>(null)
-const findBarRef = ref<InstanceType<typeof FindBar> | null>(null)
-const highlighter = new DomHighlighter()
 
 /** 覆盖确认（仅当字段表已有内容时弹出） */
 const showOverwrite = ref(false)
@@ -87,6 +79,17 @@ const rawText = computed(() => {
 const headerCount = computed(() => display.value?.headers?.length ?? 0)
 const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
 const isGrpcRes = computed(() => (display.value?.proto ?? '') === 'gRPC')
+
+// 文件类响应（下载意图，如 GET xxx/file.md、带 Content-Disposition、或二进制）：
+// 不当接口结果解析/美化，改为提示下载查看。判定见 lib/responseFile。
+const fileInfo = computed(() =>
+  detectFileResponse({
+    url: display.value?.url ?? props.tab.request?.url,
+    contentType: display.value?.contentType,
+    headers: display.value?.headers,
+    binary: display.value?.binary,
+  }),
+)
 
 const examples = ref<ResponseExample[]>([])
 const viewingUid = ref('')
@@ -227,7 +230,6 @@ async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean
 
 onBeforeUnmount(() => {
   if (persistTimer.current) clearTimeout(persistTimer.current)
-  highlighter.clear()
 })
 
 async function copyBody(): Promise<void> {
@@ -279,6 +281,16 @@ async function saveBody(): Promise<void> {
   }
 }
 
+// 文件类响应的下载：用检测到的文件名，二进制走 base64 解码写盘（saveResponseBody 内部处理）。
+async function downloadFile(): Promise<void> {
+  try {
+    const path = await api.saveResponseBody(fileInfo.value.filename, !!display.value?.binary, body.value)
+    if (path) message.success(t('resp.savedFile', { path }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 async function removeExample(): Promise<void> {
   try {
     await api.deleteResponseExample(props.tab.uid, viewingUid.value || (example.value?.uid ?? ''))
@@ -290,59 +302,15 @@ async function removeExample(): Promise<void> {
   }
 }
 
-// ---- 查找（内容区高亮 + 上下切换）----
-function openFind(): void {
-  findOn.value = true
-  void nextTick(() => findBarRef.value?.focus())
-}
-
-watch(findOn, (on) => {
-  if (!on) {
-    findKw.value = ''
-    highlighter.clear()
-    findTotal.value = 0
-    findIndex.value = -1
-  } else {
-    void nextTick(() => findBarRef.value?.focus())
-  }
+// ---- 查找（内容区高亮 + 上下切换；逻辑见 composables/useDomFind）----
+const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, findNext, findPrev } = useDomFind({
+  getSeg: () => seg.value,
+  getView: () => view.value,
+  getBody: () => body.value,
+  getHeaders: () => display.value?.headers,
+  getTrailers: () => display.value?.trailers,
+  hasResponse: () => !!display.value,
 })
-
-watch(
-  [findKw, seg, view, body, findOn, () => display.value?.headers, () => display.value?.trailers],
-  async () => {
-    if (!findOn.value) return
-    await nextTick() // 等页签 / 美化原始切换渲染完
-    findTotal.value = highlighter.apply(paneRef.value, findKw.value)
-    findIndex.value = findTotal.value ? 0 : -1
-    if (findTotal.value) highlighter.select(0)
-  },
-)
-
-function findNext(): void {
-  if (!findTotal.value) return
-  highlighter.step(1)
-  findIndex.value = highlighter.index
-}
-function findPrev(): void {
-  if (!findTotal.value) return
-  highlighter.step(-1)
-  findIndex.value = highlighter.index
-}
-
-// window 级监听：面板根 div 不可聚焦，Playwright/用户在非按钮焦点下按 Ctrl+F 时事件落在
-// body，元素上的 @keydown 收不到冒泡。面板为活动 tab 单实例，挂 window 安全。
-function onGlobalKeydown(e: KeyboardEvent): void {
-  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f' || !display.value) return
-  const target = e.target as HTMLElement | null
-  // 焦点在请求编辑器内（含编辑器自己的查找条）时交给 RequestEditor
-  if (target?.closest('.editor')) return
-  // 焦点在中性区域（页签栏 / 空白处 / body）：编辑器当前分段可查找时优先让给编辑器，避免两个查找条同开
-  if (!target?.closest('.resp') && document.querySelector('.editor .find-btn')) return
-  e.preventDefault()
-  openFind()
-}
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
@@ -393,9 +361,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
           </button>
         </div>
 
-        <response-toolbar v-model:view="view" v-model:wrap="wrap" v-model:find-on="findOn" :is-json="isJson"
-          :copied="copied" :can-save-example="!example" :findable="!!body" @update-fields="updateFields"
-          @copy-body="copyBody" @save-file="saveBody" @save-example="openSave" @find="openFind" />
+        <!-- 文件类响应不显示解析/美化/查找/保存示例等工具（改为下方下载卡片） -->
+        <response-toolbar v-if="!fileInfo.isFile" v-model:view="view" v-model:wrap="wrap" v-model:find-on="findOn"
+          :is-json="isJson" :copied="copied" :can-save-example="!example" :findable="!!body"
+          @update-fields="updateFields" @copy-body="copyBody" @save-file="saveBody" @save-example="openSave"
+          @find="openFind" />
 
         <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
           @next="findNext" @prev="findPrev" @close="findOn = false" />
@@ -410,8 +380,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 
         <div ref="paneRef" class="pane">
           <template v-if="seg === 'body'">
-            <!-- 二进制响应：body 是 base64 文本，给明确提示再展示原文 -->
-            <div v-if="display.binary" class="binhint" data-testid="resp.binaryHint">{{ t('resp.binary') }}</div>
             <div v-if="display.script?.scriptError" class="binhint warn" data-testid="resp.scriptError">
               {{ display.script.scriptError }}
             </div>
@@ -423,10 +391,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
                 <span v-if="a.error" class="aerr">{{ a.error }}</span>
               </div>
             </div>
-            <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
-            <!-- 原始视图固定折行（item 17）：minify 后的一行 JSON 不折会溢出视框；
-                 「换行」开关只作用于美化树 -->
-            <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
+            <!-- 文件类响应（下载意图，如 xxx/file.md、Content-Disposition 附件、二进制）：
+                 只提示下载查看，不把内容当接口结果解析/美化/展示。 -->
+            <div v-if="fileInfo.isFile" class="file-card" data-testid="resp.fileCard">
+              <n-icon :component="DownloadOutline" :size="24" class="fc-ico" />
+              <p class="fc-text">{{ t('resp.filePrompt', { name: fileInfo.filename }) }}</p>
+              <button class="fc-btn" type="button" data-testid="resp.downloadFile" @click="downloadFile">
+                <n-icon :component="DownloadOutline" :size="14" />
+                {{ t('resp.downloadFile') }}
+              </button>
+            </div>
+            <template v-else>
+              <!-- 二进制响应：body 是 base64 文本，给明确提示再展示原文 -->
+              <div v-if="display.binary" class="binhint" data-testid="resp.binaryHint">{{ t('resp.binary') }}</div>
+              <json-tree v-if="isJson && view === 'pretty'" ref="jv" :text="body" :wrap="wrap" />
+              <!-- 原始视图固定折行（item 17）：minify 后的一行 JSON 不折会溢出视框；
+                   「换行」开关只作用于美化树 -->
+              <pre v-else class="raw mono" data-testid="resp.rawBody">{{ rawText }}</pre>
+            </template>
           </template>
 
           <div v-else-if="seg === 'headers'" class="hlist">
@@ -681,6 +663,50 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 .binhint.warn {
   color: var(--app-danger);
+}
+
+/* 文件类响应下载卡片：居中提示 + 下载按钮，替代内容解析视图 */
+.file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--app-text-2);
+}
+
+.file-card .fc-ico {
+  color: var(--app-accent);
+}
+
+.file-card .fc-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 420px;
+  color: var(--app-muted);
+  word-break: break-all;
+}
+
+.fc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--app-accent);
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fc-btn:hover {
+  filter: brightness(1.05);
 }
 
 .asserts {

@@ -389,6 +389,9 @@ export default {
     closeHint: 'Close current tab',
     saveNowHint: 'Save now',
     binary: 'Binary response: shown as base64',
+    // File-type response (download intent, e.g. xxx/file.md): don't parse inline, prompt to download & view
+    filePrompt: 'This response is a file ({name}). To keep it intact, the content is not parsed here — download it and open with a suitable program.',
+    downloadFile: 'Download file',
     /** Response body exceeded 10 MB and was truncated (size is the truncated length) */
     truncated: 'Response truncated',
     truncatedFull: 'Response truncated ({size} actual)',

@@ -389,6 +389,9 @@ export default {
     closeHint: '关闭当前页签',
     saveNowHint: '立即保存',
     binary: '二进制响应：内容已按 base64 展示',
+    // 文件类响应（下载意图，如 xxx/file.md）：不在线解析，提示下载查看
+    filePrompt: '这是一份文件响应（{name}）。为保持文件原样，此处不解析内容，请下载后用合适的程序查看。',
+    downloadFile: '下载文件',
     /** 响应体超过 10MB 被截断（size 是截断后的长度） */
     truncated: '响应体已截断',
     truncatedFull: '响应体已截断（实际 {size}）',

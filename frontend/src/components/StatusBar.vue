@@ -159,18 +159,18 @@ function clock(ms: number): string {
 }
 
 .sync.run {
-  color: var(--app-info, #2080f0);
-  border-color: var(--app-info, #2080f0);
+  color: var(--app-info);
+  border-color: var(--app-info);
 }
 
 .sync.warn {
-  color: var(--app-warn, #f0a020);
-  border-color: var(--app-warn, #f0a020);
+  color: var(--app-warn);
+  border-color: var(--app-warn);
 }
 
 .sync.err {
-  color: var(--app-danger, #d03050);
-  border-color: var(--app-danger, #d03050);
+  color: var(--app-danger);
+  border-color: var(--app-danger);
 }
 
 .sync:hover {

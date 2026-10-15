@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,6 @@ import (
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/cookiejar"
-	"api-doc-go-client/internal/history"
 	"api-doc-go-client/internal/index"
 	"api-doc-go-client/internal/mcpaudit"
 	"api-doc-go-client/internal/mcpauth"
@@ -1323,95 +1321,7 @@ func (a *App) DeleteResponseExample(reqUID, exampleUID string) error {
 	return c.DeleteResponseExample(reqUID, exampleUID)
 }
 
-func (a *App) ListEnvs() ([]collection.Env, error) {
-	c, err := a.requireCollection()
-	if err != nil {
-		return nil, err
-	}
-	return c.ListEnvs()
-}
-
-// SaveEnvChecked 保存环境；expectHash 非空时校验磁盘内容是否仍为该哈希（并发写保护）。
-// 供 MCP 的 set_env_var / rename_env / delete_env_var 使用：这些操作是「读整份 → 改一处 → 整份写回」，
-// 不校验就会静默抹掉客户端界面或另一个 AI 会话在此期间的改动。
-func (a *App) SaveEnvChecked(env *collection.Env, expectHash string) error {
-	if env == nil {
-		return errors.New("环境为空")
-	}
-	c, err := a.requireCollection()
-	if err != nil {
-		return err
-	}
-	return c.SaveEnvChecked(*env, expectHash)
-}
-
-// RenameEnv 给环境改名（两个文件一起搬，旧文件进 .trash）；expectHash 非空时先校验旧文件是否仍��该哈希。
-// 供 MCP 的 rename_env 使用：并发校验必须落在旧名文件上，所以这层不能由调用方拼「写新+删旧」。
-func (a *App) RenameEnv(oldName, newName, expectHash string) error {
-	c, err := a.requireCollection()
-	if err != nil {
-		return err
-	}
-	return c.RenameEnv(oldName, newName, expectHash)
-}
-
-// EnvFileHash 环境主文件的内容哈希（不存在返回空串；并发写保护用）。
-func (a *App) EnvFileHash(name string) (string, error) {
-	c, err := a.requireCollection()
-	if err != nil {
-		return "", err
-	}
-	return c.EnvFileHash(name), nil
-}
-
-func (a *App) SaveEnv(env *collection.Env) error {
-	if env == nil {
-		return errors.New("环境为空")
-	}
-	c, err := a.requireCollection()
-	if err != nil {
-		return err
-	}
-	return c.SaveEnv(*env)
-}
-
-func (a *App) DeleteEnv(name string) error {
-	c, err := a.requireCollection()
-	if err != nil {
-		return err
-	}
-	return c.DeleteEnv(name)
-}
-
-// envVars 取指定环境的变量表（含 secret 合并与内置动态变量）。
-// 未选择环境时只给内置动态变量：不再把全部环境混在一起，避免意外命中其它环境的值。
-func (a *App) envVars(envName string) (map[string]string, error) {
-	vars := map[string]string{}
-	if envName != "" {
-		c, err := a.requireCollection()
-		if err != nil {
-			return nil, err
-		}
-		envs, err := c.ListEnvs()
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range envs {
-			if e.Name != envName {
-				continue
-			}
-			for _, v := range e.Vars {
-				if v.Enabled && v.Name != "" {
-					vars[v.Name] = v.Value
-				}
-			}
-		}
-	}
-	for k, v := range varx.Builtins() {
-		vars[k] = v
-	}
-	return vars, nil
-}
+// 环境变量读写与并发保护见同包 env.go（ListEnvs / SaveEnvChecked / RenameEnv / EnvFileHash / SaveEnv / DeleteEnv / envVars）。
 
 // kvMap 把 KV 行摊成脚本可用的对象（同名后者覆盖前者）。
 func kvMap(rows []collection.KV) map[string]string {
@@ -1643,44 +1553,6 @@ func (a *App) ensureJar() {
 	}
 }
 
-// recordHistory 落一条历史：失败也记，便于回溯排查；带请求快照与响应快照供回看（item 19）。
-//
-// 条目带「所属工作目录」：多根并存后历史按目录隔离展示（切到哪个根只看哪个根的记录）。
-func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr error) {
-	a.mu.Lock()
-	limit := a.settings.HistoryLimit
-	root := a.activeRoot
-	a.mu.Unlock()
-
-	entry := history.Entry{
-		Time: time.Now().UnixMilli(), UID: r.UID, Name: r.Name,
-		Method: strings.ToUpper(r.Method), URL: r.URL, Root: root,
-	}
-	if snap, err := json.Marshal(r); err == nil {
-		entry.Request = snap
-	}
-	switch {
-	case sendErr != nil:
-		entry.Error = sendErr.Error()
-	case res != nil:
-		entry.URL, entry.Status = res.URL, res.Status
-		entry.TimeMS, entry.Size = res.TimeMS, res.Size
-		// 响应快照：body 截断到 8KB（历史是单文件，防大响应撑爆）；headers 全量
-		resSnap := struct {
-			Status  int             `json:"status"`
-			Headers []collection.KV `json:"headers"`
-			Body    string          `json:"body"`
-		}{res.Status, res.Headers, res.Body}
-		if len(resSnap.Body) > 8192 {
-			resSnap.Body = resSnap.Body[:8192] + "\n…（已截断）"
-		}
-		if b, err := json.Marshal(resSnap); err == nil {
-			entry.Response = b
-		}
-	}
-	_ = history.Append(entry, limit)
-}
-
 // GetSettings 读取全局设置（以磁盘为准）。
 func (a *App) GetSettings() (*config.Settings, error) {
 	s, err := config.Load()
@@ -1714,85 +1586,7 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	return nil
 }
 
-// ListHistory 活动根最近的发送记录（新 → 旧）；升级前无归属的旧记录也一并展示。
-func (a *App) ListHistory(limit int) ([]history.Entry, error) {
-	return history.List(limit, a.activeRootID())
-}
-
-// ClearHistory 清空**活动根**的发送历史（其它工作目录的记录保留）。
-func (a *App) ClearHistory() error {
-	return history.Clear(a.activeRootID())
-}
-
-// ---------- 回收站（item 20）----------
-
-// trashColl 按 root 取集合（空 = 活动根）。
-func (a *App) trashColl(root string) (*collection.Collection, error) {
-	if strings.TrimSpace(root) == "" {
-		return a.requireCollection()
-	}
-	return a.collOf(root)
-}
-
-// ListTrashFor 列出指定工作目录（空 = 活动根）的回收站条目，新→旧。
-func (a *App) ListTrashFor(root string) ([]collection.TrashEntry, error) {
-	c, err := a.trashColl(root)
-	if err != nil {
-		return nil, err
-	}
-	return c.ListTrash()
-}
-
-// PreviewTrashFor 预览回收站条目（item 21）：文件给内容（截断），目录给文件清单。
-func (a *App) PreviewTrashFor(root, file string) (*collection.TrashPreview, error) {
-	c, err := a.trashColl(root)
-	if err != nil {
-		return nil, err
-	}
-	return c.PreviewTrash(file)
-}
-
-// DeleteFromTrash 彻底删除一条回收站记录（item 21；不可恢复，前端必须先二次确认）。
-func (a *App) DeleteFromTrash(file, root string) error {
-	c, err := a.trashColl(root)
-	if err != nil {
-		return err
-	}
-	return c.RemoveTrash(file)
-}
-
-// RestoreTrash 恢复一条回收站记录：targetRoot 空 = 恢复到原工作区原路径；
-// 否则复制到指定（已打开）工作区的同一相对路径（目标重名拒绝），成功后从源回收站移除。
-// 返回恢复后的相对路径（相对目标集合）。
-func (a *App) RestoreTrash(file, root, targetRoot string) (string, error) {
-	src, err := a.trashColl(root)
-	if err != nil {
-		return "", err
-	}
-	srcRoot := strings.TrimSpace(root)
-	if srcRoot == "" {
-		srcRoot = a.activeRootID()
-	}
-	if t := strings.TrimSpace(targetRoot); t == "" || t == srcRoot {
-		return src.RestoreTrash(file, "")
-	}
-	dst, err := a.collOf(targetRoot)
-	if err != nil {
-		return "", err
-	}
-	e, err := src.TrashInfo(file)
-	if err != nil {
-		return "", err
-	}
-	got, err := dst.ImportFromAbs(src.TrashAbs(file), collection.TrashRestoreRel(e, ""))
-	if err != nil {
-		return "", err
-	}
-	if err := src.RemoveTrash(file); err != nil {
-		return got, err
-	}
-	return got, nil
-}
+// ---------- 回收站逻辑见同包 trash.go（trashColl / ListTrashFor / PreviewTrashFor / DeleteFromTrash / RestoreTrash）----------
 
 // ListCookies 当前 Cookie 罐内容。
 func (a *App) ListCookies() ([]cookiejar.Info, error) {

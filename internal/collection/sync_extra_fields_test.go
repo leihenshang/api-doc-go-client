@@ -26,7 +26,7 @@ func extraMap(t *testing.T, extraJSON string) map[string]any {
 
 // fullRequest 构造「扩展键全填」的请求：往返用例的源，也是兼容用例的初始状态。
 func fullRequest() *Request {
-	follow, insecure := false, true
+	follow, insecure, encode := false, true, true
 	return &Request{
 		Name:   "demo",
 		Method: "POST",
@@ -40,7 +40,7 @@ func fullRequest() *Request {
 		},
 		Auth: &Auth{Type: "bearer", Token: "tok"},
 		Settings: &RequestSettings{
-			TimeoutSec: 30, FollowRedirects: &follow, MaxRedirects: 5, InsecureSSL: &insecure, EncodeURL: true,
+			TimeoutSec: 30, FollowRedirects: &follow, MaxRedirects: 5, InsecureSSL: &insecure, EncodeURL: &encode,
 		},
 		Script:         &ScriptBlock{PreRequest: "var a=1", PostResponse: "assert(1)"},
 		VarsPreRequest: []ScriptVar{{Name: "v1", Value: "x", Enabled: true}},
@@ -64,7 +64,7 @@ func settingsEq(a, b *RequestSettings) bool {
 	}
 	return a.TimeoutSec == b.TimeoutSec &&
 		a.MaxRedirects == b.MaxRedirects &&
-		a.EncodeURL == b.EncodeURL &&
+		boolPtrEq(a.EncodeURL, b.EncodeURL) &&
 		boolPtrEq(a.FollowRedirects, b.FollowRedirects) &&
 		boolPtrEq(a.InsecureSSL, b.InsecureSSL)
 }
