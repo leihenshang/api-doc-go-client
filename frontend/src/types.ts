@@ -21,6 +21,8 @@ export interface ReqBody {
    */
   data?: string
   form: KV[]
+  /** JSON 体「字段路径 → 备注」，由请求体表格视图维护，随同步往返（share Body.Descs）。 */
+  descs?: Record<string, string>
 }
 
 export type AuthType = 'none' | 'basic' | 'bearer' | 'apikey'
