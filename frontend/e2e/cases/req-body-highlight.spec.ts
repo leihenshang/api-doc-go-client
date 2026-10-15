@@ -102,4 +102,21 @@ test.describe('请求体 JSON 着色', () => {
     await expect(page.getByTestId('req.bodyRaw')).toHaveCount(0)
     await expect(page.locator('.body-pane textarea').first()).toBeVisible()
   })
+
+  test('[B5] JSON 体「表格」视图按字段编辑备注并落盘 descs', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await useJsonBody(page)
+    await page.getByTestId('req.bodyRaw').fill('{"name":"alice","age":3}')
+
+    // 切到表格视图：按字段路径展平，name / age 各一行
+    await page.locator('[data-testid="body.viewTab"][data-view="table"]').click()
+    await expect(page.getByTestId('body.fieldsRow')).toHaveCount(2)
+
+    // 编辑首个字段备注并保存 → body.descs 落盘（备注列是 naive NInput，测试 id 在外层包装，聚焦内层 input）
+    await page.getByTestId('body.fieldDesc').first().locator('input').fill('用户名')
+    await page.keyboard.press('Control+s')
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('用户名')
+  })
 })

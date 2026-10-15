@@ -9,6 +9,7 @@ import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
 import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
+import BodyFieldsTable from '@/components/BodyFieldsTable.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
@@ -17,6 +18,7 @@ import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { dialog, message } from '@/lib/notice'
+import { toBodyRows, withBodyDesc } from '@/lib/bodyFields'
 import { loadFields, rowsFromDoc } from '@/lib/responseFields'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
@@ -314,6 +316,17 @@ const jsonBroken = computed(
   () => props.tab.request.body.raw.trim() !== '' && !hasVarPlaceholder(props.tab.request.body.raw) && !isParsableJson(props.tab.request.body.raw),
 )
 
+// ---- 请求体「原文 / 表格」视图（仅 JSON 体）----
+// 表格按字段路径展平（复用响应字段的 extractFields 口径），值列只读，备注列写回 body.descs 随同步往返。
+type BodyView = 'raw' | 'table'
+const bodyView = ref<BodyView>('raw')
+const bodyRows = computed(() => toBodyRows(props.tab.request.body.raw, props.tab.request.body.descs))
+/** 编辑某字段备注：写回 body.descs（空则删项）并标脏；切换视图不标脏，只有备注改动才 dirty。 */
+function onBodyDesc(path: string, note: string): void {
+  props.tab.request.body.descs = withBodyDesc(props.tab.request.body.descs, path, note)
+  touch()
+}
+
 // 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）
 watch(
   () => props.tab.key,
@@ -458,10 +471,21 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               {{ t('editor.jsonBroken') }}
             </span>
           </div>
-          <!-- JSON 走带语法着色的编辑器（透明 textarea 叠高亮层，编辑行为不变）；
-               纯文本仍用原来的输入框，不引入没必要的着色。 -->
-          <json-body-editor v-if="bodyType === 'json'" v-model="tab.request.body.raw" :rows="12"
-            :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          <!-- JSON 体：原文 / 表格 两视图（表格按字段路径编辑备注，写回 body.descs 随同步往返）；
+               纯文本、表单沿用原编辑器。切换视图不标脏，只有备注改动才 dirty。 -->
+          <template v-if="bodyType === 'json'">
+            <div class="resp-sub" role="group">
+              <button class="sub-tab" :class="{ on: bodyView === 'raw' }" type="button" data-testid="body.viewTab"
+                data-view="raw" @click="bodyView = 'raw'">{{ t('editor.bodyTabRaw') }}</button>
+              <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
+                data-view="table" @click="bodyView = 'table'">
+                {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length }}</span>
+              </button>
+            </div>
+            <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />
+            <json-body-editor v-else v-model="tab.request.body.raw" :rows="12"
+              :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          </template>
           <n-input v-else-if="bodyType === 'text'" v-model:value="tab.request.body.raw" type="textarea" :rows="12"
             class="mono raw" :placeholder="t('editor.rawPlaceholder')" @input="touch" />
           <key-value-table v-else-if="bodyType === 'form' || bodyType === 'multipart'" :rows="tab.request.body.form"
