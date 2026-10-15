@@ -10,6 +10,7 @@
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
+| 查询 | `list_workspaces` / `use_workspace` | 看授权了哪些工作目录；选定**本会话**默认目标（之后 `project` 可省略） |
 | 查询 | `list_projects` | 有哪些项目（集合） |
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
 | 查询 | `get_request_detail` | 某接口的完整详情 + 响应字段文档（respDoc）+ 已保存的响应示例（返回 `hash` 供冲突保护） |
@@ -25,25 +26,31 @@
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
 | 写 | `set_env_var` / `delete_env_var` | 单个变量的 upsert / 删除（敏感值回填掩码 = 不改） |
 
-各工具的完整入参与示例见「五、工具详解」；参数速查见「十一、命令与参数速查」。
+各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
+
+工具按风险分三级（服务端元数据表锁定）：**low = 8 个只读工具**（随便用，无副作用）；**medium = `send_request`**
+（真实网络外发）；**high = 10 个写工具**（落盘修改集合/环境）。客户端**内嵌服务**默认对 medium/high 的每次调用
+**弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
+`-require-consent` 约束。
 
 > **敏感值（`secret: true`）的值永远只回掩码 `••••••`**，这是有意的。轮换就把新值传给 `set_env_var`；
-> 不想动它就把掩码原样传回（见 5.10）。
+> 不想动它就把掩码原样传回（见 4.10）。
 >
-> AI 侧看到的返回是一段**可读文本**（不是结构化 JSON），超大内容会被裁剪并明确标注（见「六、输出裁剪」）。
+> AI 侧看到的返回是一段**可读文本**（不是结构化 JSON），超大内容会被裁剪并明确标注（见「七、输出裁剪」）。
 
 ## 二、快速开始
 
 ### 1. 准备项目根目录
 
 先把要交给 AI 的目录**授权**给它（白名单）：`-allow-writable D:\collections`（可写）或
-`-allow D:\collections`（只读）；客户端内嵌服务在「设置 → MCP 服务 → 可访问的工作目录」里添加。
-**白名单之外一律拒绝**（读不到、也写不了）；没授权任何目录时客户端内嵌服务不会启动。
+`-allow D:\collections`（只读）；客户端内嵌服务在「状态栏 MCP 入口 → MCP 服务分区 → 可访问的工作区」里
+对当前打开的工作区逐条勾选授权。
+**白名单之外一律拒绝**（读不到、也写不了）；没授权任何目录时客户端内嵌服务不会启动监听。
 
 「项目」= 一个集合目录 = **含 `opencollection.yml` 的目录**。把若干集合放进同一个父目录：
 
 ```
-D:\collections\                 ← 这个就是 -root
+D:\collections\                 ← 授权给它（-allow-writable / 内嵌服务勾选）
 ├─ shop-api\                     ← 项目（集合）
 │  ├─ opencollection.yml         ← 有这个文件才算项目
 │  ├─ api\ping.yml
@@ -65,7 +72,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 以 Claude Desktop 为例（Cursor 用项目内 `.cursor/mcp.json`，Cline 在 MCP Servers 设置页填同样的命令与参数）：
 
 ```json
-{ "mcpServers": { "api-doc-go": { "command": "D:\\tools\\mcpserver.exe", "args": ["-root", "D:\\collections"] } } }
+{ "mcpServers": { "api-doc-go": { "command": "D:\\tools\\mcpserver.exe", "args": ["-allow-writable", "D:\\collections"] } } }
 ```
 
 配置后**重启该 AI 工具**（stdio 型 MCP 在进程启动时握手）。然后在 AI 里问一句
@@ -79,9 +86,10 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `-allow-writable` | ❌ | 授权且**可写**的工作目录（逗号分隔）；写工具只在可写授权里生效 |
 | `-root` | ❌ | **旧写法**：等价于 `-allow-writable` 传同一个目录（保留兼容） |
 | `-http` | ❌ | 留空 = 只走 stdio；给地址（如 `127.0.0.1:8189`）则**同时**提供 streamable HTTP（路径 `/mcp`）。只给端口（`:8189`）按**回环**处理，跨主机必须写 `0.0.0.0:8189` |
-| `-http-token` | ❌ | HTTP 的 Bearer 令牌。**监听非回环地址时必须给**（不给直接拒绝启动，避免把集合暴露给同网段任意进程） |
+| `-http-token` | ❌ | HTTP 的 Bearer 令牌。**监听非回环地址且未给时自动生成并打印到 stderr**（每次启动重新生成，客户端配置要跟着换；要稳定令牌就显式传） |
 | `-http-allow-origin` | ❌ | 允许的浏览器来源（Origin），逗号分隔，`*` = 任意。仅浏览器端客户端需要，同时是 DNS rebinding 防护 |
 | `-readonly` | ❌ | 只读模式：不注册写工具；`send_request` 仍可用但**不保存**响应示例 |
+| `-require-consent` | ❌ | 无头严格模式：`send_request` 与全部写工具**一律拒绝**（独立进程没有界面可弹确认，宁可全拒也不静默放行）；只读工具不受影响 |
 
 两个约定：**stdio 下 stdout 属于 JSON-RPC 协议**（日志一律走 stderr）；`-http` 模式下进程**等信号退出**，
 不会因为 stdin 关闭而退出。
@@ -93,7 +101,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
    再用 `use_workspace` 选定默认目标（之后各工具的 `project` 都可以省略）。这个默认目标是**按会话**的：
    同一次连接里选定即可，多个客户端（HTTP 下多个会话）互不影响。
 1. **一个项目 = 一个集合目录**，由授权目录扫描得到；目录变化后用 `list_projects` 的 `refresh: true` 重扫。
-2. **三种方式指定项目**（入参都叫 `project`）：**uid** → **目录名/集合名** → **路径**（绝对或相对 `-root`）。写错会报错并列出候选。
+2. **三种方式指定项目**（入参都叫 `project`）：**uid** → **目录名/集合名** → **路径**（绝对，或相对授权目录）。写错会报错并列出候选。
 3. **懒加载**：启动只扫目录（只读 manifest，不改动项目），第一次访问某项目才真正打开。因此
    `search_requests` 不带 `project` 时**只搜「已加载」的项目** —— 新项目先 `get_project_modules` 或
    `list_projects`（不带 query）打开一次。
@@ -113,7 +121,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
   未选定且未传 `project` 时，工具会报错并提示用 `use_workspace` 或显式传 `project`。
 
 ### 4.1 `list_projects`
-`project?`（按名/路径模糊过滤）、`refresh?`（重新扫描 `-root`）。
+`project?`（按名/路径模糊过滤）、`refresh?`（重新扫描授权目录）。
 返回每个项目的 `路径/名称/uid/请求数/模块数/环境列表`；不可用目录带跳过原因。统计在**首次访问该项目后**才有值（懒加载）。
 
 ### 4.2 `get_project_modules`
@@ -142,12 +150,14 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
 `body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），传了就覆盖 `bodyType`/`bodyRaw`；
-`settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（gRPC 拒绝）；
+`settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（**按子项合并**，
+只给 `params` 字段表时样例/响应头/状态码不动；gRPC 拒绝）；
 `docs` 结构先取 `get_doc_template`；返回落盘后的 `uid` 与 `path`。
 
 ### 4.6 `create_module` / `create_project`
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
-- `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（留空 = `-root`）。建完 `list_projects` 立刻可见。
+- `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（**必须是白名单内的可写目录**，
+  留空 = 第一个可写授权目录；白名单外一律拒绝）。建完 `list_projects` 立刻可见。
 
 ### 4.7 `send_request`
 `project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 true）、
@@ -156,7 +166,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.8 `update_request`
 `project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
-`params` 整表覆盖（传空数组 = 清空）；`respDoc` 整张覆盖（先 `get_request_detail` 读旧表再改；gRPC 拒绝）；
+`params` 整表覆盖（传空数组 = 清空）；`respDoc` **按子项合并**——可只传 `params` 字段表补说明，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；
 `settings` 仅单请求级，不碰全局配置。
 `ifMatch` 传详情里的 `hash`（12 位前缀即可，服务端按 git 风格前缀比对，≥8 位有效）→ 磁盘文件在此期间被外部改动就
 **拒绝写入**；**不传 = 最后写者赢**（与桌面端一致）。改名会自动同步文件名。
@@ -218,7 +228,22 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 只读模式（`-readonly`）下 AI 只能查 + 试发（不落盘），适合放行给「只答疑/查文档」的机器人。
 
-## 六、输出裁剪（保护 AI 上下文）
+## 六、风险操作确认与调用审计（客户端内嵌服务）
+
+独立 `mcpserver.exe` 是无人值守进程，**默认不弹窗**；客户端**内嵌服务**跑在桌面上的真实窗口里，多了一层交互保护：
+
+- **弹窗确认**：AI 每次调用 `send_request` 或任一写工具，客户端会弹「MCP 风险操作确认」——显示工具、来源、
+  目标项目、风险类型（网络外发 / 落盘写）和**脱敏后的入参摘要**（headers/params 只列键名、body 只给类型、
+  cURL 整段省略、疑似密钥一律掩码）。三个选项：**拒绝 / 允许 15 分钟 / 始终允许**。
+- **60 秒不点 = 自动拒绝**（fail-closed），AI 会收到「等待确认超时」的工具错误。
+- **允许 15 分钟**：同一会话里该工具（对该项目）15 分钟内不再问。**始终允许**：落盘持久授权（按 工具+项目，
+  支持「全部风险工具」「任意项目」通配），在设置 MCP 分区「始终允许的授权」里可查看、逐条移除或清空。
+- **开关**：设置 MCP 分区「风险操作前要求确认」默认开；关闭后退回纯静态白名单（等同于独立进程的行为），请谨慎。
+- **调用审计**：每次工具调用记一条（成功/业务错误/被拒绝/内部异常，含工具、项目、授权结论、耗时与入参摘要），
+  落在 `<用户配置目录>/api-doc-client/audit.log.jsonl`（独立进程同路径各写各的）。设置 MCP 分区的「调用审计」面板
+  可按工具/项目/风险/结果过滤查询，支持**导出**与**清空**（清空前自动归档）。排查「AI 到底动过什么」先看这里。
+
+## 七、输出裁剪（保护 AI 上下文）
 
 | 内容 | 默认 | 怎么调 |
 |---|---|---|
@@ -228,19 +253,19 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 被裁剪时返回文本会**明确写**「已截断：共 N 字节，本次仅返回 M 字节」，不会静默丢弃。
 
-## 七、跨主机与 WSL
+## 八、跨主机与 WSL
 
 AI 工具跑在 WSL2、集合放在 Windows（或反过来）时，**不要**在 WSL 里直接跑 mcpserver 读 `/mnt/c/...`
-（原因见 7.4），而是 Windows 侧跑服务、WSL 侧走 HTTP。
+（原因见 8.4），而是 Windows 侧跑服务、WSL 侧走 HTTP。
 
-### 7.1 两步启动
+### 8.1 两步启动
 
 ```bash
-# Windows 侧：绑 0.0.0.0 并显式给令牌
-mcpserver.exe -root D:\collections -http 0.0.0.0:8189 -http-token my-secret-token
+# Windows 侧：绑 0.0.0.0 并显式给令牌（不给会自动生成一个并打印在 stderr，重启即换）
+mcpserver.exe -allow-writable D:\collections -http 0.0.0.0:8189 -http-token my-secret-token
 ```
 
-### 7.2 WSL 侧连哪个地址
+### 8.2 WSL 侧连哪个地址
 
 | WSL 网络模式 | 怎么判断 | WSL 里填的地址 |
 |---|---|---|
@@ -252,7 +277,7 @@ mcpserver.exe -root D:\collections -http 0.0.0.0:8189 -http-token my-secret-toke
 
 先探通再谈业务：`curl http://127.0.0.1:8189/healthz` → `{"ok":true,...}`（不需要令牌）。
 
-### 7.3 客户端配置与自检
+### 8.3 客户端配置与自检
 
 ```json
 {
@@ -282,24 +307,27 @@ curl -s -X POST http://127.0.0.1:8189/mcp -H "$H1" -H "$H2" -H "Authorization: B
 `notifications/initialized` 不能省（协议要求初始化通知之后才能发其它请求）；每次握手返回新的 `Mcp-Session-Id`，
 后续请求都要带上（正规客户端会自动处理）。
 
-### 7.4 为什么不在 WSL 里直接跑服务读 `/mnt/c/...`
+### 8.4 为什么不在 WSL 里直接跑服务读 `/mnt/c/...`
 
 `/mnt/c`（drvfs/9p）**不产生可靠的 inotify 事件** → 外部改动监听与索引刷新基本失效，冲突保护要靠手动重读兜底，
 跨文件系统的重命名/锁语义也更容易出怪问题（尤其 `.trash` 移动）。要本地跑就把集合放在 WSL 原生文件系统
 （`~/collections`）并保证只有一个写者；否则用上面的 HTTP 方式。
 
-## 八、排查
+## 九、排查
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| AI 说「找不到工具 / 服务器未连接」 | `command` 路径错、没重启 AI 工具、`-root` 没传（必填，会直接退出） |
+| AI 说「找不到工具 / 服务器未连接」 | `command` 路径错、没重启 AI 工具、没传授权目录（`-allow`/`-allow-writable`/`-root` 全空会直接退出） |
 | `list_projects` 空但目录明明在 | 该子目录**缺 `opencollection.yml`**；补好后 `refresh: true` 重扫 |
+| 写工具报「只读授权」 | 该目录是 `-allow`（只读）授权的；写操作要在 `-allow-writable` / 内嵌服务勾选「可写」 |
 | 提示「这是 Bruno 集合目录」 | Bruno 格式需先用客户端「导入」转换 |
 | 提示「找不到项目」/「匹配到多个项目」 | `project` 支持 uid/名称/路径；歧义时用返回的候选（推荐 `path`） |
 | `search_requests` 少了某些项目 | 不带 `project` 只搜**已加载**项目；先 `get_project_modules` 打开它 |
 | 保存被拒「文件已被外部修改」 | 读取之后文件被改过。重新 `get_request_detail` 合并后重试或另存新请求。**偶发误报**：文件监听重建索引有几百毫秒延迟，重新读一次即可 |
 | 发送失败 | 地址不通/超时（默认 30s，受全局 `timeoutSec` 约束）/证书问题（`insecureSsl`） |
 | 写操作提示 `unknown tool` | 用了 `-readonly`，写工具没注册 |
+| 「用户拒绝了该操作」/「等待确认超时（60 秒未响应）」 | 内嵌服务的风险操作弹窗被点了拒绝或没人点（见「六」）；批量操作可选「允许 15 分钟」或「始终允许」 |
+| 「无头严格模式禁止风险操作」 | 独立进程加了 `-require-consent`；去掉该参数，或改在客户端内嵌服务下用（有 UI 可确认） |
 | HTTP 模式起不来 | 端口被占（换端口）；路径固定 `/mcp` |
 | 项目统计是 0 | 懒加载：访问一次该项目后才有统计 |
 | `环境 "dev" 已存在` | 新集合自动带 `dev` 环境；换名或直接用 |
@@ -313,19 +341,21 @@ curl -s -X POST http://127.0.0.1:8189/mcp -H "$H1" -H "$H2" -H "Authorization: B
 | WSL 连不上 Windows | 先 `curl .../healthz`：`000` = 地址/防火墙（mirrored 用 `127.0.0.1`）；有响应但 401 = 令牌不对 |
 | `go build` 拉不到 go-sdk | `GOPROXY=https://goproxy.cn,direct go build …` |
 
-## 九、安全清单
+## 十、安全清单
 
 | 项 | 说明 |
 |---|---|
-| 能做什么 | 在 `-root` 下的集合里读写请求、建模块/项目、发请求、删请求（进 `.trash`） |
-| 不会做什么 | 不碰 `-root` 之外的路径（集合层拒绝绝对路径与 `..`）；不执行任意命令；不自动提交 git |
+| 能做什么 | 在**授权白名单**目录里的集合读写请求、建模块/项目、发请求、删请求（进 `.trash`） |
+| 不会做什么 | 不碰白名单之外的路径（集合层拒绝绝对路径与 `..`）；不执行任意命令；不自动提交 git |
 | 写保护 | `update_request` 支持 `ifMatch`；删除只进 `.trash`；环境写操作支持 `ifMatch` |
-| 远程暴露 | 监听非回环**必须**带令牌（独立二进制不给就拒绝启动；内嵌服务自动生成并落盘），每个请求都校验；`/healthz` 免令牌且只回版本号 |
+| 交互确认 | 客户端内嵌服务对 `send_request` 与全部写工具弹窗确认（拒绝 / 允许 15 分钟 / 始终允许，60s 超时按拒绝）；独立进程用 `-require-consent` 可切为一律拒绝 |
+| 调用审计 | 每次工具调用落一条 `audit.log.jsonl`（含授权结论与脱敏入参摘要），设置 MCP 分区可查询/导出/清空 |
+| 远程暴露 | 独立二进制监听非回环且不给令牌时**自动生成并打印**（重启即换，要稳定令牌请显式传）；内嵌服务启用且令牌为空时自动生成并**落盘**（重启不换）；每个请求都校验 Bearer；`/healthz` 免令牌且只回版本号 |
 | 防火墙 | 首次启动弹窗选「专用网络」；或管理员 PowerShell：`New-NetFirewallRule -DisplayName mcpserver -Direction Inbound -LocalPort 8189 -Protocol TCP -Action Allow -Profile Private` |
 | 暴露面 | 只在受信网络这么做；不要直接映射公网，需要就 `ssh -L 8189:127.0.0.1:8189 user@host` |
-| 建议 | ① 对外机器人用 `-readonly`；② 让 AI 指向 **git 工作副本**，改动可 review/回滚；③ 响应示例会进版本库，注意敏感数据 |
+| 建议 | ① 对外机器人用 `-readonly` 或只读授权；② 让 AI 指向 **git 工作副本**，改动可 review/回滚；③ 响应示例会进版本库，注意敏感数据；④ 敏感值只回掩码，AI 上下文里拿不到真密钥 |
 
-## 十、与桌面客户端的关系
+## 十一、与桌面客户端的关系
 
 - 两者操作**同一份集合文件**：AI 建的请求/示例，客户端里立刻能看到（外部改动检测会提示冲突）。
 - 客户端独有：UI 编辑、变量书签、cURL 导入面板、gRPC 定义导入与 Mock 面板、同步绑定面板。
@@ -334,7 +364,8 @@ curl -s -X POST http://127.0.0.1:8189/mcp -H "$H1" -H "$H2" -H "Authorization: B
 
 ## 附：用客户端内置的 MCP 服务（不用单独跑 mcpserver.exe）
 
-客户端内置同一套服务，在「全局设置 → MCP 服务」分区配置（适合「AI 与客户端同机、想一键开关」）。
+客户端内置同一套服务（适合「AI 与客户端同机、想一键开关」）。入口在**底部状态栏的 MCP 指示**
+（运行中 / 未启用 / 出错，每 5 秒刷新），点击直接打开设置弹窗的「MCP 服务」分区。
 
 | 字段 | 说明 |
 |---|---|
@@ -342,42 +373,53 @@ curl -s -X POST http://127.0.0.1:8189/mcp -H "$H1" -H "$H2" -H "Authorization: B
 | 监听地址 | `127.0.0.1（仅本机）` / `0.0.0.0（跨主机）` |
 | 端口 | 默认 8189，可改（1024–65535） |
 | 只读模式 | 默认开：AI 只能查询与试发 |
+| 可访问的工作区 | 列出**客户端当前打开的工作目录**，逐条勾选授权 + 单独开关「可写」；一条都不勾 = 服务不监听（安全默认） |
 | 浏览器来源 | Origin 白名单，逗号分隔；留空 = 拒绝一切浏览器来源 |
 | 访问令牌 | 启用且为空时**自动生成并落盘**（重启/改设置不会变）；「重新生成」立即换新（旧令牌失效） |
+| 风险操作前要求确认 | 默认开：`send_request` 与全部写工具弹窗确认（见「六」）；关闭 = 退回纯静态白名单 |
+| 始终允许的授权 | 展示弹窗里点过「始终允许」的条目（工具 × 项目，含通配），可逐条移除或清空 |
+| 调用审计 | 内嵌面板：按工具/项目/风险/结果过滤查询 + 导出 + 清空（清空前自动归档） |
 | 状态行 | 运行中显示端点 URL 与可见项目数；失败显示原因（如端口被占用） |
+| 一键复制示例 | 生成含地址与 Bearer 令牌的 `mcpServers` JSON 片段，粘贴进 AI 工具即可（跨主机做法与第八节相同） |
 
-保存后立即生效；「复制连接配置」把地址与令牌一起复制（跨主机做法与第七节相同）。
+保存后立即生效（改监听地址/端口/令牌会重启服务）。
 
 | | 客户端内嵌服务 | 独立 `mcpserver.exe` |
 |---|---|---|
-| 配置位置 | 设置界面 | 命令行参数 |
-| 项目根 | **当前打开集合的父目录**（同级集合一并对 AI 可见） | `-root` |
+| 配置位置 | 状态栏 MCP 入口 → 设置 MCP 分区 | 命令行参数 |
+| 工作目录 | 勾选客户端**当前打开的工作区**（可写开关逐条独立） | `-allow` / `-allow-writable`（`-root` 旧写法） |
 | 生命周期 | 随客户端启停 | 独立进程 |
 | 默认只读 | 开 | 关 |
+| 风险工具确认 | **默认弹窗**（可关） | 默认不拦截（`-require-consent` 切为全拒绝） |
+| 令牌 | 自动生成并**落盘**（稳定） | 非回环未给时自动生成**仅打印**（重启即换） |
 | 多开 | 一个客户端一个实例 | 可多实例（注意端口冲突） |
 
-配置存在 `<用户配置目录>/api-doc-client/config.json` 的 `mcp` 段。跨主机时记得把**只读模式关掉**才能让 AI 建/改接口。
+配置存在 `<用户配置目录>/api-doc-client/config.json` 的 `mcp` 段（含 `allow` / `interactiveAuth` / `grants`）。
+跨主机时记得把**只读模式关掉**才能让 AI 建/改接口。
 
-## 十一、命令与参数速查
+## 十二、命令与参数速查
 
 ```bash
 # 构建（首次需拉 SDK，注意代理）
 GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 # 启动
-mcpserver.exe -root D:\collections                        # stdio（AI 挂载）
-mcpserver.exe -root D:\collections -http 127.0.0.1:8189   # + HTTP /mcp
-mcpserver.exe -root D:\collections -readonly              # 只读
-mcpserver.exe -root D:\collections -http 0.0.0.0:8189 -http-token <令牌>   # 跨主机
+mcpserver.exe -allow-writable D:\collections                        # stdio（AI 挂载，可写授权）
+mcpserver.exe -allow D:\collections                                 # stdio（只读授权）
+mcpserver.exe -allow-writable D:\collections -http 127.0.0.1:8189    # + HTTP /mcp
+mcpserver.exe -allow-writable D:\collections -readonly               # 只读（不注册写工具）
+mcpserver.exe -allow-writable D:\collections -require-consent        # 风险工具一律拒绝（无头严格）
+mcpserver.exe -allow-writable D:\collections -http 0.0.0.0:8189 -http-token <令牌>   # 跨主机
 
 # 调试：手工发 JSON-RPC 看服务是否活着（stdio 需保持管道打开）
 printf '%s\n' \
  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
- | mcpserver.exe -root D:\collections
+ | mcpserver.exe -allow-writable D:\collections
 ```
 
 **默认约定回顾**：示例默认保存、响应体裁剪 8192 字节、列表 50/200 条、敏感值只回掩码（掩码回传 = 不改，`.`/`?` 不算掩码）、
-省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、`-root` 下含 `opencollection.yml` 的子目录 = 项目、
-`project` 三种写法（uid / 名称 / 路径）。
+省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、授权目录（`-allow-writable`/`-allow`）下含
+`opencollection.yml` 的子目录 = 项目、`project` 三种写法（uid / 名称 / 路径）、
+内嵌服务风险工具默认弹窗确认（拒绝 / 允许 15 分钟 / 始终允许，60s 超时按拒绝）、每次调用都写审计。
