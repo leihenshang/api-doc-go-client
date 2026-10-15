@@ -9,7 +9,7 @@ import (
 // 兼容口径见 sync_extra_fields.go 头注释：键存在且为字符串才覆盖，空串清空，缺键不动。
 
 var extendedKeys = []string{
-	extraKeyBodyType, extraKeyBody, extraKeyBodyForm,
+	extraKeyBodyType, extraKeyBody, extraKeyBodyForm, extraKeyBodyDescs,
 	extraKeyAuth, extraKeySettings, extraKeyScript,
 	extraKeyVars, extraKeyAsserts, extraKeyRetContentType,
 }
@@ -37,6 +37,7 @@ func fullRequest() *Request {
 				{Name: "a", Value: "1", Enabled: true, Description: "字段 a"},
 				{Name: "b", Value: "2", Enabled: false},
 			},
+			Descs: map[string]string{"data.list[].id": "列表项ID", "data.total": "总数"},
 		},
 		Auth: &Auth{Type: "bearer", Token: "tok"},
 		Settings: &RequestSettings{
@@ -85,6 +86,9 @@ func TestSyncExtra_ExtendedRoundTrip(t *testing.T) {
 		if got.Body.Form[i] != want {
 			t.Errorf("bodyForm[%d]: got %+v want %+v", i, got.Body.Form[i], want)
 		}
+	}
+	if len(got.Body.Descs) != len(src.Body.Descs) || got.Body.Descs["data.total"] != "总数" {
+		t.Errorf("bodyDescs: got %+v want %+v", got.Body.Descs, src.Body.Descs)
 	}
 	if got.Auth == nil || *got.Auth != *src.Auth {
 		t.Errorf("auth: got %+v want %+v", got.Auth, src.Auth)
@@ -157,6 +161,9 @@ func TestApplySyncExtra_OldKeySetKeepsExtendedFields(t *testing.T) {
 	}
 	if got.Body.Type != "form" || len(got.Body.Form) != 2 {
 		t.Errorf("body 被旧键集改动: %+v", got.Body)
+	}
+	if len(got.Body.Descs) != 2 || got.Body.Descs["data.total"] != "总数" {
+		t.Errorf("bodyDescs 被旧键集改动: %+v", got.Body.Descs)
 	}
 }
 

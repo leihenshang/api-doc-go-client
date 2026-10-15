@@ -72,6 +72,7 @@ func SyncExtra(r *Request) string {
 	extra[extraKeyBodyType] = r.Body.Type
 	extra[extraKeyBody] = bodyTextOf(r.Body)
 	extra[extraKeyBodyForm] = marshalFormRows(r.Body.Form)
+	extra[extraKeyBodyDescs] = marshalDescs(r.Body.Descs)
 	extra[extraKeyAuth] = marshalAuth(r.Auth)
 	extra[extraKeySettings] = marshalSettings(r.Settings)
 	extra[extraKeyScript] = marshalScript(r.Script)
