@@ -36,6 +36,9 @@ type BindInfo struct {
 	// ExampleHashes 响应示例的已推送状态（示例 UID → 文件 hash）。
 	// 推送时做脏检测；「有记录但文件已不在」视为本地删除，推送 tombstone。
 	ExampleHashes map[string]string `json:"exampleHashes,omitempty"`
+	// DocHashes 文档条目的已推送状态（文档 UID → 文件 hash）。
+	// 文档不进索引、无独立脏标记，用它做脏检测，只推内容变化的条目（避免每轮全量重推）。
+	DocHashes map[string]string `json:"docHashes,omitempty"`
 }
 
 // Client 同步 HTTP 客户端。
