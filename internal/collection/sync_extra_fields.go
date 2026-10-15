@@ -6,8 +6,8 @@ package collection
 // 语义沿用既有 extra 的「整份覆盖」：键存在且为字符串才覆盖，空串清空，缺键不动 ——
 // 于是旧客户端推旧键集不会清空服务端新列，旧服务端下发缺新键的 extra 也不会清空本地字段。
 //
-// 未接入项：bodyDescs（请求体字段备注）依赖共享包 Body 增加 Descs 字段，属跨仓改动，
-// 常量先占位、待共享包升版本后再接；在此之前客户端不推该键，服务端该列保持不动。
+// 未接入项：（无）。bodyDescs（请求体字段备注）依赖共享包 Body.Descs，随其发版后已接入，
+// 与服务端 http_request_body_descs 列双向往返。
 
 import (
 	"encoding/json"
@@ -18,7 +18,7 @@ const (
 	extraKeyBodyType       = "bodyType"       // none|json|text|form|multipart
 	extraKeyBody           = "body"           // json/text 原文
 	extraKeyBodyForm       = "bodyForm"       // form/multipart 行 JSON
-	extraKeyBodyDescs      = "bodyDescs"      // {"a.b":"备注"}（待共享包支持后启用）
+	extraKeyBodyDescs      = "bodyDescs"      // {"a.b":"备注"}（JSON 体字段备注，随 Body.Descs 往返）
 	extraKeyAuth           = "auth"           // {type,username,password,token,key,value,in}
 	extraKeySettings       = "settings"       // {timeout,followRedirects,maxRedirects,insecureSsl,encodeUrl}
 	extraKeyScript         = "script"         // {preRequest,postResponse}
@@ -226,6 +226,9 @@ func applyExtendedFields(r *Request, m map[string]any) {
 	if v, ok := m[extraKeyBodyForm].(string); ok {
 		r.Body.Form = parseFormRows(v, r.Body.Form)
 	}
+	if v, ok := m[extraKeyBodyDescs].(string); ok {
+		r.Body.Descs = parseDescs(v, r.Body.Descs)
+	}
 	if v, ok := m[extraKeyAuth].(string); ok {
 		r.Auth = parseAuth(v, r.Auth)
 	}
@@ -275,4 +278,30 @@ func parseFormRows(s string, keep []KV) []KV {
 		})
 	}
 	return out
+}
+
+// ---- JSON 体字段备注（Body.Descs：path → 备注）----
+
+// marshalDescs 字段备注 map → JSON 字符串；空 map 返回空串（服务端据此清空该列）。
+func marshalDescs(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// parseDescs JSON 字符串 → 字段备注 map；空串清空，解析失败保留旧值（避免半截覆盖）。
+func parseDescs(s string, keep map[string]string) map[string]string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var m map[string]string
+	if json.Unmarshal([]byte(s), &m) != nil {
+		return keep
+	}
+	return m
 }

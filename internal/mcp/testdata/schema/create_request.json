@@ -34,6 +34,9 @@
         "data": {
           "type": "string"
         },
+        "descs": {
+          "type": "object"
+        },
         "form": {
           "items": {
             "properties": {
