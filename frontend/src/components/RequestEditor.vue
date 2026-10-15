@@ -16,12 +16,12 @@ import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { dialog, message } from '@/lib/notice'
 import type { FieldRow } from '@/lib/responseFields'
-import { loadFields, paramsFromRows, removeFields, rootJsonType, rowsFromDoc, saveFields } from '@/lib/responseFields'
+import { buildRespDoc, loadFields, persistRespDoc, rowsFromDoc, type PersistTimer } from '@/lib/responseFields'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { Auth, ResponseDoc } from '@/types'
+import type { Auth } from '@/types'
 import { SearchOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
@@ -109,6 +109,17 @@ watch(
     if (isGrpcReq.value || readonly.value || syncingFrom.value === 'params') return
     syncParamsFromUrl()
     if (edited) touch()
+  },
+)
+
+// 模块级 Map 跨组件实例常驻：页签关闭后要回收对应 key，否则长期使用会累积已关闭页签的条目。
+watch(
+  () => tabs.tabs.map((t) => t.key),
+  (keys) => {
+    const alive = new Set(keys)
+    for (const k of lastUrlByTab.keys()) {
+      if (!alive.has(k)) lastUrlByTab.delete(k)
+    }
   },
 )
 
@@ -398,7 +409,7 @@ watch(
 // 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
 const hasResp = computed(() => fields.value.length > 0)
 const fields = ref<FieldRow[]>([])
-let fieldTimer: ReturnType<typeof setTimeout> | null = null
+const fieldTimer: PersistTimer = { current: null }
 
 function initFields(): void {
   const fromDoc = rowsFromDoc(props.tab.request.respDoc)
@@ -428,35 +439,18 @@ watch(
 
 /** 写回：已落盘 HTTP 请求更新模型 respDoc（含义输入防抖；删除/清空立即写）；草稿 / gRPC 只存本地。 */
 async function persistFields(immediate = false): Promise<void> {
-  const uid = props.tab.uid
-  const doc: ResponseDoc = {
-    type: props.tab.request.respDoc?.type || rootJsonType('') || '',
-    params: paramsFromRows(fields.value),
-    sample: props.tab.request.respDoc?.sample || '',
-    // 字段表编辑不动快照：状态码/响应头原样带回（item 8）
-    status: props.tab.request.respDoc?.status ?? 0,
-    headers: props.tab.request.respDoc?.headers ?? [],
-  }
-  if (props.tab.draft || isGrpcReq.value || !uid) {
-    saveFields(uid, fields.value)
-    return
-  }
-  const apply = async (): Promise<void> => {
-    try {
-      await api.updateResponseDoc(uid, doc)
-      props.tab.request.respDoc = doc
-      removeFields(uid)
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
-    }
-  }
-  if (immediate) {
-    if (fieldTimer) clearTimeout(fieldTimer)
-    await apply()
-    return
-  }
-  if (fieldTimer) clearTimeout(fieldTimer)
-  fieldTimer = setTimeout(() => void apply(), 600)
+  // 字段表编辑不动快照：type/sample/status/headers 一律回退既有 respDoc（live 传空）。
+  await persistRespDoc({
+    uid: props.tab.uid,
+    draft: props.tab.draft,
+    grpc: isGrpcReq.value,
+    rows: fields.value,
+    doc: buildRespDoc(fields.value, props.tab.request.respDoc, {}),
+    immediate,
+    timer: fieldTimer,
+    attach: (doc) => { props.tab.request.respDoc = doc },
+    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+  })
 }
 
 function setMeaning(path: string, meaning: string): void {
@@ -507,7 +501,7 @@ const respView = ref<RespView>('fields')
 const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
 onBeforeUnmount(() => {
-  if (fieldTimer) clearTimeout(fieldTimer)
+  if (fieldTimer.current) clearTimeout(fieldTimer.current)
 })
 
 // ---- 编辑区页内查找（textarea：JSON / 文本请求体、脚本、Docs 源码编辑）----

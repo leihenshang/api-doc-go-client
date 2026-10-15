@@ -76,16 +76,26 @@ func DefaultOptions() Options {
 	return Options{Timeout: defaultTimeout, FollowRedirects: true, MaxRedirects: defaultMaxRD}
 }
 
+// OptionsInput NewOptions 的入参（聚合成结构体，避免 6 个位置参数违反「≤4」约定）。
+type OptionsInput struct {
+	InsecureSSL     bool
+	TimeoutSec      int
+	FollowRedirects bool
+	MaxRedirects    int
+	Jar             http.CookieJar
+	ProxyURL        string
+}
+
 // NewOptions 由设置值合成策略（集中默认值，避免各调用点重复搬运字段）；
 // timeoutSec / maxRedirects <= 0 时取默认值。
-func NewOptions(insecureSSL bool, timeoutSec int, followRedirects bool, maxRedirects int, jar http.CookieJar, proxyURL string) Options {
+func NewOptions(in OptionsInput) Options {
 	o := DefaultOptions()
-	o.InsecureSSL = insecureSSL
-	o.FollowRedirects = followRedirects
-	o.Jar = jar
-	o.ProxyURL = proxyURL
-	o.Timeout = clampTimeoutSec(timeoutSec)
-	o.MaxRedirects = clampRedirects(maxRedirects)
+	o.InsecureSSL = in.InsecureSSL
+	o.FollowRedirects = in.FollowRedirects
+	o.Jar = in.Jar
+	o.ProxyURL = in.ProxyURL
+	o.Timeout = clampTimeoutSec(in.TimeoutSec)
+	o.MaxRedirects = clampRedirects(in.MaxRedirects)
 	return o
 }
 

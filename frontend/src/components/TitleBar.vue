@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
         </svg>
       </span>
       <span class="brand">{{ t('app.brand') }}</span>
-      <span v-if="isDev" class="dev-badge" data-testid="title.devBadge" title="开发版（wails dev）">dev</span>
+      <span v-if="isDev" class="dev-badge" data-testid="title.devBadge" :title="t('app.devBadgeTitle')">dev</span>
       <span class="ver mono">{{ VERSION }}</span>
     </div>
     <!-- 中间插槽：集合切换 / 环境切换 / 本地搜索（原先独占一行的工具栏，2026-10-03 并入标题栏） -->

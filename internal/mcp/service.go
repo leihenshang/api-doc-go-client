@@ -674,14 +674,33 @@ type CreateRequestInput struct {
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
 func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, error) {
-	a, e, err := s.resolveWrite(in.Project)
+	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return nil, err
 	}
+	draft, err := resolveCreateDraft(a, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyCreateFields(draft, in); err != nil {
+		return nil, err
+	}
+	// 草稿模板的默认 headers 会在没有 headers 时被 CreateRequestFromDraft 填上，这里不覆盖
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, errNeedName
+	}
+	return a.CreateRequestFromDraft(strings.TrimSpace(in.Folder), name, draft)
+}
+
+// resolveCreateDraft 造出 create_request 的草稿底稿：cURL 导入 / 复制已有请求 / 空白三种来源。
+// name 仍由调用方给（cURL 导入结果作为草稿内容）。
+func resolveCreateDraft(a ProjectApp, in CreateRequestInput) (*collection.Request, error) {
 	var draft *collection.Request
+	var err error
 	switch {
 	case strings.TrimSpace(in.Curl) != "":
-		// cURL 导入：URL/方法/头/体都从命令里解析，name 仍由调用方给（导入结果作为草稿内容）
+		// cURL 导入：URL/方法/头/体都从命令里解析
 		draft, err = a.ParseCurl(in.Curl)
 		if err != nil {
 			return nil, fmt.Errorf("解析 cURL 失败: %w", err)
@@ -697,6 +716,12 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if draft == nil {
 		return nil, errEmptyDraft
 	}
+	return draft, nil
+}
+
+// applyCreateFields 把入参里「显式传了」的字段覆盖到底稿上（非指针入参用「非空才覆盖」）。
+// 唯一的校验：gRPC 请求不接受 respDoc，直接返回 errRespDocGRPC。
+func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 	if in.Method != "" {
 		draft.Method = strings.ToUpper(strings.TrimSpace(in.Method))
 	}
@@ -721,7 +746,7 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	}
 	if in.RespDoc != nil {
 		if draft.IsGRPC() {
-			return nil, errRespDocGRPC
+			return errRespDocGRPC
 		}
 		draft.RespDoc = mergeRespDoc(draft.RespDoc, in.RespDoc)
 	}
@@ -731,17 +756,7 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if in.Docs != "" {
 		draft.Docs = in.Docs
 	}
-	// 草稿模板的默认 headers 会在没有 headers 时被 CreateRequestFromDraft 填上，这里不覆盖
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		return nil, errNeedName
-	}
-	created, err := a.CreateRequestFromDraft(strings.TrimSpace(in.Folder), name, draft)
-	if err != nil {
-		return nil, err
-	}
-	_ = e
-	return created, nil
+	return nil
 }
 
 // mergeRespDoc 把传入的 respDoc 合到已有文档上（item 13）：允许只写字段表——
@@ -820,38 +835,8 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	if err != nil {
 		return nil, fmt.Errorf("读取请求 %s 失败: %w", in.UID, err)
 	}
-	if in.Name != nil {
-		r.Name = strings.TrimSpace(*in.Name)
-	}
-	if in.Method != nil {
-		r.Method = strings.ToUpper(strings.TrimSpace(*in.Method))
-	}
-	if in.URL != nil {
-		r.URL = strings.TrimSpace(*in.URL)
-	}
-	if in.Headers != nil {
-		r.Headers = in.Headers
-	}
-	if in.Params != nil {
-		r.Params = in.Params
-	}
-	if in.Body != nil {
-		r.Body = *in.Body
-	}
-	if in.Settings != nil {
-		r.Settings = in.Settings
-	}
-	if in.RespDoc != nil {
-		if r.IsGRPC() {
-			return nil, errRespDocGRPC
-		}
-		r.RespDoc = mergeRespDoc(r.RespDoc, in.RespDoc)
-	}
-	if in.Auth != nil {
-		r.Auth = in.Auth
-	}
-	if in.Docs != nil {
-		r.Docs = *in.Docs
+	if err := applyUpdateFields(r, in); err != nil {
+		return nil, err
 	}
 	// 冲突检测：优先用调用方（AI）读到的 hash；没给就退回当前磁盘 hash（等于不保护）
 	hash := strings.TrimSpace(in.IfMatch)
@@ -878,6 +863,45 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 		}
 	}
 	return r, nil
+}
+
+// applyUpdateFields 把 update_request 里「非 nil」的字段覆盖到已读请求上（指针入参 = 只改传了的）。
+// 唯一校验：gRPC 请求不接受 respDoc，返回 errRespDocGRPC。
+func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
+	if in.Name != nil {
+		r.Name = strings.TrimSpace(*in.Name)
+	}
+	if in.Method != nil {
+		r.Method = strings.ToUpper(strings.TrimSpace(*in.Method))
+	}
+	if in.URL != nil {
+		r.URL = strings.TrimSpace(*in.URL)
+	}
+	if in.Headers != nil {
+		r.Headers = in.Headers
+	}
+	if in.Params != nil {
+		r.Params = in.Params
+	}
+	if in.Body != nil {
+		r.Body = *in.Body
+	}
+	if in.Settings != nil {
+		r.Settings = in.Settings
+	}
+	if in.RespDoc != nil {
+		if r.IsGRPC() {
+			return errRespDocGRPC
+		}
+		r.RespDoc = mergeRespDoc(r.RespDoc, in.RespDoc)
+	}
+	if in.Auth != nil {
+		r.Auth = in.Auth
+	}
+	if in.Docs != nil {
+		r.Docs = *in.Docs
+	}
+	return nil
 }
 
 // CreateProject 新建项目：目标必须是**授权且可写**的工作目录。

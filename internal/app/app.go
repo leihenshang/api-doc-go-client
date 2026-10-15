@@ -573,6 +573,7 @@ func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 		return nil, err
 	}
 	a.setSyncToken(c, b.Token)
+	a.invalidateSyncDiskCache(c) // linked/mode/cursor 变了：状态栏下一次轮询立即反映
 	return &b, nil
 }
 
@@ -592,6 +593,7 @@ func (a *App) UnbindSyncFor(root string) error {
 		return err
 	}
 	a.setSyncToken(c, "")
+	a.invalidateSyncDiskCache(c) // 解绑后 linked/mode/cursor 归零：立即反映
 	return nil
 }
 
@@ -666,8 +668,7 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 			st.LastReport = rep
 		}
 	})
-	a.mu.Lock()
-	a.mu.Unlock()
+	a.invalidateSyncDiskCache(c) // 同步改动了 cursor/dirty/冲突：让下一次状态栏轮询立即重读
 	if err == nil {
 		a.emitAppEvent("collection:changed", map[string]any{"root": rootKey(c.Dir), "paths": []string{"sync"}})
 	}
@@ -690,24 +691,63 @@ type SyncStatus struct {
 }
 
 // GetSyncStatus 活动根的同步状态（供状态栏轮询）。
+//
+// 内存里即时更新的字段（Running/LastSyncAt/LastError/LastReport）直接取；
+// 需要读盘的字段（.sync.json / 索引 dirty / .conflicts 目录）走短 TTL 缓存，
+// 避免状态栏每 5s 轮询都做三次磁盘访问（大集合下 dirty 查询 + 冲突目录列举会拖慢）。
 func (a *App) GetSyncStatus() *SyncStatus {
 	c, err := a.requireCollection()
 	if err != nil {
 		return &SyncStatus{}
 	}
+	st := a.syncStatusOf(c)
+	disk := a.syncDiskSnapshot(c)
+	st.Linked = disk.Linked
+	st.Mode = disk.Mode
+	st.Cursor = disk.Cursor
+	st.DirtyCount = disk.DirtyCount
+	st.Conflicts = disk.Conflicts
+	return &st
+}
+
+// syncDiskTTL GetSyncStatus 磁盘派生字段的缓存有效期。
+// 同步 / binding / 冲突变更后主动失效（见 invalidateSyncDiskCache），保证「立即同步」后状态即时刷新。
+const syncDiskTTL = 2 * time.Second
+
+// syncDiskSnapshot 取磁盘派生状态快照：TTL 内复用缓存，过期则重读并回存（按根各自缓存）。
+func (a *App) syncDiskSnapshot(c *collection.Collection) syncDiskSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e := a.entryOfLocked(c)
+	if e == nil {
+		return syncDiskSnapshot{}
+	}
+	if e.syncDisk != nil && time.Since(e.syncDiskAt) < syncDiskTTL {
+		return *e.syncDisk
+	}
 	b, _ := syncengine.LoadBind(c.Dir)
-	// 轻量读取：状态栏会高频轮询，不能每次都做全量索引重建（walk 整个集合）
 	dirty, _ := c.DirtyNodesFast()
 	confs, _ := c.ListConflicts()
+	snap := syncDiskSnapshot{
+		Linked:     b.Linked,
+		Mode:       b.Mode,
+		Cursor:     b.Cursor,
+		DirtyCount: len(dirty),
+		Conflicts:  len(confs),
+	}
+	e.syncDisk = &snap
+	e.syncDiskAt = time.Now()
+	return snap
+}
 
-	st := a.syncStatusOf(c)
-
-	st.Linked = b.Linked
-	st.Mode = b.Mode
-	st.Cursor = b.Cursor
-	st.DirtyCount = len(dirty)
-	st.Conflicts = len(confs)
-	return &st
+// invalidateSyncDiskCache 丢弃某根的磁盘状态缓存，令下一次 GetSyncStatus 立即重读。
+func (a *App) invalidateSyncDiskCache(c *collection.Collection) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if e := a.entryOfLocked(c); e != nil {
+		e.syncDisk = nil
+		e.syncDiskAt = time.Time{}
+	}
 }
 
 // setSyncRunning 标记该集合是否正在同步（状态栏「同步中」）。
@@ -831,7 +871,11 @@ func (a *App) ResolveConflictFor(root, file, choice string) error {
 	if err != nil {
 		return err
 	}
-	return c.ResolveConflict(file, choice)
+	if err := c.ResolveConflict(file, choice); err != nil {
+		return err
+	}
+	a.invalidateSyncDiskCache(c) // 冲突数与 dirty 可能变化：状态栏下一次轮询立即反映
+	return nil
 }
 
 // ---- 文档条目（B13）----
@@ -1576,7 +1620,14 @@ func (a *App) sendOptions() runner.Options {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.settings
-	return runner.NewOptions(s.InsecureSSL, s.TimeoutSec, s.FollowRedirects, s.MaxRedirects, a.jar, s.ProxyURL)
+	return runner.NewOptions(runner.OptionsInput{
+		InsecureSSL:     s.InsecureSSL,
+		TimeoutSec:      s.TimeoutSec,
+		FollowRedirects: s.FollowRedirects,
+		MaxRedirects:    s.MaxRedirects,
+		Jar:             a.jar,
+		ProxyURL:        s.ProxyURL,
+	})
 }
 
 // ensureJar 惰性创建 Cookie 罐（是否落盘由全局设置决定）。

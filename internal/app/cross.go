@@ -108,7 +108,43 @@ func (a *App) MoveFolderToCollection(srcRoot, uid, destRoot, destParent string) 
 		return nil, err
 	}
 
-	// ---- 1. 预检 ----
+	// ---- 1. 预检（不通过则尚未改动任何盘）----
+	node, err := precheckFolderMove(src, dest, uid, destParent)
+	if err != nil {
+		return nil, err
+	}
+
+	// ---- 2. 镜像目标结构（最轻、可整体撤销）----
+	destOf, made, err := mirrorFolderStructure(dest, node, destParent)
+	if err != nil {
+		rollbackCreatedFolders(dest, made)
+		return nil, err
+	}
+
+	// ---- 3. 搬请求（每个请求自身原子）----
+	moved, err := a.carryRequestsAcross(src, dest, node, destOf)
+	if err != nil {
+		// 回滚：逆序把已搬的请求搬回去（源结构此时仍完整，所以放得回原位）
+		if rbErr := a.rollbackMovedRequests(src, dest, moved); rbErr != nil {
+			return nil, fmt.Errorf("%v；回滚未完全成功（%v），请检查两个工作目录后手工整理", err, rbErr)
+		}
+		rollbackCreatedFolders(dest, made)
+		return nil, fmt.Errorf("%v；已回滚（%d 个请求已搬回源工作目录，uid 会变化，请重新打开对应标签）", err, len(moved))
+	}
+
+	// ---- 4. 删源（自底向上：空分组才删得掉；整棵进源集合 .trash）----
+	uids := movedRequestUIDs(node)
+	if err := deleteFoldersBottomUp(src, node); err != nil {
+		return uids, fmt.Errorf("内容已搬到目标工作目录（%s），但清理源分组失败，请手工删除：%w", dest.Name, err)
+	}
+	return uids, nil
+}
+
+// precheckFolderMove 搬运第 1 步：两端可写已在 crossMoveTargets 校验，这里再核对
+// 源分组存在且不是集合根、目标分组存在、目标下无同名分组（CreateFolder 对已存在目录是
+// 「复用」，同名会悄悄合并进别人的分组）。任一不通过即返回错误，调用方尚未改盘。
+// 通过时返回待搬运的源分组节点。
+func precheckFolderMove(src, dest *collection.Collection, uid, destParent string) (*collection.Node, error) {
 	srcTree, err := src.Tree()
 	if err != nil {
 		return nil, err
@@ -127,14 +163,17 @@ func (a *App) MoveFolderToCollection(srcRoot, uid, destRoot, destParent string) 
 	if destParent != "" && findFolderByPath(destTree, destParent) == nil {
 		return nil, errors.New("目标分组不存在或已被删除")
 	}
-	// 同名就拒绝：CreateFolder 对已存在的目录是「复用」，会悄悄合并进别人的分组
 	if folderByName(destTree, destParent, node.Name) != nil {
 		return nil, fmt.Errorf("目标分组下已存在同名分组「%s」", node.Name)
 	}
+	return node, nil
+}
 
-	// ---- 2. 镜像目标结构（深度优先；建完即从目标树里解出真实路径）----
-	var made []string // 已建出来的目标目录（逆序回滚用）
-	// destOf 源分组路径 → 目标目录：搬运阶段照它走，避免双方清理规则不同导致落到别的目录
+// mirrorFolderStructure 搬运第 2 步：深度优先在目标侧镜像出整棵分组结构（只有目录 + folder.yml）。
+// 返回 destOf（源分组路径 → 目标目录，搬运阶段据此落位，避免双方清理规则不同落到别的目录）
+// 与 made（已建目录，逆序回滚用）；中途失败时已建目录随返回值带出，交调用方回滚。
+func mirrorFolderStructure(dest *collection.Collection, node *collection.Node, destParent string) (map[string]string, []string, error) {
+	var made []string
 	destOf := map[string]string{}
 	var mirror func(n *collection.Node, destDir string) (string, error)
 	mirror = func(n *collection.Node, destDir string) (string, error) {
@@ -154,50 +193,36 @@ func (a *App) MoveFolderToCollection(srcRoot, uid, destRoot, destParent string) 
 		}
 		return newDir, nil
 	}
-	if _, err := mirror(node, destParent); err != nil {
-		rollbackCreatedFolders(dest, made)
-		return nil, err
-	}
+	_, err := mirror(node, destParent)
+	return destOf, made, err
+}
 
-	// ---- 3. 搬请求（深度优先，按 destOf 落到对应目标分组）----
+// carryRequestsAcross 搬运第 3 步：深度优先把 node 子树里的请求逐个搬到 destOf 对应的目标分组。
+// 返回已搬走的请求（回滚需要「原 uid / 新 uid / 原目录」）；任一次搬运失败立即返回，
+// 已搬列表随错误一并带回，交调用方逆序回滚。
+func (a *App) carryRequestsAcross(src, dest *collection.Collection, node *collection.Node, destOf map[string]string) ([]movedRequest, error) {
 	var moved []movedRequest
-	var walkErr error
-	var walk func(n *collection.Node)
-	walk = func(n *collection.Node) {
-		if walkErr != nil {
-			return
-		}
+	var walk func(n *collection.Node) error
+	walk = func(n *collection.Node) error {
 		destDir := destOf[n.Path]
 		for _, ch := range n.Children {
 			switch ch.Type {
 			case "folder":
-				walk(ch)
+				if err := walk(ch); err != nil {
+					return err
+				}
 			case "request":
 				newUID, err := a.moveRequestAcross(src, dest, ch.UID, destDir)
 				if err != nil {
-					walkErr = err
-					return
+					return err
 				}
 				moved = append(moved, movedRequest{srcUID: ch.UID, destUID: newUID, srcDir: relDirOf(ch.Path)})
 			}
 		}
+		return nil
 	}
-	walk(node)
-	if walkErr != nil {
-		// 回滚：逆序把已搬的请求搬回去（源结构此时仍完整，所以放得回原位）
-		if rbErr := a.rollbackMovedRequests(src, dest, moved); rbErr != nil {
-			return nil, fmt.Errorf("%v；回滚未完全成功（%v），请检查两个工作目录后手工整理", walkErr, rbErr)
-		}
-		rollbackCreatedFolders(dest, made)
-		return nil, fmt.Errorf("%v；已回滚（%d 个请求已搬回源工作目录，uid 会变化，请重新打开对应标签）", walkErr, len(moved))
-	}
-
-	// ---- 4. 删源（自底向上：空分组才删得掉；整棵进源集合 .trash）----
-	uids := movedRequestUIDs(node)
-	if err := deleteFoldersBottomUp(src, node); err != nil {
-		return uids, fmt.Errorf("内容已搬到目标工作目录（%s），但清理源分组失败，请手工删除：%w", dest.Name, err)
-	}
-	return uids, nil
+	err := walk(node)
+	return moved, err
 }
 
 // resolveCreatedDir 解出「刚在 parent 下建的同名分组」在目标集合里的真实相对路径。

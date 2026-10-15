@@ -240,7 +240,12 @@ func (a *JSONLAuditor) Subscribe() (<-chan Event, func()) {
 	a.subs[id] = ch
 	cancel := func() {
 		a.mu.Lock()
-		delete(a.subs, id)
+		// 关闭通道唤醒消费者（`for ev := range ch` 随即退出），否则订阅 goroutine 会永久阻塞。
+		// 用 map 命中判定防重复关闭：Close() 里也会对仍在册的通道关闭，二者不会二次 close。
+		if c, ok := a.subs[id]; ok {
+			delete(a.subs, id)
+			close(c)
+		}
 		a.mu.Unlock()
 	}
 	return ch, cancel
@@ -314,17 +319,15 @@ func (a *JSONLAuditor) writeOne(evIn Event) {
 	a.size += int64(len(b)) + 1
 	needRotate = a.size >= a.maxFileBytes
 	a.ring = appendRing(a.ring, &evIn)
-	subs := make([]chan Event, 0, len(a.subs))
+	// 扇出必须与「关闭订阅通道」（cancel / Close）互斥，否则可能向已关闭通道发送而 panic；
+	// 二者都在 a.mu 下完成即可。发送为非阻塞（满则跳过），持锁时间有界（订阅者数量很小）。
 	for _, ch := range a.subs {
-		subs = append(subs, ch)
-	}
-	a.mu.Unlock()
-	for _, ch := range subs {
 		select {
 		case ch <- evIn:
 		default: // 慢订阅者跳过
 		}
 	}
+	a.mu.Unlock()
 	if needRotate {
 		if err := a.rotateNow(); err != nil {
 			a.logf("audit rotate: %v", err)
@@ -416,9 +419,21 @@ func (a *JSONLAuditor) ExportTo(dest string) error {
 // Close 停止写循环并 flush（最多等待 2s）。幂等，可重复调用。
 func (a *JSONLAuditor) Close() error {
 	a.closeOnce.Do(func() { close(a.queue) })
+	stopped := false
 	select {
 	case <-a.done:
+		stopped = true
 	case <-time.After(2 * time.Second):
+	}
+	// 写循环已确定退出（不再有扇出发送）后，关闭仍在册的订阅通道，唤醒未显式退订的消费者。
+	// 超时未退出时不关闭（避免与残留发送竞态）——此时正常路径的 cancel() 已各自关闭。
+	if stopped {
+		a.mu.Lock()
+		for id, ch := range a.subs {
+			close(ch)
+			delete(a.subs, id)
+		}
+		a.mu.Unlock()
 	}
 	return nil
 }
