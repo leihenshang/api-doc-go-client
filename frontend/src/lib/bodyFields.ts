@@ -4,23 +4,23 @@
 import { extractFields } from '@/lib/responseFields'
 
 export interface BodyFieldRow {
-  path: string
-  type: string
-  /** 叶子为原始值文本、容器为空串；本列只读（值由 JSON 原文决定，表格只编辑备注） */
-  value: string
-  /** 字段备注（取自 body.descs[path]），可编辑并写回 body.descs */
-  desc: string
+    path: string
+    type: string
+    /** 叶子为原始值文本、容器为空串；本列只读（值由 JSON 原文决定，表格只编辑备注） */
+    value: string
+    /** 字段备注（取自 body.descs[path]），可编辑并写回 body.descs */
+    desc: string
 }
 
 /** JSON 原文 → 表格行；按 body.descs 附上各行备注；非法/空 JSON 返回空数组（表格显示空态）。 */
 export function toBodyRows(raw: string, descs?: Record<string, string>): BodyFieldRow[] {
-  const d = descs ?? {}
-  return extractFields(raw).map((f) => ({
-    path: f.path,
-    type: f.type,
-    value: f.value,
-    desc: d[f.path] ?? '',
-  }))
+    const d = descs ?? {}
+    return extractFields(raw).map((f) => ({
+        path: f.path,
+        type: f.type,
+        value: f.value,
+        desc: d[f.path] ?? '',
+    }))
 }
 
 /**
@@ -28,12 +28,12 @@ export function toBodyRows(raw: string, descs?: Record<string, string>): BodyFie
  * 空串（trim 后）删除该项，保持 body.descs 精简，避免同步里塞满空备注。
  */
 export function withBodyDesc(
-  descs: Record<string, string> | undefined,
-  path: string,
-  note: string,
+    descs: Record<string, string> | undefined,
+    path: string,
+    note: string,
 ): Record<string, string> {
-  const next: Record<string, string> = { ...(descs ?? {}) }
-  if (note.trim() === '') delete next[path]
-  else next[path] = note
-  return next
+    const next: Record<string, string> = { ...(descs ?? {}) }
+    if (note.trim() === '') delete next[path]
+    else next[path] = note
+    return next
 }
