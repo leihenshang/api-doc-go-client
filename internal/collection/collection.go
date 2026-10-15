@@ -59,6 +59,9 @@ type Collection struct {
 const gitignoreContent = "# 客户端自动维护\n" +
 	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.trash/\n.conflicts/\nnode_modules/\n"
 
+// NewUID 生成实体稳定身份（uuid v4）。环境/变量的 uid 由同步引擎首次推送时补齐。
+func NewUID() string { return uuid.NewString() }
+
 // Open 打开（不存在则初始化）一个集合目录。
 // 原生 Bruno 目录（含 bruno.json 或 .bru）不能直接打开，须走导入流程。
 func Open(dir string) (*Collection, error) {
@@ -1159,7 +1162,7 @@ func (c *Collection) readEnv(name string) (*Env, error) {
 			sec = got
 		}
 	}
-	env := &Env{Name: name}
+	env := &Env{UID: f.UID, Name: name}
 	for _, v := range f.Vars {
 		if v.Secret {
 			if val, ok := sec[v.Name]; ok {
@@ -1216,6 +1219,7 @@ func (c *Collection) saveEnv(env Env) error {
 	}
 	f := envFile{}
 	f.Info.Name = env.Name
+	f.UID = env.UID
 	sec := secretsFile{Secrets: map[string]string{}}
 	for _, v := range env.Vars {
 		if v.Name == "" {

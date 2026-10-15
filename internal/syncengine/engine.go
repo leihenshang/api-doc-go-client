@@ -2,6 +2,7 @@ package syncengine
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/index"
+	"api-doc-go-client/internal/secrets"
 )
 
 // Engine 一轮同步的编排：先 pull 后 push。
@@ -22,6 +24,68 @@ type Engine struct {
 	Coll *collection.Collection
 	Bind BindInfo
 	CLI  *Client
+	// Cipher secret 变量值的口令加解密器；nil/空口令时 secret 不出本机（不同步该条）。
+	Cipher *secrets.Cipher
+}
+
+// cipher 返回生效的加解密器：显式注入优先，否则读本机持久化口令（App 每次同步新建 Engine）。
+func (e *Engine) cipher() *secrets.Cipher {
+	if e.Cipher != nil {
+		return e.Cipher
+	}
+	return secrets.NewCipher(SyncPassphrase())
+}
+
+// SyncPassphrase 读取本机同步口令（未设置返回空串）。口令用于 secret 变量值的加解密，
+// 存配置目录 0600（与 device_id 同级）；换机需输入同一口令才能解开既有密文。
+func SyncPassphrase() string {
+	p := syncPassphrasePath()
+	if p == "" {
+		return ""
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// SetSyncPassphrase 设置口令（传空串 = 清除文件）。
+func SetSyncPassphrase(pass string) error {
+	p := syncPassphrasePath()
+	if p == "" {
+		return fmt.Errorf("无法定位配置目录")
+	}
+	if pass == "" {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(pass), 0o600) // 刻意不加尾换行：口令原样存取
+}
+
+func syncPassphrasePath() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "sync_passphrase")
+}
+
+// envHashOf / varHashOf：环境与变量条目的内容摘要（sha-256 hex），做推送脏检测用。
+// secret 值以本地明文参与摘要（摘要不泄露明文），改名/改值/启停/敏感标记都会触发重推。
+func envHashOf(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(sum[:])
+}
+
+func varHashOf(v collection.Var) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%v\x00%v\x00%s", v.Name, v.Enabled, v.Secret, v.Value)))
+	return hex.EncodeToString(sum[:])
 }
 
 // DeviceID 读取本机设备标识：首次生成后持久化到配置目录（device_id 文件），跨重启保持不变。
@@ -241,6 +305,10 @@ func typeRank(t string) int {
 		return 2
 	case "example":
 		return 3 // 示例依赖请求文件，排在其后
+	case "variable_env":
+		return 4 // 环境先于变量（变量按 env_uid 挂接）
+	case "variable":
+		return 5
 	default:
 		return 9
 	}
@@ -253,6 +321,13 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	// 响应示例：写 examples/ 文件即可，不进索引/冲突副本体系。
 	if it.Type == "example" {
 		return e.applyExample(it.UID, p)
+	}
+	// 环境/变量：落 environments/ 文件，摘要记录在 Bind，不进索引与冲突副本体系。
+	if it.Type == "variable_env" {
+		return e.applyVarEnv(it.UID, p)
+	}
+	if it.Type == "variable" {
+		return e.applyVariable(it.UID, p)
 	}
 
 	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）。
@@ -420,6 +495,94 @@ func (e *Engine) applyDoc(uid string, p Payload) error {
 	return e.Coll.SaveDoc(d)
 }
 
+// envByUID 按同步 uid 找本地环境（ListEnvs 已合并 secret 值）。
+func (e *Engine) envByUID(uid string) (collection.Env, int, error) {
+	envs, err := e.Coll.ListEnvs()
+	if err != nil {
+		return collection.Env{}, -1, err
+	}
+	for i, env := range envs {
+		if env.UID == uid {
+			return env, i, nil
+		}
+	}
+	return collection.Env{}, -1, nil
+}
+
+// applyVarEnv 应用环境：uid 缺失则新建；名称不一致则重命名（RenameEnv 保证两文件同搬）；一致则仅记录摘要。
+func (e *Engine) applyVarEnv(uid string, p Payload) error {
+	if p.Name == "" {
+		return nil
+	}
+	env, _, err := e.envByUID(uid)
+	if err != nil {
+		return err
+	}
+	switch {
+	case env.Name == "": // 本地无此环境：按服务端 uid 新建
+		if err := e.Coll.SaveEnv(collection.Env{UID: uid, Name: p.Name}); err != nil {
+			return err
+		}
+	case env.Name == p.Name: // 同名：no-op
+	default: // 改名：走原子重命名（旧文件进 .trash）
+		if err := e.Coll.RenameEnv(env.Name, p.Name, ""); err != nil {
+			return err
+		}
+	}
+	if e.Bind.EnvHashes == nil {
+		e.Bind.EnvHashes = map[string]string{}
+	}
+	e.Bind.EnvHashes[uid] = envHashOf(p.Name)
+	return nil
+}
+
+// applyVariable 应用变量：定位所属环境（环境条目排序在前，正常必然先落好）；
+// secret 值尝试口令解密——未设/错口令时按密文原样落 secrets 文件（不丢数据，设好口令后下轮重新对齐），
+// 之后整份 SaveEnv（名称/启停/敏感标记/值一并覆盖）。
+func (e *Engine) applyVariable(uid string, p Payload) error {
+	if p.Name == "" || p.EnvUID == "" {
+		return nil
+	}
+	env, _, err := e.envByUID(p.EnvUID)
+	if err != nil {
+		return err
+	}
+	if env.Name == "" {
+		return fmt.Errorf("变量 %s 的所属环境（uid=%s）尚未同步", p.Name, p.EnvUID)
+	}
+	value := p.Value
+	if p.Secret {
+		if dec, derr := e.cipher().Open(p.Value); derr == nil {
+			value = dec
+		}
+	}
+	enabled := p.Enabled == nil || *p.Enabled
+	found := false
+	for i, v := range env.Vars {
+		if v.UID != "" && v.UID == uid {
+			env.Vars[i].Name, env.Vars[i].Value = p.Name, value
+			env.Vars[i].Enabled, env.Vars[i].Secret = enabled, p.Secret
+			found = true
+			break
+		}
+	}
+	if !found {
+		env.Vars = append(env.Vars, collection.Var{
+			UID: uid, Name: p.Name, Value: value, Enabled: enabled, Secret: p.Secret,
+		})
+	}
+	if err := e.Coll.SaveEnv(env); err != nil {
+		return err
+	}
+	if e.Bind.VarHashes == nil {
+		e.Bind.VarHashes = map[string]string{}
+	}
+	e.Bind.VarHashes[uid] = varHashOf(collection.Var{
+		Name: p.Name, Value: value, Enabled: enabled, Secret: p.Secret,
+	})
+	return nil
+}
+
 func (e *Engine) applyDelete(it Item, rep *Report) {
 	switch it.Type {
 	case "api":
@@ -432,7 +595,60 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 	case "example":
 		_ = e.Coll.DeleteResponseExampleByUID(it.UID)
 		delete(e.Bind.ExampleHashes, it.UID)
+	case "variable":
+		e.removeVarByUID(it.UID)
+		delete(e.Bind.VarHashes, it.UID)
+	case "variable_env":
+		e.removeEnvByUID(it.UID)
 	}
+}
+
+// removeVarByUID 从所属环境文件里删掉该 uid 的变量（保存走 SaveEnv，secret 旁路随之收口）。
+func (e *Engine) removeVarByUID(uid string) {
+	env, _, err := e.envByUIDVar(uid)
+	if err != nil || env.Name == "" {
+		return
+	}
+	kept := env.Vars[:0:0]
+	for _, v := range env.Vars {
+		if v.UID != uid {
+			kept = append(kept, v)
+		}
+	}
+	env.Vars = kept
+	_ = e.Coll.SaveEnv(env)
+}
+
+// envByUIDVar 按变量 uid 反查其所在环境。
+func (e *Engine) envByUIDVar(uid string) (collection.Env, int, error) {
+	envs, err := e.Coll.ListEnvs()
+	if err != nil {
+		return collection.Env{}, -1, err
+	}
+	for i, env := range envs {
+		for _, v := range env.Vars {
+			if v.UID == uid {
+				return env, i, nil
+			}
+		}
+	}
+	return collection.Env{}, -1, nil
+}
+
+// removeEnvByUID 删除环境（两文件移入 .trash），并清理其变量与自身的同步摘要记录。
+func (e *Engine) removeEnvByUID(uid string) {
+	env, _, err := e.envByUID(uid)
+	if err != nil || env.Name == "" {
+		delete(e.Bind.EnvHashes, uid)
+		return
+	}
+	for _, v := range env.Vars {
+		if v.UID != "" {
+			delete(e.Bind.VarHashes, v.UID)
+		}
+	}
+	_ = e.Coll.DeleteEnv(env.Name)
+	delete(e.Bind.EnvHashes, uid)
 }
 
 // applyExample 应用服务端下发的响应示例：落到所属请求的 examples/ 目录。
@@ -528,6 +744,7 @@ func (e *Engine) pushDirty(rep *Report) error {
 	b.collectTombstoneOps(pendingDel)
 	e.collectDocOps(b)
 	e.collectExampleOps(b)
+	e.collectVarOps(b)
 	if len(b.ops) == 0 {
 		return nil
 	}
@@ -677,6 +894,101 @@ func (e *Engine) applyPushResults(rep *Report, resp *PushResp, meta map[string]d
 	return allOk
 }
 
+// collectVarOps 环境与变量（S16）：先补齐并落盘缺失的 uid（自愈式身份分配），再按摘要做脏检测；
+// 顺序固定为「全部环境 → 全部变量」，服务端按序应用即可保证变量能找到环境。
+// secret 值：设置了口令则以 enc:v1: 密文出网（已是密文的原样发、防二次加密）；
+// 未设口令则跳过该条——明文绝不出本机，也不报错刷屏（下轮设好口令自然补推）。
+func (e *Engine) collectVarOps(b *pushBatch) {
+	envs, err := e.Coll.ListEnvs()
+	if err != nil {
+		return
+	}
+	ciph := e.cipher()
+	type pendingVar struct {
+		envUID string
+		v      collection.Var
+	}
+	var pending []pendingVar
+	liveEnv := map[string]bool{}
+	for _, env := range envs {
+		changed := false
+		if env.UID == "" {
+			env.UID = collection.NewUID()
+			changed = true
+		}
+		for i := range env.Vars {
+			if env.Vars[i].Name == "" {
+				continue
+			}
+			if env.Vars[i].UID == "" {
+				env.Vars[i].UID = collection.NewUID()
+				changed = true
+			}
+		}
+		if changed {
+			if err := e.Coll.SaveEnv(env); err != nil {
+				continue
+			}
+		}
+		if env.UID == "" {
+			continue
+		}
+		liveEnv[env.UID] = true
+		eh := envHashOf(env.Name)
+		if prev, seen := e.Bind.EnvHashes[env.UID]; !seen || prev != eh {
+			op := Op{OpID: newOpID(), Op: "upsert", Type: "variable_env", UID: env.UID}
+			op.Payload, _ = json.Marshal(Payload{Name: env.Name})
+			b.add(op, dirtyMeta{uid: env.UID, hash: eh, typ: "variable_env"})
+		}
+		for _, v := range env.Vars {
+			if v.UID != "" && v.Name != "" {
+				pending = append(pending, pendingVar{envUID: env.UID, v: v})
+			}
+		}
+	}
+	liveVar := map[string]bool{}
+	for _, pv := range pending {
+		v := pv.v
+		liveVar[v.UID] = true
+		h := varHashOf(v)
+		if prev, seen := e.Bind.VarHashes[v.UID]; seen && prev == h && h != "" {
+			continue
+		}
+		val := v.Value
+		if v.Secret {
+			if !ciph.Enabled() {
+				continue // 未设口令：secret 不出本机
+			}
+			if !secrets.IsEncrypted(val) {
+				blob, _, serr := ciph.Seal(val)
+				if serr != nil {
+					continue
+				}
+				val = blob
+			}
+		}
+		enabled := v.Enabled
+		op := Op{OpID: newOpID(), Op: "upsert", Type: "variable", UID: v.UID}
+		op.Payload, _ = json.Marshal(Payload{
+			Name: v.Name, Value: val, Secret: v.Secret, Enabled: &enabled, EnvUID: pv.envUID,
+		})
+		b.add(op, dirtyMeta{uid: v.UID, hash: h, typ: "variable"})
+	}
+	// 「有记录但已不在本地」视为删除：变量 tombstone 先于环境。
+	for uid := range e.Bind.VarHashes {
+		if !liveVar[uid] {
+			b.add(Op{OpID: newOpID(), Op: "delete", Type: "variable", UID: uid},
+				dirtyMeta{uid: uid, typ: "variable", isDelete: true})
+		}
+	}
+	for uid := range e.Bind.EnvHashes {
+		if !liveEnv[uid] {
+			b.add(Op{OpID: newOpID(), Op: "delete", Type: "variable_env", UID: uid},
+				dirtyMeta{uid: uid, typ: "variable_env", isDelete: true})
+		}
+	}
+}
+
 // applyPushed 单条成功回执：示例 / 文档不进索引，改用 Bind.ExampleHashes / Bind.DocHashes 记录推送状态
 // （upsert 记 hash、删除清记录）；其余条目 MarkSynced，无文件 hash 的（分组）用哨兵值。
 func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
@@ -699,6 +1011,28 @@ func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
 				e.Bind.DocHashes = map[string]string{}
 			}
 			e.Bind.DocHashes[m.uid] = m.hash
+		}
+		return
+	}
+	if m.typ == "variable" || m.typ == "variable_env" {
+		store := e.Bind.VarHashes
+		if m.typ == "variable_env" {
+			store = e.Bind.EnvHashes
+		}
+		if m.isDelete {
+			delete(store, m.uid)
+			return
+		}
+		if m.hash != "" {
+			if store == nil {
+				store = map[string]string{}
+				if m.typ == "variable_env" {
+					e.Bind.EnvHashes = store
+				} else {
+					e.Bind.VarHashes = store
+				}
+			}
+			store[m.uid] = m.hash
 		}
 		return
 	}

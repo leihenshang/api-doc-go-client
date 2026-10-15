@@ -39,6 +39,11 @@ type BindInfo struct {
 	// DocHashes 文档条目的已推送状态（文档 UID → 文件 hash）。
 	// 文档不进索引、无独立脏标记，用它做脏检测，只推内容变化的条目（避免每轮全量重推）。
 	DocHashes map[string]string `json:"docHashes,omitempty"`
+	// EnvHashes / VarHashes 环境与变量的已推送状态（UID → 内容摘要）。
+	// 变量类文件（environments/）不进索引，用摘要做脏检测；secret 值摘要用本地明文计算，
+	// 摘要本身不泄露明文（sha-256），密文只在传输层出现。
+	EnvHashes map[string]string `json:"envHashes,omitempty"`
+	VarHashes map[string]string `json:"varHashes,omitempty"`
 }
 
 // Client 同步 HTTP 客户端。
@@ -200,7 +205,13 @@ type Payload struct {
 	Status      int    `json:"status,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	Seq         int    `json:"seq,omitempty"`
-	Deleted     bool   `json:"deleted,omitempty"`
+	// variable / variable_env（S16）：Name 复用为变量名/环境名；
+	// secret 变量的 Value 为口令加密密文（enc:v1: 前缀），服务端只存不解析。
+	EnvUID  string `json:"env_uid,omitempty"`
+	Value   string `json:"value,omitempty"`
+	Secret  bool   `json:"secret,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
+	Deleted bool   `json:"deleted,omitempty"`
 }
 
 // ---- HTTP ----

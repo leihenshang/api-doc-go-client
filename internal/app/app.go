@@ -595,6 +595,18 @@ func (a *App) UnbindSyncFor(root string) error {
 	return nil
 }
 
+// GetSyncPassphraseSet 返回本机是否已设置同步口令（secret 变量加解密用）。
+// 刻意不回传口令本身——UI 只需要知道"是否已设置"。
+func (a *App) GetSyncPassphraseSet() bool {
+	return syncengine.SyncPassphrase() != ""
+}
+
+// SetSyncPassphrase 设置/清除同步口令（空串=清除）。口令存配置目录 0600，不进集合文件。
+// 未设置口令时 secret 变量不会出本机（推送跳过该条，明文不外泄）。
+func (a *App) SetSyncPassphrase(pass string) error {
+	return syncengine.SetSyncPassphrase(pass)
+}
+
 // RunSync 在**活动根**上执行一轮同步（先 pull 后 push）。token 为空时用已保存的 PAT。
 func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	c, err := a.requireCollection()

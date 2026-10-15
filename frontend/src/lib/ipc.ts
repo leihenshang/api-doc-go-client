@@ -341,6 +341,9 @@ export const api = {
   setSyncBindFor: (req: SyncBindReq) => call<SyncBindInfo>('SetSyncBindFor', req),
   unbindSyncFor: (root: string) => call<null>('UnbindSyncFor', root),
   runSyncForRoot: (root: string) => call<SyncReport>('RunSyncForRoot', root),
+  // 同步口令（secret 变量加解密）：只查询「是否已设置」，永不回传口令本身
+  getSyncPassphraseSet: () => call<boolean>('GetSyncPassphraseSet'),
+  setSyncPassphrase: (pass: string) => call<null>('SetSyncPassphrase', pass),
   listConflictsFor: (root: string) =>
     call<ConflictItem[] | null>('ListConflictsFor', root).then((v) => v ?? []),
   getConflictDetailFor: (root: string, file: string) =>
