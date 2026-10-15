@@ -30,11 +30,11 @@ const (
 // syncSettingsRow 请求设置行：三态布尔落 smallint（1=true / 0=false / -1=未设置）。
 // FollowRedirects / InsecureSSL 在本地是 *bool，退化成 bool 会丢掉「未设置 → 沿用全局设置」这一档。
 type syncSettingsRow struct {
-	Timeout         int  `json:"timeout,omitempty"`
-	FollowRedirects int8 `json:"followRedirects"`
-	MaxRedirects    int  `json:"maxRedirects,omitempty"`
-	InsecureSSL     int8 `json:"insecureSsl"`
-	EncodeURL       bool `json:"encodeUrl,omitempty"`
+	Timeout         int   `json:"timeout,omitempty"`
+	FollowRedirects int8  `json:"followRedirects"`
+	MaxRedirects    int   `json:"maxRedirects,omitempty"`
+	InsecureSSL     int8  `json:"insecureSsl"`
+	EncodeURL       *bool `json:"encodeUrl,omitempty"`
 }
 
 // syncFormRow form/multipart 行（对齐服务端 http_request_body_form）。

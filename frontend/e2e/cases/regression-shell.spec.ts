@@ -295,7 +295,8 @@ test.describe('外壳、布局与命令面板', () => {
     await expect(page.locator('.n-message').last()).toContainText(t('tab.closeAborted', { n: 1 }))
     await expect(tabs).toHaveCount(1) // 只剩那张草稿
     await expect(tabs.locator('.dot')).toHaveCount(1)
-    await expect(page.getByTestId('tab.overview')).toHaveCount(0)
+    // 概览页签是常驻的（active = 无选中页签），取消关闭全部后仍停在草稿上 ⇒ 概览不应处于激活态
+    await expect(page.getByTestId('tab.overview')).not.toHaveClass(/active/)
   })
   // 设置弹窗改为「左侧竖向分区菜单 + 右侧只显示当前分区」，这里钉住两件事：
   // ① 分区可切换且只有当前分区可见（字段散落在不同分区时别把人绕进去）

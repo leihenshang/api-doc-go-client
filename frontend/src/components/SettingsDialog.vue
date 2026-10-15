@@ -174,6 +174,9 @@ async function copyExample(): Promise<void> {
   }
 }
 
+// 语言名一律用「本族语写法」（autonym）：简体中文 / English 各自固定，
+// 不随当前界面语言翻译 —— 语言切换器里把「English」译成「英语」反而不利于目标语言用户识别。
+// 有意不进语言包（属 i18n 例外约定中的「专有名词」类）。
 const langOptions = [
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },

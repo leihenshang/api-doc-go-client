@@ -69,11 +69,14 @@ type Options struct {
 	MaxRedirects    int
 	Jar             http.CookieJar
 	ProxyURL        string // HTTP(S) 代理；空 = 直连
+	// EncodeURL 是否对 URL query 参数做百分号编码。默认 true（与历史行为一致）；
+	// 请求级 settings.encodeUrl=false 时关闭，参数按原文拼进 query。
+	EncodeURL bool
 }
 
 // DefaultOptions 全局设置未就绪时的兜底策略。
 func DefaultOptions() Options {
-	return Options{Timeout: defaultTimeout, FollowRedirects: true, MaxRedirects: defaultMaxRD}
+	return Options{Timeout: defaultTimeout, FollowRedirects: true, MaxRedirects: defaultMaxRD, EncodeURL: true}
 }
 
 // OptionsInput NewOptions 的入参（聚合成结构体，避免 6 个位置参数违反「≤4」约定）。
@@ -135,7 +138,7 @@ func Send(ctx context.Context, r collection.Request, vars map[string]string, opt
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	target, missing, err := buildURL(r, vars)
+	target, missing, err := buildURL(r, vars, opts.EncodeURL)
 	if err != nil {
 		return nil, err
 	}
@@ -233,12 +236,17 @@ func MergeOptions(o Options, s *collection.RequestSettings) Options {
 	if s.InsecureSSL != nil {
 		o.InsecureSSL = *s.InsecureSSL
 	}
+	if s.EncodeURL != nil {
+		o.EncodeURL = *s.EncodeURL
+	}
 	return o
 }
 
 // buildURL 渲染 URL 并合并查询参数；第二个返回值是「引用了但未定义」的变量名
 // （varx 的既定规则：未定义变量保留原文，由调用方决定是否拦截）。
-func buildURL(r collection.Request, vars map[string]string) (*url.URL, []string, error) {
+// encode=true（默认）把参数名/值做百分号编码；encode=false 时按原文拼接（用户自行保证已转义），
+// 对应请求级 settings.encodeUrl=false。
+func buildURL(r collection.Request, vars map[string]string, encode bool) (*url.URL, []string, error) {
 	raw, missing := varx.Resolve(strings.TrimSpace(r.URL), vars)
 	if raw == "" {
 		return nil, missing, fmt.Errorf("URL 为空")
@@ -246,6 +254,19 @@ func buildURL(r collection.Request, vars map[string]string) (*url.URL, []string,
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, missing, fmt.Errorf("URL 无法解析: %w", err)
+	}
+	if !encode {
+		// 不自动编码：保留 URL 里已有的原始 query，把参数按 name=value 原样追加（不转义）。
+		// 关掉编码本就是「我要按原文发」的诉求，特殊字符由用户负责。
+		parts := []string{}
+		if u.RawQuery != "" {
+			parts = append(parts, u.RawQuery)
+		}
+		for _, p := range resolveKV(r.Params, vars) {
+			parts = append(parts, p.Name+"="+p.Value)
+		}
+		u.RawQuery = strings.Join(parts, "&")
+		return u, missing, nil
 	}
 	q := u.Query()
 	for _, p := range resolveKV(r.Params, vars) {

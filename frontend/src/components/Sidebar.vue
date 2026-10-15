@@ -3,6 +3,8 @@
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
+import { useTreeDnd } from '@/composables/useTreeDnd'
+import { ancestorPaths, canDrop, filterTree, folderNameTaken, searchNode, sortTree, type SortMode } from '@/lib/collTree'
 import { api } from '@/lib/ipc'
 import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
@@ -168,7 +170,6 @@ const searching = computed(() => keyword.value.trim() !== '')
 
 // ---- 排序：关（磁盘顺序）/ 名称升序 / 名称降序，作用于每一层的同级条目 ----
 
-type SortMode = 'default' | 'asc' | 'desc'
 const sortMode = ref<SortMode>('default')
 
 /**
@@ -204,25 +205,6 @@ function onTreeMenu(key: string | number): void {
     const mode = key.slice('sort:'.length)
     if (mode === 'asc' || mode === 'desc' || mode === 'default') sortMode.value = mode
   }
-}
-
-/**
- * 排序返回**新数组**（绝不改动 store 里的树）：分组在前、其余条目（请求/文档）在后，
- * 各自按名称排（localeCompare 中文也能正确排序）；子层递归同样处理。
- */
-function sortTree(nodes: TreeNode[]): TreeNode[] {
-  if (sortMode.value === 'default') return nodes
-  const dir = sortMode.value === 'asc' ? 1 : -1
-  const byName = (a: TreeNode, b: TreeNode): number => a.name.localeCompare(b.name, 'zh-Hans-CN') * dir
-  const folders: TreeNode[] = []
-  const leaves: TreeNode[] = []
-  for (const n of nodes) {
-    const copy = n.children?.length ? { ...n, children: sortTree(n.children) } : n
-      ; (copy.type === 'folder' ? folders : leaves).push(copy)
-  }
-  folders.sort(byName)
-  leaves.sort(byName)
-  return [...folders, ...leaves]
 }
 
 // ---- 顶部工具条：打开集合 / 创建集合 ----
@@ -262,26 +244,10 @@ function confirmCreate(): boolean {
   return true
 }
 
-// 搜索：命中请求保留其祖先分组
-function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
-  const out: TreeNode[] = []
-  for (const n of nodes) {
-    if (n.type === 'folder') {
-      const kids = n.children ? filterTree(n.children, q) : []
-      if (kids.length || n.name.toLowerCase().includes(q)) {
-        out.push({ ...n, children: kids.length ? kids : n.children })
-      }
-    } else if (n.name.toLowerCase().includes(q)) {
-      out.push(n)
-    }
-  }
-  return out
-}
-
 /** 每个根的树（搜索时按关键字过滤：命中的请求保留其祖先分组；排序开启时深排序副本）。 */
 function treeOf(root: CollectionSummary): TreeNode[] {
   const base = searching.value ? filterTree(root.info.tree, keyword.value.trim().toLowerCase()) : root.info.tree
-  return sortTree(base)
+  return sortTree(base, sortMode.value)
 }
 
 /** 分组折叠态按「根 + 路径」记：两个根里可能有同路径的分组（拷贝出来的集合）。 */
@@ -640,142 +606,24 @@ function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request')
 // 触发不可靠（用户反馈：鼠标根本拖不动），而且拖拽期间渲染进程的输入派发会被原生拖拽循环
 // 阻塞 —— 现象就是「按下去动了、但什么都不会发生」。改成 pointerdown/move/up 自己算命中，
 // 行为在 WebView2 / Chromium / Firefox 下一致，也不再依赖 dataTransfer。
-const DRAG_THRESHOLD = 4 // px：位移小于它算点击，不算拖动
+// 拖拽状态与按下/移动/松手/取消的指针编排见 composables/useTreeDnd。
+// canDrop（能否落点）已抽到 lib/collTree；这里只补一个「重名分组」落点提示（需 props.roots + i18n）。
 
-const dragNode = ref<{ root: string; node: TreeNode } | null>(null)
-/** 按下但还没越过阈值：等他动了才算拖动，避免影响正常点击打开请求 */
-const pending = ref<{ root: string; node: TreeNode; x: number; y: number } | null>(null)
-/** 当前指针下的放置目标；ok=false 表示非法（自己/后代/跨工作目录），给「禁止」反馈而不是静默 */
-const dropHint = ref<{
-  root: string
-  uid: string
-  path: string
-  ok: boolean
-  tip?: string
-} | null>(null)
-const dragging = computed(() => dragNode.value !== null)
-
-/** 搜索过滤时树是残缺的，这时不允许拖动（拖到看不见的分组会让人困惑） */
-const dragEnabled = computed(() => !searching.value && editing.value === null)
-
-/** 拖动结束后紧跟的那次 click 要吞掉，否则松手会顺手打开请求 */
-let suppressClick = false
-
-/**
- * 能否把 node 放进 destRoot 里的 destPath（空串 = 该工作目录的根）。
- * 规则：目标必须是分组或根；同根内分组不能移入自己或自己的后代（会成环）；
- * 跨工作目录两种都能搬：请求单搬、分组连同其下子分组与请求整棵搬（目标侧重建 + 源进 .trash）。
- */
-function canDrop(node: TreeNode, dragRoot: string, destRoot: string, destPath: string): boolean {
-  if (dragRoot !== destRoot) return true
-  if (node.type === 'folder' && destPath === node.path) return false
-  if (node.type === 'folder' && destPath.startsWith(node.path + '/')) return false
-  return true
-}
-
-function onRowPointerDown(root: string, node: TreeNode, ev: PointerEvent): void {
-  if (!dragEnabled.value || ev.button !== 0) return
-  // 只排除「行内操作控件」：展开箭头、悬停动作按钮、重命名输入框、下拉与链接。
-  // 注意不能一刀切排除所有 button —— 请求/分组的名字本身就是个 <button class="rname">，
-  // 一刀切会让整行都拖不动（实测就是这个原因导致鼠标拖起来毫无反应）。
-  const el = ev.target as HTMLElement | null
-  if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
-  pending.value = { root, node, x: ev.clientX, y: ev.clientY }
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', onPointerUp)
-  window.addEventListener('pointercancel', cancelDrag)
-  window.addEventListener('keydown', onDragKeydown)
-}
-
-function detachDragListeners(): void {
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', onPointerUp)
-  window.removeEventListener('pointercancel', cancelDrag)
-  window.removeEventListener('keydown', onDragKeydown)
-}
-
-/** 指针所在位置对应的放置目标（用 elementFromPoint 命中行，不依赖事件冒泡顺序）。 */
-function hintAt(x: number, y: number): typeof dropHint.value {
-  const drag = dragNode.value
-  if (!drag) return null
-  const el = document.elementFromPoint(x, y) as HTMLElement | null
-  const row = el?.closest('[data-testid="tree.row"], [data-testid="tree.root"]') as HTMLElement | null
-  if (!row) return null
-  const root = row.dataset.root ?? ''
-  const isRootRow = row.dataset.testid === 'tree.root'
-  if (!isRootRow && row.dataset.kind !== 'folder') return null // 请求行不能当容器
-  const path = isRootRow ? '' : (row.dataset.path ?? '')
-  // 跨根搬分组时目标下已有同名分组：后端会拒（CreateFolder 会把同名目录复用掉），
-  // 这里提前置灰并把原因写在落点提示上，别让用户拖完才吃一个报错
-  const tip =
-    drag.node.type === 'folder' && hasSameNamedFolder(root, path, drag.node.name)
-      ? t('tree.dupFolderHint', { name: drag.node.name })
-      : undefined
-  return {
-    root,
-    uid: isRootRow ? '__root__' : (row.dataset.uid ?? ''),
-    path,
-    ok: canDrop(drag.node, drag.root, root, path) && !tip,
-    tip,
+/** 落点重名提示：目标分组（含跨根）下已有同名分组时给原因（后端会拒同名目录复用）。 */
+function dropTipFor(node: TreeNode, destRoot: string, destPath: string): string | undefined {
+  const item = props.roots.find((r) => r.root === destRoot)
+  if (!item) return undefined
+  if (node.type === 'folder' && folderNameTaken(item.info.tree, destPath, node.name)) {
+    return t('tree.dupFolderHint', { name: node.name })
   }
+  return undefined
 }
 
-/** 目标分组（空 = 该根的根）下是否已有同名分组。 */
-function hasSameNamedFolder(root: string, destPath: string, name: string): boolean {
-  const item = props.roots.find((r) => r.root === root)
-  if (!item) return false
-  const nodes = destPath ? (findFolderByPath(item.info.tree, destPath)?.children ?? []) : item.info.tree
-  return nodes.some((n) => n.type === 'folder' && n.name === name)
-}
-
-/** 在树里按相对路径找分组节点（跨根提示用；只看当前根之外的根时也走它）。 */
-function findFolderByPath(nodes: TreeNode[], path: string): TreeNode | null {
-  for (const n of nodes) {
-    if (n.type !== 'folder') continue
-    if (n.path === path) return n
-    if (n.children) {
-      const hit = findFolderByPath(n.children, path)
-      if (hit) return hit
-    }
-  }
-  return null
-}
-
-function onPointerMove(ev: PointerEvent): void {
-  const p = pending.value
-  if (!p) return
-  if (!dragNode.value) {
-    if (Math.abs(ev.clientX - p.x) < DRAG_THRESHOLD && Math.abs(ev.clientY - p.y) < DRAG_THRESHOLD) return
-    dragNode.value = { root: p.root, node: p.node }
-  }
-  ev.preventDefault() // 拖拽期间不选中文字
-  dropHint.value = hintAt(ev.clientX, ev.clientY)
-}
-
-function onDragKeydown(ev: KeyboardEvent): void {
-  if (ev.key === 'Escape') cancelDrag()
-}
-
-function cancelDrag(): void {
-  detachDragListeners()
-  pending.value = null
-  dragNode.value = null
-  dropHint.value = null
-}
-
-function onPointerUp(ev: PointerEvent): void {
-  const drag = dragNode.value
-  const hint = drag ? hintAt(ev.clientX, ev.clientY) : null
-  const dragged = drag !== null
-  detachDragListeners()
-  pending.value = null
-  dragNode.value = null
-  dropHint.value = null
-  if (!dragged) return // 只是点击：交给 click 处理
-  suppressClick = true
-  setTimeout(() => (suppressClick = false), 0)
-  if (drag && hint?.ok) void performMove(drag.root, drag.node, hint.root, hint.path)
-}
+const { dragNode, dropHint, dragging, clickSuppressed, onRowPointerDown } = useTreeDnd({
+  dragEnabled: () => !searching.value && editing.value === null,
+  dropTip: dropTipFor,
+  onDrop: performMove,
+})
 
 /**
  * 点击树里的行：请求行打开对应页签（拖动刚结束的那次点击忽略）；分组行折叠/展开。
@@ -785,7 +633,7 @@ function onPointerUp(ev: PointerEvent): void {
  * 点的是非活动根里的请求时，先把那一根切成活动根 —— 页签是按根分组的。
  */
 function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
-  if (editing.value || suppressClick) return
+  if (editing.value || clickSuppressed.value) return
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
   if (node.type === 'folder') {
@@ -846,30 +694,6 @@ async function performMove(
 function findNode(root: string, uid: string): TreeNode | null {
   const item = props.roots.find((r) => r.root === root)
   return item ? searchNode(item.info.tree, uid) : null
-}
-
-function searchNode(nodes: TreeNode[], uid: string): TreeNode | null {
-  for (const n of nodes) {
-    if (n.uid === uid && (n.type === 'folder' || n.type === 'request')) return n
-    if (n.children) {
-      const hit = searchNode(n.children, uid)
-      if (hit) return hit
-    }
-  }
-  return null
-}
-
-// 某节点的祖先分组路径（用于把当前选中的请求自动展开到可见）；只在该根的树里找
-function ancestorPaths(nodes: TreeNode[], uid: string, trail: string[] = []): string[] | null {
-  for (const n of nodes) {
-    if (n.uid === uid) return trail
-    if (n.children) {
-      const next = n.type === 'folder' ? [...trail, n.path] : trail
-      const hit = ancestorPaths(n.children, uid, next)
-      if (hit) return hit
-    }
-  }
-  return null
 }
 
 /**

@@ -266,7 +266,10 @@
     "settings": {
       "properties": {
         "encodeUrl": {
-          "type": "boolean"
+          "type": [
+            "null",
+            "boolean"
+          ]
         },
         "followRedirects": {
           "type": [

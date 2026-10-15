@@ -589,13 +589,8 @@ func buildExportTOC(name string, tree []*Node, res *scanResult) string {
 	// TOC：id 分配顺序必须与 mdToHTML 输出正文标题的顺序完全一致
 	// （集合名 → 树先序 folder/request，且每个 request 之后紧跟其 Docs 内的标题）。
 	// 先消耗 toc-0 给集合名，再 DFS 遍历节点；doc 节点不生成标题，跳过。
-	var tocID int
-	nextID := func() string {
-		id := fmt.Sprintf("toc-%d", tocID)
-		tocID++
-		return id
-	}
-	var toc strings.Builder
+	s := &tocBuilder{res: res}
+	toc := &s.b
 	toc.WriteString(`<nav class="toc" aria-label="目录">`)
 	toc.WriteString(`<div class="toc-title">目录</div>`)
 	// 目录搜索：输入时过滤并自动展开命中节点的祖先（见底部 <script>）
@@ -605,65 +600,88 @@ func buildExportTOC(name string, tree []*Node, res *scanResult) string {
 	toc.WriteString(`<ul class="toc-list">`)
 	// 集合名（对应正文第一个标题 toc-0）
 	toc.WriteString(`<li class="toc-root"><a href="#`)
-	toc.WriteString(nextID())
+	toc.WriteString(s.nextID())
 	toc.WriteString(`">`)
 	toc.WriteString(html.EscapeString(name))
 	toc.WriteString(`</a></li>`)
 
-	// walkTOC 生成可折叠的目录树；isTop 标记顶层，仅第一个顶层目录默认展开（data-default / aria-expanded），
-	// 其余目录默认折叠，满足「默认仅第一个目录打开」的需求。doc 节点不进正文标题，TOC 也跳过。
-	var walkTOC func(nodes []*Node, depth int, isTop bool)
-	walkTOC = func(nodes []*Node, depth int, isTop bool) {
-		for i, n := range nodes {
-			// doc 节点不进正文标题，TOC 也跳过（与 ExportMarkdown 行为一致）
-			if n.Type == "doc" {
-				continue
-			}
-			if n.Type == "folder" {
-				id := nextID()
-				// 仅第一个顶层目录默认展开；嵌套目录一律默认折叠
-				open := isTop && i == 0
-				toc.WriteString(`<li class="toc-folder" data-default="`)
-				toc.WriteString(strconv.FormatBool(open))
-				toc.WriteString(`" aria-expanded="`)
-				toc.WriteString(strconv.FormatBool(open))
-				toc.WriteString(`">`)
-				// 折叠/展开开关（点击切换 aria-expanded，不触发跳转）
-				toc.WriteString(`<span class="toc-toggle" role="button" tabindex="0" aria-label="折叠或展开"></span>`)
-				toc.WriteString(`<a href="#`)
-				toc.WriteString(id)
-				toc.WriteString(`">`)
-				toc.WriteString(html.EscapeString(n.Name))
-				toc.WriteString(`</a>`)
-				if len(n.Children) > 0 {
-					toc.WriteString(`<ul>`)
-					walkTOC(n.Children, depth+1, false)
-					toc.WriteString(`</ul>`)
-				}
-				toc.WriteString(`</li>`)
-				continue
-			}
-			// request：方法徽标前置，配色与文案口径与客户端集合树（MethodTag）完全一致
-			id := nextID()
-			toc.WriteString(`<li class="toc-request">`)
-			toc.WriteString(methodBadge(n.Method))
-			toc.WriteString(`<a href="#`)
-			toc.WriteString(id)
-			toc.WriteString(`">`)
-			toc.WriteString(html.EscapeString(n.Name))
-			toc.WriteString(`</a></li>`)
-			// 该请求正文之后会紧跟其 Docs 内的标题（被 mdToHTML 占用 toc-N），
-			// 必须把这部分标题数计入计数器，后续节点的 toc-N 才能与正文对齐。
-			if res != nil {
-				if r, ok := res.reqs[n.UID]; ok {
-					tocID += countDocHeadings(r.Docs)
-				}
-			}
-		}
-	}
-	walkTOC(tree, 0, true)
+	// 生成可折叠的目录树；仅第一个顶层目录默认展开，其余默认折叠。doc 节点不进正文标题，TOC 也跳过。
+	s.walk(tree, 0, true)
 	toc.WriteString(`</ul></nav>`)
 	return toc.String()
+}
+
+// tocBuilder 按正文标题顺序分配 toc-N 并写出 HTML 导出目录树。
+// id 计数器必须与 mdToHTML 的标题输出顺序严格一致，故 request 之后要消耗其 Docs 的标题数。
+type tocBuilder struct {
+	b   strings.Builder
+	id  int
+	res *scanResult
+}
+
+// nextID 自增分配一个 toc-N 锚点 id。
+func (t *tocBuilder) nextID() string {
+	id := fmt.Sprintf("toc-%d", t.id)
+	t.id++
+	return id
+}
+
+// walk 深度优先写出一层节点：doc 跳过（不进正文标题），folder 递归子节点，request 带方法徽标。
+// isTop 标记顶层，仅第一个顶层目录默认展开（data-default/aria-expanded），嵌套目录一律默认折叠。
+func (t *tocBuilder) walk(nodes []*Node, depth int, isTop bool) {
+	for i, n := range nodes {
+		// doc 节点不进正文标题，TOC 也跳过（与 ExportMarkdown 行为一致）
+		if n.Type == "doc" {
+			continue
+		}
+		if n.Type == "folder" {
+			t.folder(n, isTop && i == 0, depth)
+			continue
+		}
+		t.request(n)
+	}
+}
+
+// folder 写一个可折叠目录条目（折叠/展开开关不触发跳转），并递归其子节点。
+func (t *tocBuilder) folder(n *Node, open bool, depth int) {
+	id := t.nextID()
+	t.b.WriteString(`<li class="toc-folder" data-default="`)
+	t.b.WriteString(strconv.FormatBool(open))
+	t.b.WriteString(`" aria-expanded="`)
+	t.b.WriteString(strconv.FormatBool(open))
+	t.b.WriteString(`">`)
+	// 折叠/展开开关（点击切换 aria-expanded，不触发跳转）
+	t.b.WriteString(`<span class="toc-toggle" role="button" tabindex="0" aria-label="折叠或展开"></span>`)
+	t.b.WriteString(`<a href="#`)
+	t.b.WriteString(id)
+	t.b.WriteString(`">`)
+	t.b.WriteString(html.EscapeString(n.Name))
+	t.b.WriteString(`</a>`)
+	if len(n.Children) > 0 {
+		t.b.WriteString(`<ul>`)
+		t.walk(n.Children, depth+1, false)
+		t.b.WriteString(`</ul>`)
+	}
+	t.b.WriteString(`</li>`)
+}
+
+// request 写一个请求条目（方法徽标前置，配色与文案口径与客户端集合树 MethodTag 完全一致）。
+// 该请求正文之后会紧跟其 Docs 内的标题（被 mdToHTML 占用 toc-N），必须把这部分标题数计入计数器，
+// 后续节点的 toc-N 才能与正文对齐。
+func (t *tocBuilder) request(n *Node) {
+	id := t.nextID()
+	t.b.WriteString(`<li class="toc-request">`)
+	t.b.WriteString(methodBadge(n.Method))
+	t.b.WriteString(`<a href="#`)
+	t.b.WriteString(id)
+	t.b.WriteString(`">`)
+	t.b.WriteString(html.EscapeString(n.Name))
+	t.b.WriteString(`</a></li>`)
+	if t.res != nil {
+		if r, ok := t.res.reqs[n.UID]; ok {
+			t.id += countDocHeadings(r.Docs)
+		}
+	}
 }
 
 // mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、`行内代码`、表格、
@@ -1147,30 +1165,9 @@ func sanitizeHTMLTag(tag string) (string, bool) {
 		rest = strings.TrimSuffix(rest, ">")
 		rest = strings.TrimSpace(rest)
 		for _, am := range htmlAttrRE.FindAllString(rest, -1) {
-			pair := strings.SplitN(am, "=", 2)
-			an := strings.ToLower(strings.TrimSpace(pair[0]))
-			if an == "" {
-				continue
+			if frag, keep := cleanHTMLAttr(am); keep {
+				b.WriteString(frag)
 			}
-			if strings.HasPrefix(an, "on") {
-				continue // 事件属性一律删除
-			}
-			if len(pair) == 1 {
-				b.WriteString(" " + an)
-				continue
-			}
-			raw := strings.TrimSpace(pair[1])
-			var v string
-			if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
-				v = raw[1 : len(raw)-1]
-			} else {
-				v = raw
-			}
-			if (an == "href" || an == "src") && dangerousURL(v) {
-				continue
-			}
-			// html.EscapeString 已把引号转成 &#34;/&#39;，双引号包裹安全
-			b.WriteString(" " + an + "=\"" + html.EscapeString(v) + "\"")
 		}
 		if selfClose {
 			b.WriteString(" /")
@@ -1178,6 +1175,34 @@ func sanitizeHTMLTag(tag string) (string, bool) {
 	}
 	b.WriteString(">")
 	return b.String(), true
+}
+
+// cleanHTMLAttr 清洗单个 HTML 属性，返回要写入的片段（含前导空格）与是否保留。
+// 事件属性（on*）一律删除；href/src 命中危险协议（javascript:/vbscript:）删除；
+// 其余属性规范引号后保留（html.EscapeString 已把引号转成 &#34;/&#39;，双引号包裹安全）。
+func cleanHTMLAttr(am string) (string, bool) {
+	pair := strings.SplitN(am, "=", 2)
+	an := strings.ToLower(strings.TrimSpace(pair[0]))
+	if an == "" {
+		return "", false
+	}
+	if strings.HasPrefix(an, "on") {
+		return "", false // 事件属性一律删除
+	}
+	if len(pair) == 1 {
+		return " " + an, true
+	}
+	raw := strings.TrimSpace(pair[1])
+	var v string
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+		v = raw[1 : len(raw)-1]
+	} else {
+		v = raw
+	}
+	if (an == "href" || an == "src") && dangerousURL(v) {
+		return "", false
+	}
+	return " " + an + "=\"" + html.EscapeString(v) + "\"", true
 }
 
 // dangerousURL 判断 URL 是否带可执行 scheme（javascript:/vbscript:/data:text/html）。

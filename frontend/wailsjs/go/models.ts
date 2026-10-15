@@ -841,6 +841,7 @@ export namespace collection {
 	    type: string;
 	    params: ResponseParam[];
 	    sample: string;
+	    contentType?: string;
 	    status?: number;
 	    headers?: KV[];
 	
@@ -853,6 +854,7 @@ export namespace collection {
 	        this.type = source["type"];
 	        this.params = this.convertValues(source["params"], ResponseParam);
 	        this.sample = source["sample"];
+	        this.contentType = source["contentType"];
 	        this.status = source["status"];
 	        this.headers = this.convertValues(source["headers"], KV);
 	    }
