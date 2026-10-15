@@ -1,11 +1,16 @@
 export default {
   app: {
     brand: 'api-doc-go',
+    devBadgeTitle: '开发版（wails dev）',
     minimise: '最小化',
     maximise: '最大化 / 还原',
     close: '关闭',
     themeToDark: '切换到深色模式',
     themeToLight: '切换到浅色模式',
+  },
+  ipc: {
+    callFailed: 'IPC 调用失败: {method} (HTTP {status})',
+    callFailedGeneric: 'IPC 调用失败',
   },
   common: {
     cancel: '取消',
@@ -203,6 +208,7 @@ export default {
     collection: 'Collection',
     newDraft: '新请求',
     newGrpcDraft: '新 gRPC 请求',
+    notFound: '页签不存在',
     closeCurrent: '关闭当前',
     closeLeft: '关闭左侧所有',
     closeRight: '关闭右侧所有',

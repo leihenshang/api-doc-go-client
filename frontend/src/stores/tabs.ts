@@ -169,6 +169,9 @@ export const useTabsStore = defineStore('tabs', {
   getters: {
     active: (s) => s.tabs.find((t) => t.key === s.activeKey) ?? null,
     count: (s) => s.tabs.length,
+    // 「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘、
+    // 冲突页签已挂横幅且 flush 会跳过 —— 都不计入。供切区/退出前的未保存询问复用。
+    savableTabs: (s): Tab[] => s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict),
   },
   actions: {
     /** 打开一条请求（已有 tab 则激活）。 */
@@ -228,7 +231,7 @@ export const useTabsStore = defineStore('tabs', {
     },
     async saveDraft(key: string, folder: string, name: string): Promise<RequestDoc> {
       const tab = this.tabs.find((t) => t.key === key)
-      if (!tab) throw new Error('tab 不存在')
+      if (!tab) throw new Error(i18n.global.t('tab.notFound'))
       const created = await api.createRequestFromDraft(folder, name, { ...tab.request, name })
       tab.uid = created.uid
       tab.request = created
@@ -375,8 +378,8 @@ export const useTabsStore = defineStore('tabs', {
       this.scheduleAfterEdit(tab)
     },
     /** 编辑后的落盘调度（touch / undo / redo 共用）：
-     *  草稿走 localStorage；已落盘请求只在开启自动保存时写盘（默认手动保存模式）。
-     *  撤销/重做之前无条件排 flush，等于绕过了「手动保存」设置 —— 按 Ctrl+Z 就落盘。 */
+     *  草稿走 localStorage；已落盘请求**只在开启自动保存时**才调度写盘（默认手动保存模式）。
+     *  因此 undo/redo 不会绕过「手动保存」——未开启自动保存时按 Ctrl+Z 只改内存并标脏，不落盘。 */
     scheduleAfterEdit(tab: Tab): void {
       clearTimeout(saveTimers.get(tab.key))
       if (tab.draft) this.scheduleDrafts()
@@ -708,9 +711,8 @@ export const useTabsStore = defineStore('tabs', {
     async confirmLeaveUnsaved(): Promise<'save' | 'discard' | 'cancel'> {
       const settings = useSettingsStore()
       if (settings.autoSave) return 'save'
-      // 只统计「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘、
-      // 冲突页签已挂横幅且 flush 会跳过 —— 都不该触发保存询问。
-      const savable = this.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict)
+      // 只统计「可被 flush 保存」的已落盘页签（口径见 savableTabs getter），都不满足则无需询问。
+      const savable = this.savableTabs
       if (!savable.length) return 'save'
       return new Promise((resolve) => {
         const d = dialog.warning({

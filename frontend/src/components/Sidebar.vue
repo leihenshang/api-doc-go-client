@@ -9,27 +9,27 @@ import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
 import {
-  AddOutline,
-  ArrowDownOutline,
-  ArrowUpOutline,
-  CheckmarkOutline,
-  ChevronDownOutline,
-  ChevronForwardOutline,
-  CloseOutline,
-  ContractOutline,
-  CreateOutline,
-  EllipsisHorizontalOutline,
-  ExpandOutline,
-  FolderOpenOutline,
-  GitNetworkOutline,
-  OpenOutline,
-  RefreshOutline,
-  Star,
-  StarOutline,
-  SwapVerticalOutline,
-  SyncOutline,
-  TerminalOutline,
-  TrashOutline
+    AddOutline,
+    ArrowDownOutline,
+    ArrowUpOutline,
+    CheckmarkOutline,
+    ChevronDownOutline,
+    ChevronForwardOutline,
+    CloseOutline,
+    ContractOutline,
+    CreateOutline,
+    EllipsisHorizontalOutline,
+    ExpandOutline,
+    FolderOpenOutline,
+    GitNetworkOutline,
+    OpenOutline,
+    RefreshOutline,
+    Star,
+    StarOutline,
+    SwapVerticalOutline,
+    SyncOutline,
+    TerminalOutline,
+    TrashOutline
 } from '@vicons/ionicons5'
 import type { DropdownOption, InputInst } from 'naive-ui'
 import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
@@ -569,7 +569,7 @@ async function removeRequest(root: string, node: TreeNode): Promise<void> {
  * 行内「···」菜单：把分组/请求的常用操作（新建子项、重命名、删除、收藏）收进一个下拉，
  * 不再在行内堆一排图标按钮；「更新」(根行立即同步) 仍作为直接按钮，不进菜单。
  */
-function rowMenuOptions(row: Row): any[] {
+function rowMenuOptions(row: Row): DropdownOption[] {
   const n = row.node!
   if (n.type === 'folder') {
     return [

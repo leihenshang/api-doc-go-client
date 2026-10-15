@@ -2,6 +2,7 @@
 //   - Wails 运行时：window.go.app.App.<Method>(args…)（bindings 注入）
 //   - 浏览器开发：POST /api/App/<Method>（vite 代理到 cmd/devserver）
 // 两态走同一套 App 方法，前端无感知。
+import { i18n } from '@/i18n'
 import type {
   AuthzDecision,
   CollectionInfo,
@@ -116,11 +117,11 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   const text = await res.text()
   // 桌面端若误走 HTTP（Wails 资源服务对 POST 返回 405），这里给出可定位的报错而非 JSON 解析异常
   if (!res.ok || !text.trim().startsWith('{')) {
-    throw new Error(`IPC 调用失败: ${method} (HTTP ${res.status})`)
+    throw new Error(i18n.global.t('ipc.callFailed', { method, status: res.status }))
   }
   const payload = JSON.parse(text) as { ok: boolean; data?: T; error?: string }
   if (!payload.ok) {
-    throw new Error(payload.error ?? 'IPC 调用失败')
+    throw new Error(payload.error ?? i18n.global.t('ipc.callFailedGeneric'))
   }
   return payload.data as T
 }
@@ -317,6 +318,7 @@ export const api = {
   deleteCookie: (domain: string, name: string, path: string) =>
     call<null>('DeleteCookie', domain, name, path),
   searchIndex: (q: string, limit = 200) => call<IndexNode[] | null>('SearchIndex', q, limit).then((v) => v ?? []),
+  /** 预留（无 UI 入口）：对应 Go 门面 RebuildIndex，索引现由文件监听/保存自动维护；保留桥接以便手动重建排障。 */
   rebuildIndex: () => call<null>('RebuildIndex'),
   generateCode: (lang: string, envName: string, r: RequestDoc) =>
     call<string>('GenerateCode', lang, envName, r),
@@ -327,6 +329,8 @@ export const api = {
   startMock: (port: number) => call<MockStatus>('StartMock', port),
   stopMock: () => call<null>('StopMock'),
   mockStatus: () => call<MockStatus>('MockStatus'),
+  // 预留（无 UI 入口）：活动根版同步门面。多根改造后 UI 一律走下面的 *For 变体（显式传根），
+  // 这几个「隐式活动根」入口保留以维持与 Go 门面 / wailsjs 绑定的契约对齐，暂无调用方。
   getSyncBind: () => call<SyncBindInfo>('GetSyncBind'),
   setSyncBind: (serverUrl: string, projectId: number, mode: string, token: string) =>
     call<SyncBindInfo>('SetSyncBind', serverUrl, projectId, mode, token),
@@ -343,9 +347,12 @@ export const api = {
     call<ConflictDetail>('ConflictDetailFor', root, file),
   resolveConflictFor: (root: string, file: string, choice: string) =>
     call<null>('ResolveConflictFor', root, file, choice),
+  // 预留（无 UI 入口）：活动根版冲突门面。UI 走上面的 *For 变体（侧栏冲突页按根展示）。
   listConflicts: () => call<ConflictItem[] | null>('ListConflicts').then((v) => v ?? []),
   getConflictDetail: (file: string) => call<ConflictDetail>('ConflictDetail', file),
   resolveConflict: (file: string, choice: string) => call<null>('ResolveConflict', file, choice),
+  // 文档条目（B13）门面：后端能力已就绪。readDoc/saveDoc 由预留组件 DocEditor.vue 引用；
+  // listDocs/createDoc/deleteDoc 暂无任何调用方（待文档入口上线），保留以对齐 Go 门面契约。
   listDocs: () => call<DocEntry[] | null>('ListDocs').then((v) => v ?? []),
   readDoc: (uid: string) => call<DocEntry>('ReadDoc', uid),
   createDoc: (name: string) => call<DocEntry>('CreateDoc', name),
@@ -353,5 +360,6 @@ export const api = {
   deleteDoc: (uid: string) => call<null>('DeleteDoc', uid),
   getSyncStatus: () => call<SyncStatus>('GetSyncStatus'),
   startAutoSync: (intervalSec: number) => call<null>('StartAutoSync', intervalSec),
+  /** 预留（无 UI 入口）：对应 Go 门面 StopAutoSync；切根/关根时后端已内部停表，前端未单设「停止自动同步」按钮。 */
   stopAutoSync: () => call<null>('StopAutoSync'),
 }

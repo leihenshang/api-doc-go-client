@@ -2,8 +2,8 @@
 // 手动保存模式下若还有未保存改动，先弹「保存并退出 / 退出不保存 / 取消」；
 // 自动保存模式或无未保存改动直接退出。
 import { i18n } from '@/i18n'
-import { dialog } from '@/lib/notice'
 import { windowCtl } from '@/lib/ipc'
+import { dialog } from '@/lib/notice'
 import { useSettingsStore } from '@/stores/settings'
 import { useTabsStore } from '@/stores/tabs'
 
@@ -15,7 +15,7 @@ export function requestQuit(): void {
     return
   }
   const tabs = useTabsStore()
-  const savable = tabs.tabs.filter((x) => !x.draft && x.uid && x.dirty && !x.conflict)
+  const savable = tabs.savableTabs
   if (!savable.length) {
     quitNow()
     return

@@ -11,10 +11,10 @@ import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { loadFields, paramsFromRows, rebuildFields, removeFields, rootJsonType, rowsFromDoc, saveFields, type FieldRow } from '@/lib/responseFields'
+import { buildRespDoc, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { ResponseDoc, SendResult } from '@/types'
+import type { ResponseExample, SendResult } from '@/types'
 import { BookmarkOutline, TrashOutline } from '@vicons/ionicons5'
 import { NAlert, NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -88,7 +88,7 @@ const headerCount = computed(() => display.value?.headers?.length ?? 0)
 const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
 const isGrpcRes = computed(() => (display.value?.proto ?? '') === 'gRPC')
 
-const examples = ref<any[]>([])
+const examples = ref<ResponseExample[]>([])
 const viewingUid = ref('')
 
 const exampleOptions = computed(() => [
@@ -120,7 +120,9 @@ watch(
 async function reloadExamples(): Promise<void> {
   try {
     examples.value = await api.listResponseExamples(props.tab.uid)
-  } catch {
+  } catch (e) {
+    // 拉取失败静默置空会让用户看到空下拉却不知原因，至少留一条控制台告警便于排查
+    console.warn('[resp] 加载响应示例失败:', props.tab.uid, e)
     examples.value = []
   }
 }
@@ -201,43 +203,30 @@ async function doUpdateFields(old: FieldRow[], inherit: boolean): Promise<void> 
 }
 
 /** 含义输入去抖写盘。草稿 / gRPC 请求暂存 localStorage；HTTP 请求写回请求模型 RespDoc（immediate 用于「更新」按钮）。 */
-let persistTimer: ReturnType<typeof setTimeout> | null = null
+const persistTimer: PersistTimer = { current: null }
 async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean> {
-  const uid = props.tab.uid
-  const doc: ResponseDoc = {
-    type: rootJsonType(body.value) || props.tab.request?.respDoc?.type || '',
-    params: paramsFromRows(rows),
-    sample: body.value || props.tab.request?.respDoc?.sample || '',
-    // 快照（item 8）：有本次响应就用当时的状态码/响应头，否则保留旧快照
-    status: display.value?.status ?? props.tab.request?.respDoc?.status ?? 0,
-    headers: display.value?.headers?.length ? display.value.headers : (props.tab.request?.respDoc?.headers ?? []),
-  }
-  if (props.tab.draft || isGrpcReq.value || !uid) {
-    saveFields(uid, rows)
-    return true
-  }
-  const apply = async (): Promise<boolean> => {
-    try {
-      await api.updateResponseDoc(uid, doc)
-      if (props.tab.request) props.tab.request.respDoc = doc
-      removeFields(uid)
-      return true
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
-      return false
-    }
-  }
-  if (immediate) {
-    if (persistTimer) clearTimeout(persistTimer)
-    return apply()
-  }
-  if (persistTimer) clearTimeout(persistTimer)
-  persistTimer = setTimeout(() => void apply(), 600)
-  return true
+  // 快照优先：有本次响应就用它的 type/sample/status/headers，缺省回退既有 respDoc（组装规则见 buildRespDoc）。
+  const doc = buildRespDoc(rows, props.tab.request?.respDoc, {
+    type: rootJsonType(body.value),
+    sample: body.value,
+    status: display.value?.status,
+    headers: display.value?.headers?.length ? display.value.headers : undefined,
+  })
+  return persistRespDoc({
+    uid: props.tab.uid,
+    draft: props.tab.draft,
+    grpc: isGrpcReq.value,
+    rows,
+    doc,
+    immediate,
+    timer: persistTimer,
+    attach: (d) => { if (props.tab.request) props.tab.request.respDoc = d },
+    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+  })
 }
 
 onBeforeUnmount(() => {
-  if (persistTimer) clearTimeout(persistTimer)
+  if (persistTimer.current) clearTimeout(persistTimer.current)
   highlighter.clear()
 })
 

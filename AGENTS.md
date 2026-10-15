@@ -5,7 +5,7 @@
 ## 项目概览
 
 - Wails v2 桌面客户端：Go 内核（`internal/*`）+ Vue3/TS 前端（`frontend/src`），**集合是纯文本文件（YAML），文件即真相源**。
-- 分层单向：`handler(HTTP 层) → service → repository → model`；客户端没有 HTTP 层，改为 **App 门面**（`internal/app/app.go`，约 32 个导出方法），前端经 IPC 调用（Wails 绑定 / devserver 反射桥 `/api/App/<Method>`）。
+- 分层单向：`handler(HTTP 层) → service → repository → model`；客户端没有 HTTP 层，改为 **App 门面**（`internal/app` 包，跨 `app/grpc/multicoll/mcp/cross/reveal` 等文件，约 115 个导出方法；清单以 `frontend/src/lib/ipc.ts` 为准），前端经 IPC 调用（Wails 绑定 / devserver 反射桥 `/api/App/<Method>`）。
 - 界面中文优先（`frontend/src/i18n/locales/{zh-CN,en-US}.ts`，默认 zh-CN）；暗色主题令牌集中在 `frontend/src/styles/base.css`（`:root` 浅色 / `:root[data-theme='dark']` 暗色），**组件不写死颜色**。
 
 ## 常用命令

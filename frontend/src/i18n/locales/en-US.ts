@@ -1,11 +1,16 @@
 export default {
   app: {
     brand: 'api-doc-go',
+    devBadgeTitle: 'Dev build (wails dev)',
     minimise: 'Minimize',
     maximise: 'Maximize / restore',
     close: 'Close',
     themeToDark: 'Switch to dark mode',
     themeToLight: 'Switch to light mode',
+  },
+  ipc: {
+    callFailed: 'IPC call failed: {method} (HTTP {status})',
+    callFailedGeneric: 'IPC call failed',
   },
   common: {
     cancel: 'Cancel',
@@ -203,6 +208,7 @@ export default {
     collection: 'Collection',
     newDraft: 'New request',
     newGrpcDraft: 'New gRPC request',
+    notFound: 'Tab not found',
     closeCurrent: 'Close current',
     closeLeft: 'Close all to the left',
     closeRight: 'Close all to the right',

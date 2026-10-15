@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/mocksrv"
@@ -18,7 +19,7 @@ import (
 //
 // 设计：App 从「一个 coll 槽位」改成「一张按**工作目录**索引的表 + 一个活动根」。
 // 所有**集合级**导出方法仍只经 requireCollection() 解析集合，因此这次改造不需要改动
-// 那 60 多个方法的签名（也就不会牵动 frontend/wailsjs 的生成绑定与 devserver 反射桥的
+// 那百余个方法（导出方法约 115，见 frontend/src/lib/ipc.ts）的签名（也就不会牵动 frontend/wailsjs 的生成绑定与 devserver 反射桥的
 // 参数个数校验）；需要显式指定「非活动根」的动作（列根、切换、关闭、重载、跨根搜索/移动）
 // 才走新增的带 root 参数方法。
 //
@@ -65,8 +66,21 @@ type collEntry struct {
 	syncToken string
 	// syncStatus 状态栏同步状态（按根各自记录）
 	syncStatus SyncStatus
+	// syncDisk 状态栏磁盘派生字段（Linked/Mode/Cursor/DirtyCount/Conflicts）的短 TTL 缓存；
+	// at 为零值表示无缓存。状态栏每 5s 轮询，命中缓存可免去 .sync.json 读 + 索引查询 + .conflicts 目录读。
+	syncDisk   *syncDiskSnapshot
+	syncDiskAt time.Time
 	// syncStop 定时同步停止信号（按根各自停止）
 	syncStop chan struct{}
+}
+
+// syncDiskSnapshot GetSyncStatus 里需要读盘才能得到的字段快照（区别于内存里即时更新的 Running/LastSyncAt 等）。
+type syncDiskSnapshot struct {
+	Linked     bool
+	Mode       string
+	Cursor     int64
+	DirtyCount int
+	Conflicts  int
 }
 
 // ---------- 表访问（以下 *Locked 方法要求调用方持 a.mu） ----------
@@ -268,7 +282,7 @@ func (a *App) ActiveCollection() string { return a.activeRootID() }
 // SetActiveCollection 切换活动根（前端在用户点击某个根时调用）。root 传 ListCollections 里的 Root。
 //
 // 为什么需要显式切换：集合级方法（读请求、保存、发送、环境、同步…）都作用于活动根，
-// 这样 60 多个既有方法的签名与前端绑定都不用动；跨根动作走带 root 参数的新方法。
+// 这样百余个既有方法的签名与前端绑定都不用动；跨根动作走带 root 参数的新方法。
 func (a *App) SetActiveCollection(root string) error {
 	if strings.TrimSpace(root) == "" {
 		return errors.New("工作目录标识为空")

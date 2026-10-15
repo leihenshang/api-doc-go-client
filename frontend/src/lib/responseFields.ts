@@ -2,7 +2,8 @@
 // localStorage 仅用于未落盘草稿与旧版本存档的一次性迁移。
 // 字段只在用户点「更新响应字段」时解析一次；重复更新**只追加新出现的字段**
 // 并保留既有顺序与「含义」标注 —— 响应里时有时无的字段（可选字段、分页尾部字段等）不会被抹掉。
-import type { ResponseDoc, ResponseParam } from '@/types'
+import { api } from '@/lib/ipc'
+import type { KV, ResponseDoc, ResponseParam } from '@/types'
 
 export interface FieldRow {
   path: string
@@ -172,4 +173,78 @@ export function rootJsonType(text: string): string {
   if (s.startsWith('{')) return 'object'
   if (s.startsWith('[')) return 'array'
   return ''
+}
+
+/** buildRespDoc 用到的「本次快照」：各字段可为 undefined，表示本次没有该信息、应回退既有 respDoc。 */
+export interface RespDocLive {
+  type?: string
+  sample?: string
+  status?: number
+  headers?: KV[]
+}
+
+/**
+ * 组装 ResponseDoc：字段表(params)恒由 rows 重新导出；其余四字段按「本次快照优先、缺省回退既有 doc」的
+ * 统一优先级取值 —— 请求编辑器（只改字段、不动快照）与响应面板（带本次响应快照）共用同一套规则，
+ * 避免两处字段集合/快照策略漂移。字符串用 `||`（空串视为缺省），status/headers 用 `??`（0 / undefined 判定）。
+ */
+export function buildRespDoc(rows: FieldRow[], base: ResponseDoc | null | undefined, live: RespDocLive): ResponseDoc {
+  return {
+    type: live.type || base?.type || '',
+    params: paramsFromRows(rows),
+    sample: live.sample || base?.sample || '',
+    // 字段表编辑不动快照：状态码/响应头本次没有就原样带回（item 8）
+    status: live.status ?? base?.status ?? 0,
+    headers: live.headers ?? base?.headers ?? [],
+  }
+}
+
+/** 防抖计时器句柄（调用方持有并可清理），用对象包一层以便 persistRespDoc 读写同一个引用。 */
+export interface PersistTimer {
+  current: ReturnType<typeof setTimeout> | null
+}
+
+/** persistRespDoc 入参：写回一条请求的 RespDoc 所需的全部上下文。 */
+export interface RespDocPersistCtx {
+  uid: string
+  draft: boolean
+  grpc: boolean
+  rows: FieldRow[]
+  doc: ResponseDoc
+  /** true=立即写（删除/清空/「更新」按钮）；false=按 debounceMs 防抖（含义连续输入） */
+  immediate: boolean
+  timer: PersistTimer
+  /** 写盘成功后把 doc 落回请求模型（调用方决定写到哪个 tab） */
+  attach: (doc: ResponseDoc) => void
+  /** 写盘失败的提示回调（保持调用方原有的 message.error 语义） */
+  onError: (e: unknown) => void
+  debounceMs?: number
+}
+
+/**
+ * 把字段表写回请求模型的统一实现：草稿 / gRPC / 无 uid → 只存本地存档；
+ * 否则 updateResponseDoc → attach → 清本地存档，按 immediate 决定立即执行还是防抖。
+ * 返回是否「已发起/已成功落盘」（草稿路径返回 true）。两处调用点（请求编辑器、响应面板）共用，
+ * 消除各自重复的防抖 + 落盘 + 错误处理逻辑。
+ */
+export async function persistRespDoc(ctx: RespDocPersistCtx): Promise<boolean> {
+  if (ctx.draft || ctx.grpc || !ctx.uid) {
+    saveFields(ctx.uid, ctx.rows)
+    return true
+  }
+  const apply = async (): Promise<boolean> => {
+    try {
+      await api.updateResponseDoc(ctx.uid, ctx.doc)
+      ctx.attach(ctx.doc)
+      removeFields(ctx.uid)
+      return true
+    } catch (e) {
+      ctx.onError(e)
+      return false
+    }
+  }
+  if (ctx.timer.current) clearTimeout(ctx.timer.current)
+  if (ctx.immediate) return apply()
+  ctx.timer.current = setTimeout(() => void apply(), ctx.debounceMs ?? 600)
+  return true
 }

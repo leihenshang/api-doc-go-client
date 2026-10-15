@@ -31,7 +31,14 @@ func sendOptions() runner.Options {
 	if j, err := cookiejar.New(s.PersistCookies); err == nil {
 		jar = j
 	}
-	return runner.NewOptions(s.InsecureSSL, s.TimeoutSec, s.FollowRedirects, s.MaxRedirects, jar, s.ProxyURL)
+	return runner.NewOptions(runner.OptionsInput{
+		InsecureSSL:     s.InsecureSSL,
+		TimeoutSec:      s.TimeoutSec,
+		FollowRedirects: s.FollowRedirects,
+		MaxRedirects:    s.MaxRedirects,
+		Jar:             jar,
+		ProxyURL:        s.ProxyURL,
+	})
 }
 
 func fatal(err error) {

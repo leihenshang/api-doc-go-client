@@ -1074,11 +1074,9 @@ function restoreScrolls(): void {
 
 watch(
   () => tabs.activeKey,
-  (next, prev) => {
-    if (prev) {
-      // 切走前先记下旧 tab 的位置（activeKey 已变，用 prev 找不到 DOM，故依赖 onScroll 里已存的值）
-      void prev
-    }
+  (next) => {
+    // 旧 tab 的滚动位置已在 onScroll 里实时存入 getScroll/saveScroll，无需在此用 prev 回捞
+    // （activeKey 已变，prev 找不到对应 DOM）。
     if (next) {
       // DOM 更新后再恢复
       void nextTick(() => restoreScrolls())
