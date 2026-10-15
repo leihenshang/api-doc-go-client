@@ -24,6 +24,47 @@ const error = ref('')
 const busy = ref(false)
 const details = ref<ConflictDetail[]>([])
 
+// ---- 同步口令（secret 变量加解密；口令只存本机配置目录，UI 永远看不到已存的值）----
+const passphrase = ref('')
+const passSet = ref(false)
+const passBusy = ref(false)
+
+async function loadPass(): Promise<void> {
+  try {
+    passSet.value = await api.getSyncPassphraseSet()
+  } catch {
+    passSet.value = false
+  }
+}
+
+async function savePass(): Promise<void> {
+  if (!passphrase.value) return
+  passBusy.value = true
+  try {
+    await api.setSyncPassphrase(passphrase.value)
+    passSet.value = true
+    passphrase.value = ''
+    message.success(t('sync.passSaved'))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    passBusy.value = false
+  }
+}
+
+async function clearPass(): Promise<void> {
+  passBusy.value = true
+  try {
+    await api.setSyncPassphrase('')
+    passSet.value = false
+    message.success(t('sync.passCleared'))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    passBusy.value = false
+  }
+}
+
 const modeOptions = computed(() => [
   { label: t('sync.modeAuto'), value: 'auto' },
   { label: t('sync.modeManual'), value: 'manual' },
@@ -42,6 +83,7 @@ watch(
       mode.value = bind.value.mode || 'auto'
       // PAT 已随集合持久化：回显已保存令牌（留空保存 = 沿用），重启客户端无需重填
       token.value = bind.value.token ?? ''
+      void loadPass()
       await loadConflicts()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -210,6 +252,29 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
         </div>
       </section>
 
+      <!-- 同步口令：secret 变量值以口令加密后才出网，服务端只存密文不解析 -->
+      <section class="conn" data-testid="sync.passSection">
+        <div class="cell">
+          <label class="cl">
+            {{ t('sync.passTitle') }}
+            <span class="cl-hint">{{ passSet ? t('sync.passSet') : t('sync.passUnset') }}</span>
+          </label>
+          <div class="pass-row">
+            <n-input v-model:value="passphrase" size="small" type="password" show-password-on="click"
+              data-testid="sync.pass" :placeholder="t('sync.passPlaceholder')" @keyup.enter="savePass" />
+            <n-button size="small" type="primary" :disabled="!passphrase" :loading="passBusy"
+              data-testid="sync.passSave" @click="savePass">
+              {{ t('sync.passSave') }}
+            </n-button>
+            <n-button v-if="passSet" size="small" quaternary :loading="passBusy"
+              data-testid="sync.passClear" @click="clearPass">
+              {{ t('sync.passClear') }}
+            </n-button>
+          </div>
+        </div>
+        <p class="hint">{{ t('sync.passHint') }}</p>
+      </section>
+
       <p v-if="error" class="err">{{ error }}</p>
 
       <!-- 冲突区：与连接信息分开，默认折叠列表，点开看差异 -->
@@ -256,6 +321,17 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+}
+
+.pass-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pass-row :deep(.n-input) {
+  flex: 1;
   min-width: 0;
 }
 

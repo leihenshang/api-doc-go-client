@@ -129,6 +129,8 @@ type ScriptAssert struct {
 
 // Env 环境：文件名（不含扩展名）即环境名。
 type Env struct {
+	// UID 环境稳定身份（同步用 ext_uid），落盘于环境主文件的 uid 字段。
+	UID  string `json:"uid,omitempty"`
 	Name string `json:"name"`
 	Vars []Var  `json:"vars"`
 }
