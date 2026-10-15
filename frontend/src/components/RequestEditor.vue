@@ -24,7 +24,7 @@ import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { Auth } from '@/types'
+import type { Auth, ResponseDoc } from '@/types'
 import { SearchOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
@@ -349,10 +349,37 @@ const { fields, hasResp, initFields, setMeaning, removeField, removeFieldsByPath
 
 // 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
 
-// 响应数据快照格式化（item 24）：能 parse 就缩进 2 格美化，否则原文展示。
+// ---- 响应内容类型（对齐 Go respDoc.contentType 与同步键 retContentType）----
+// 默认 json；非 json（text/xml/html/binary）时样例原样展示，不做缩进格式化。
+const respContentType = computed(() => props.tab.request.respDoc?.contentType || 'json')
+
+const contentTypeOptions = computed(() => [
+  { label: t('editor.ctJson'), value: 'json' },
+  { label: t('editor.ctText'), value: 'text' },
+  { label: t('editor.ctXml'), value: 'xml' },
+  { label: t('editor.ctHtml'), value: 'html' },
+  { label: t('editor.ctBinary'), value: 'binary' },
+])
+
+/** 当前类型的展示名（下拉未命中时回退原始值，兼容旧数据）。 */
+const contentTypeLabel = computed(
+  () => contentTypeOptions.value.find((o) => o.value === respContentType.value)?.label ?? respContentType.value,
+)
+
+/** 与字段表共用 respDoc 真相源：只有类型真的变了才标脏（落盘与同步随 contentType 往返）。 */
+function setContentType(v: string): void {
+  const req = props.tab.request
+  const doc: ResponseDoc = req.respDoc ?? { type: '', params: [], sample: '' }
+  if (doc.contentType === v) return
+  req.respDoc = { ...doc, contentType: v }
+  touch()
+}
+
+// 响应数据快照格式化（item 24）：JSON 类型能 parse 就缩进 2 格美化，其余类型与解析失败时原文展示。
 const respSnapPretty = computed(() => {
   const raw = respSnap.value?.sample ?? ''
   if (!raw.trim()) return ''
+  if (respContentType.value !== 'json') return raw
   try {
     return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
@@ -528,6 +555,14 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
       <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与生成接口文档同源）；
            子页签切换字段表格 / 更新时的响应数据与响应头快照（item 8） -->
       <div v-else-if="seg === 'resp'" class="resp-pane">
+        <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化 -->
+        <div class="resp-ct">
+          <span class="lbl">{{ t('editor.respContentType') }}</span>
+          <n-select :value="respContentType" :options="contentTypeOptions" size="small" class="ctype"
+            data-testid="resp.contentType" :title="t('editor.respContentTypeHint')"
+            @update:value="(v: string) => setContentType(v)" />
+          <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
+        </div>
         <div class="resp-sub" role="group">
           <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" data-testid="resp.segTab"
             data-view="fields" @click="respView = 'fields'">{{ t('editor.respTabFields') }}</button>
@@ -744,6 +779,32 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 }
 
 /* Resp 分段子页签（item 8）：字段表格 / 响应数据 / 响应头 快照切换 */
+/* 响应类型行：下拉 + 类型徽标（与子页签同排风格） */
+.resp-ct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 0;
+}
+
+.resp-ct .lbl {
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.resp-ct .ctype {
+  width: 120px;
+}
+
+.ct-badge {
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--app-accent-tint);
+  color: var(--app-accent-dark);
+}
+
 .resp-sub {
   display: flex;
   align-items: center;
