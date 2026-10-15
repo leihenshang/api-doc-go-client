@@ -600,17 +600,21 @@ func (b *pushBatch) collectTombstoneOps(pendingDel []string) {
 	}
 }
 
-// collectDocOps 文档条目（B13）：整量推送，由服务端按内容判重 ——
-// 文档体量小且无独立脏标记，逐个比对 hash 的收益不抵一次全量写入。
+// collectDocOps 文档条目（B13）：按内容 hash 做脏检测，只推变化项（首次因无记录全推）。
+// 文档不进索引，用 Bind.DocHashes 记录已推送状态（回执在 applyPushed 里写入），避免每轮全量重推。
 func (e *Engine) collectDocOps(b *pushBatch) {
 	docs, _ := e.Coll.ListDocs()
 	for _, d := range docs {
 		if d.UID == "" {
 			continue
 		}
+		h := e.Coll.FileHashOf(d.Path)
+		if prev, seen := e.Bind.DocHashes[d.UID]; seen && prev == h && h != "" {
+			continue // 内容未变化，跳过
+		}
 		op := Op{OpID: newOpID(), Op: "upsert", Type: "doc", UID: d.UID}
 		op.Payload, _ = json.Marshal(Payload{Name: d.Name, Content: d.Content, Icon: d.Icon})
-		b.add(op, dirtyMeta{uid: d.UID, hash: e.Coll.FileHashOf(d.Path), typ: "doc"})
+		b.add(op, dirtyMeta{uid: d.UID, hash: h, typ: "doc"})
 	}
 }
 
@@ -673,7 +677,7 @@ func (e *Engine) applyPushResults(rep *Report, resp *PushResp, meta map[string]d
 	return allOk
 }
 
-// applyPushed 单条成功回执：示例不进索引，改用 Bind.ExampleHashes 记录推送状态
+// applyPushed 单条成功回执：示例 / 文档不进索引，改用 Bind.ExampleHashes / Bind.DocHashes 记录推送状态
 // （upsert 记 hash、删除清记录）；其余条目 MarkSynced，无文件 hash 的（分组）用哨兵值。
 func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
 	if m.typ == "example" {
@@ -684,6 +688,17 @@ func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
 				e.Bind.ExampleHashes = map[string]string{}
 			}
 			e.Bind.ExampleHashes[m.uid] = m.hash
+		}
+		return
+	}
+	if m.typ == "doc" {
+		if m.isDelete {
+			delete(e.Bind.DocHashes, m.uid)
+		} else if m.hash != "" {
+			if e.Bind.DocHashes == nil {
+				e.Bind.DocHashes = map[string]string{}
+			}
+			e.Bind.DocHashes[m.uid] = m.hash
 		}
 		return
 	}
