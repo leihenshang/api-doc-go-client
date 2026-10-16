@@ -360,13 +360,14 @@ export const api = {
   listConflicts: () => call<ConflictItem[] | null>('ListConflicts').then((v) => v ?? []),
   getConflictDetail: (file: string) => call<ConflictDetail>('ConflictDetail', file),
   resolveConflict: (file: string, choice: string) => call<null>('ResolveConflict', file, choice),
-  // 文档条目（B13）门面：后端能力已就绪。readDoc/saveDoc 由预留组件 DocEditor.vue 引用；
-  // listDocs/createDoc/deleteDoc 暂无任何调用方（待文档入口上线），保留以对齐 Go 门面契约。
+  // 文档条目（B19）门面：树叶子 + 独立页签（与请求同构）。folder 为空 = docs/ 默认位。
   listDocs: () => call<DocEntry[] | null>('ListDocs').then((v) => v ?? []),
   readDoc: (uid: string) => call<DocEntry>('ReadDoc', uid),
-  createDoc: (name: string) => call<DocEntry>('CreateDoc', name),
+  createDoc: (name: string, folder = '') => call<DocEntry>('CreateDoc', name, folder),
   saveDoc: (d: DocEntry) => call<null>('SaveDoc', d),
   deleteDoc: (uid: string) => call<null>('DeleteDoc', uid),
+  moveDoc: (uid: string, destFolder: string) => call<null>('MoveDoc', uid, destFolder),
+  renameDoc: (uid: string, name: string) => call<null>('RenameDoc', uid, name),
   getSyncStatus: () => call<SyncStatus>('GetSyncStatus'),
   startAutoSync: (intervalSec: number) => call<null>('StartAutoSync', intervalSec),
   /** 预留（无 UI 入口）：对应 Go 门面 StopAutoSync；切根/关根时后端已内部停表，前端未单设「停止自动同步」按钮。 */
