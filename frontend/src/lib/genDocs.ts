@@ -1,7 +1,7 @@
 // 从请求数据自动生成一份 Markdown 接口文档，填入请求的 Docs 区。
 // 纯函数：章节标题 / 表头文案由调用方传入当前语言的实际文案（labels），本文件不依赖 i18n。
 // 结构对齐约定（参考采集文档）：
-//   简要描述 → 请求URI → 请求方式 → 请求头 → 请求参数 → 请求示例 → 响应字段 → 响应示例 → 备注。
+//   简要描述 → 请求URI → 请求方式 → 请求头 → 请求参数 → 请求体 → 请求示例 → 响应字段 → 响应示例 → 备注。
 // 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数/响应字段均为「参数名|必选|类型|说明」，
 // 必选默认填「是」，类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
 // 且「请求URI」只保留路径（查询串交由「请求参数」表体现）。
@@ -15,11 +15,13 @@ export interface ApiDocLabels {
   method: string // 请求方式
   headers: string // 请求头
   params: string // 请求参数
+  body: string // 请求体
   reqExample: string // 请求示例
   resFields: string // 响应字段
   resExample: string // 响应示例
   note: string // 备注
   colName: string // 参数名
+  colValue: string // 值（请求体表单体列）
   colType: string // 类型
   colDesc: string // 说明
   colRequired: string // 必选
@@ -93,6 +95,25 @@ export function buildApiDoc(input: ApiDocInput): string {
     out.push(`## ${L.params}`, `| ${hdr} |`, '| --- | --- | --- | --- |')
     for (const p of params)
       out.push(`| ${esc(p.name)} | ${L.requiredYes} | ${DEFAULT_TYPE} | ${esc(p.description ?? '')} |`)
+    out.push('')
+  }
+
+  // 请求体：与查询参数**并存互不影响**（同章节内参数表在前、请求体在后）。
+  // 原始体（json/text 等）进代码块；form/multipart 字段另起一张表，与 B14 导出语义一致。
+  const body = r.body
+  const bodyRaw = (body?.raw ?? '').trim()
+  const bodyForm = (body?.form ?? []).filter((f) => f.enabled && f.name.trim())
+  if (body && body.type !== 'none' && (bodyRaw || bodyForm.length)) {
+    out.push(`## ${L.body}`, `- ${body.type}`)
+    if (bodyRaw) {
+      const lang = body.type === 'json' ? 'json' : ''
+      out.push('', '```' + lang, bodyRaw, '```')
+    }
+    if (bodyForm.length) {
+      const hdr = [L.colName, L.colValue, L.colDesc].join(' | ')
+      out.push('', `| ${hdr} |`, '| --- | --- | --- |')
+      for (const f of bodyForm) out.push(`| ${esc(f.name)} | ${esc(f.value)} | ${esc(f.description ?? '')} |`)
+    }
     out.push('')
   }
 
