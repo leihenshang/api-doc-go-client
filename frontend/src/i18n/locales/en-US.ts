@@ -297,6 +297,13 @@ export default {
     empty: 'No fields (invalid or empty JSON)',
   },
   docs: {
+    title: 'Docs',
+    new: 'New doc',
+    namePh: 'Doc name',
+    empty: 'No docs yet',
+    pickHint: 'Select a doc or create one',
+    deleteConfirm: 'Delete this doc? It moves to Trash',
+    deleted: 'Doc deleted',
     gen: 'Generate API doc',
     download: 'Download',
     downloaded: 'Saved to {path}',

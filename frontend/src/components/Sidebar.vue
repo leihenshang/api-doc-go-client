@@ -3,6 +3,7 @@
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
+import DocsDialog from '@/components/DocsDialog.vue'
 import { useTreeDnd } from '@/composables/useTreeDnd'
 import { ancestorPaths, canDrop, filterTree, folderNameTaken, searchNode, sortTree, type SortMode } from '@/lib/collTree'
 import { api } from '@/lib/ipc'
@@ -20,6 +21,7 @@ import {
     CloseOutline,
     ContractOutline,
     CreateOutline,
+    DocumentTextOutline,
     EllipsisHorizontalOutline,
     ExpandOutline,
     FolderOpenOutline,
@@ -209,6 +211,7 @@ const sortMode = ref<SortMode>('default')
  */
 const treeMenu = computed(() => [
   { key: 'create', label: t('sidebar.createCollection'), icon: () => h(NIcon, { component: AddOutline }) },
+  { key: 'docs', label: t('docs.title'), icon: () => h(NIcon, { component: DocumentTextOutline }) },
   { type: 'divider' as const, key: 'd-sort' },
   {
     key: 'sort:asc',
@@ -232,6 +235,10 @@ function onTreeMenu(key: string | number): void {
     void startCreate()
     return
   }
+  if (key === 'docs') {
+    docsShow.value = true
+    return
+  }
   if (typeof key === 'string' && key.startsWith('sort:')) {
     const mode = key.slice('sort:'.length)
     if (mode === 'asc' || mode === 'desc' || mode === 'default') sortMode.value = mode
@@ -239,6 +246,8 @@ function onTreeMenu(key: string | number): void {
 }
 
 // ---- 顶部工具条：打开集合 / 创建集合 ----
+
+const docsShow = ref(false)
 
 const createShow = ref(false)
 const createName = ref('')
@@ -958,6 +967,8 @@ watch(
     </div>
 
     <!-- 关闭工作目录：居中确认（item 11），确认后 emit 给 App 做页签/存储清理 -->
+    <DocsDialog v-model:show="docsShow" />
+
     <n-modal v-model:show="closeShow" preset="dialog" type="warning" :title="t('tree.closeDir')"
       :content="closeTarget ? t('tree.confirmCloseDir', { name: rootName(closeTarget) }) : ''"
       :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" @positive-click="confirmCloseRoot"
