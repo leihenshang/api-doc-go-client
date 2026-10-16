@@ -20,16 +20,18 @@ export function sortTree(nodes: TreeNode[], mode: SortMode): TreeNode[] {
     return [...folders, ...leaves]
 }
 
-/** 搜索：命中请求保留其祖先分组；命中分组名则保留分组。q 需已小写、已 trim。 */
-export function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
+/** 搜索：命中请求保留其父级分组；命中分组名则保留分组。q 需已小写、已 trim。
+ * hitUids：Go 索引按 url/method/path 命中的请求 uid 集合（侧栏异步补充，口径同顶部搜索栏）；
+ * 请求「名称包含 q」或「在 hitUids 中」即保留。 */
+export function filterTree(nodes: TreeNode[], q: string, hitUids?: Set<string>): TreeNode[] {
     const out: TreeNode[] = []
     for (const n of nodes) {
         if (n.type === 'folder') {
-            const kids = n.children ? filterTree(n.children, q) : []
+            const kids = n.children ? filterTree(n.children, q, hitUids) : []
             if (kids.length || n.name.toLowerCase().includes(q)) {
                 out.push({ ...n, children: kids.length ? kids : n.children })
             }
-        } else if (n.name.toLowerCase().includes(q)) {
+        } else if (n.name.toLowerCase().includes(q) || hitUids?.has(n.uid)) {
             out.push(n)
         }
     }

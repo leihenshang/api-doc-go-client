@@ -318,6 +318,9 @@ export const api = {
   deleteCookie: (domain: string, name: string, path: string) =>
     call<null>('DeleteCookie', domain, name, path),
   searchIndex: (q: string, limit = 200) => call<IndexNode[] | null>('SearchIndex', q, limit).then((v) => v ?? []),
+  // 按工作目录检索索引（root 为空 = 活动根）；多根侧栏/面板逐根取 URL·方法·路径命中集
+  searchIndexFor: (root: string, q: string, limit = 200) =>
+    call<IndexNode[] | null>('SearchIndexFor', root, q, limit).then((v) => v ?? []),
   /** 预留（无 UI 入口）：对应 Go 门面 RebuildIndex，索引现由文件监听/保存自动维护；保留桥接以便手动重建排障。 */
   rebuildIndex: () => call<null>('RebuildIndex'),
   generateCode: (lang: string, envName: string, r: RequestDoc) =>
