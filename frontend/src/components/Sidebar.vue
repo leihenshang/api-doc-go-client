@@ -57,6 +57,7 @@ const emit = defineEmits<{
   open: [uid: string]
   'new-request': [folder: string]
   'new-grpc-request': [folder: string]
+  'new-doc': [folder: string]
   'import-curl': [folder: string]
   /** 点击某个根：把它切成活动根 */
   activate: [root: string]
@@ -506,6 +507,7 @@ async function submitRename(): Promise<void> {
   try {
     await ensureActive(cur.root)
     if (node.type === 'folder') await coll.renameFolder(cur.uid, name)
+    else if (node.type === 'doc') await coll.renameDoc(cur.uid, name)
     else await coll.renameRequest(cur.uid, name)
   } catch (e) {
     fail(e)
@@ -573,6 +575,17 @@ async function removeRequest(root: string, node: TreeNode): Promise<void> {
   }
 }
 
+/** B19：删除文档条目（进 .trash，可恢复）。 */
+async function removeDoc(root: string, node: TreeNode): Promise<void> {
+  try {
+    await ensureActive(root)
+    await coll.deleteDoc(node.uid)
+    tabs.forgetRequest(node.uid)
+  } catch (e) {
+    fail(e)
+  }
+}
+
 /**
  * 行内「···」菜单：把分组/请求的常用操作（新建子项、重命名、删除、收藏）收进一个下拉，
  * 不再在行内堆一排图标按钮；「更新」(根行立即同步) 仍作为直接按钮，不进菜单。
@@ -585,9 +598,16 @@ function rowMenuOptions(row: Row): DropdownOption[] {
       { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }) },
       { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }) },
       { key: 'subfolder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
+      { key: 'doc', label: t('tree.newDoc'), icon: () => h(NIcon, { component: DocumentTextOutline }), testid: 'tree.row.newDoc' },
       { type: 'divider', key: 'd1' },
       { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
       { key: 'delete', label: t('tree.delDir'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
+    ]
+  }
+  if (n.type === 'doc') {
+    return [
+      { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
+      { key: 'delete', label: t('tree.delDoc'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
     ]
   }
   const fav = coll.isFav(n.uid)
@@ -617,27 +637,39 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
     else if (key === 'grpc') emit('new-grpc-request', n.path)
     else if (key === 'curl') emit('import-curl', n.path)
     else if (key === 'subfolder') void startAdd(row.root, n.path)
+    else if (key === 'doc') emit('new-doc', n.path)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'folder')
   } else if (n.type === 'request') {
     if (key === 'fav') coll.toggleFav(n.uid)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'request')
+  } else if (n.type === 'doc') {
+    if (key === 'rename') void startRename(row.root, n)
+    else if (key === 'delete') confirmDelete(row.root, n, 'doc')
   }
 }
 
 /** 删除二次确认（沿用全局 dialog，与弹窗确认风格一致）。 */
-function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request'): void {
+function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request' | 'doc'): void {
   const n = node as TreeNode
+  const title = kind === 'folder' ? t('tree.delDir') : kind === 'doc' ? t('tree.delDoc') : t('tree.delApi')
+  const content =
+    kind === 'folder'
+      ? t('tree.confirmDelFolder', { name: n.name })
+      : kind === 'doc'
+        ? t('tree.confirmDelDoc', { name: n.name })
+        : t('tree.confirmDelRequest', { name: n.name })
   dialog.warning({
-    title: kind === 'folder' ? t('tree.delDir') : t('tree.delApi'),
-    content:
-      kind === 'folder'
-        ? t('tree.confirmDelFolder', { name: n.name })
-        : t('tree.confirmDelRequest', { name: n.name }),
+    title,
+    content,
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
-    onPositiveClick: () => (kind === 'folder' ? removeFolder(root, n) : removeRequest(root, n)),
+    onPositiveClick: () => {
+      if (kind === 'folder') return removeFolder(root, n)
+      if (kind === 'doc') return removeDoc(root, n)
+      return removeRequest(root, n)
+    },
   })
 }
 
@@ -678,6 +710,10 @@ function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
   if (editing.value || clickSuppressed.value) return
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
+  if (node.type === 'doc') {
+    void tabs.openDocTab(node.uid)
+    return
+  }
   if (node.type === 'folder') {
     toggle(root, node.path)
     return
@@ -698,6 +734,11 @@ async function performMove(
   destPath: string,
 ): Promise<void> {
   if (!canDrop(node, root, destRoot, destPath)) return
+  // 本期不支持文档跨工作目录移动（服务端分组归属按根，跨根需另设计）：同根内才放行
+  if (node.type === 'doc' && root !== destRoot) {
+    message.warning(t('tree.docCrossRoot'))
+    return
+  }
   // 已经在目标位置就不动（避免无意义的写盘与提示）
   if (root === destRoot && node.path === destPath) return
   try {
@@ -716,6 +757,7 @@ async function performMove(
     }
     await ensureActive(root)
     if (node.type === 'folder') await coll.moveFolder(node.uid, destPath)
+    else if (node.type === 'doc') await coll.moveDoc(node.uid, destPath)
     else await coll.moveRequest(node.uid, destPath)
     // 目标分组若是折叠的会自动展开，否则用户看不到「移动成功了」
     const key = folderKey(root, destPath)
@@ -725,7 +767,7 @@ async function performMove(
       collapsed.value = next
     }
     // 已打开的页签要同步路径（面包屑与后续保存都靠它）
-    if (node.type === 'request') tabs.syncPath(node.uid, destPath)
+    if (node.type === 'request' || node.type === 'doc') tabs.syncPath(node.uid, destPath)
     // 成功不再弹提示：落点横线 + 树即时刷新已经把结果说清楚了，多一条 toast 只是噪音
   } catch (e) {
     fail(e)
@@ -872,7 +914,7 @@ watch(
           <div class="row" :class="{
             folder: row.node?.type === 'folder',
             on: row.node?.uid === props.activeUid && row.root === props.activeRoot,
-            clickable: row.node?.type === 'request',
+            clickable: row.node?.type === 'request' || row.node?.type === 'doc',
             dim: row.root !== props.activeRoot,
             dragging: dragNode?.root === row.root && dragNode?.node.uid === row.node?.uid,
             'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
@@ -914,6 +956,26 @@ watch(
                 <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
                   :render-label="renderMenuLabel" @select="onRowMenu(row, $event)">
                   <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开 -->
+                  <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
+                    :aria-label="t('tree.more')">
+                    <n-icon :component="EllipsisHorizontalOutline" :size="13" />
+                  </button>
+                </n-dropdown>
+              </span>
+            </template>
+
+            <!-- B19：文档行（与请求行同构：图标 + 行内重命名 + 行内菜单） -->
+            <template v-else-if="row.node!.type === 'doc'">
+              <n-icon :component="DocumentTextOutline" :size="13" class="dicon" data-testid="tree.docRow" />
+              <n-input v-if="editing?.root === row.root && editing?.uid === row.node!.uid" v-model:value="editing.value"
+                size="tiny" class="rename" @keyup.enter="submitRename" @blur="submitRename"
+                @keyup.esc="editing = null" />
+              <button v-else class="rname" data-testid="tree.row.name" :title="row.node!.name">
+                {{ row.node!.name }}
+              </button>
+              <span class="actions">
+                <n-dropdown trigger="click" placement="bottom-start" :options="rowMenuOptions(row)"
+                  :render-label="renderMenuLabel" @select="onRowMenu(row, $event)">
                   <button class="act" type="button" data-testid="tree.row.menu" :title="t('tree.more')"
                     :aria-label="t('tree.more')">
                     <n-icon :component="EllipsisHorizontalOutline" :size="13" />
@@ -1192,7 +1254,17 @@ watch(
    字号不同时，相同 line-height 下两者的基线会差出 1px 以上，看着就是两个字错位。
    这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。 */
 .row>.mt,
-.row>.rname {
+.row>/* B19：文档行图标（与 method-tag 同列对齐） */
+.dicon {
+  flex: 0 0 auto;
+  color: var(--app-muted);
+}
+
+.row.on .dicon {
+  color: var(--app-accent);
+}
+
+.rname {
   display: inline-flex;
   align-items: center;
   line-height: 26px;

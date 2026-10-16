@@ -262,6 +262,16 @@ export const useTabsStore = defineStore('tabs', {
         // 取不到 hash 时留空：下次保存不带 expectHash（退化为无冲突检测）
       }
     },
+    /** B19：文档页签编辑回写（内容/标题任一变化即标脏）。 */
+    touchDoc(key: string, patch: Partial<DocTabDoc>): void {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab || tab.kind !== 'doc' || !tab.doc) return
+      tab.doc = { ...tab.doc, ...patch }
+      if (!tab.dirty) {
+        tab.dirty = true
+        this.scheduleSave(tab)
+      }
+    },
     /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
     openDoc(r: RequestDoc): void {
       this.pushTab(r)

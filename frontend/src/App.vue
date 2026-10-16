@@ -6,6 +6,7 @@ import CommandPalette from '@/components/CommandPalette.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
 import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import EnvManager from '@/components/EnvManager.vue'
+import DocEditor from '@/components/DocEditor.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
 import McpConsentDialog from '@/components/McpConsentDialog.vue'
@@ -51,7 +52,7 @@ import {
     enUS,
     zhCN
 } from 'naive-ui'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const coll = useCollectionStore()
@@ -216,6 +217,36 @@ async function withoutDetailTransition<T>(fn: () => T | Promise<T>): Promise<T> 
 
 /** 详情区实际渲染的页签：有活动页签用它；切根瞬间没有活动页签时沿用上一个（避免闪概览）。 */
 const detailTab = computed(() => tabs.active ?? (switchingRoot.value ? stuckActive.value : null))
+
+/** B19：当前页签是否为文档页签（主区分派到 DocEditor，隐藏请求栏/响应面板）。 */
+const isDocTab = computed(() => (detailTab.value?.kind ?? 'request') === 'doc')
+
+/**
+ * 输入型对话框（新建文档等）：Promise 返回Trimmed 输入，取消/空串返回 ''。
+ * naive 的 dialog 无原生 prompt，这里用「带输入框的 warning」实现一次即可复用。
+ */
+function promptName(title: string, placeholder: string): Promise<string> {
+  return new Promise((resolve) => {
+    let value = ''
+    const d = dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          autofocus: true,
+          placeholder,
+          onUpdateValue: (v: string) => (value = v),
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => resolve(value.trim()),
+      onClose: () => resolve(''),
+      onNegativeClick: () => {
+        d.destroy?.()
+        resolve('')
+      },
+    })
+  })
+}
 
 /**
  * 通知集合树「把选中行滚到可见」的信号：点页签一律加一 ——
@@ -625,6 +656,18 @@ function newDraft(folder = '', doc: RequestDoc | null = null): void {
   tabs.openDraft(doc, folder)
 }
 
+/** B19：在指定分组（folder 空 = docs/ 默认位）新建文档并直接开文档页签。 */
+async function newDocAt(folder = ''): Promise<void> {
+  const name = await promptName(t('docs.newDocTitle'), t('docs.newDocPlaceholder'))
+  if (!name) return
+  try {
+    const d = await coll.createDoc(name, folder)
+    await tabs.openDocTab(d.uid)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 /** 新建 gRPC 请求（G1.1/G1.2）：同样是未落盘草稿，grpc 段全空，由请求栏与 Schema 分段补齐。 */
 function newGrpcDraft(folder = ''): void {
   tabs.openDraft(blankGrpcRequest(), folder)
@@ -839,6 +882,11 @@ function saveActiveNow(): void {
   if (draftTab.value) return
   const tab = tabs.active
   if (!tab) return
+  // B19：文档页签走文档保存（expectHash + 冲突三态）
+  if ((tab.kind ?? 'request') === 'doc') {
+    void tabs.saveDoc(tab.key)
+    return
+  }
   if (!tab.draft) {
     void tabs.flush(tab.key)
     return
@@ -944,7 +992,8 @@ watch(
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
                 :reveal-tick="treeRevealTick" :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
                 @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
-                @new-request="newDraft" @new-grpc-request="newGrpcDraft" @import-curl="openCurl"
+                @new-request="newDraft" @new-grpc-request="newGrpcDraft" @new-doc="newDocAt"
+                @import-curl="openCurl"
                 @sync="openSyncSettings()" @sync-root="syncRootNow" @open-collection="openCollection('')"
                 @create-collection="openCollection" />
             </aside>
@@ -973,21 +1022,29 @@ watch(
                       {{ t('conflict.saveCopy') }}
                     </button>
                   </div>
-                  <request-bar :tab="detailTab" @codegen="showCodegen = true" @save="saveActiveNow" />
-                  <div ref="workEl" class="work" :class="settings.responseLayout">
-                    <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
-                      <request-editor :tab="detailTab" />
-                    </section>
+                  <!-- B19：文档页签 —— 隐藏请求栏与响应面板，编辑区满幅 -->
+                  <template v-if="isDocTab">
+                    <doc-editor :doc="detailTab.doc!" :readonly="coll.isReadOnly"
+                      @update:doc="(d) => tabs.touchDoc(detailTab.key, d)" @save="saveActiveNow"
+                      @close="requestClose(detailTab.key)" />
+                  </template>
+                  <template v-else>
+                    <request-bar :tab="detailTab" @codegen="showCodegen = true" @save="saveActiveNow" />
+                    <div ref="workEl" class="work" :class="settings.responseLayout">
+                      <section ref="editorEl" class="editor-col" @scroll.passive="saveScrolls">
+                        <request-editor :tab="detailTab" />
+                      </section>
 
-                    <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
-                    <div class="splitter" role="separator" :title="t('editor.resizeHint')"
-                      :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
-                      @pointerdown="startResize" />
+                      <!-- 纯拖动条：布局切换已移到标题栏（TitleBar 的 .layouts），中缝只留拖拽与分隔线 -->
+                      <div class="splitter" role="separator" :title="t('editor.resizeHint')"
+                        :aria-orientation="settings.responseLayout === 'right' ? 'vertical' : 'horizontal'"
+                        @pointerdown="startResize" />
 
-                    <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
-                      <response-panel :tab="detailTab" />
-                    </section>
-                  </div>
+                      <section ref="respEl" class="resp-col" :style="respStyle" @scroll.passive="saveScrolls">
+                        <response-panel :tab="detailTab" />
+                      </section>
+                    </div>
+                  </template>
                 </div>
 
                 <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
