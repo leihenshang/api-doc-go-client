@@ -11,6 +11,7 @@ service Echo {
   rpc Boom(EchoMsg) returns (EchoMsg);
   rpc Slow(EchoMsg) returns (EchoMsg);
   rpc Watch(EchoMsg) returns (stream EchoMsg);
+  rpc Collect(stream EchoMsg) returns (EchoMsg);
 }
 
 message EchoMsg {
