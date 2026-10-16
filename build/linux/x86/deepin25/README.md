@@ -1,7 +1,7 @@
 # 打包流程：Linux · x86(x86_64) · Deepin 25 —— deb 安装包
 
-> 状态：**仅文档，尚未实施**。本目录用于沉淀该目标平台的打包流程；脚本化（`scripts/build-deb.sh`）、
-> 图标多尺寸生成、CI 接入等实现见文末「待实施清单」。
+> 状态：**打包脚本已实现** —— `scripts/build-deb.sh`（构建 → deb 树 → 图标缩放 → dpkg-deb，prod/dev 各一包）；
+> 脚本尚待在 Linux 构建机首次实跑验证（Windows 侧仅做过 `bash -n` 语法校验）。CI 接入等见文末「待实施清单」。
 >
 > 目录层级约定：`build/<系统>/<cpu架构>/<os>/`。
 > 本目录对应 **linux + x86_64 + deepin25**，dpkg 架构为 **amd64**。
@@ -147,9 +147,9 @@ xprop -id $(xdotool search --class ApiDocClient | head -1) WM_CLASS _NET_WM_ICON
 
 ## 5. 待实施清单（先不做）
 
-1. `scripts/build-deb.sh`：一条命令完成 构建 → deb 树 → 图标缩放 → `dpkg-deb` 打包（prod/dev 各一个包）
+1. ✅ 已实现（脚本）：`scripts/build-deb.sh` 一条命令完成 构建 → deb 树 → 图标缩放 → `dpkg-deb` 打包（prod/dev 各一个包）
 2. `gdk_set_program_class` cgo 垫片（§4 方式 2）及 `StartupWMClass` 的相应收敛
-3. 图标多尺寸生成（`convert`/`sharp`，含 dev 图标）
-4. dev 包与 prod 包的版本号/包名规则
+3. ✅ 已并入脚本（ImageMagick 缩放 16–512 七档，dev 图标自动回落正式图标）
+4. ✅ 已定（脚本）：prod `api-doc-client_<version>_<arch>.deb` / dev `api-doc-client-dev_…`，版本取 `VERSION` 环境变量 > `wails.json info.productVersion` > `0.0.0-dev`
 5. CI 接入（`.github/workflows`）与发布流程
 6. `nfpm` 配置替代手工 deb 树（便于后续多架构/多发行版）
