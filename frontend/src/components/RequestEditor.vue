@@ -210,6 +210,7 @@ async function genDocs(): Promise<void> {
         headers: t('docs.headers'),
         params: t('docs.params'),
         body: t('docs.body'),
+        bodyParams: t('docs.bodyParams'),
         reqExample: t('docs.reqExample'),
         resFields: t('docs.resFields'),
         resExample: t('docs.resExample'),

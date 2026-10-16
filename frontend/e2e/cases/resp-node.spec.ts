@@ -86,7 +86,7 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await openRequest(page, 'ping')
     await patchRequest(app, PING_UID, {
       params: [{ name: 'page', value: '1', enabled: true }],
-      body: { type: 'json', raw: '{"uid": "u-42"}', form: [] },
+      body: { type: 'json', raw: '{"uid": "u-42", "vip": true}', form: [], descs: { uid: '用户ID' } },
     })
     await page.reload()
     await expect(page.getByTestId('tree.row').first()).toBeVisible({ timeout: 10_000 })
@@ -99,5 +99,8 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(md).toContainText('page')
     await expect(md).toContainText(t('docs.body')) // 修复点：请求体章节不再丢
     await expect(md).toContainText('u-42') // 原始体内容进代码块
+    await expect(md).toContainText(t('docs.bodyParams')) // JSON 体附字段表（小标题）
+    await expect(md).toContainText('用户ID') // descs 备注进表「说明」列
+    await expect(md).toContainText('vip') // 摊平字段（路径）进表
   })
 })

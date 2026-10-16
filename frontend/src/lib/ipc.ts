@@ -137,10 +137,13 @@ function normalizeRequest(r: RequestDoc): RequestDoc {
     body: {
       type: r.body?.type ?? 'none',
       raw: r.body?.raw ?? '',
-      // data（Bruno 结构化 JSON 体）必须原样保留：之前在这里被剥离，
+      // data（Bruno 结构化 JSON 体）必须原样保留：之前在这里被剥掉，
       // 导致导入 Bruno 后再保存/同步时 body.data 丢失（T5）。
       data: r.body?.data ?? '',
       form: r.body?.form ?? [],
+      // descs（JSON 体字段备注，share Body.Descs）同样必须在边界保留：
+      // 之前被重建剥掉，重载后表格视图备注与生成文档的请求体表丢备注。
+      descs: r.body?.descs,
     },
     // grpc 段的 imports/metadata 同样是可省略字段（Go 侧 omitempty）：归一成数组，界面免判空
     grpc: r.grpc
