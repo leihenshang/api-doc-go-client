@@ -365,6 +365,10 @@ export const api = {
   readDoc: (uid: string) => call<DocEntry>('ReadDoc', uid),
   createDoc: (name: string, folder = '') => call<DocEntry>('CreateDoc', name, folder),
   saveDoc: (d: DocEntry) => call<null>('SaveDoc', d),
+  /** B19：带期望哈希保存（磁盘 hash 不一致返回 [conflict] 前缀错误） */
+  saveDocExpectHash: (d: DocEntry, expectHash: string) => call<null>('SaveDocExpectHash', d, expectHash),
+  /** B19：文档文件当前磁盘 hash（文档不进索引，单独取；空串 = 取不到） */
+  docFileHash: (uid: string) => call<string | null>('DocFileHash', uid),
   deleteDoc: (uid: string) => call<null>('DeleteDoc', uid),
   moveDoc: (uid: string, destFolder: string) => call<null>('MoveDoc', uid, destFolder),
   renameDoc: (uid: string, name: string) => call<null>('RenameDoc', uid, name),

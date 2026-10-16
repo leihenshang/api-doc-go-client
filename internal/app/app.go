@@ -941,6 +941,25 @@ func (a *App) SaveDoc(d *collection.DocEntry) error {
 	return c.SaveDoc(d)
 }
 
+// SaveDocExpectHash 带期望哈希保存文档（B19）：磁盘 hash 与 expectHash 不一致时
+// 返回以 [conflict] 开头的错误，供文档页签复用请求那套「冲突条」交互。
+func (a *App) SaveDocExpectHash(d *collection.DocEntry, expectHash string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.SaveDocChecked(d, expectHash)
+}
+
+// DocFileHash 文档文件的当前磁盘 hash（B19：文档页签保存前/外部改动比对用）。
+func (a *App) DocFileHash(uid string) string {
+	c, err := a.requireCollection()
+	if err != nil {
+		return ""
+	}
+	return c.DocFileHash(uid)
+}
+
 // DeleteDoc 删除文档。
 func (a *App) DeleteDoc(uid string) error {
 	c, err := a.requireCollection()

@@ -93,7 +93,7 @@ func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 	return d, nil
 }
 
-// SaveDoc 写回文档文件。Path 必须落在集合的 docs/ 目录内（防越界写盘）。
+// SaveDoc 写回文档文件。Path 必须落在集合目录内（B19：任意目录，防越界写盘）。
 func (c *Collection) SaveDoc(d *DocEntry) error {
 	if d == nil || d.UID == "" {
 		return fmt.Errorf("缺少 uid")
@@ -107,6 +107,32 @@ func (c *Collection) SaveDoc(d *DocEntry) error {
 	}
 	c.ignoreWrite(d.Path)
 	return writeDocFile(full, d)
+}
+
+// DocFileHash 文档文件当前的磁盘 hash（B19：文档不进 SQLite 索引，单独算；
+// 取不到（未落盘/扫描失败）返回空串，调用方据此跳过冲突检测）。
+func (c *Collection) DocFileHash(uid string) string {
+	res, err := c.scan()
+	if err != nil {
+		return ""
+	}
+	d, ok := res.docs[uid]
+	if !ok {
+		return ""
+	}
+	return c.FileHashOf(d.Path)
+}
+
+// SaveDocChecked 带期望哈希的文档保存（B19，与 SaveRequest 的 ExpectHash 同语义）：
+// expectHash 非空且与磁盘 hash 不一致时拒写，错误以 conflictMarker 开头，
+// 前端据此展示「重新加载 / 另存为副本」而不是普通保存失败。
+func (c *Collection) SaveDocChecked(d *DocEntry, expectHash string) error {
+	if expectHash != "" {
+		if cur := c.DocFileHash(d.UID); cur != "" && cur != expectHash {
+			return fmt.Errorf("%s 磁盘内容已被其他来源修改", conflictMarker)
+		}
+	}
+	return c.SaveDoc(d)
 }
 
 // docPath 校验并解析文档相对路径：必须是集合内的 .md 文件。
