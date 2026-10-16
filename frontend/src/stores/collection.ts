@@ -9,7 +9,7 @@
 // 按根区分的状态（标签会话、环境选择、收藏）都以 root 为键。
 import { defineStore } from 'pinia'
 import { api } from '@/lib/ipc'
-import type { CollectionInfo, CollectionSummary, Env, RequestDoc, TreeNode } from '@/types'
+import type { CollectionInfo, CollectionSummary, DocEntry, Env, RequestDoc, TreeNode } from '@/types'
 
 /** 取活动根的概要：getter 里不引用别的 getter（避免 Pinia 的 this 推断问题）。 */
 function activeOf(state: {
@@ -230,6 +230,23 @@ export const useCollectionStore = defineStore('collection', {
     async moveRequest(uid: string, destFolder: string): Promise<void> {
       await api.moveRequest(uid, destFolder)
       await this.reload()
+    },
+    /** B19：文档条目（与请求同级的树叶子）。 */
+    async renameDoc(uid: string, name: string): Promise<void> {
+      await api.renameDoc(uid, name)
+      await this.reload()
+    },
+    async moveDoc(uid: string, destFolder: string): Promise<void> {
+      await api.moveDoc(uid, destFolder)
+      await this.reload()
+    },
+    async deleteDoc(uid: string): Promise<void> {
+      await api.deleteDoc(uid)
+      await this.reload()
+    },
+    /** B19：新建文档（folder 空 = docs/ 默认位）；返回条目供调用方开页签。 */
+    async createDoc(name: string, folder: string): Promise<DocEntry> {
+      return await api.createDoc(name, folder)
     },
     async moveFolder(uid: string, destParent: string): Promise<void> {
       await api.moveFolder(uid, destParent)

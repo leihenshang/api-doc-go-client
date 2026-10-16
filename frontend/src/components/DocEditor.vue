@@ -1,57 +1,35 @@
 <script setup lang="ts">
-// 文档条目编辑器（B13）：Markdown 编辑 + 预览。
+// 文档条目编辑器（B13 → B19）：Markdown 编辑 + 预览。
 //
-// 由 DocsDialog.vue（B9 入口：侧栏「⋯ → 文档」）挂载，按 uid 载入 docs/*.md，保存走 ReadDoc/SaveDoc 门面。
-// 后端能力含 SyncDocAssets（E19 附件离线映射，见《客户端与服务端同步实现现状.md》）。
-import { NButton, NInput } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
+// B19 起它不再是弹窗内容，而是**文档页签**的编辑区：数据由父组件（App.vue）以
+// tab.doc 传入，编辑经 update:doc 回写 store（标脏），保存由父组件走
+// tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { api } from '@/lib/ipc'
-import { message } from '@/lib/notice'
-import { useCollectionStore } from '@/stores/collection'
-import type { DocEntry } from '@/types'
+import { isDark } from '@/lib/theme'
+import type { DocTabDoc } from '@/stores/tabs'
 
-const props = defineProps<{ uid: string }>()
-const emit = defineEmits<{ close: []; saved: [] }>()
+const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
+const emit = defineEmits<{
+  'update:doc': [doc: DocTabDoc]
+  save: []
+  close: []
+}>()
 const { t, locale } = useI18n()
-const coll = useCollectionStore()
 
-const doc = ref<DocEntry | null>(null)
-const content = ref('')
-const name = ref('')
-const mode = ref<'edit' | 'preview' | 'split'>('split')
-const readonly = computed(() => coll.isReadOnly)
+const mode = ref<'edit' | 'split' | 'preview'>('split')
+const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
-watch(
-  () => props.uid,
-  async (uid) => {
-    if (!uid) return
-    try {
-      doc.value = await api.readDoc(uid)
-      content.value = doc.value?.content ?? ''
-      name.value = doc.value?.name ?? ''
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
-    }
-  },
-  { immediate: true },
-)
-
-async function save(): Promise<void> {
-  if (!doc.value || readonly.value) return
-  try {
-    doc.value.content = content.value
-    doc.value.name = name.value
-    await api.saveDoc(doc.value)
-    message.success(t('common.saved'))
-    emit('saved')
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
+/** 标题与正文都走 store：改一点就标脏，保存由页签统一调度（防抖/手动一致）。 */
+function onName(v: string): void {
+  emit('update:doc', { ...props.doc, name: v })
+}
+function onContent(v: string): void {
+  emit('update:doc', { ...props.doc, content: v })
 }
 </script>
 
@@ -59,11 +37,12 @@ async function save(): Promise<void> {
   <div class="doc-editor">
     <div class="hd">
       <n-input
-        v-model:value="name"
+        :value="doc.name"
         size="small"
         class="name"
         :readonly="readonly"
         data-testid="doc.name"
+        @update:value="onName"
       />
       <span class="sp" />
       <n-button size="tiny" :type="mode === 'edit' ? 'primary' : 'default'" @click="mode = 'edit'">
@@ -75,7 +54,7 @@ async function save(): Promise<void> {
       <n-button size="tiny" :type="mode === 'preview' ? 'primary' : 'default'" @click="mode = 'preview'">
         {{ t('editor.preview') }}
       </n-button>
-      <n-button v-if="!readonly" size="tiny" type="primary" data-testid="doc.save" @click="save">
+      <n-button v-if="!readonly" size="tiny" type="primary" data-testid="doc.save" @click="emit('save')">
         {{ t('common.save') }}
       </n-button>
       <n-button size="tiny" quaternary @click="emit('close')">×</n-button>
@@ -83,13 +62,14 @@ async function save(): Promise<void> {
     <div class="body" :class="mode">
       <md-editor
         v-if="mode !== 'preview'"
-        v-model="content"
+        :model-value="doc.content"
         :language="mdLanguage"
-        :theme="mode === 'split' ? 'light' : 'light'"
+        :theme="isDark ? 'dark' : 'light'"
         class="md-edit"
         :readonly="readonly"
+        @update:model-value="onContent"
       />
-      <md-preview v-if="mode !== 'edit'" :model-value="content" class="md-preview" />
+      <md-preview v-if="mode !== 'edit'" :model-value="doc.content" class="md-preview" />
     </div>
   </div>
 </template>
@@ -119,30 +99,23 @@ async function save(): Promise<void> {
 }
 
 .body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
 }
 
-.body.edit .md-edit,
-.body.preview .md-preview {
-  flex: 1;
+.body.edit :deep(.md-editor) {
+  flex: 1 1 auto;
+}
+
+.body.split :deep(.md-editor),
+.body.split :deep(.md-preview) {
+  flex: 1 1 50%;
   min-width: 0;
 }
 
-.body.split .md-edit,
-.body.split .md-preview {
-  flex: 1;
+.body.preview :deep(.md-preview) {
+  flex: 1 1 auto;
   min-width: 0;
-}
-
-.body.split .md-edit {
-  border-right: 1px solid var(--app-border);
-}
-
-.md-edit,
-.md-preview {
-  height: 100%;
-  overflow: auto;
 }
 </style>
