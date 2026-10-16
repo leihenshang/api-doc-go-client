@@ -297,6 +297,13 @@ export default {
     empty: '暂无字段（JSON 非法或为空）',
   },
   docs: {
+    title: '文档',
+    new: '新建文档',
+    namePh: '文档名称',
+    empty: '暂无文档',
+    pickHint: '选择或新建一篇文档',
+    deleteConfirm: '删除该文档？将移入回收站',
+    deleted: '文档已删除',
     gen: '生成接口文档',
     download: '下载',
     downloaded: '已保存到 {path}',
