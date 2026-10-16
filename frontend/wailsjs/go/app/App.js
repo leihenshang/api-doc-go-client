@@ -126,6 +126,10 @@ export function GetSyncBindFor(arg1) {
   return window['go']['app']['App']['GetSyncBindFor'](arg1);
 }
 
+export function GetSyncPassphraseSet() {
+  return window['go']['app']['App']['GetSyncPassphraseSet']();
+}
+
 export function GetSyncStatus() {
   return window['go']['app']['App']['GetSyncStatus']();
 }
@@ -366,6 +370,10 @@ export function SearchIndex(arg1, arg2) {
   return window['go']['app']['App']['SearchIndex'](arg1, arg2);
 }
 
+export function SearchIndexFor(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SearchIndexFor'](arg1, arg2, arg3);
+}
+
 export function SendRequest(arg1, arg2) {
   return window['go']['app']['App']['SendRequest'](arg1, arg2);
 }
@@ -396,6 +404,10 @@ export function SetSyncBind(arg1, arg2, arg3, arg4) {
 
 export function SetSyncBindFor(arg1) {
   return window['go']['app']['App']['SetSyncBindFor'](arg1);
+}
+
+export function SetSyncPassphrase(arg1) {
+  return window['go']['app']['App']['SetSyncPassphrase'](arg1);
 }
 
 export function StartAutoSync(arg1) {
