@@ -135,13 +135,15 @@ func writeDeviceID(id string) error {
 
 // Report 一轮同步的结果摘要。
 type Report struct {
-	Pulled    int      `json:"pulled"`
-	Pushed    int      `json:"pushed"`
-	Conflicts int      `json:"conflicts"`
-	Rejected  int      `json:"rejected"`
-	Errors    []string `json:"errors,omitempty"`
-	Cursor    int64    `json:"cursor"`
-	Gap       bool     `json:"gap"`
+	Pulled    int `json:"pulled"`
+	Pushed    int `json:"pushed"`
+	Conflicts int `json:"conflicts"`
+	Rejected  int `json:"rejected"`
+	// Assets 文档图片离线映射（E19）本轮新镜像的附件数（已存在的旧附件不计）。
+	Assets int      `json:"assets,omitempty"`
+	Errors []string `json:"errors,omitempty"`
+	Cursor int64    `json:"cursor"`
+	Gap    bool     `json:"gap"`
 }
 
 // RunOne 执行一轮：pull → apply → push dirty。

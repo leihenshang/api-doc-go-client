@@ -672,6 +672,14 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 	// 同步后重建索引
 	_ = c.RebuildIndex()
 
+	// E19 文档图片离线映射：成功轮后 best-effort 镜像绑定服务端的同源图片
+	// （内容寻址已存在即跳过；失败不影响本轮结果，也不报错刷屏）
+	if err == nil && rep != nil {
+		if n, aerr := syncDocAssets(c, b.ServerURL, tok); aerr == nil && n > 0 {
+			rep.Assets = n
+		}
+	}
+
 	// 记状态（按集合各自记录，状态栏切到哪个根就看哪个根）
 	a.updateSyncStatus(c, func(st *SyncStatus) {
 		if err != nil {
@@ -958,23 +966,36 @@ func (a *App) SyncDocAssets(token string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	docs, err := c.ListDocs()
-	if err != nil {
-		return 0, err
+	b, err := syncengine.LoadBind(c.Dir)
+	if err != nil || !b.Linked {
+		return 0, errors.New("未关联服务端或缺少令牌")
 	}
 	tok := token
 	if tok == "" {
 		tok = a.syncTokenOf(c)
 	}
-	b, _ := syncengine.LoadBind(c.Dir)
-	if tok == "" || !b.Linked {
+	if tok == "" {
+		tok = b.Token
+	}
+	if tok == "" {
 		return 0, errors.New("未关联服务端或缺少令牌")
+	}
+	return syncDocAssets(c, b.ServerURL, tok)
+}
+
+// syncDocAssets 把集合内文档引用的同源图片镜像到 assets/（内容寻址，已存在即跳过）。
+// E19 离线映射核心：由 App.SyncDocAssets 门面与 runSyncFor 成功轮后的 best-effort 共用。
+// 单条失败不影响其余附件；整体错误（如令牌失效）上抛由调用方决定是否忽略。
+func syncDocAssets(c *collection.Collection, serverURL, token string) (int, error) {
+	docs, err := c.ListDocs()
+	if err != nil {
+		return 0, err
 	}
 	client := &http.Client{Timeout: assetFetchTimeout}
 	count := 0
 	for _, d := range docs {
 		for _, u := range collection.DocImageURLs(d.Content) {
-			n, ferr := fetchAsset(client, c, b.ServerURL, tok, u)
+			n, ferr := fetchAsset(client, c, serverURL, token, u)
 			if ferr != nil {
 				continue // 单条失败不影响其余附件
 			}
