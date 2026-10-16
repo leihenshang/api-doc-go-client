@@ -17,7 +17,14 @@ export interface Tab {
   key: string
   uid: string
   title: string
+  /**
+   * B19：页签类型。缺省（旧持久化数据 / 既有构造点）按 'request' 处理。
+   * 'doc' 时 `doc` 为真相源，`request` 仅为占位（发送/响应等入口在 UI 层按 kind 隐藏）。
+   */
+  kind?: 'request' | 'doc'
   request: RequestDoc
+  /** kind='doc' 时的文档数据（真相源；保存/回填/冲突都走它） */
+  doc?: DocTabDoc
   dirty: boolean
   sending: boolean
   response: SendResult | null
@@ -79,8 +86,18 @@ function clearLegacyKey(kind: 'tabs' | 'drafts', collUid: string): void {
 }
 
 interface TabSession {
-  uids: string[]
+  /** B19：会话条目带类型；旧数据为纯 string[]（uid），反序列化时补 'request' */
+  uids: (string | { uid: string; kind?: 'request' | 'doc' })[]
   activeUid: string
+}
+
+/** 文档页签的本地数据（B19）：真相源是集合里的 .md 文件，uid 来自 frontmatter。 */
+export interface DocTabDoc {
+  uid: string
+  path: string
+  name: string
+  content: string
+  icon: string
 }
 
 /** 新建草稿的空请求模板：与 Go 侧 CreateRequest 的默认值一致（URL 留空，不预填 {{host}}）。 */
@@ -171,12 +188,13 @@ export const useTabsStore = defineStore('tabs', {
     count: (s) => s.tabs.length,
     // 「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘、
     // 冲突页签已挂横幅且 flush 会跳过 —— 都不计入。供切区/退出前的未保存询问复用。
-    savableTabs: (s): Tab[] => s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict),
+    savableTabs: (s): Tab[] =>
+      s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict && (t.kind ?? 'request') === 'request'),
   },
   actions: {
     /** 打开一条请求（已有 tab 则激活）。 */
     async openRequest(uid: string): Promise<void> {
-      const exist = this.tabs.find((t) => t.uid === uid)
+      const exist = this.tabs.find((t) => t.uid === uid && (t.kind ?? 'request') === 'request')
       if (exist) {
         this.setActive(exist.key)
         return
@@ -186,6 +204,63 @@ export const useTabsStore = defineStore('tabs', {
       this.pushTab(r)
       const tab = this.tabs.find((t) => t.uid === uid)
       if (tab) tab.baseHash = this.hashes[uid] ?? ''
+    },
+    /**
+     * B19：打开文档页签（树叶子点击入口）。同 uid 已开则聚焦，与 openRequest 同逻辑。
+     * 真相源是 tab.doc；request 仅作占位，UI 层按 kind 分派到 DocEditor。
+     */
+    async openDocTab(uid: string): Promise<void> {
+      const exist = this.tabs.find((t) => t.uid === uid && t.kind === 'doc')
+      if (exist) {
+        this.setActive(exist.key)
+        return
+      }
+      const d = await api.readDoc(uid)
+      const tab: Tab = {
+        key: nextKey(), uid: d.uid, title: d.name, kind: 'doc', request: blankRequest(),
+        doc: { uid: d.uid, path: d.path ?? '', name: d.name ?? '', content: d.content ?? '', icon: d.icon ?? '' },
+        dirty: false, sending: false, response: null, error: '', resolve: null,
+        draft: false, draftFolder: '', grpcSchema: null, grpcError: '',
+      }
+      this.tabs.push(tab)
+      this.setActive(tab.key)
+      this.saveSession()
+    },
+    /**
+     * B19：保存文档页签。与请求保存共用「脏点 + 保存中 + 冲突」三态，
+     * expectHash 走 Go 侧 SaveDocExpectHash（磁盘 hash 不一致即返回 [conflict]）。
+     */
+    async saveDoc(key: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab || tab.kind !== 'doc' || !tab.doc || !tab.dirty) return
+      if (tab.saving || tab.conflict) return
+      tab.saving = true
+      try {
+        await api.saveDocExpectHash({
+          uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
+          content: tab.doc.content, icon: tab.doc.icon,
+        }, tab.baseHash ?? '')
+        tab.dirty = false
+        await this.refreshDocHash(tab)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (msg.includes('[conflict]')) {
+          tab.conflict = true
+          message.warning(i18n.global.t('conflict.detected'))
+        } else {
+          message.error(msg)
+        }
+      } finally {
+        tab.saving = false
+      }
+    },
+    /** 文档页签的磁盘 hash 刷新（文档不进 SQLite 索引，单独读一次 hash）。 */
+    async refreshDocHash(tab: Tab): Promise<void> {
+      try {
+        tab.baseHash = (await api.docFileHash(tab.uid)) ?? ''
+      } catch {
+        // 取不到 hash 时留空：下次保存不带 expectHash（退化为无冲突检测）
+      }
     },
     /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
     openDoc(r: RequestDoc): void {
@@ -216,14 +291,18 @@ export const useTabsStore = defineStore('tabs', {
       this.saveDrafts()
       return tab.key
     },
-    /** 把草稿落盘成真实请求：uid / 文件名 / 序号由集合层分配，成功后 tab 转正（不再是草稿）。 */
-    /**
+    /** 把草稿落盘成真实请求：uid / 文件名 / 序号由集合层分配，成功后 tab 转正（不再是草稿）。 */    /**
      * 请求在集合树里被移动（拖动改上级目录 / 「移动到…」）后，同步已打开页签里的路径。
      * 不做的话：页签面包屑仍显示旧位置，而且后续保存会把文件写回旧路径（在旧目录里多出一份）。
      */
     syncPath(uid: string, path: string): void {
       for (const tab of this.tabs) {
         if (tab.uid !== uid) continue
+        // B19：文档页签同步 doc.path（否则后续保存会把内容写回旧路径）
+        if ((tab.kind ?? 'request') === 'doc') {
+          if (tab.doc && tab.doc.path !== path) tab.doc.path = path
+          continue
+        }
         if (tab.request.path === path) continue
         tab.request.path = path
         tab.draftFolder = ''
@@ -394,6 +473,11 @@ export const useTabsStore = defineStore('tabs', {
       clearTimeout(saveTimers.get(key))
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.draft || !tab.dirty || !tab.uid) return
+      // B19：文档页签走文档保存通道（expectHash + 冲突三态），不进下面的请求保存链路
+      if ((tab.kind ?? 'request') === 'doc') {
+        await this.saveDoc(key)
+        return
+      }
       const coll = useCollectionStore()
       // P2：只读集合（同步镜像）不允许写盘 —— 编辑可以，落盘不行
       if (coll.isReadOnly) {
@@ -481,6 +565,35 @@ export const useTabsStore = defineStore('tabs', {
       let conflicts = 0
       for (const tab of this.tabs) {
         if (tab.draft || !tab.uid) continue
+        // B19：文档页签单独比对（文档不进 SQLite 索引，hash 需单独取）
+        if ((tab.kind ?? 'request') === 'doc') {
+          if (tab.saving) continue
+          let cur = ''
+          try {
+            cur = (await api.docFileHash(tab.uid)) ?? ''
+          } catch {
+            continue
+          }
+          if (!cur || !tab.baseHash || cur === tab.baseHash) continue
+          if (tab.dirty) {
+            if (!tab.conflict) {
+              tab.conflict = true
+              conflicts++
+            }
+            continue
+          }
+          try {
+            const d = await api.readDoc(tab.uid)
+            if (tab.doc) {
+              tab.doc = { uid: d.uid, path: d.path ?? '', name: d.name ?? '', content: d.content ?? '', icon: d.icon ?? '' }
+              tab.title = d.name || tab.title
+            }
+            tab.baseHash = cur
+          } catch {
+            // 读失败保持现状
+          }
+          continue
+        }
         // 本方保存可能在途：索引已更新、baseHash 尚未回写（flush 只在保存成功后刷 baseHash）。
         // 若此时按「索引≠baseHash」判冲突，就把正在进行的本方保存误判成外部改动 → 假冲突。
         // 与 flush 的 `if (tab.saving) return` 对齐，同一 uid 在途期间跳过这次同步。
@@ -814,7 +927,8 @@ export const useTabsStore = defineStore('tabs', {
       if (!coll.activeRoot) return
       const active = this.tabs.find((t) => t.key === this.activeKey)
       const data: TabSession = {
-        uids: this.tabs.filter((t) => !t.draft).map((t) => t.uid),
+        // B19：带 kind 保存（旧版本读出 string[] 时按 request 处理，向后兼容）
+        uids: this.tabs.filter((t) => !t.draft).map((t) => ({ uid: t.uid, kind: t.kind ?? 'request' })),
         activeUid: active && !active.draft ? active.uid : '',
       }
       try {
@@ -843,12 +957,16 @@ export const useTabsStore = defineStore('tabs', {
       } catch {
         return
       }
-      for (const uid of data.uids ?? []) {
+      for (const it of data.uids ?? []) {
+        // 兼容旧格式：纯字符串 uid 视为请求
+        const uid = typeof it === 'string' ? it : it.uid
+        const kind = typeof it === 'string' ? 'request' : it.kind ?? 'request'
         if (!uid) continue
         try {
-          await this.openRequest(uid)
+          if (kind === 'doc') await this.openDocTab(uid)
+          else await this.openRequest(uid)
         } catch {
-          // 请求已被删除：跳过，不阻断恢复
+          // 条目已被删除：跳过，不阻断恢复
         }
       }
       this.restoreDrafts()
