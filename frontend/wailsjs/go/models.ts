@@ -1694,6 +1694,7 @@ export namespace syncengine {
 	    pushed: number;
 	    conflicts: number;
 	    rejected: number;
+	    assets?: number;
 	    errors?: string[];
 	    cursor: number;
 	    gap: boolean;
@@ -1708,6 +1709,7 @@ export namespace syncengine {
 	        this.pushed = source["pushed"];
 	        this.conflicts = source["conflicts"];
 	        this.rejected = source["rejected"];
+	        this.assets = source["assets"];
 	        this.errors = source["errors"];
 	        this.cursor = source["cursor"];
 	        this.gap = source["gap"];
