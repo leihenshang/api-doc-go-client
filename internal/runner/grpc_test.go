@@ -110,6 +110,22 @@ func echoHandler(res *grpcproto.Result) grpc.StreamHandler {
 			}
 			return true
 		})
+		// 服务器流：回 3 条带序号的消息（F6 用例）。
+		if md.IsStreamingServer() {
+			for i := int64(1); i <= 3; i++ {
+				m := dynamicpb.NewMessage(md.Output())
+				if fd := m.Descriptor().Fields().ByName("text"); fd != nil {
+					m.Set(fd, protoreflect.ValueOfString(fieldString(in, "text")))
+				}
+				if fd := m.Descriptor().Fields().ByName("n"); fd != nil {
+					m.Set(fd, protoreflect.ValueOfInt64(i))
+				}
+				if err := stream.SendMsg(m); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		return stream.SendMsg(out)
 	}
 }
@@ -275,10 +291,40 @@ func TestSendGRPCBadTarget(t *testing.T) {
 func TestSendGRPCStreamingUnsupported(t *testing.T) {
 	res := compileEcho(t)
 	_, err := SendGRPC(context.Background(), GrpcRequest{
-		Target: "127.0.0.1:1", Method: echoMethod(t, res, "Watch"),
+		Target: "127.0.0.1:1", Method: echoMethod(t, res, "Collect"),
 	}, nil, DefaultOptions())
-	if err == nil || !strings.Contains(err.Error(), "流式") {
-		t.Errorf("流式方法应给出明确提示，实际: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "客户端流") {
+		t.Errorf("客户端流方法应给出明确提示，实际: %v", err)
+	}
+}
+
+// TestSendGRPCServerStream F6：服务器流式调用收多帧并组装 JSON 数组；状态 OK、 trailers 照常。
+func TestSendGRPCServerStream(t *testing.T) {
+	res := compileEcho(t)
+	target, stop := startEchoServer(t, res, nil)
+	defer stop()
+
+	got, err := SendGRPC(context.Background(), GrpcRequest{
+		Target: target, Method: echoMethod(t, res, "Watch"), Message: `{"text":"tick"}`,
+	}, nil, DefaultOptions())
+	if err != nil {
+		t.Fatalf("SendGRPC: %v", err)
+	}
+	if got.Status != int(codes.OK) {
+		t.Fatalf("状态码应为 OK，实际 %d body=%s", got.Status, got.Body)
+	}
+	var msgs []struct {
+		Text string `json:"text"`
+		N    string `json:"n"` // protojson int64 → 字符串
+	}
+	if err := json.Unmarshal([]byte(got.Body), &msgs); err != nil {
+		t.Fatalf("Body 应为 JSON 数组: %v (%s)", err, got.Body)
+	}
+	if len(msgs) != 3 || msgs[0].Text != "tick" || msgs[2].N != "3" {
+		t.Fatalf("应收到 3 帧带序号消息，实际 %s", got.Body)
+	}
+	if len(got.Trailers) == 0 {
+		t.Error("流式调用也应带回尾元数据")
 	}
 }
 

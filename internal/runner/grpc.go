@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -60,32 +61,63 @@ type GrpcRequest struct {
 	Types    *protoregistry.Types // protojson 解析 Any / 扩展（可为 nil）
 }
 
-// SendGRPC 发送一次 gRPC 调用（首期仅支持 unary）。
+// SendGRPC 发送一次 gRPC 调用（unary 与 server-streaming）。
 //
 // 与 HTTP 的差异：**非 OK 的 gRPC 状态不算 error** —— 它以 Result.Status（gRPC code）+ 尾元数据
 // 返回，错误详情写进 Body，让响应面板照常渲染状态徽章与详情；只有「没到服务端」的情况
 // （地址非法 / 消息不合法 / 证书读不出来）才返回 error。
+// server-streaming：收到多条响应按到达顺序组装为 JSON 数组；中途出错时丢弃已收部分、
+// 按 unary 同样方式返回状态码（取消沿用 callCtx，行为与 unary 一致）。
+// 客户端流 / 双工：暂不支持，调用前即报错（见 F6 记录）。
 func SendGRPC(ctx context.Context, req GrpcRequest, vars map[string]string, opts Options) (*Result, error) {
 	if req.Method == nil {
 		return nil, errors.New("缺少 gRPC 方法（请先导入 .proto 并选择服务与方法）")
 	}
-	if req.Method.IsStreamingClient() || req.Method.IsStreamingServer() {
-		return nil, fmt.Errorf("暂不支持流式方法 %s（当前版本仅支持一元调用）", req.Method.Name())
+	if req.Method.IsStreamingClient() {
+		return nil, fmt.Errorf("暂不支持客户端流/双工方法 %s（已支持服务器流）", req.Method.Name())
 	}
+	call, err := newGRPCCall(ctx, req, vars, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer call.cancel()
+	defer func() { _ = call.conn.Close() }()
+
+	start := time.Now()
+	if req.Method.IsStreamingServer() {
+		return sendServerStream(call, req, start)
+	}
+	return invokeUnary(call, req, start)
+}
+
+// grpcCall 是一次调用的已准备上下文：连接、带超时的 ctx、渲染并解析好的请求消息。
+type grpcCall struct {
+	target   string
+	conn     *grpc.ClientConn
+	callCtx  context.Context
+	cancel   context.CancelFunc
+	callOpts []grpc.CallOption
+	reqMsg   *dynamicpb.Message
+	sentSize int
+}
+
+// newGRPCCall 完成拨号准备：合并请求级设置 → 渲染地址/消息 → 建连接（不发起调用）。
+func newGRPCCall(ctx context.Context, req GrpcRequest, vars map[string]string, opts Options) (*grpcCall, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	// 请求级 settings 覆盖全局（超时 / 忽略证书校验）：与 HTTP 同一套规则（G7.3/G7.4）
 	opts = MergeOptions(opts, req.Settings)
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
+	callCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 
 	target, err := renderTarget(req.Target, vars)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	creds, err := transportCreds(req.TLS, opts.InsecureSSL)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	callOpts := []grpc.CallOption{}
@@ -97,38 +129,42 @@ func SendGRPC(ctx context.Context, req GrpcRequest, vars map[string]string, opts
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxGrpcMsgSize), grpc.MaxCallSendMsgSize(maxGrpcMsgSize)),
 	)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("建立 gRPC 连接失败: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
-
-	callCtx := withMetadata(ctx, req.Metadata, vars)
+	c := &grpcCall{target: target, conn: conn, callCtx: withMetadata(callCtx, req.Metadata, vars), cancel: cancel, callOpts: callOpts}
 	// 请求消息里的 {{变量}} 先替换（G10.1）：与 HTTP 请求体同一套语义
 	msgText, _ := varx.Resolve(req.Message, vars)
 	reqMsg := dynamicpb.NewMessage(req.Method.Input())
 	if strings.TrimSpace(msgText) != "" {
 		if err := unmarshalMessage(req.Method, msgText, reqMsg, req.Types); err != nil {
+			_ = conn.Close()
+			cancel()
 			return nil, err
 		}
 	}
 	// 发送字节数（G8.3）：序列化后的大小（压缩后实际线长会小于它，界面标注为消息大小）
-	sentSize := 0
 	if raw, merr := proto.Marshal(reqMsg); merr == nil {
-		sentSize = len(raw)
+		c.sentSize = len(raw)
 	}
+	c.reqMsg = reqMsg
+	return c, nil
+}
 
+// invokeUnary 执行一元调用（原 SendGRPC 主路径，语义不变）。
+func invokeUnary(call *grpcCall, req GrpcRequest, start time.Time) (*Result, error) {
 	respMsg := dynamicpb.NewMessage(req.Method.Output())
 	var header, trailer metadata.MD
-	start := time.Now()
-	invokeErr := conn.Invoke(callCtx, grpcCallPath(req.Method), reqMsg, respMsg,
-		append(callOpts, grpc.Header(&header), grpc.Trailer(&trailer))...)
+	invokeErr := call.conn.Invoke(call.callCtx, grpcCallPath(req.Method), call.reqMsg, respMsg,
+		append(call.callOpts, grpc.Header(&header), grpc.Trailer(&trailer))...)
 
 	st := status.Convert(invokeErr)
 	res := &Result{
-		URL:         grpcURL(target, req.Method),
+		URL:         grpcURL(call.target, req.Method),
 		Status:      int(st.Code()),
 		Proto:       "gRPC",
 		TimeMS:      time.Since(start).Milliseconds(),
-		SentSize:    sentSize,
+		SentSize:    call.sentSize,
 		ContentType: grpcContentType,
 		Headers:     mdToKV(header),
 		Trailers:    mdToKV(trailer),
@@ -145,6 +181,61 @@ func SendGRPC(ctx context.Context, req GrpcRequest, vars map[string]string, opts
 	if raw, merr := proto.Marshal(respMsg); merr == nil {
 		res.Size = len(raw)
 	}
+	return res, nil
+}
+
+// sendServerStream 执行服务器流式调用：发一条请求后逐个接收，Body 为 JSON 数组。
+func sendServerStream(call *grpcCall, req GrpcRequest, start time.Time) (*Result, error) {
+	var header, trailer metadata.MD
+	stream, err := call.conn.NewStream(call.callCtx, &grpc.StreamDesc{ServerStreams: true},
+		grpcCallPath(req.Method), append(call.callOpts, grpc.Header(&header), grpc.Trailer(&trailer))...)
+	if err != nil {
+		return nil, fmt.Errorf("创建 gRPC 流失败: %w", err)
+	}
+	if err := stream.SendMsg(call.reqMsg); err == nil {
+		_ = stream.CloseSend()
+	}
+	// 发送失败不提前返回：继续 Recv 以拿服务端最终状态（与 unary 的「状态不算 error」一致）。
+
+	var bodies []string
+	var recvErr error
+	size := 0
+	for {
+		out := dynamicpb.NewMessage(req.Method.Output())
+		if err := stream.RecvMsg(out); err != nil {
+			if err != io.EOF {
+				recvErr = err
+			}
+			break
+		}
+		body, merr := marshalMessage(out, req.Types)
+		if merr != nil {
+			return nil, merr
+		}
+		bodies = append(bodies, body)
+		if raw, e := proto.Marshal(out); e == nil {
+			size += len(raw)
+		}
+	}
+
+	res := &Result{
+		URL:         grpcURL(call.target, req.Method),
+		Proto:       "gRPC",
+		TimeMS:      time.Since(start).Milliseconds(),
+		SentSize:    call.sentSize,
+		ContentType: grpcContentType,
+		Headers:     mdToKV(header),
+		Trailers:    mdToKV(trailer),
+	}
+	if recvErr != nil {
+		st := status.Convert(recvErr)
+		res.Status = int(st.Code())
+		res.Body = grpcErrorBody(st)
+		return res, nil
+	}
+	res.Status = int(codes.OK)
+	res.Body = "[" + strings.Join(bodies, ",") + "]"
+	res.Size = size
 	return res, nil
 }
 
