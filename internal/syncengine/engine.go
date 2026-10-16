@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -16,6 +17,7 @@ import (
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/index"
+	"api-doc-go-client/internal/keychain"
 	"api-doc-go-client/internal/secrets"
 )
 
@@ -36,9 +38,13 @@ func (e *Engine) cipher() *secrets.Cipher {
 	return secrets.NewCipher(SyncPassphrase())
 }
 
-// SyncPassphrase 读取本机同步口令（未设置返回空串）。口令用于 secret 变量值的加解密，
-// 存配置目录 0600（与 device_id 同级）；换机需输入同一口令才能解开既有密文。
+// SyncPassphrase 读取本机同步口令（未设置返回空串）。口令用于 secret 变量值的加解密。
+// G6：优先 OS 密钥环；未迁入时回退配置目录 0600 文件，且文件有值会**择机迁入密钥环**
+// （确认写入成功才删文件）。换机需输入同一口令才能解开既有密文。
 func SyncPassphrase() string {
+	if v, err := keychain.Get(passphraseKeyringUser); err == nil {
+		return v
+	}
 	p := syncPassphrasePath()
 	if p == "" {
 		return ""
@@ -47,20 +53,43 @@ func SyncPassphrase() string {
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	pass := string(data)
+	if pass != "" && keychain.Set(passphraseKeyringUser, pass) == nil {
+		_ = os.Remove(p) // 迁移成功：磁盘不再保留口令文件
+	}
+	return pass
 }
 
-// SetSyncPassphrase 设置口令（传空串 = 清除文件）。
+// passphraseKeyringUser 是密钥环中同步口令的条目名。
+const passphraseKeyringUser = "sync_passphrase"
+
+// SetSyncPassphrase 设置口令（传空串 = 清除）。优先写密钥环并删除文件；
+// 密钥环不可用（ErrNotAvailable 等）时保持历史行为：配置目录 0600 文件。
 func SetSyncPassphrase(pass string) error {
-	p := syncPassphrasePath()
-	if p == "" {
-		return fmt.Errorf("无法定位配置目录")
-	}
 	if pass == "" {
+		if err := keychain.Delete(passphraseKeyringUser); err != nil && !errors.Is(err, keychain.ErrNotFound) {
+			return err
+		}
+		p := syncPassphrasePath()
+		if p == "" {
+			return nil
+		}
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
+	}
+	if err := keychain.Set(passphraseKeyringUser, pass); err == nil {
+		if p := syncPassphrasePath(); p != "" {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+		return nil
+	}
+	p := syncPassphrasePath()
+	if p == "" {
+		return fmt.Errorf("无法定位配置目录")
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
