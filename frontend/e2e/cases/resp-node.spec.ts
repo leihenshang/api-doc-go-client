@@ -1,6 +1,7 @@
 // 集合树不再展示 Resp 合成节点（实际问题记录 item 7：入口收敛到请求编辑器「响应字段」分段），
 // 以及 Docs「生成接口文档」覆盖确认 + 响应字段进文档。
 import { expect, test } from '../helpers/app'
+import { patchRequest } from '../helpers/api'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
 import { openCollection, openReqTab, openRequest, send } from '../helpers/ui'
@@ -76,5 +77,27 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(page.getByTestId('tree.row').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('tree.resp.name')).toHaveCount(0)
     expect(readCollectionFile(dir, 'api/ping.yml')).toContain('respdoc')
+  })
+
+  // H15 回归：请求同时有查询参数与请求体时，生成的文档两章都要在（旧版缺「请求体」章）。
+  test('生成接口文档：参数与请求体并存时两章齐备', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await patchRequest(app, PING_UID, {
+      params: [{ name: 'page', value: '1', enabled: true }],
+      body: { type: 'json', raw: '{"uid": "u-42"}', form: [] },
+    })
+    await page.reload()
+    await expect(page.getByTestId('tree.row').first()).toBeVisible({ timeout: 10_000 })
+    await page.locator('[data-testid="tree.row"][data-kind="request"]').first().click()
+
+    await openReqTab(page, 'docs')
+    await page.getByTestId('docs.gen').click()
+    const md = page.locator('.md-preview').first()
+    await expect(md).toContainText(t('docs.params')) // 参数表仍在
+    await expect(md).toContainText('page')
+    await expect(md).toContainText(t('docs.body')) // 修复点：请求体章节不再丢
+    await expect(md).toContainText('u-42') // 原始体内容进代码块
   })
 })
