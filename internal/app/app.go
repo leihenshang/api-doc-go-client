@@ -923,12 +923,13 @@ func (a *App) ReadDoc(uid string) (*collection.DocEntry, error) {
 }
 
 // CreateDoc 新建文档条目。
-func (a *App) CreateDoc(name string) (*collection.DocEntry, error) {
+// CreateDoc 新建文档条目（folder 为空 = docs/ 默认位；B19 起可为任意分组目录）。
+func (a *App) CreateDoc(name, folder string) (*collection.DocEntry, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
 	}
-	return c.CreateDoc(name, "")
+	return c.CreateDoc(name, "", folder)
 }
 
 // SaveDoc 保存文档。

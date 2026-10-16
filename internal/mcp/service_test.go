@@ -132,7 +132,7 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 		t.Errorf("新请求不该有示例: %+v", d.Examples)
 	}
 	// 关联文档：走 API 建一条 docs 条目（不手写 frontmatter，格式以集合层为准）
-	doc, err := a.CreateDoc("ping 接口说明")
+	doc, err := a.CreateDoc("ping 接口说明", "")
 	if err != nil {
 		t.Fatal(err)
 	}

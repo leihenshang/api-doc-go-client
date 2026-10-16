@@ -510,7 +510,15 @@ func (e *Engine) applyDoc(uid string, p Payload) error {
 		if name == "" {
 			name = "未命名文档"
 		}
-		created, err := e.Coll.CreateDoc(name, uid)
+		// J11-2.3：按 group_uid 落到对应分组目录；根级/未分组为空串 → docs/ 默认位。
+		// 组本地不存在时目录为空（拓扑序保证 group 先到，此处兜底不报错）。
+		folder := ""
+		if p.GroupUID != "" {
+			if dir := e.findDirByUID(p.GroupUID); dir != "" {
+				folder = dir
+			}
+		}
+		created, err := e.Coll.CreateDoc(name, uid, folder)
 		if err != nil {
 			return err
 		}
