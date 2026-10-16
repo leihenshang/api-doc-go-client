@@ -114,7 +114,7 @@ func TestExportHTMLTOC(t *testing.T) {
 		}
 	}
 	// 文档节点（不应出现在 TOC 与 heading 中）
-	if _, err := c.CreateDoc("说明文档", ""); err != nil {
+	if _, err := c.CreateDoc("说明文档", "", ""); err != nil {
 		t.Fatalf("建文档: %v", err)
 	}
 

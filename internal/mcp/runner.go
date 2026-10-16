@@ -72,7 +72,7 @@ type ProjectApp interface {
 	ListResponseExamples(reqUID string) ([]*collection.ResponseExample, error)
 	SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error)
 	ListDocs() ([]*collection.DocEntry, error)
-	CreateDoc(name string) (*collection.DocEntry, error)
+	CreateDoc(name, folder string) (*collection.DocEntry, error)
 	SaveDoc(d *collection.DocEntry) error
 }
 

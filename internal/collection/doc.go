@@ -13,13 +13,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DocEntry 一条文档条目（B13）：本地落 docs/<name>.md，带 YAML frontmatter。
+// DocEntry 一条文档条目（B13/B19）：本地任意目录下的 .md 文件，带 YAML frontmatter。
 type DocEntry struct {
 	UID     string `json:"uid"`
 	Name    string `json:"name"`
-	Path    string `json:"path"` // 相对集合根
+	Path    string `json:"path"` // 相对集合根（B19：不再限制 docs/ 内）
 	Content string `json:"content"`
 	Icon    string `json:"icon,omitempty"`
+	// Seq 同层排序权重（frontmatter 可选键），与请求的 info.seq 同语义
+	Seq int `json:"seq,omitempty"`
 }
 
 // docFront 文档 frontmatter。
@@ -27,6 +29,7 @@ type docFront struct {
 	UID   string         `yaml:"uid"`
 	Name  string         `yaml:"name"`
 	Icon  string         `yaml:"icon,omitempty"`
+	Seq   int            `yaml:"seq,omitempty"`
 	Extra map[string]any `yaml:"-"`
 }
 
@@ -60,23 +63,28 @@ func (c *Collection) ReadDoc(uid string) (*DocEntry, error) {
 }
 
 // CreateDoc 新建文档条目（uid 为空时自动生成）。
-func (c *Collection) CreateDoc(name, uid string) (*DocEntry, error) {
+// folder 为空落到 docs/ 默认位（兼容旧行为）；非空为分组目录相对路径（B19：与请求同目录混排）。
+func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
 	if uid == "" {
 		uid = uuid.NewString()
 	}
-	if err := os.MkdirAll(filepath.Join(c.Dir, docsDir), 0o755); err != nil {
+	dir := strings.TrimSpace(folder)
+	if dir == "" {
+		dir = docsDir
+	}
+	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(dir)), 0o755); err != nil {
 		return nil, err
 	}
 	base := sanitizeFileName(name)
-	rel := filepath.ToSlash(filepath.Join(docsDir, base+".md"))
+	rel := joinRel(dir, base+".md")
 	for i := 2; ; i++ {
 		if _, err := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(rel))); os.IsNotExist(err) {
 			break
 		}
-		rel = filepath.ToSlash(filepath.Join(docsDir, fmt.Sprintf("%s-%d.md", base, i)))
+		rel = joinRel(dir, fmt.Sprintf("%s-%d.md", base, i))
 	}
 	d := &DocEntry{UID: uid, Name: name, Path: rel, Content: ""}
 	if err := c.SaveDoc(d); err != nil {
@@ -101,10 +109,11 @@ func (c *Collection) SaveDoc(d *DocEntry) error {
 	return writeDocFile(full, d)
 }
 
-// docPath 校验并解析文档相对路径：必须是集合内 docs/ 下的 .md 文件。
+// docPath 校验并解析文档相对路径：必须是集合内的 .md 文件。
 //
 // 为什么必须校验：DocEntry 经 App 门面由前端 / devserver 桥传入，Path 属于外部输入；
 // 不校验就等于提供了「任意路径写 .md」的能力（参见 SaveRequest 的同类校验）。
+// B19 起不再限制 docs/ 目录（文档与请求同目录混排），但仍必须留在集合根内。
 func (c *Collection) docPath(rel string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rel)))
 	if clean == "." || clean == "" || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
@@ -114,9 +123,9 @@ func (c *Collection) docPath(rel string) (string, error) {
 		return "", fmt.Errorf("文档必须是 .md 文件: %s", rel)
 	}
 	full := filepath.Join(c.Dir, clean)
-	base := filepath.Clean(filepath.Join(c.Dir, docsDir))
-	if full != base && !strings.HasPrefix(full, base+string(filepath.Separator)) {
-		return "", fmt.Errorf("文档必须位于 %s 目录内: %s", docsDir, rel)
+	root := filepath.Clean(c.Dir)
+	if full != root && !strings.HasPrefix(full, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("文档必须位于集合目录内: %s", rel)
 	}
 	return full, nil
 }
@@ -149,6 +158,45 @@ func (c *Collection) RenameDoc(uid, name string) error {
 	}
 	d.Name = name
 	return c.SaveDoc(d)
+}
+
+// MoveDoc 把文档移动到目标分组目录（B19）：与 MoveRequest 同语义——目标经
+// resolveFolderForMove 解析（拒 ../ 与绝对路径、目录不存在时按需补 folder.yml），
+// 改 Path + os.Rename，uid 与文件名主干不变。
+func (c *Collection) MoveDoc(uid, destFolder string) error {
+	res, err := c.scan()
+	if err != nil {
+		return err
+	}
+	d, ok := res.docs[uid]
+	if !ok {
+		return errNotFound
+	}
+	dest, err := c.resolveFolderForMove(destFolder)
+	if err != nil {
+		return err
+	}
+	oldFull := filepath.Join(c.Dir, filepath.FromSlash(d.Path))
+	oldDir := filepath.ToSlash(filepath.Dir(d.Path))
+	if oldDir == "." {
+		oldDir = ""
+	}
+	if oldDir == dest {
+		return nil // 已在目标分组
+	}
+	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(dest)), 0o755); err != nil {
+		return err
+	}
+	newRel := joinRel(dest, filepath.Base(filepath.FromSlash(d.Path)))
+	newFull := filepath.Join(c.Dir, filepath.FromSlash(newRel))
+	if _, err := os.Stat(newFull); err == nil {
+		return fmt.Errorf("目标分组已存在同名文档")
+	}
+	c.ignoreWrite(newRel)
+	if err := os.Rename(oldFull, newFull); err != nil {
+		return fmt.Errorf("移动文档文件: %w", err)
+	}
+	return nil
 }
 
 // readDocFile 解析文档文件（frontmatter + 正文）。
@@ -186,13 +234,13 @@ func parseDocFile(rel string, data []byte) (*DocEntry, error) {
 	}
 	return &DocEntry{
 		UID: front.UID, Name: name, Path: filepath.ToSlash(rel),
-		Content: body, Icon: front.Icon,
+		Content: body, Icon: front.Icon, Seq: front.Seq,
 	}, nil
 }
 
 // writeDocFile 写文档文件。
 func writeDocFile(full string, d *DocEntry) error {
-	fm := docFront{UID: d.UID, Name: d.Name, Icon: d.Icon}
+	fm := docFront{UID: d.UID, Name: d.Name, Icon: d.Icon, Seq: d.Seq}
 	fmData, err := yaml.Marshal(fm)
 	if err != nil {
 		return err

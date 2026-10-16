@@ -63,7 +63,6 @@ func TestSaveDocRejectsPathOutsideDocs(t *testing.T) {
 		"../../pwned.md",
 		outside,
 		"docs/../../pwned.md",
-		"notes/a.md", // 不在 docs/ 下
 		"docs/a.txt", // 非 .md
 	}
 	for _, p := range bad {
@@ -81,6 +80,10 @@ func TestSaveDocRejectsPathOutsideDocs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "docs", "ok.md")); err != nil {
 		t.Fatalf("合法文档未落盘: %v", err)
+	}
+	// B19：集合内任意目录的 .md 合法（文档与请求同目录混排）；越界路径仍拒绝
+	if err := c.SaveDoc(&DocEntry{UID: "u3", Name: "n", Path: "notes/a.md", Content: "x"}); err != nil {
+		t.Fatalf("集合内任意目录文档写入失败: %v", err)
 	}
 }
 

@@ -1041,10 +1041,15 @@ func (c *Collection) treeFromScan(res *scanResult) []*Node {
 		n := ensureDir(dir)
 		n.children = append(n.children, &Node{Type: "request", UID: r.UID, Name: r.Name, Path: r.Path, Method: r.Method, Seq: r.Seq})
 	}
-	// 挂文档条目（B13）：docs/*.md 归入根，type=doc
+	// 挂文档条目（B19）：按所在目录挂载，与请求同层混排；旧集合 docs/*.md 的父目录
+	// 就是 docs/，行为与之前「挂根」一致（docs 目录本身不作为分组节点出现）。
 	for _, d := range res.docs {
-		root := ensureDir("")
-		root.children = append(root.children, &Node{Type: "doc", UID: d.UID, Name: d.Name, Path: d.Path, Seq: 0})
+		dir := filepath.ToSlash(filepath.Dir(d.Path))
+		if dir == "." {
+			dir = ""
+		}
+		n := ensureDir(dir)
+		n.children = append(n.children, &Node{Type: "doc", UID: d.UID, Name: d.Name, Path: d.Path, Seq: d.Seq})
 	}
 	// 空分组（只有 folder.yml、暂无请求）也必须出现在树里，否则建完就"消失"
 	for dir := range res.uidByDir {
