@@ -114,11 +114,30 @@ func TestFixtureGzip(t *testing.T) {
 	}
 }
 
-// 流式方法：执行器当前明确报「不支持流式」（P5 落地前），夹具侧已实现 4 种形态。
+// 流式形态（F6）：服务器流（ListHellos）已由执行器支持，收到夹具的 3 帧并组装 JSON 数组；
+// 客户端流/双工（CollectHellos/Chat）仍在调用前明确拒绝。
 func TestFixtureStreamingMethodGuard(t *testing.T) {
 	addr, res, stop := startFixture(t)
 	defer stop()
-	for _, name := range []string{"ListHellos", "CollectHellos", "Chat"} {
+
+	md, err := res.MethodDescriptor("demo.Greeter", "ListHellos")
+	if err != nil {
+		t.Fatalf("取方法 ListHellos 失败: %v", err)
+	}
+	out, err := runner.SendGRPC(context.Background(), runner.GrpcRequest{
+		Target: addr, Method: md, Message: `{"name":"stream"}`, Types: res.Types,
+	}, nil, runner.DefaultOptions())
+	if err != nil {
+		t.Fatalf("服务器流调用应成功，实际: %v", err)
+	}
+	if out.Status != int(codes.OK) {
+		t.Fatalf("状态码应 OK，实际 %d body=%s", out.Status, out.Body)
+	}
+	if n := strings.Count(out.Body, "hello stream"); n != serverStreamCount {
+		t.Errorf("应收到 %d 帧，body=%s", serverStreamCount, out.Body)
+	}
+
+	for _, name := range []string{"CollectHellos", "Chat"} {
 		md, err := res.MethodDescriptor("demo.Greeter", name)
 		if err != nil {
 			t.Fatalf("取方法 %s 失败: %v", name, err)
@@ -126,8 +145,8 @@ func TestFixtureStreamingMethodGuard(t *testing.T) {
 		_, err = runner.SendGRPC(context.Background(), runner.GrpcRequest{
 			Target: addr, Method: md, Message: `{"name":"x"}`, Types: res.Types,
 		}, nil, runner.DefaultOptions())
-		if err == nil || !strings.Contains(err.Error(), "流式") {
-			t.Errorf("%s 应报「暂不支持流式」，实际: %v", name, err)
+		if err == nil || !strings.Contains(err.Error(), "客户端流") {
+			t.Errorf("%s 应报「暂不支持客户端流/双工」，实际: %v", name, err)
 		}
 	}
 }
