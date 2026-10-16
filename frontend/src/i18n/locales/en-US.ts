@@ -316,6 +316,7 @@ export default {
     params: 'Request params',
     headers: 'Headers',
     body: 'Request body',
+    bodyParams: 'Body fields',
     reqExample: 'Request example',
     resFields: 'Response fields',
     resExample: 'Response example',

@@ -5,6 +5,7 @@
 // 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数/响应字段均为「参数名|必选|类型|说明」，
 // 必选默认填「是」，类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
 // 且「请求URI」只保留路径（查询串交由「请求参数」表体现）。
+import { toBodyRows } from '@/lib/bodyFields'
 import type { FieldRow } from '@/lib/responseFields'
 import type { RequestDoc } from '@/types'
 
@@ -16,6 +17,7 @@ export interface ApiDocLabels {
   headers: string // 请求头
   params: string // 请求参数
   body: string // 请求体
+  bodyParams: string // 请求体字段（表小标题）
   reqExample: string // 请求示例
   resFields: string // 响应字段
   resExample: string // 响应示例
@@ -99,12 +101,20 @@ export function buildApiDoc(input: ApiDocInput): string {
   }
 
   // 请求体：与查询参数**并存互不影响**（同章节内参数表在前、请求体在后）。
-  // 原始体（json/text 等）进代码块；form/multipart 字段另起一张表，与 B14 导出语义一致。
+  // json 等原始体：先附「请求体字段」表（口径同编辑器表格视图：路径/类型/备注 descs），
+  // 再给原文代码块；form/multipart 字段另起一张表，与 B14 导出语义一致。
   const body = r.body
   const bodyRaw = (body?.raw ?? '').trim()
   const bodyForm = (body?.form ?? []).filter((f) => f.enabled && f.name.trim())
   if (body && body.type !== 'none' && (bodyRaw || bodyForm.length)) {
     out.push(`## ${L.body}`, `- ${body.type}`)
+    const bodyFields = body.type === 'json' ? toBodyRows(body.raw, body.descs) : []
+    if (bodyFields.length) {
+      const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
+      out.push('', `**${L.bodyParams}**`, '', `| ${hdr} |`, '| --- | --- | --- | --- |')
+      for (const f of bodyFields)
+        out.push(`| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.desc)} |`)
+    }
     if (bodyRaw) {
       const lang = body.type === 'json' ? 'json' : ''
       out.push('', '```' + lang, bodyRaw, '```')

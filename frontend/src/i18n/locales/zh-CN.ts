@@ -316,6 +316,7 @@ export default {
     params: '请求参数',
     headers: '请求头',
     body: '请求体',
+    bodyParams: '请求体字段',
     reqExample: '请求示例',
     resFields: '响应字段',
     resExample: '响应示例',
