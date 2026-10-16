@@ -893,7 +893,7 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 		return skipReservedDir(d.Name())
 	}
 	dir := relDir(rel)
-	if !scanExtAllowed(d.Name(), dir) {
+	if !scanExtAllowed(d.Name()) {
 		return nil
 	}
 	data, err := os.ReadFile(path)
@@ -940,11 +940,16 @@ func skipReservedDir(name string) error {
 	return nil
 }
 
-// scanExtAllowed 扩展名白名单：yml/yaml 是请求与环境文件；docs/*.md 是文档条目（B13）——
-// 之前这里把 .md 一并挡掉，导致 ListDocs 永远扫不到任何文档（含客户端自己创建的）。
-func scanExtAllowed(name, dir string) bool {
-	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".yml" || ext == ".yaml" || (ext == ".md" && dir == docsDir)
+// scanExtAllowed 扩展名白名单：yml/yaml 是请求与环境文件；.md 是文档条目（B19）。
+// B19 起 .md 不再限制在 docs/ 下——文档与请求同目录混排；README.md 是说明文件，不视为条目。
+func scanExtAllowed(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".yml", ".yaml":
+		return true
+	case ".md":
+		return !strings.EqualFold(name, "README.md")
+	}
+	return false
 }
 
 // scanHead 文件头：判断类型与取 uid 只需这几项，不必整体反序列化。
