@@ -950,6 +950,24 @@ func (a *App) DeleteDoc(uid string) error {
 	return c.DeleteDoc(uid)
 }
 
+// MoveDoc 把文档移动到目标分组目录（destFolder 空 = 根；B19）。
+func (a *App) MoveDoc(uid, destFolder string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.MoveDoc(uid, destFolder)
+}
+
+// RenameDoc 改文档显示名（只改 frontmatter name，文件名不变；B19）。
+func (a *App) RenameDoc(uid, name string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.RenameDoc(uid, name)
+}
+
 // SyncDocAssets 拉取文档引用的附件到本地 assets/（R9）。
 //
 // 预留 API：文档条目在客户端尚无 UI 入口（见《客户端代码分析问题》F-03，
