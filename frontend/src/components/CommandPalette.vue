@@ -1,25 +1,25 @@
 <script setup lang="ts">
 // Ctrl+K 命令面板（design-spec §3）：范围筛选 + 键盘上下选择 + 回车执行。
 // 索引数据来自内存中的集合树与环境，无需联网。
-import { NIcon, NInput, NModal } from 'naive-ui'
-import type { InputInst } from 'naive-ui'
-import {
-  AddOutline,
-  FolderOpenOutline,
-  MoonOutline,
-  RefreshOutline,
-  SearchOutline,
-  ServerOutline,
-  SettingsOutline,
-  SwapVerticalOutline,
-  TimeOutline,
-} from '@vicons/ionicons5'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { Component } from 'vue'
-import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
 import { api } from '@/lib/ipc'
 import type { CollectionSummary, Env, TreeNode } from '@/types'
+import {
+    AddOutline,
+    FolderOpenOutline,
+    MoonOutline,
+    RefreshOutline,
+    SearchOutline,
+    ServerOutline,
+    SettingsOutline,
+    SwapVerticalOutline,
+    TimeOutline,
+} from '@vicons/ionicons5'
+import type { InputInst } from 'naive-ui'
+import { NIcon, NInput, NModal } from 'naive-ui'
+import type { Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 type Scope = 'all' | 'request' | 'env' | 'command'
 type Kind = Exclude<Scope, 'all'>
@@ -35,6 +35,8 @@ interface Item {
   root?: string
   /** 请求所属集合名（跨目录搜索时的标注；本目录搜索为空） */
   coll?: string
+  /** 请求 URL（取自本地索引，展示在结果行；索引缺项时为空） */
+  url?: string
 }
 
 const props = defineProps<{
@@ -85,6 +87,23 @@ watch(keyword, (kw) => {
   }, 150)
 })
 const scope = ref<Scope>('all')
+
+// uid → 请求 URL（Go 索引全量拉取）：结果行展示 URL，按 URL 搜索时能直观看到命中了哪条地址。
+const urlByUid = ref<Record<string, string>>({})
+async function loadUrls(): Promise<void> {
+  try {
+    const lists = await Promise.all(props.roots.map((r) => api.searchIndexFor(r.root, '', 0)))
+    const map: Record<string, string> = {}
+    for (const nodes of lists) {
+      for (const n of nodes) {
+        if (n.type === 'request' && n.url) map[n.uid] = n.url
+      }
+    }
+    urlByUid.value = map
+  } catch {
+    // 索引不可用只是少一列 URL 展示，不影响搜索与跳转
+  }
+}
 /** 目录作用域：本目录 = 只看活动根；所有目录 = 合并所有已打开的工作目录 */
 const dirScope = ref<'current' | 'all'>('current')
 const cursor = ref(0)
@@ -138,6 +157,7 @@ function collectRequests(
       path: trail.join(' / '),
       root: meta.root,
       coll: meta.coll,
+      url: urlByUid.value[n.uid],
     })
   }
 }
@@ -193,6 +213,7 @@ watch(
     scope.value = 'all'
     dirScope.value = 'current' // 默认只看当前工作目录；要看全部时手动切
     cursor.value = 0
+    void loadUrls()
     await nextTick()
     inputEl.value?.focus()
   },
@@ -316,6 +337,8 @@ function setInput(el: unknown): void {
           <span class="lb">{{ it.label }}</span>
           <!-- 跨目录搜索：标注请求所属的工作目录，避免同名请求分不清 -->
           <span v-if="it.coll" class="dir" data-testid="palette.itemDir">{{ it.coll }}</span>
+          <!-- URL 命中可解释性：直接展示请求地址（长路径尾部省略） -->
+          <span v-if="it.url" class="pu mono" data-testid="palette.itemUrl" :title="it.url">{{ it.url }}</span>
           <span class="pa">{{ it.path }}</span>
         </button>
         <div v-if="!filtered.length" class="none">{{ t('palette.empty') }}</div>
@@ -464,6 +487,18 @@ kbd {
   font-size: 11.5px;
   color: var(--app-placeholder);
   max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 结果行的请求 URL：等宽、弱色，超长省略（完整值在 title 里） */
+.pu {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--app-muted);
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
