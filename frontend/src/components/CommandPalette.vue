@@ -18,6 +18,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MethodTag from '@/components/MethodTag.vue'
+import { api } from '@/lib/ipc'
 import type { CollectionSummary, Env, TreeNode } from '@/types'
 
 type Scope = 'all' | 'request' | 'env' | 'command'
@@ -55,6 +56,34 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const keyword = ref('')
+
+// URL/方法/路径 命中：与侧栏树搜索同口径，走 Go 索引逐根查询（名称匹配仍在本机即时完成）。
+const hitByRoot = ref<Record<string, Set<string>>>({})
+let hitToken = 0
+let hitTimer: ReturnType<typeof setTimeout> | null = null
+watch(keyword, (kw) => {
+  const q = kw.trim()
+  const token = ++hitToken
+  if (hitTimer) clearTimeout(hitTimer)
+  if (!q) {
+    hitByRoot.value = {}
+    return
+  }
+  hitTimer = setTimeout(() => {
+    void Promise.all(
+      props.roots.map(async (r) => {
+        const nodes = await api.searchIndexFor(r.root, q, 500)
+        return [r.root, new Set(nodes.map((n) => n.uid))] as const
+      }),
+    )
+      .then((pairs) => {
+        if (token === hitToken) hitByRoot.value = Object.fromEntries(pairs)
+      })
+      .catch(() => {
+        if (token === hitToken) hitByRoot.value = {}
+      })
+  }, 150)
+})
 const scope = ref<Scope>('all')
 /** 目录作用域：本目录 = 只看活动根；所有目录 = 合并所有已打开的工作目录 */
 const dirScope = ref<'current' | 'all'>('current')
@@ -148,7 +177,9 @@ const filtered = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return items.value.filter((it) => {
     if (scope.value !== 'all' && it.kind !== scope.value) return false
-    return q === '' || it.label.toLowerCase().includes(q) || it.path.toLowerCase().includes(q)
+    if (q === '' || it.label.toLowerCase().includes(q) || it.path.toLowerCase().includes(q)) return true
+    // URL/方法/路径命中（Go 索引）：仅请求条目，按其所属根取命中集
+    return it.kind === 'request' && !!it.root && !!hitByRoot.value[it.root]?.has(it.id)
   })
 })
 

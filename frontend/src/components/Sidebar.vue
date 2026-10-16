@@ -26,6 +26,7 @@ import {
     GitNetworkOutline,
     OpenOutline,
     RefreshOutline,
+    SearchOutline,
     Star,
     StarOutline,
     SwapVerticalOutline,
@@ -168,6 +169,36 @@ function confirmCloseRoot(): void {
 
 const searching = computed(() => keyword.value.trim() !== '')
 
+// ---- 树搜索的「索引侧命中」：名称是本机同步匹配，URL/方法/路径 走 Go 索引（口径同顶部搜索栏）。
+// 多根逐根查询（索引按集合分库）；keyword 防抖 150ms，递增 token 保证「最新一次输入」胜出。----
+const hitByRoot = ref<Record<string, Set<string>>>({})
+let hitToken = 0
+let hitTimer: ReturnType<typeof setTimeout> | null = null
+watch(keyword, (kw) => {
+  const q = kw.trim()
+  const token = ++hitToken
+  if (hitTimer) clearTimeout(hitTimer)
+  if (!q) {
+    hitByRoot.value = {}
+    return
+  }
+  hitTimer = setTimeout(() => {
+    void Promise.all(
+      props.roots.map(async (r) => {
+        const nodes = await api.searchIndexFor(r.root, q, 500)
+        return [r.root, new Set(nodes.map((n) => n.uid))] as const
+      }),
+    )
+      .then((pairs) => {
+        if (token === hitToken) hitByRoot.value = Object.fromEntries(pairs)
+      })
+      // 索引查询失败只退回名称匹配，不打扰用户（名称过滤仍然即时可用）
+      .catch(() => {
+        if (token === hitToken) hitByRoot.value = {}
+      })
+  }, 150)
+})
+
 // ---- 排序：关（磁盘顺序）/ 名称升序 / 名称降序，作用于每一层的同级条目 ----
 
 const sortMode = ref<SortMode>('default')
@@ -246,7 +277,9 @@ function confirmCreate(): boolean {
 
 /** 每个根的树（搜索时按关键字过滤：命中的请求保留其祖先分组；排序开启时深排序副本）。 */
 function treeOf(root: CollectionSummary): TreeNode[] {
-  const base = searching.value ? filterTree(root.info.tree, keyword.value.trim().toLowerCase()) : root.info.tree
+  const base = searching.value
+    ? filterTree(root.info.tree, keyword.value.trim().toLowerCase(), hitByRoot.value[root.root])
+    : root.info.tree
   return sortTree(base, sortMode.value)
 }
 
@@ -759,7 +792,11 @@ watch(
 
     <div class="search">
       <n-input v-model:value="keyword" size="small" clearable :placeholder="t('sidebar.search')"
-        data-testid="sidebar.search" />
+        data-testid="sidebar.search">
+        <template #prefix>
+          <n-icon :component="SearchOutline" :size="14" data-testid="sidebar.searchIcon" />
+        </template>
+      </n-input>
     </div>
 
     <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">

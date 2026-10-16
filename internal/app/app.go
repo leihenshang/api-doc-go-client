@@ -424,7 +424,13 @@ func (a *App) ReloadCollection() (*collection.CollectionInfo, error) {
 // hashOf/searchIn）都按「0 = 全量」使用；此前在这里兜底成 200，会让 >200 个请求的
 // 集合静默丢结果（冲突检测直接退化成不检测）。界面搜索自己传 limit。
 func (a *App) SearchIndex(q string, limit int) ([]index.Node, error) {
-	c, err := a.requireCollection()
+	return a.SearchIndexFor("", q, limit)
+}
+
+// SearchIndexFor 按工作目录检索本地索引（root 为空 = 活动根）。
+// 名称匹配在前端即时完成，这里补 URL/方法/路径 的索引口径，多根场景（侧栏、跨目录搜索面板）逐根查询。
+func (a *App) SearchIndexFor(root string, q string, limit int) ([]index.Node, error) {
+	c, err := a.collOf(root)
 	if err != nil {
 		return nil, err
 	}

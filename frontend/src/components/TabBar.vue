@@ -189,9 +189,6 @@ onBeforeUnmount(() => {
         <method-tag :method="tab.request.method" />
         <span v-if="tab.dirty || tab.draft" class="dot" :title="t('tab.unsaved')" />
         <span class="tt">{{ tab.title }}</span>
-        <span v-if="tab.response" class="st" :class="tab.response.status < 400 ? 'ok' : 'err'">
-          {{ tab.response.status }}
-        </span>
         <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')"
           @click.stop="emit('close', tab.key)">
           <n-icon :component="CloseOutline" :size="13" />
@@ -333,24 +330,6 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--app-accent);
   flex: 0 0 auto;
-}
-
-.st {
-  font-family: var(--app-mono);
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 4px;
-  line-height: 14px;
-}
-
-.st.ok {
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
-}
-
-.st.err {
-  background: var(--app-danger-tint);
-  color: var(--app-danger);
 }
 
 .x {
