@@ -227,7 +227,8 @@ export interface AssertResult {
 }
 
 export interface TreeNode {
-  type: 'folder' | 'request'
+  /** B19：doc 为文档条目叶子（与 request 同级同目录混排） */
+  type: 'folder' | 'request' | 'doc'
   uid: string
   name: string
   path: string

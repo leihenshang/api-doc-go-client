@@ -51,10 +51,11 @@ export function findFolderByPath(nodes: TreeNode[], path: string): TreeNode | nu
     return null
 }
 
-/** 在树里按 uid 找节点（folder / request）。 */
+/** 在树里按 uid 找节点（folder / request / doc）。 */
 export function searchNode(nodes: TreeNode[], uid: string): TreeNode | null {
     for (const n of nodes) {
-        if (n.uid === uid && (n.type === 'folder' || n.type === 'request')) return n
+        if (n.uid === uid && n.type !== 'folder') return n
+        if (n.type === 'folder' && n.uid === uid) return n
         if (n.children) {
             const hit = searchNode(n.children, uid)
             if (hit) return hit
