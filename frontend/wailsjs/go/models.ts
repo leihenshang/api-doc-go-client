@@ -370,6 +370,7 @@ export namespace collection {
 	    data?: string;
 	    raw: string;
 	    form: KV[];
+	    descs?: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new Body(source);
@@ -381,6 +382,7 @@ export namespace collection {
 	        this.data = source["data"];
 	        this.raw = source["raw"];
 	        this.form = this.convertValues(source["form"], KV);
+	        this.descs = source["descs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -402,6 +404,7 @@ export namespace collection {
 		}
 	}
 	export class EnvVar {
+	    uid?: string;
 	    name: string;
 	    value: string;
 	    enabled: boolean;
@@ -413,6 +416,7 @@ export namespace collection {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
 	        this.name = source["name"];
 	        this.value = source["value"];
 	        this.enabled = source["enabled"];
@@ -420,6 +424,7 @@ export namespace collection {
 	    }
 	}
 	export class Env {
+	    uid?: string;
 	    name: string;
 	    vars: EnvVar[];
 	
@@ -429,6 +434,7 @@ export namespace collection {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
 	        this.name = source["name"];
 	        this.vars = this.convertValues(source["vars"], EnvVar);
 	    }
@@ -1661,6 +1667,9 @@ export namespace syncengine {
 	    cursor: number;
 	    token?: string;
 	    exampleHashes?: Record<string, string>;
+	    docHashes?: Record<string, string>;
+	    envHashes?: Record<string, string>;
+	    varHashes?: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new BindInfo(source);
@@ -1675,6 +1684,9 @@ export namespace syncengine {
 	        this.cursor = source["cursor"];
 	        this.token = source["token"];
 	        this.exampleHashes = source["exampleHashes"];
+	        this.docHashes = source["docHashes"];
+	        this.envHashes = source["envHashes"];
+	        this.varHashes = source["varHashes"];
 	    }
 	}
 	export class Report {

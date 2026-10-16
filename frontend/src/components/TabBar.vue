@@ -6,16 +6,16 @@
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
 import {
-  AddOutline,
-  ChevronBackCircleOutline,
-  ChevronBackOutline,
-  ChevronForwardCircleOutline,
-  ChevronForwardOutline,
-  CloseCircleOutline,
-  CloseOutline,
-  CopyOutline,
-  LayersOutline,
-  SaveOutline,
+    AddOutline,
+    ChevronBackCircleOutline,
+    ChevronBackOutline,
+    ChevronForwardCircleOutline,
+    ChevronForwardOutline,
+    CloseCircleOutline,
+    CloseOutline,
+    CopyOutline,
+    LayersOutline,
+    SaveOutline,
 } from '@vicons/ionicons5'
 import type { DropdownOption } from 'naive-ui'
 import { NDropdown, NIcon } from 'naive-ui'

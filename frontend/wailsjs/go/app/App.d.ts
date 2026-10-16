@@ -76,6 +76,8 @@ export function GetSyncBind():Promise<syncengine.BindInfo>;
 
 export function GetSyncBindFor(arg1:string):Promise<syncengine.BindInfo>;
 
+export function GetSyncPassphraseSet():Promise<boolean>;
+
 export function GetSyncStatus():Promise<app.SyncStatus>;
 
 export function GrpcMessageFields(arg1:string,arg2:Array<string>,arg3:string,arg4:string):Promise<Array<proto.FieldInfo>>;
@@ -196,6 +198,8 @@ export function SaveSettings(arg1:config.Settings):Promise<void>;
 
 export function SearchIndex(arg1:string,arg2:number):Promise<Array<index.Node>>;
 
+export function SearchIndexFor(arg1:string,arg2:string,arg3:number):Promise<Array<index.Node>>;
+
 export function SendRequest(arg1:collection.Request,arg2:string):Promise<runner.Result>;
 
 export function SetActiveCollection(arg1:string):Promise<void>;
@@ -211,6 +215,8 @@ export function SetQuitAllowed(arg1:boolean):Promise<void>;
 export function SetSyncBind(arg1:string,arg2:number,arg3:string,arg4:string):Promise<syncengine.BindInfo>;
 
 export function SetSyncBindFor(arg1:app.SyncBindReq):Promise<syncengine.BindInfo>;
+
+export function SetSyncPassphrase(arg1:string):Promise<void>;
 
 export function StartAutoSync(arg1:number):Promise<void>;
 
