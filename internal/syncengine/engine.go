@@ -347,7 +347,11 @@ func typeRank(t string) int {
 
 func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	var p Payload
-	_ = json.Unmarshal(it.Payload, &p)
+	// 载荷解析失败必须中止本条应用：忽略 err 会让 p 保持零值，
+	// 随后 applyAPI/applyDoc 会把一个空条目写盘，等于用垃圾覆盖本地真实数据。
+	if err := json.Unmarshal(it.Payload, &p); err != nil {
+		return fmt.Errorf("解析 %s %s 的同步载荷失败: %w", it.Type, it.UID, err)
+	}
 
 	// 响应示例：写 examples/ 文件即可，不进索引/冲突副本体系。
 	if it.Type == "example" {
