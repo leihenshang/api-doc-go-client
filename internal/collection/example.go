@@ -129,7 +129,7 @@ func (c *Collection) SaveResponseExample(reqUID, name string, req ExampleRequest
 	if err != nil {
 		return nil, fmt.Errorf("序列化响应示例: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(fullDir, unique+".yml"), data, 0o644); err != nil {
+	if err := writeFileAtomic(filepath.Join(fullDir, unique+".yml"), data, 0o644); err != nil {
 		return nil, err
 	}
 	return ex, nil
@@ -301,7 +301,7 @@ func (c *Collection) UpsertResponseExampleFile(ex *ResponseExample) (string, err
 	if err != nil {
 		return "", fmt.Errorf("序列化响应示例: %w", err)
 	}
-	if err := os.WriteFile(full, data, 0o644); err != nil {
+	if err := writeFileAtomic(full, data, 0o644); err != nil {
 		return "", err
 	}
 	return ex.Path, nil

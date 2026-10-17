@@ -276,7 +276,7 @@ func writeDocFile(full string, d *DocEntry) error {
 	b.Write(fmData)
 	b.WriteString("---\n")
 	b.WriteString(d.Content)
-	return os.WriteFile(full, []byte(b.String()), 0o644)
+	return writeFileAtomic(full, []byte(b.String()), 0o644)
 }
 
 // ---- 附件离线映射（R9）----
@@ -298,7 +298,7 @@ func (c *Collection) SaveAsset(hash string, data []byte) (string, error) {
 	if _, err := os.Stat(full); err == nil {
 		return full, nil // 已存在
 	}
-	if err := os.WriteFile(full, data, 0o644); err != nil {
+	if err := writeFileAtomic(full, data, 0o644); err != nil {
 		return "", err
 	}
 	return full, nil
