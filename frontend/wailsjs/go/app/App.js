@@ -50,8 +50,8 @@ export function ConflictDetailFor(arg1, arg2) {
   return window['go']['app']['App']['ConflictDetailFor'](arg1, arg2);
 }
 
-export function CreateDoc(arg1) {
-  return window['go']['app']['App']['CreateDoc'](arg1);
+export function CreateDoc(arg1, arg2) {
+  return window['go']['app']['App']['CreateDoc'](arg1, arg2);
 }
 
 export function CreateFolder(arg1, arg2) {
@@ -92,6 +92,10 @@ export function DeleteRequest(arg1) {
 
 export function DeleteResponseExample(arg1, arg2) {
   return window['go']['app']['App']['DeleteResponseExample'](arg1, arg2);
+}
+
+export function DocFileHash(arg1) {
+  return window['go']['app']['App']['DocFileHash'](arg1);
 }
 
 export function EnvFileHash(arg1) {
@@ -222,6 +226,10 @@ export function MockStatus() {
   return window['go']['app']['App']['MockStatus']();
 }
 
+export function MoveDoc(arg1, arg2) {
+  return window['go']['app']['App']['MoveDoc'](arg1, arg2);
+}
+
 export function MoveFolder(arg1, arg2) {
   return window['go']['app']['App']['MoveFolder'](arg1, arg2);
 }
@@ -298,6 +306,10 @@ export function RemoveMCPGrant(arg1, arg2) {
   return window['go']['app']['App']['RemoveMCPGrant'](arg1, arg2);
 }
 
+export function RenameDoc(arg1, arg2) {
+  return window['go']['app']['App']['RenameDoc'](arg1, arg2);
+}
+
 export function RenameEnv(arg1, arg2, arg3) {
   return window['go']['app']['App']['RenameEnv'](arg1, arg2, arg3);
 }
@@ -340,6 +352,10 @@ export function RunSyncForRoot(arg1) {
 
 export function SaveDoc(arg1) {
   return window['go']['app']['App']['SaveDoc'](arg1);
+}
+
+export function SaveDocExpectHash(arg1, arg2) {
+  return window['go']['app']['App']['SaveDocExpectHash'](arg1, arg2);
 }
 
 export function SaveEnv(arg1) {
