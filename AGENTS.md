@@ -26,6 +26,7 @@ bash scripts/check.sh --e2e-ui   # Playwright UI 交互调试
 1. **改 UI 交互就补测试钩子**：可交互元素加 `data-testid`（命名 `模块.子域.元素`，如 `resp.tab`、`tree.row.plus`），便于人工核对与后续自动化。
 2. **改完即跑 `bash scripts/check.sh`（秒级）**；真窗口核对（无边框拖动、透明圆角观感、窗口控制、缩放/字体渲染）只在用户明确要求时做，不要自行启动长任务。
 3. **临时数据只放本地**：产物写 `.tmp/`（已 gitignore），不要把临时集合/截图提交进仓库。
+4. **三仓联动与版本一致性（P2-2 / P2-28）**：共享库改动后用 `bash ../api-doc-go-share/scripts/gowork.sh` 在父目录生成 `go.work`（三个模块走本地代码，改完立即可见）；`go.work` 不进任何仓库，`--off` 取消。**workspace 模式与 `GOFLAGS=-mod=mod` 互斥**，不要再设该开关。发布前：share 打 tag → `GOWORK=off go get github.com/leihenshang/api-doc-go-share@vX` → `bash scripts/share-version.sh` 通过（已接入 `scripts/check.sh`）。
 
 ## 文档约定
 

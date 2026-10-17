@@ -42,7 +42,7 @@ step() { echo; echo "== $* =="; }
 # ---- 静态检查与单测（所有模式都跑，--e2e-ui 除外） ----
 
 if [[ "$MODE" != "e2e-ui" ]]; then
-  step "L0-1/6 gofmt（列出未格式化文件，有输出即失败）"
+  step "gofmt（列出未格式化文件，有输出即失败）"
   unformatted="$(cd "$ROOT" && gofmt -l cmd internal main.go)"
   if [[ -n "$unformatted" ]]; then
     echo "$unformatted"
@@ -50,22 +50,25 @@ if [[ "$MODE" != "e2e-ui" ]]; then
     exit 1
   fi
 
-  step "L0-2/6 go build"
+  step "三仓 share 版本一致性（P2-2）"
+  bash "$ROOT/scripts/share-version.sh"
+
+  step "go build"
   (cd "$ROOT" && go build ./...)
 
-  step "L0-3/6 go vet"
+  step "go vet"
   (cd "$ROOT" && go vet ./...)
 
-  step "L0-4/6 前端类型检查"
+  step "前端类型检查"
   (cd "$ROOT/frontend" && npm run --silent type-check)
 
-  step "L0-5/6 i18n key 一致性"
+  step "i18n key 一致性"
   (cd "$ROOT/frontend" && npm run --silent i18n:check)
 
-  step "L0-6/6 前后端模型契约门禁（type-contract）"
+  step "前后端模型契约门禁（type-contract）"
   (cd "$ROOT/frontend" && node scripts/type-contract.mjs)
 
-  step "L1 go test $RACE + 覆盖率门禁（含集合文件层/执行器/e2e 夹具/配置/历史/Cookie 单测）"
+  step "go test $RACE + 覆盖率门禁（含集合文件层/执行器/e2e 夹具/配置/历史/Cookie 单测）"
   RACE_ARG=""
   if [[ -z "$RACE" ]]; then
     RACE_ARG="--no-race"
