@@ -634,6 +634,10 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 	case "example":
 		_ = e.Coll.DeleteResponseExampleByUID(it.UID)
 		delete(e.Bind.ExampleHashes, it.UID)
+	// J11-2.4：文档删除（进 .trash，可恢复）；清掉已推送记录，避免下次再推一次删除
+	case "doc":
+		_ = e.Coll.DeleteDoc(it.UID)
+		delete(e.Bind.DocHashes, it.UID)
 	case "variable":
 		e.removeVarByUID(it.UID)
 		delete(e.Bind.VarHashes, it.UID)
@@ -730,6 +734,7 @@ func (e *Engine) applyExample(uid string, p Payload) error {
 }
 
 // findDirByUID 扫描找分组目录相对路径。
+// findDirByUID 分组 uid → 目录相对路径（找不到返回空串）。
 func (e *Engine) findDirByUID(uid string) string {
 	info, err := e.Coll.Info()
 	if err != nil {
@@ -744,6 +749,33 @@ func (e *Engine) findDirByUID(uid string) string {
 			if n.Children != nil {
 				if p := walk(n.Children); p != "" {
 					return p
+				}
+			}
+		}
+		return ""
+	}
+	return walk(info.Tree)
+}
+
+// folderUIDByDir 目录相对路径 → 分组 uid（J11：文档 push 的 GroupUID 用）。
+// 目录不是分组（如 docs/ 或未建 folder.yml 的裸目录）时返回空串 = 未分组。
+func (e *Engine) folderUIDByDir(dir string) string {
+	info, err := e.Coll.Info()
+	if err != nil {
+		return ""
+	}
+	var walk func(nodes []*collection.Node) string
+	walk = func(nodes []*collection.Node) string {
+		for _, n := range nodes {
+			if n.Type != "folder" {
+				continue
+			}
+			if n.Path == dir {
+				return n.UID
+			}
+			if n.Children != nil {
+				if u := walk(n.Children); u != "" {
+					return u
 				}
 			}
 		}
@@ -858,20 +890,46 @@ func (b *pushBatch) collectTombstoneOps(pendingDel []string) {
 
 // collectDocOps 文档条目（B13）：按内容 hash 做脏检测，只推变化项（首次因无记录全推）。
 // 文档不进索引，用 Bind.DocHashes 记录已推送状态（回执在 applyPushed 里写入），避免每轮全量重推。
+// J11：payload 带 GroupUID（目录归属）；「有推送记录但文件已不在」推 delete tombstone。
 func (e *Engine) collectDocOps(b *pushBatch) {
 	docs, _ := e.Coll.ListDocs()
+	live := make(map[string]bool, len(docs))
 	for _, d := range docs {
 		if d.UID == "" {
 			continue
 		}
+		live[d.UID] = true
 		h := e.Coll.FileHashOf(d.Path)
 		if prev, seen := e.Bind.DocHashes[d.UID]; seen && prev == h && h != "" {
 			continue // 内容未变化，跳过
 		}
+		p := Payload{Name: d.Name, Content: d.Content, Icon: d.Icon}
+		// J11-2.1：目录归属 = 服务端分组。根级与 docs/ 默认位都算未分组（空串），
+		// 与「旧集合 docs/*.md 挂根」的既有行为一致。
+		if dir := parentDir(d.Path); dir != "" && dir != "docs" {
+			p.GroupUID = e.folderUIDByDir(dir)
+		}
 		op := Op{OpID: newOpID(), Op: "upsert", Type: "doc", UID: d.UID}
-		op.Payload, _ = json.Marshal(Payload{Name: d.Name, Content: d.Content, Icon: d.Icon})
+		op.Payload, _ = json.Marshal(p)
 		b.add(op, dirtyMeta{uid: d.UID, hash: h, typ: "doc"})
 	}
+	// J11-2.2：本地已删除的文档 → tombstone（照抄 collectExampleOps 模式）
+	for uid := range e.Bind.DocHashes {
+		if live[uid] {
+			continue
+		}
+		b.add(Op{OpID: newOpID(), Op: "delete", Type: "doc", UID: uid},
+			dirtyMeta{uid: uid, typ: "doc", isDelete: true})
+	}
+}
+
+/** parentDir 取相对路径的父目录：根级文件返回空串。 */
+func parentDir(rel string) string {
+	dir := path.Dir(filepath.ToSlash(rel))
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir
 }
 
 // collectExampleOps 响应示例：按 hash 脏检测推 upsert；
