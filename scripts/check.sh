@@ -42,7 +42,7 @@ step() { echo; echo "== $* =="; }
 # ---- 静态检查与单测（所有模式都跑，--e2e-ui 除外） ----
 
 if [[ "$MODE" != "e2e-ui" ]]; then
-  step "L0-1/5 gofmt（列出未格式化文件，有输出即失败）"
+  step "L0-1/6 gofmt（列出未格式化文件，有输出即失败）"
   unformatted="$(cd "$ROOT" && gofmt -l cmd internal main.go)"
   if [[ -n "$unformatted" ]]; then
     echo "$unformatted"
@@ -50,16 +50,16 @@ if [[ "$MODE" != "e2e-ui" ]]; then
     exit 1
   fi
 
-  step "L0-2/5 go build"
+  step "L0-2/6 go build"
   (cd "$ROOT" && go build ./...)
 
-  step "L0-3/5 go vet"
+  step "L0-3/6 go vet"
   (cd "$ROOT" && go vet ./...)
 
-  step "L0-4/5 前端类型检查"
+  step "L0-4/6 前端类型检查"
   (cd "$ROOT/frontend" && npm run --silent type-check)
 
-  step "L0-5/5 i18n key 一致性"
+  step "L0-5/6 i18n key 一致性"
   (cd "$ROOT/frontend" && npm run --silent i18n:check)
 
   step "L0-6/6 前后端模型契约门禁（type-contract）"
