@@ -1,13 +1,18 @@
 name: CI
 
-# 与本地门禁同源：bash scripts/check.sh（gofmt → build → vet → test -race
-# → 前端 type-check → i18n → 模型契约）。
+# 与本地门禁同源：bash scripts/check.sh（gofmt → build → vet → 全量 -cover + 覆盖率下限
+# → 关键包 -race → 前端 type-check → i18n → 模型契约）。
 # e2e 不在默认门禁里（需要浏览器与构建产物），按需用 workflow_dispatch 的 mode 手动跑。
+#
+# 【已关闭自动触发】2026-10-17：push / pull_request 不再自动跑。
+# 需要时在 GitHub Actions 页面手动 Run workflow，或把下面 on: 段落恢复为：
+#   on:
+#     push:
+#       branches: [master, main]
+#     pull_request:
+#     workflow_dispatch: ...
 
 on:
-  push:
-    branches: [master, main]
-  pull_request:
   workflow_dispatch:
     inputs:
       mode:
