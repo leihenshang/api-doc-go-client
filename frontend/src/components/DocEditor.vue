@@ -20,7 +20,8 @@ const emit = defineEmits<{
 }>()
 const { t, locale } = useI18n()
 
-const mode = ref<'edit' | 'split' | 'preview'>('split')
+// 默认单栏：文档页签没有请求/响应分栏，进来就该铺满编辑区；分栏/预览按需切换
+const mode = ref<'edit' | 'split' | 'preview'>('edit')
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
@@ -78,8 +79,12 @@ function onContent(v: string): void {
 .doc-editor {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* 铺满右侧工作区：父级是 column flex（.detail），这里再显式给宽 + 允许收缩 */
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .hd {
@@ -88,10 +93,16 @@ function onContent(v: string): void {
   gap: 6px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--app-border);
+  /* 头部不参与拉伸，也不被内容挤走 */
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .name {
-  width: 220px;
+  /* 可收缩：按钮变宽（长语言/窄窗口）时不要把输入框挤没 */
+  flex: 0 1 220px;
+  min-width: 120px;
 }
 
 .sp {
@@ -100,22 +111,28 @@ function onContent(v: string): void {
 
 .body {
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
 }
 
 .body.edit :deep(.md-editor) {
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .body.split :deep(.md-editor),
 .body.split :deep(.md-preview) {
   flex: 1 1 50%;
+  width: 50%;
   min-width: 0;
 }
 
 .body.preview :deep(.md-preview) {
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
 }
 </style>
