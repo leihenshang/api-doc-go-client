@@ -974,8 +974,11 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 	case "folder":
 		scanFolderFile(res, dir, head)
 	default:
-		// B13 文档条目：docs/*.md
-		if dir == docsDir && strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		// B19 文档条目：任意目录下的 .md 都算（README.md 已被 scanExtAllowed 排除）。
+		// 此前这里还卡着 dir == docsDir，导致放在分组目录里的 .md 扫不到 ——
+		// 表现就是「新建文档后树里没有 + 打开提示条目不存在」。
+		// parseDocFile 要求 frontmatter 带 uid，普通 markdown 笔记会自动跳过。
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			if doc, err := parseDocFile(rel, data); err == nil {
 				res.docs[doc.UID] = doc
 			}

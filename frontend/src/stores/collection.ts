@@ -246,7 +246,10 @@ export const useCollectionStore = defineStore('collection', {
     },
     /** B19：新建文档（folder 空 = docs/ 默认位）；返回条目供调用方开页签。 */
     async createDoc(name: string, folder: string): Promise<DocEntry> {
-      return await api.createDoc(name, folder)
+      const doc = await api.createDoc(name, folder)
+      // 必须重扫：否则新建的文档不会出现在集合树里（用户看到的就是「建了但树里没有」）
+      await this.reload()
+      return doc
     },
     async moveFolder(uid: string, destParent: string): Promise<void> {
       await api.moveFolder(uid, destParent)

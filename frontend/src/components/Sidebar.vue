@@ -629,7 +629,13 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
     else if (key === 'grpc') emit('new-grpc-request', n.path)
     else if (key === 'curl') emit('import-curl', n.path)
     else if (key === 'subfolder') void startAdd(row.root, n.path)
-    else if (key === 'doc') emit('new-doc', n.path)
+    else if (key === 'doc') {
+      // 新建后把目标分组展开：否则文档落在折叠的分组里，用户会以为「没建上」
+      const next = new Set(collapsed.value)
+      next.delete(folderKey(row.root, n.path))
+      collapsed.value = next
+      emit('new-doc', n.path)
+    }
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'folder')
   } else if (n.type === 'request') {
