@@ -701,12 +701,12 @@ func (e *Engine) removeEnvByUID(uid string) {
 // applyExample 应用服务端下发的响应示例：落到所属请求的 examples/ 目录。
 // 请求尚未同步到本地时报错（typeRank 已保证 api 先于 example，通常不会走到）。
 func (e *Engine) applyExample(uid string, p Payload) error {
-	if p.ApiUID == "" {
+	if p.APIUID == "" {
 		return fmt.Errorf("example %s 缺少 api_uid", uid)
 	}
-	r, err := e.Coll.ReadRequest(p.ApiUID)
+	r, err := e.Coll.ReadRequest(p.APIUID)
 	if err != nil {
-		return fmt.Errorf("example %s 找不到所属请求 %s", uid, p.ApiUID)
+		return fmt.Errorf("example %s 找不到所属请求 %s", uid, p.APIUID)
 	}
 	status := p.Status
 	if status == 0 {
@@ -717,7 +717,7 @@ func (e *Engine) applyExample(uid string, p Payload) error {
 		name = "示例"
 	}
 	ex := &collection.ResponseExample{
-		UID: uid, Name: name, RequestUID: p.ApiUID,
+		UID: uid, Name: name, RequestUID: p.APIUID,
 		Path: path.Join(collection.ExampleDirForPath(r.Path), name+".yml"),
 		Seq:  p.Seq,
 		Response: collection.ExampleResponse{
@@ -952,7 +952,7 @@ func (e *Engine) collectExampleOps(b *pushBatch) {
 		}
 		op := Op{OpID: newOpID(), Op: "upsert", Type: "example", UID: ex.UID}
 		op.Payload, _ = json.Marshal(Payload{
-			Name: ex.Name, ApiUID: ex.RequestUID, Sample: ex.Response.Body,
+			Name: ex.Name, APIUID: ex.RequestUID, Sample: ex.Response.Body,
 			Status: ex.Response.Status, ContentType: ex.Response.ContentType, Seq: ex.Seq,
 		})
 		b.add(op, dirtyMeta{uid: ex.UID, hash: h, typ: "example"})
