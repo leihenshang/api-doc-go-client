@@ -22,6 +22,9 @@ type Server struct {
 	coll   *collection.Collection
 	port   int
 	reqCnt int
+	// done 在 Serve 返回时关闭：Stop 要等它才能真正断定服务已停。
+	// 只关 listener 不等 goroutine，会在频繁启停（切集合、改端口）时累积孤儿 goroutine（P1-11）。
+	done chan struct{}
 }
 
 // Status 运行状态（给 UI 展示）。
@@ -52,19 +55,34 @@ func (s *Server) Start(port int) (*Status, error) {
 	s.ln = ln
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	s.srv = &http.Server{Handler: http.HandlerFunc(s.handle)}
-	go func() { _ = s.srv.Serve(ln) }()
+	done := make(chan struct{})
+	s.done = done
+	srv := s.srv
+	go func() {
+		defer close(done)
+		_ = srv.Serve(ln) // Close 之后返回 ErrServerClosed，属正常退出
+	}()
 	return s.statusLocked(), nil
 }
 
-// Stop 停止服务。
+// Stop 停止服务，并等待 Serve goroutine 真正退出。
+//
+// 等待放在锁外：Close 返回后 Serve 很快返回，但若持锁等待，而同一条 goroutine 恰好要
+// 回来拿锁（handle 里取集合除外，主要是避免任何潜在互锁），会把停止操作拖死。
 func (s *Server) Stop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.srv == nil {
+		s.mu.Unlock()
 		return nil
 	}
-	err := s.srv.Close()
-	s.srv, s.ln = nil, nil
+	srv, done := s.srv, s.done
+	s.srv, s.ln, s.done = nil, nil, nil
+	s.mu.Unlock()
+
+	err := srv.Close()
+	if done != nil {
+		<-done // 等服务真正退出，不再留孤儿 goroutine
+	}
 	return err
 }
 
