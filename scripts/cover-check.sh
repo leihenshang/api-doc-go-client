@@ -63,6 +63,7 @@ internal/varx 75
 internal/watch 70
 cmd/testfixtures 55
 cmd/grpcfixture 35
+cmd/devserver 30
 EOF
 )
 
