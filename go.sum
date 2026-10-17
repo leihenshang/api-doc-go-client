@@ -67,6 +67,8 @@ github.com/leihenshang/api-doc-go-share v0.10.1 h1:Sq/4k5k5xtwol0UXItqDgK4AsTe14
 github.com/leihenshang/api-doc-go-share v0.10.1/go.mod h1:kopgsdabfKUJEPr0dTyh3nuJxE3auGOW5wUwy/LaUro=
 github.com/leihenshang/api-doc-go-share v0.10.2 h1:2upzMBEcgakaGIdmBs4jWsBJKdsmbk2uI6I/osluyAM=
 github.com/leihenshang/api-doc-go-share v0.10.2/go.mod h1:kopgsdabfKUJEPr0dTyh3nuJxE3auGOW5wUwy/LaUro=
+github.com/leihenshang/api-doc-go-share v0.10.3 h1:GoxHU1kbel3TEsU61DtElRwNGcSGrKnnCGFCqzYW3NQ=
+github.com/leihenshang/api-doc-go-share v0.10.3/go.mod h1:kopgsdabfKUJEPr0dTyh3nuJxE3auGOW5wUwy/LaUro=
 github.com/matryer/is v1.4.0/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
 github.com/matryer/is v1.4.1 h1:55ehd8zaGABKLXQUe2awZ99BD/PTc2ls+KV/dXphgEQ=
 github.com/matryer/is v1.4.1/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
