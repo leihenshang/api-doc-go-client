@@ -309,8 +309,11 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	// 集合自己也会规范化目录：以它的结果为准（软链接/相对路径写法可能不同）
 	key := rootKey(c.Dir)
 
+	// 索引键必须在**登记进 a.colls 之前**定下来。
+	// 一旦登记，任何 goroutine 都能拿到这份集合去搜索/重建索引；此时再去改它的索引键
+	// （SetIndexKey/RebuildIndex 会换掉内部句柄）就是锁外改共享状态——P1-10。
+	// 集合此刻还没有任何外部引用，改它是安全的。
 	a.mu.Lock()
-	// 并发打开同一目录的兜底（两个入口同时点开）：被别人抢先就用它，把自己这份关掉
 	if e := a.colls[key]; e != nil {
 		a.activeRoot = key
 		dup := e.coll
@@ -329,16 +332,30 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 			break
 		}
 	}
-	a.colls[key] = &collEntry{coll: c}
-	a.collOrder = append(a.collOrder, key)
-	a.activeRoot = key
-	mcpOn := a.settings.MCP.Enabled
 	a.mu.Unlock()
 
 	if uidTaken {
 		c.SetIndexKey(c.UID + "--" + shortHash(key))
 		_ = c.RebuildIndex() // 新键指向的索引文件是空的，先按磁盘重建一份
 	}
+
+	// 回到锁内正式登记：期间可能已被别的入口抢先打开同一目录，按同样规则让位。
+	a.mu.Lock()
+	if e := a.colls[key]; e != nil {
+		a.activeRoot = key
+		dup := e.coll
+		mcpOn := a.settings.MCP.Enabled
+		a.mu.Unlock()
+		_ = c.Close()
+		a.afterActiveChange(mcpOn)
+		return a.refreshInfo(dup)
+	}
+	a.colls[key] = &collEntry{coll: c}
+	a.collOrder = append(a.collOrder, key)
+	a.activeRoot = key
+	mcpOn := a.settings.MCP.Enabled
+	a.mu.Unlock()
+
 	go a.watchLoop(c, key)
 	// MCP 服务的项目根由「活动集合的父目录」推导，新开目录后要重建服务才能看到新项目
 	if mcpOn {

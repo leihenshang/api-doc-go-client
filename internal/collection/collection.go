@@ -44,6 +44,10 @@ type Collection struct {
 	UID  string
 	Name string
 	idx  *index.DB // 本地 SQLite 索引（C1）；惰性打开
+	// idxMu 保护 idx 指针本身：ensureIndex 在任意调用 goroutine 上惰性打开，
+	// Close / SetIndexKey 会在另一条 goroutine 上关闭并置 nil —— 裸字段就是数据竞争
+	// （P1-10：watchLoop 里 RebuildIndex 与前端并发搜索同时命中同一集合）。
+	idxMu sync.Mutex
 	// closed：Close 后置位。防止 watcher 关闭竞态下（事件与 done 同时就绪）
 	// 又触发一次 RebuildIndex 在「错误的配置目录」里重开索引（跨测试/Windows 文件锁问题）。
 	idxClosed atomic.Bool
@@ -251,6 +255,8 @@ func (c *Collection) SetIndexKey(key string) {
 
 // closeIndex 关闭索引句柄（文件保留）；返回关闭错误。
 func (c *Collection) closeIndex() error {
+	c.idxMu.Lock()
+	defer c.idxMu.Unlock()
 	if c.idx == nil {
 		return nil
 	}
@@ -278,6 +284,8 @@ func safeIndexName(uid string) string {
 // ensureIndex 惰性打开索引库。集合 Close 后拒绝重开：关闭竞态残留的 watcher
 // 事件不应再创建索引句柄（否则会在新的配置目录里生成孤儿 sqlite 并锁住文件）。
 func (c *Collection) ensureIndex() (*index.DB, error) {
+	c.idxMu.Lock()
+	defer c.idxMu.Unlock()
 	if c.idxClosed.Load() {
 		return nil, errCollectionClosed
 	}
@@ -410,10 +418,7 @@ func (c *Collection) Search(q string, limit int) ([]index.Node, error) {
 
 // CloseIndex 释放索引句柄（切换集合时调用）。
 func (c *Collection) CloseIndex() {
-	if c.idx != nil {
-		_ = c.idx.Close()
-		c.idx = nil
-	}
+	_ = c.closeIndex()
 }
 
 // manifestVersion 集合清单的 opencollection 版本号。
@@ -1937,12 +1942,13 @@ const minHashPrefix = 8
 // 必要性：文件监听会忽略「自己刚写的路径」（ignoreWrite），所以索引不会因为我们自己的保存而更新；
 // 若不同步，前端下一次读到的 hash 仍是旧值 → 下一次保存会被误判成外部改动（假冲突）。
 func (c *Collection) refreshIndexNode(r *Request, full string, data []byte) {
-	if c.idx == nil {
-		return
+	db, err := c.ensureIndex()
+	if err != nil {
+		return // 索引没打开（或集合已关闭）就不维护：下次重建会补齐
 	}
 	// 索引里还没有（新创建的请求）也要写进去，否则它要等下次全量重建才能被搜索到
-	n, ok, err := c.idx.Get(r.UID)
-	if err != nil || !ok {
+	n, ok, gerr := db.Get(r.UID)
+	if gerr != nil || !ok {
 		n = index.Node{UID: r.UID, Type: "request", Path: filepath.ToSlash(r.Path)}
 	}
 	n.Hash = sha256Hex(data)
@@ -1952,7 +1958,7 @@ func (c *Collection) refreshIndexNode(r *Request, full string, data []byte) {
 	n.Title = r.Name
 	n.Method = r.Method
 	n.URL = r.URL
-	_ = c.idx.Upsert(n)
+	_ = db.Upsert(n)
 }
 
 // DeleteRequest 删除请求：文件移入 .trash/（带时间戳，可人工找回）。

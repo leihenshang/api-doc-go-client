@@ -341,6 +341,11 @@ func (a *App) CloseCollection(root string) error {
 	a.mu.Unlock()
 
 	// Close = 停监听 + 关索引句柄（索引文件本身保留，下次打开可直接复用）
+	//
+	// 必须在锁外调用：Close 会等 watcher goroutine 退出，而 watchLoop 自身要拿 a.mu 校验
+	// 自己是否还登记着 —— 在锁内 Close 直接互锁。安全性由「先摘登记、再关句柄」保证：
+	// 摘掉之后没有任何路径能再拿到这份集合的新引用，已在途的调用会拿到 errCollectionClosed
+	// 而不是访问已关闭的索引（P1-10）。
 	_ = e.coll.Close()
 	if mock != nil {
 		_ = mock.Stop()
