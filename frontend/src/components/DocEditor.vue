@@ -20,8 +20,8 @@ const emit = defineEmits<{
 }>()
 const { t, locale } = useI18n()
 
-// 默认单栏：文档页签没有请求/响应分栏，进来就该铺满编辑区；分栏/预览按需切换
-const mode = ref<'edit' | 'split' | 'preview'>('edit')
+// 文档页签只有「编辑 / 预览」两种单栏形态（不支持左右分栏）
+const mode = ref<'edit' | 'preview'>('edit')
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
@@ -48,9 +48,6 @@ function onContent(v: string): void {
       <span class="sp" />
       <n-button size="tiny" :type="mode === 'edit' ? 'primary' : 'default'" @click="mode = 'edit'">
         {{ t('editor.edit') }}
-      </n-button>
-      <n-button size="tiny" :type="mode === 'split' ? 'primary' : 'default'" @click="mode = 'split'">
-        {{ t('editor.split') }}
       </n-button>
       <n-button size="tiny" :type="mode === 'preview' ? 'primary' : 'default'" @click="mode = 'preview'">
         {{ t('editor.preview') }}
@@ -112,27 +109,26 @@ function onContent(v: string): void {
 .body {
   flex: 1 1 auto;
   width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
 }
 
+/* md-editor-v3 默认 height:500px（固定高），不覆盖就只占半屏 */
 .body.edit :deep(.md-editor) {
   flex: 1 1 auto;
   width: 100%;
+  height: 100%;
   min-width: 0;
-}
-
-.body.split :deep(.md-editor),
-.body.split :deep(.md-preview) {
-  flex: 1 1 50%;
-  width: 50%;
-  min-width: 0;
+  min-height: 0;
 }
 
 .body.preview :deep(.md-preview) {
   flex: 1 1 auto;
   width: 100%;
+  height: 100%;
   min-width: 0;
+  overflow: auto;
 }
 </style>
