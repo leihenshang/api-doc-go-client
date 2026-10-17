@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # 客户端工程门禁（本地与 CI 共用）
 #
-#   bash scripts/check.sh                # 静态检查 + 单测（秒级，默认 / CI 用这个）
+#   bash scripts/check.sh                # 静态检查 + 单测（带 -race，默认 / CI 用这个）
 #   bash scripts/check.sh --smoke        # 加上前端构建 + e2e 冒烟（@smoke，约 30 秒）
 #   bash scripts/check.sh --full         # 加上前端构建 + 全量 e2e（排除 @demo，约 3 分钟）
 #   bash scripts/check.sh --e2e-ui       # 打开 Playwright UI（交互式，不跑静态检查）
 #   bash scripts/check.sh --skip-build   # 与 e2e 模式组合：跳过前端构建（dist 已是最新时用）
+#   bash scripts/check.sh --no-race       # 单测不开 -race（更快，仅本地临时用）
 #
 # e2e 前置：frontend 下装过依赖与浏览器（npm i && npx playwright install chromium）；
 # 用例细节见 frontend/e2e/README.md。
@@ -15,6 +16,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 MODE="fast"
 SKIP_BUILD=0
+# 默认开 -race：collection watcher 与 syncengine 的并发写只有竞态检测能发现。
+RACE="-race"
 for arg in "$@"; do
   case "$arg" in
     --fast) MODE="fast" ;;
@@ -22,12 +25,13 @@ for arg in "$@"; do
     --full) MODE="full" ;;
     --e2e-ui) MODE="e2e-ui" ;;
     --skip-build) SKIP_BUILD=1 ;;
+    --no-race) RACE="" ;;
     -h | --help)
-      sed -n '2,12p' "$0"
+      sed -n '2,13p' "$0"
       exit 0
       ;;
     *)
-      echo "未知参数：$arg（可用：--fast / --smoke / --full / --e2e-ui / --skip-build）" >&2
+      echo "未知参数：$arg（可用：--fast / --smoke / --full / --e2e-ui / --skip-build / --no-race）" >&2
       exit 2
       ;;
   esac
@@ -61,8 +65,8 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "L0-6/6 前后端模型契约门禁（type-contract）"
   (cd "$ROOT/frontend" && node scripts/type-contract.mjs)
 
-  step "L1 go test ./...（含集合文件层/执行器/e2e 夹具/配置/历史/Cookie 单测）"
-  (cd "$ROOT" && go test ./...)
+  step "L1 go test $RACE ./...（含集合文件层/执行器/e2e 夹具/配置/历史/Cookie 单测）"
+  (cd "$ROOT" && go test $RACE ./...)
 fi
 
 # ---- e2e（可选模式） ----
