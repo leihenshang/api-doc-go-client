@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"api-doc-go-client/internal/collection"
@@ -104,6 +105,10 @@ func NewApp() *App {
 type eventSub struct {
 	ch   chan map[string]any
 	self int
+	// dropped 该订阅因「积压太多」被丢弃的事件数（P2-18）。
+	// 只在 emitAppEvent 的发送方 goroutine 上自增（每个订阅同一时刻只有一个发送者持锁快照后串行发），
+	// 读取方是诊断/测试，用 atomic 避免与读者构成竞争。
+	dropped atomic.Int64
 }
 
 // SubscribeEvents 订阅应用事件（collection:changed / mcp:authz-* 等）。
@@ -149,19 +154,33 @@ func (a *App) appCtx() context.Context {
 func (a *App) emitAppEvent(name string, payload any) {
 	a.mu.Lock()
 	ctx := a.ctx
-	subs := make([]chan map[string]any, 0, len(a.eventSubs))
+	subs := make([]*eventSub, 0, len(a.eventSubs))
 	for _, s := range a.eventSubs {
-		subs = append(subs, s.ch)
+		subs = append(subs, s)
 	}
 	a.mu.Unlock()
 	if ctx != nil {
 		runtime.EventsEmit(ctx, name, payload)
 	}
 	ev := map[string]any{"name": name, "payload": payload}
-	for _, ch := range subs {
+	for _, sub := range subs {
+		// P2-18：通道满时丢**最旧**的一条再塞新的，而不是直接丢掉新事件。
+		// 事件语义是「状态变更通知」（前端收到就重扫），丢新的会让界面停在过期状态，
+		// 丢旧的则最坏只是少刷一次中间态；同时累加 dropped，便于判断前端是否长期跟不上。
 		select {
-		case ch <- ev:
+		case sub.ch <- ev:
+			continue
 		default:
+		}
+		select {
+		case <-sub.ch:
+			sub.dropped.Add(1)
+		default:
+		}
+		select {
+		case sub.ch <- ev:
+		default:
+			sub.dropped.Add(1)
 		}
 	}
 }
