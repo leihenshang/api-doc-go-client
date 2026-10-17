@@ -174,6 +174,11 @@ func loopbackListenAddr(addr string) bool {
 	if err != nil {
 		host = strings.TrimSpace(addr)
 	}
+	// 空 host（":8175"）与 "0.0.0.0" 都会绑全网卡，必须判为非回环 ——
+	// 不能走 loopbackHost("")（那里空 Host 是放行的，因为它是请求头语义）。
+	if strings.TrimSpace(host) == "" {
+		return false
+	}
 	return loopbackHost(host)
 }
 
