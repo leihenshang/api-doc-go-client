@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,7 +49,11 @@ type Collection struct {
 	idxClosed atomic.Bool
 	// indexKey 索引文件名用的键，空 = 用 UID（见 SetIndexKey：多根并存时同 uid 的拷贝目录要区分开）
 	indexKey string
-	w        *watch.Watcher // 外部改动监听（D1）；惰性启动
+	// w 外部改动监听（D1）；惰性启动。
+	// 由 wMu 保护：WatchEvents 在 watchLoop goroutine 上读，StopWatch 在
+	// Close 所在 goroutine 上写，裸字段会构成数据竞争（go test -race 可复现）。
+	w   *watch.Watcher
+	wMu sync.Mutex
 	// grpcDefault 集合级默认 gRPC 定义（清单里的 grpc 段，P8）；nil = 未配置。
 	// 只有在内存里保留它，writeManifest 才不会把清单里的这一段写丢。
 	grpcDefault *share.GRPCDefault
@@ -124,8 +129,18 @@ func Open(dir string) (*Collection, error) {
 
 // ---------- 外部改动监听（D1/D2）----------
 
+// watcher 取当前监听器（可能为 nil）。这是读取 c.w 的唯一入口：
+// watchLoop 线程需要随时读它，Close 线程会把它置 nil，必须串行化。
+func (c *Collection) watcher() *watch.Watcher {
+	c.wMu.Lock()
+	defer c.wMu.Unlock()
+	return c.w
+}
+
 // StartWatch 启动目录监听；失败不阻塞打开（可手动 ⟳ 兜底）。
 func (c *Collection) StartWatch() error {
+	c.wMu.Lock()
+	defer c.wMu.Unlock()
 	if c.w != nil {
 		return nil
 	}
@@ -139,26 +154,32 @@ func (c *Collection) StartWatch() error {
 
 // WatchEvents 外部改动事件流（未启动时返回 nil）。
 func (c *Collection) WatchEvents() <-chan watch.Event {
-	if c.w == nil {
+	w := c.watcher()
+	if w == nil {
 		return nil
 	}
-	return c.w.Events()
+	return w.Events()
 }
 
 // WatchDone 监听器关闭信号（未启动时返回 nil）。
 // 事件通道在 Close 后不会再关闭，消费方（watchLoop）靠它退出，避免 goroutine 永久阻塞。
 func (c *Collection) WatchDone() <-chan struct{} {
-	if c.w == nil {
+	w := c.watcher()
+	if w == nil {
 		return nil
 	}
-	return c.w.Done()
+	return w.Done()
 }
 
-// StopWatch 停止监听。
+// StopWatch 停止监听。先把指针摘下再关：Close 可能阻塞（关 inotify），
+// 持锁调用会让同时在读 c.w 的 WatchEvents 一起卡住。
 func (c *Collection) StopWatch() {
-	if c.w != nil {
-		_ = c.w.Close()
-		c.w = nil
+	c.wMu.Lock()
+	w := c.w
+	c.w = nil
+	c.wMu.Unlock()
+	if w != nil {
+		_ = w.Close()
 	}
 }
 
@@ -180,16 +201,16 @@ func (c *Collection) Close() error {
 // 在窗口过期后才到达，泄漏成外部改动并触发假冲突（编辑未保存时尤为明显）。内容指纹版
 // （ignoreWriteContent）只忽略「内容仍等于我方写入」的事件，多加时长不会误吞真正的并发改动。
 func (c *Collection) ignoreWrite(rel string) {
-	if c.w != nil {
-		c.w.Ignore(rel, 1500*time.Millisecond)
+	if w := c.watcher(); w != nil {
+		w.Ignore(rel, 1500*time.Millisecond)
 	}
 }
 
 // ignoreWriteContent 自写回环（带内容指纹）：窗口内只有「文件内容仍等于我方写入的那份」
 // 才忽略；同一窗口里别人改的内容照常上报（否则别人的改动会被静默吞掉）。
 func (c *Collection) ignoreWriteContent(rel string, content []byte) {
-	if c.w != nil {
-		c.w.IgnoreWrite(rel, sha256Hex(content), 1500*time.Millisecond)
+	if w := c.watcher(); w != nil {
+		w.IgnoreWrite(rel, sha256Hex(content), 1500*time.Millisecond)
 	}
 }
 
