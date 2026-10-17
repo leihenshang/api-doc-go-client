@@ -125,6 +125,24 @@ func (a *App) SubscribeEvents() (<-chan map[string]any, func()) {
 	}
 }
 
+// setAppCtx 记录 Wails 运行时上下文。
+//
+// P2-9：ctx 存在结构体里是 Wails 的既定形态（绑定方法不带 ctx 参数），
+// 但写入发生在 Startup / DomReady 钩子里，读取发生在任意前端调用或后台 goroutine 上，
+// 裸字段构成数据竞争。统一走 setter/getter，所有读写都在 a.mu 下。
+func (a *App) setAppCtx(ctx context.Context) {
+	a.mu.Lock()
+	a.ctx = ctx
+	a.mu.Unlock()
+}
+
+// appCtx 取 Wails 运行时上下文；非桌面环境（devserver）返回 nil。
+func (a *App) appCtx() context.Context {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.ctx
+}
+
 // emitAppEvent 向下行发送命名应用事件：桌面态走 Wails EventsEmit，浏览器态经
 // SubscribeEvents 的信封通道由 devserver SSE 转发（事件名由载荷自带，不再硬编码）。
 // 订阅方堵塞时丢弃该事件，保证调用方（含 MCP 工具调用线程）不被慢前端拖住。
@@ -161,7 +179,7 @@ const (
 // startup Wails 生命周期。
 // Startup Wails 生命周期钩子（必须导出：OnStartup 引用跨包方法）。
 func (a *App) Startup(ctx context.Context) {
-	a.ctx = ctx
+	a.setAppCtx(ctx)
 	a.signalQuit = make(chan struct{})
 	a.watchSignals()
 	// T2/T3：把授权 UI 桥与审计器注入内嵌 MCP 服务（开关关时授权链为 nil；审计恒开）。
@@ -185,7 +203,7 @@ func (a *App) Startup(ctx context.Context) {
 // 用它判断：放得下就保持首选尺寸并居中，放不下就直接最大化（Windows 侧 Wails 已按工作区裁剪客户区，
 // 任务栏自动让开）。窗口先隐藏（main.go 的 StartHidden），自适应完再 Show，避免启动闪一下再跳。
 func (a *App) DomReady(ctx context.Context) {
-	a.ctx = ctx
+	a.setAppCtx(ctx)
 	a.fitInitialWindow(ctx)
 	runtime.WindowShow(ctx)
 }
@@ -251,18 +269,20 @@ func (a *App) PickDirectory() (string, error) {
 	if a.headlessDir != "" {
 		return a.headlessDir, nil
 	}
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return "", errors.New("应用未就绪")
 	}
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择集合目录"})
+	return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{Title: "选择集合目录"})
 }
 
 // PickFile 选择本地文件（multipart 上传用）。
 func (a *App) PickFile() (string, error) {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return "", errors.New("应用未就绪")
 	}
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择上传文件"})
+	return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{Title: "选择上传文件"})
 }
 
 // PickGrpcProtoFiles 选择 .proto 定义（可多选，带 .proto 过滤）：gRPC 请求的「导入 / 更新定义」用。
@@ -270,10 +290,11 @@ func (a *App) PickFile() (string, error) {
 // 必须支持多选：一个服务的定义常拆在多个文件（service 与 message 分文件 + 同目录互相 import），
 // 分开导入会因「import 依赖还没进集合」而解析失败（设计文档 D2/G2.2）。
 func (a *App) PickGrpcProtoFiles() ([]string, error) {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return nil, errors.New("应用未就绪")
 	}
-	return runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+	return runtime.OpenMultipleFilesDialog(ctx, runtime.OpenDialogOptions{
 		Title:   "选择 .proto 定义",
 		Filters: []runtime.FileFilter{{DisplayName: "Proto 定义 (*.proto)", Pattern: "*.proto"}},
 	})
@@ -1313,8 +1334,8 @@ func (a *App) SaveResponseBody(defaultName string, binary bool, body string) (st
 	var path string
 	if a.headlessDir != "" {
 		path = filepath.Join(a.headlessDir, filepath.Base(name))
-	} else if a.ctx != nil {
-		picked, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	} else if ctx := a.appCtx(); ctx != nil {
+		picked, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
 			Title:           "保存响应体",
 			DefaultFilename: name,
 		})
@@ -1901,8 +1922,8 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 	var path string
 	if a.headlessDir != "" {
 		path = filepath.Join(a.headlessDir, filepath.Base(name))
-	} else if a.ctx != nil {
-		picked, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	} else if ctx := a.appCtx(); ctx != nil {
+		picked, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
 			Title:           "导出文档",
 			DefaultFilename: name,
 		})
@@ -1927,32 +1948,36 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 
 // WindowMinimise 最小化窗口。
 func (a *App) WindowMinimise() {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return
 	}
-	runtime.WindowMinimise(a.ctx)
+	runtime.WindowMinimise(ctx)
 }
 
 // WindowToggleMaximise 最大化 / 还原窗口。
 func (a *App) WindowToggleMaximise() {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return
 	}
-	runtime.WindowToggleMaximise(a.ctx)
+	runtime.WindowToggleMaximise(ctx)
 }
 
 // WindowIsMaximised 当前是否最大化（标题栏按钮切换图标用）。
 func (a *App) WindowIsMaximised() bool {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return false
 	}
-	return runtime.WindowIsMaximised(a.ctx)
+	return runtime.WindowIsMaximised(ctx)
 }
 
 // Quit 退出应用。
 func (a *App) Quit() {
-	if a.ctx == nil {
+	ctx := a.appCtx()
+	if ctx == nil {
 		return
 	}
-	runtime.Quit(a.ctx)
+	runtime.Quit(ctx)
 }
