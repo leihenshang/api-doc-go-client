@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	share "github.com/leihenshang/api-doc-go-share/varx"
 )
 
 func TestResolveBasic(t *testing.T) {
@@ -136,5 +138,60 @@ func TestResolvePlainNameUnchanged(t *testing.T) {
 	out, missing := Resolve("{{host}}/x", map[string]string{"host": "http://localhost:2025"})
 	if missing != nil || out != "http://localhost:2025/x" {
 		t.Fatalf("普通名解析异常：out=%q missing=%v", out, missing)
+	}
+}
+
+// TestConsistentWithSharedPackage P1-19：客户端不再自带一套语法，而是包一层共享包。
+// 对共享语法覆盖到的所有形态，两层输出必须逐字节一致；唯一的**有意差异**是
+// 客户端把含 `-`/`.` 的变量名透明转写后交给共享包（共享包正则只认 [A-Za-z0-9_]）。
+func TestConsistentWithSharedPackage(t *testing.T) {
+	vars := map[string]string{
+		"host":  "http://api.test",
+		"token": "abc",
+		"empty": "",
+	}
+	texts := []string{
+		"",
+		"没有占位符",
+		"{{host}}/v1/user",
+		"{{ host }}/v1/user", // 花括号内允许空白
+		"{{host}}{{host}}",   // 重复
+		"{{missing}}",        // 未定义保留原文
+		"{{empty}}",          // 空值命中即替换
+		`{"a":"{{token}}","b":"{{host}}"}`,
+		"{{$uuid}}",                      // 内置动态变量：每次值不同，只比「是否被替换」
+		"{{$unknownBuiltin}}",            // 未知内置变量保留原文
+		"{{host}}/{{missing}}/{{empty}}", // 混合
+	}
+	for _, text := range texts {
+		got, gotMissing := Resolve(text, vars)
+		want, wantMissing := share.ResolveWithBuiltins(text, table(vars), share.DefaultBuiltins())
+		if text == "{{$uuid}}" || strings.Contains(text, "{{$uuid}}") {
+			// uuid 随机，不做逐字节比较；但两边都必须「替换掉了」
+			if got == text || want == text {
+				t.Fatalf("内置变量应被替换：client=%q share=%q", got, want)
+			}
+			continue
+		}
+		if got != want {
+			t.Fatalf("Resolve(%q) 与共享包不一致:\nclient=%q\nshare =%q", text, got, want)
+		}
+		if strings.Join(gotMissing, ",") != strings.Join(wantMissing, ",") {
+			t.Fatalf("Resolve(%q) 缺失名单不一致: client=%v share=%v", text, gotMissing, wantMissing)
+		}
+	}
+}
+
+// TestHyphenatedOnlyDivergence 记录「有意差异」：连字符/点号变量名只有客户端支持，
+// 共享包对它是原样保留。这条测试保证差异是**受控**的，而不是谁悄悄改了语法。
+func TestHyphenatedOnlyDivergence(t *testing.T) {
+	vars := map[string]string{"clxone-ipam": "10.0.0.1"}
+	text := "{{clxone-ipam}}"
+	got, missing := Resolve(text, vars)
+	if got != "10.0.0.1" || len(missing) != 0 {
+		t.Fatalf("客户端应支持连字符变量名，got %q missing=%v", got, missing)
+	}
+	if shared, _ := share.ResolveWithBuiltins(text, table(vars), share.DefaultBuiltins()); shared == "10.0.0.1" {
+		t.Fatal("共享包应不支持连字符名（若已支持，请删除本用例与客户端的转写逻辑）")
 	}
 }
