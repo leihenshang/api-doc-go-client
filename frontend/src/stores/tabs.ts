@@ -269,7 +269,10 @@ export const useTabsStore = defineStore('tabs', {
       tab.doc = { ...tab.doc, ...patch }
       if (!tab.dirty) {
         tab.dirty = true
-        this.scheduleSave(tab)
+        // 与请求一致：仅开启自动保存时才防抖写盘；手动模式下只标脏，等 Ctrl+S / 关闭询问
+        if (useSettingsStore().autoSave) {
+          saveTimers.set(tab.key, setTimeout(() => void this.saveDoc(tab.key), SAVE_DEBOUNCE))
+        }
       }
     },
     /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
