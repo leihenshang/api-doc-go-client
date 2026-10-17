@@ -824,7 +824,7 @@ func (r *mdRenderer) renderQuote(trim string) bool {
 // 原样输出不包 <p>；清洗失败则退化为转义文本（既不吞内容，也不放过注入标记）。
 func (r *mdRenderer) renderBlockTag(trim string) bool {
 	m := blockTagOnlyRE.FindStringSubmatch(trim)
-	if m == nil || !htmlAllowedTags[strings.ToLower(m[1])] {
+	if m == nil || !isAllowedHTMLTag(m[1]) {
 		return false
 	}
 	r.closeBlocks()
@@ -1124,8 +1124,12 @@ var (
 )
 
 // htmlAllowedTags 允许在导出 HTML 中原样保留的标签白名单。
+//
 // 刻意不含 script/iframe/object/embed/form/input/button/link/style/meta/svg 等可执行或可外联的标签 ——
 // 即使内容来自用户自己的集合，也按「最小能力」放行（markdown-it 常见排版标签即可）。
+//
+// **只读**：本表在包初始化后不再修改，因此不需要加锁（P2-20）。
+// 唯一读取入口是 isAllowedHTMLTag；新增白名单项请改这里并跑 TestHTMLAllowedTagsAreSafe。
 var htmlAllowedTags = map[string]bool{
 	"a": true, "abbr": true, "b": true, "blockquote": true, "br": true, "caption": true,
 	"cite": true, "code": true, "col": true, "colgroup": true, "dd": true, "del": true,
@@ -1137,6 +1141,12 @@ var htmlAllowedTags = map[string]bool{
 	"tfoot": true, "th": true, "thead": true, "tr": true, "u": true, "ul": true,
 }
 
+// isAllowedHTMLTag 判断标签名（大小写不敏感）是否在白名单内。
+// 全部调用点都走它，避免将来有人新增判断分支时直接读 map、忘了忽略大小写。
+func isAllowedHTMLTag(name string) bool {
+	return htmlAllowedTags[strings.ToLower(name)]
+}
+
 // sanitizeHTMLTag 清洗单个 HTML 标签：非白名单标签返回 ok=false；白名单标签删除所有 on* 事件
 // 属性与 javascript:/vbscript: 链接，其余属性（class/href/src/alt/title/colspan…）保留并规范引号。
 func sanitizeHTMLTag(tag string) (string, bool) {
@@ -1145,7 +1155,7 @@ func sanitizeHTMLTag(tag string) (string, bool) {
 		return "", false
 	}
 	name := strings.ToLower(m[1])
-	if !htmlAllowedTags[name] {
+	if !isAllowedHTMLTag(name) {
 		return "", false
 	}
 	closing := strings.HasPrefix(strings.TrimSpace(tag), "</")
