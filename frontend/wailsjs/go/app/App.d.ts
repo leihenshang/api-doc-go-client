@@ -38,7 +38,7 @@ export function ConflictDetail(arg1:string):Promise<collection.ConflictDetail>;
 
 export function ConflictDetailFor(arg1:string,arg2:string):Promise<collection.ConflictDetail>;
 
-export function CreateDoc(arg1:string):Promise<collection.DocEntry>;
+export function CreateDoc(arg1:string,arg2:string):Promise<collection.DocEntry>;
 
 export function CreateFolder(arg1:string,arg2:string):Promise<void>;
 
@@ -59,6 +59,8 @@ export function DeleteFromTrash(arg1:string,arg2:string):Promise<void>;
 export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
+
+export function DocFileHash(arg1:string):Promise<string>;
 
 export function EnvFileHash(arg1:string):Promise<string>;
 
@@ -124,6 +126,8 @@ export function MCPStatusText():Promise<app.MCPStatus>;
 
 export function MockStatus():Promise<mocksrv.Status>;
 
+export function MoveDoc(arg1:string,arg2:string):Promise<void>;
+
 export function MoveFolder(arg1:string,arg2:string):Promise<void>;
 
 export function MoveFolderToCollection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<string>>;
@@ -162,6 +166,8 @@ export function RemoveGrpcProto(arg1:string):Promise<void>;
 
 export function RemoveMCPGrant(arg1:string,arg2:string):Promise<void>;
 
+export function RenameDoc(arg1:string,arg2:string):Promise<void>;
+
 export function RenameEnv(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RenameFolder(arg1:string,arg2:string):Promise<void>;
@@ -183,6 +189,8 @@ export function RunSync(arg1:string):Promise<syncengine.Report>;
 export function RunSyncForRoot(arg1:string):Promise<syncengine.Report>;
 
 export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
+
+export function SaveDocExpectHash(arg1:collection.DocEntry,arg2:string):Promise<void>;
 
 export function SaveEnv(arg1:collection.Env):Promise<void>;
 

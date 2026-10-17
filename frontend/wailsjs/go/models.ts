@@ -623,6 +623,7 @@ export namespace collection {
 	    path: string;
 	    content: string;
 	    icon?: string;
+	    seq?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DocEntry(source);
@@ -635,6 +636,7 @@ export namespace collection {
 	        this.path = source["path"];
 	        this.content = source["content"];
 	        this.icon = source["icon"];
+	        this.seq = source["seq"];
 	    }
 	}
 	
