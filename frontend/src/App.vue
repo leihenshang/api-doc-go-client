@@ -658,7 +658,7 @@ function newDraft(folder = '', doc: RequestDoc | null = null): void {
 
 /** B19：在指定分组（folder 空 = docs/ 默认位）新建文档并直接开文档页签。 */
 async function newDocAt(folder = ''): Promise<void> {
-  const name = await promptName(t('docs.newDocTitle'), t('docs.newDocPlaceholder'))
+  const name = await promptName(t('docs.new'), t('docs.namePh'))
   if (!name) return
   try {
     const d = await coll.createDoc(name, folder)
@@ -1023,10 +1023,10 @@ watch(
                     </button>
                   </div>
                   <!-- B19：文档页签 —— 隐藏请求栏与响应面板，编辑区满幅 -->
-                  <template v-if="isDocTab">
+                  <template v-if="isDocTab && detailTab">
                     <doc-editor :doc="detailTab.doc!" :readonly="coll.isReadOnly"
-                      @update:doc="(d) => tabs.touchDoc(detailTab.key, d)" @save="saveActiveNow"
-                      @close="requestClose(detailTab.key)" />
+                      @update:doc="(d) => tabs.touchDoc(detailTab!.key, d)" @save="saveActiveNow"
+                      @close="requestClose(detailTab!.key)" />
                   </template>
                   <template v-else>
                     <request-bar :tab="detailTab" @codegen="showCodegen = true" @save="saveActiveNow" />
