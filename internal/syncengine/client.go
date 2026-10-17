@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	syncapi "github.com/leihenshang/api-doc-go-share/syncapi"
 )
 
 // Mode 同步方式（opencollection.yml 的 sync.mode）。
@@ -116,103 +118,24 @@ func isLoopbackHost(host string) bool {
 
 // ---- 协议 DTO（与 service.Sync* 对齐）----
 
-// Meta 能力协商。
-type Meta struct {
-	ServerVersion string   `json:"server_version"`
-	SyncProto     int      `json:"sync_proto"`
-	Features      []string `json:"features"`
-}
+// ---- 同步线协议 ----
+//
+// 结构与 `json` tag 的唯一真源在共享库 `share/syncapi`（P2-1）：服务端与客户端
+// 都是它的别名，字段不一致在编译期就不可能发生。协议有破坏性变更时，
+// 要改的是共享库 + `syncapi.Proto`，不是这里。
 
-// State 游标探测。
-type State struct {
-	Cursor          int64 `json:"cursor"`
-	OldestAvailable int64 `json:"oldest_available"`
-}
-
-// Item 同步条目。
-type Item struct {
-	Type    string          `json:"type"`
-	UID     string          `json:"uid"`
-	Op      string          `json:"op"`
-	Payload json.RawMessage `json:"payload"`
-	ItemRev int64           `json:"item_rev"`
-	Deleted bool            `json:"deleted"`
-}
-
-// Changes 增量响应。
-type Changes struct {
-	Cursor  int64  `json:"cursor"`
-	Items   []Item `json:"items"`
-	HasMore bool   `json:"has_more"`
-	Gap     bool   `json:"gap"`
-}
-
-// Snapshot 全量响应。
-type Snapshot struct {
-	Cursor  int64  `json:"cursor"`
-	Items   []Item `json:"items"`
-	HasMore bool   `json:"has_more"`
-	Offset  int    `json:"offset"`
-}
-
-// Op push 一条。
-type Op struct {
-	OpID    string          `json:"op_id"`
-	Op      string          `json:"op"`
-	Type    string          `json:"type"`
-	UID     string          `json:"uid"`
-	BaseRev int64           `json:"base_rev"`
-	Payload json.RawMessage `json:"payload"`
-}
-
-// OpResult 逐条结果。
-type OpResult struct {
-	OpID    string          `json:"op_id"`
-	Status  string          `json:"status"`
-	ItemRev int64           `json:"item_rev"`
-	Reason  string          `json:"reason"`
-	Server  json.RawMessage `json:"server"`
-}
-
-// PushReq / PushResp。
-type PushReq struct {
-	ProjectID  uint64 `json:"project_id"`
-	DeviceID   string `json:"device_id"`
-	DeviceName string `json:"device_name"`
-	Ops        []Op   `json:"ops"`
-}
-
-type PushResp struct {
-	Results []OpResult `json:"results"`
-	Cursor  int64      `json:"cursor"`
-}
-
-// Payload 条目载荷。
-type Payload struct {
-	Title    string `json:"title,omitempty"`
-	PID      string `json:"parent_uid,omitempty"`
-	Priority int    `json:"priority,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Method   string `json:"method,omitempty"`
-	URL      string `json:"url,omitempty"`
-	GroupUID string `json:"group_uid,omitempty"`
-	Extra    string `json:"extra,omitempty"`
-	Content  string `json:"content,omitempty"`
-	Icon     string `json:"icon,omitempty"`
-	// example（响应示例）：Name 复用为示例名
-	ApiUID      string `json:"api_uid,omitempty"`
-	Sample      string `json:"sample,omitempty"`
-	Status      int    `json:"status,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	Seq         int    `json:"seq,omitempty"`
-	// variable / variable_env（S16）：Name 复用为变量名/环境名；
-	// secret 变量的 Value 为口令加密密文（enc:v1: 前缀），服务端只存不解析。
-	EnvUID  string `json:"env_uid,omitempty"`
-	Value   string `json:"value,omitempty"`
-	Secret  bool   `json:"secret,omitempty"`
-	Enabled *bool  `json:"enabled,omitempty"`
-	Deleted bool   `json:"deleted,omitempty"`
-}
+type (
+	Meta     = syncapi.Meta
+	State    = syncapi.State
+	Item     = syncapi.Item
+	Changes  = syncapi.Changes
+	Snapshot = syncapi.Snapshot
+	Op       = syncapi.Op
+	OpResult = syncapi.OpResult
+	PushReq  = syncapi.PushReq
+	PushResp = syncapi.PushResp
+	Payload  = syncapi.Payload
+)
 
 // ---- HTTP ----
 

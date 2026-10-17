@@ -426,7 +426,7 @@ func TestRunOneAppliesAllEntityTypes(t *testing.T) {
 			{Type: "api", UID: "a1", Op: "upsert", ItemRev: 2,
 				Payload: payloadOf(t, Payload{Name: "下单", Method: "POST", URL: "/v1/order", GroupUID: "g1"})},
 			{Type: "example", UID: "ex1", Op: "upsert", ItemRev: 3,
-				Payload: payloadOf(t, Payload{Name: "成功", ApiUID: "a1", Status: 201, ContentType: "application/json", Sample: `{"ok":true}`})},
+				Payload: payloadOf(t, Payload{Name: "成功", APIUID: "a1", Status: 201, ContentType: "application/json", Sample: `{"ok":true}`})},
 			{Type: "doc", UID: "d1", Op: "upsert", ItemRev: 4,
 				Payload: payloadOf(t, Payload{Name: "接入说明", Content: "# 正文", GroupUID: "g1"})},
 			{Type: "variable_env", UID: "env1", Op: "upsert", ItemRev: 5,
