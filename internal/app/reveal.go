@@ -26,14 +26,19 @@ func (a *App) RevealInFolder(root string) error {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = filepath.Clean(abs)
 	}
+	// 目录名以 "-" 开头时会被当成命令行选项（例如 `-rf`），必须用 -- 断开选项解析（P2-10）。
+	// Windows 的 explorer 不认 --，改为要求绝对路径且不含控制字符（它本来也不解析选项后置位）。
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
+		if !filepath.IsAbs(dir) || strings.ContainsAny(dir, "\r\n\x00") {
+			return errors.New("目录路径非法")
+		}
 		cmd = exec.Command("explorer.exe", dir)
 	case "darwin":
-		cmd = exec.Command("open", dir)
+		cmd = exec.Command("open", "--", dir)
 	default:
-		cmd = exec.Command("xdg-open", dir)
+		cmd = exec.Command("xdg-open", "--", dir)
 	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("打开文件管理器失败: %w", err)

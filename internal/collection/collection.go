@@ -1311,10 +1311,12 @@ func (c *Collection) saveEnv(env Env) error {
 		return err
 	}
 	mainP, secP := c.envPaths(env.Name)
-	if err := writeFileAtomic(mainP, mainData, 0o644); err != nil {
+	// 主文件也收权到 0600（P2-11）：非 secret 变量里同样常有 token/内网地址，
+	// 之前只有 secrets 文件是 0600，主文件 0644 等于把这一半敞着。
+	if err := writeFileAtomic(mainP, mainData, 0o600); err != nil {
 		return err
 	}
-	return writeFileAtomic(secP, secData, 0o600) // secrets 文件收权
+	return writeFileAtomic(secP, secData, 0o600)
 }
 
 // RenameEnv 给环境改名：读旧（含 secrets 合并）→ 写新名 → 旧的两个文件移入 .trash/。

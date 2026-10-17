@@ -3,6 +3,7 @@ package collection
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -195,6 +196,35 @@ func TestEnvNameAcceptsChinese(t *testing.T) {
 	for _, bad := range []string{"a/b", "a b", "a:b", ".hidden", ".."} {
 		if err := c.SaveEnv(Env{Name: bad}); err == nil {
 			t.Fatalf("SaveEnv(%q) 应被拒绝", bad)
+		}
+	}
+}
+
+// TestEnvFilesAreOwnerOnly P2-11：环境主文件与 secrets 文件都必须是 0600。
+// 主文件里除了 secret 变量之外，还常放 token、内网地址；0644 在多人机器上等于公开。
+func TestEnvFilesAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 不使用 POSIX 权限位")
+	}
+	c, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	val := "v1"
+	if err := c.SaveEnv(Env{UID: "e1", Name: "dev", Vars: []Var{
+		{Name: "host", Value: "http://10.0.0.1", Enabled: true},
+		{Name: "token", Value: "s3cret", Enabled: true, Secret: true},
+	}}); err != nil {
+		t.Fatalf("SaveEnv: %v (val=%s)", err, val)
+	}
+	mainP, secP := c.envPaths("dev")
+	for _, p := range []string{mainP, secP} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("stat %s: %v", p, err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("%s 权限应为 0600，got %04o", filepath.Base(p), perm)
 		}
 	}
 }
