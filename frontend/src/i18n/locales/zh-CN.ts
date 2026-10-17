@@ -226,7 +226,6 @@ export default {
   },
   editor: {
     edit: '编辑',
-    split: '分栏',
     preview: '预览',
     // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
     urlPlaceholder: 'https://api.example.com/users',
