@@ -107,7 +107,7 @@ func Open(dir string) (*Collection, error) {
 	// 集合级 .gitignore（幂等）：secret 文件与本地目录不进版本控制
 	gi := filepath.Join(abs, ".gitignore")
 	if _, err := os.Stat(gi); os.IsNotExist(err) {
-		_ = os.WriteFile(gi, []byte(gitignoreContent), 0o644)
+		_ = writeFileAtomic(gi, []byte(gitignoreContent), 0o644)
 	}
 	// 首次打开：给一个默认环境，便于立刻体验变量替换
 	if _, err := os.Stat(filepath.Join(abs, "environments")); os.IsNotExist(err) {
@@ -429,7 +429,7 @@ func (c *Collection) writeManifest() error {
 	if err != nil {
 		return fmt.Errorf("序列化集合清单: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	return writeFileAtomic(path, data, 0o644)
 }
 
 // Meta 集合身份（清单里的名称与 uid）。
@@ -842,6 +842,41 @@ func asBool(v any, def bool) bool {
 
 // ---------- 扫描与树 ----------
 
+// writeFileAtomic 原子写盘（P1-5）：先写同目录隐藏临时文件、fsync 后 rename 覆盖。
+// 直接 os.WriteFile 在崩溃/断电时会留下半截文件，YAML 直接损坏且无备份可恢复；
+// 临时文件名以 "." 开头，扫描（skipReservedDir）会跳过，不会误收进集合树。
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	discard := func() { _ = os.Remove(name) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		discard()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		discard()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		discard()
+		return err
+	}
+	if err := os.Chmod(name, perm); err != nil {
+		discard()
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		discard()
+		return err
+	}
+	return nil
+}
+
 // conflictMarker 冲突错误的识别标记：写盘时发现磁盘内容已被别人改动，错误文本以它开头。
 // 前端据此展示「重新加载 / 另存为副本」而不是普通保存失败提示。
 const conflictMarker = "[conflict]"
@@ -1250,10 +1285,10 @@ func (c *Collection) saveEnv(env Env) error {
 		return err
 	}
 	mainP, secP := c.envPaths(env.Name)
-	if err := os.WriteFile(mainP, mainData, 0o644); err != nil {
+	if err := writeFileAtomic(mainP, mainData, 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(secP, secData, 0o600) // secrets 文件收权
+	return writeFileAtomic(secP, secData, 0o600) // secrets 文件收权
 }
 
 // RenameEnv 给环境改名：读旧（含 secrets 合并）→ 写新名 → 旧的两个文件移入 .trash/。
@@ -1499,7 +1534,7 @@ func (c *Collection) RenameFolder(uid, name string) error {
 	if err != nil {
 		return fmt.Errorf("序列化分组描述: %w", err)
 	}
-	return os.WriteFile(full, out, 0o644)
+	return writeFileAtomic(full, out, 0o644)
 }
 
 // DeleteFolder 删除空分组（有子分组/请求时拒绝，避免误删）；目录移入 .trash。
@@ -1766,7 +1801,7 @@ func (c *Collection) ensureFolderYML(dir, name string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(c.Dir, filepath.FromSlash(dir), "folder.yml"), data, 0o644)
+	return writeFileAtomic(filepath.Join(c.Dir, filepath.FromSlash(dir), "folder.yml"), data, 0o644)
 }
 
 func (c *Collection) nextSeq(folder string) int {
@@ -1849,7 +1884,7 @@ func (c *Collection) SaveRequest(r *Request) error {
 		return err
 	}
 	c.ignoreWriteContent(clean, data)
-	if err := os.WriteFile(full, data, 0o644); err != nil {
+	if err := writeFileAtomic(full, data, 0o644); err != nil {
 		return err
 	}
 	c.refreshIndexNode(r, full, data)
@@ -1954,7 +1989,7 @@ func (c *Collection) SavePendingDeletes(list []string) error {
 		return nil
 	}
 	data, _ := json.MarshalIndent(list, "", "  ")
-	return os.WriteFile(filepath.Join(c.Dir, pendingDeletesFile), data, 0o644)
+	return writeFileAtomic(filepath.Join(c.Dir, pendingDeletesFile), data, 0o644)
 }
 
 // ClearPendingDeletes 清空（推送成功后调用）。
