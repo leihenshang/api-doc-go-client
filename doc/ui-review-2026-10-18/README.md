@@ -293,30 +293,35 @@ UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 
 
 ---
 
-## 8. 窗口外框阴影（2026-10-18 追加）
+## 8. 窗口外框阴影（2026-10-18 追加，已对齐参考图）
 
 **诉求**：无边框窗口在深色或杂色壁纸上"糊"进背景，看不出是一个独立窗口。
+参考图（音乐播放器）的特征是**扩散大、无硬边、四边均匀略偏下**。
 
-**改动**（`1394246`）：
-- `body` 让出 `--app-frame-gap`（桌面态 8px）+ `box-sizing: border-box`；
-- `.app` 加 `box-shadow: var(--app-shadow-window)`：
-  浅色 `0 8px 24px -4px rgba(0,0,0,.28) + 0 1px 3px rgba(0,0,0,.12)`，
-  暗色 `0 10px 28px -6px rgba(0,0,0,.7) + 0 1px 3px rgba(0,0,0,.5)`；
-- 仅 Wails 桌面壳启用（App.vue 按 `hasWailsRuntime()` 写 `data-shell`），
-  浏览器态 `gap=0 / shadow=none`，否则 devserver 里会多出一圈白边；
-- 最大化时 `--app-frame-gap:0` + `--app-shadow-window:none`，屏幕边缘不会露出阴影带。
+**最终参数**（`604d546`）：
+- `--app-frame-gap: 20px` —— blur 30 的柔光必须有这个留白，否则被窗口矩形裁成一圈脏边；
+- 浅色 `0 2px 4px rgba(0,0,0,.05)`（贴边勾轮廓）+ `0 6px 28px -4px rgba(0,0,0,.18)`（柔光）；
+- 暗色 `0 2px 4px rgba(0,0,0,.4)` + `0 12px 32px -6px rgba(0,0,0,.62)`；
+- 仅 Wails 桌面壳启用（App.vue 按 `hasWailsRuntime()` 写 `data-shell`）；
+  浏览器态 `gap=0 / shadow=none`，最大化两者都归零。
 
 **为什么必须留白**：`.app` 铺满窗口，`box-shadow` 画在 border-box **外侧**，
-窗口矩形会把它裁掉——没有那 8px 透明边，阴影等于没加。
+窗口矩形会把它裁掉——没有留白，阴影等于没加。
 
-**实测**（1280×800）：
-| 状态 | body padding | shadow | 内容宽 |
+**窗口尺寸同步补偿**：留白 8→20 会让内容缩 40px，因此 `preferredWindow*` 1600×1000 →
+**1640×1040**、`MinWidth/MinHeight` 1120×720 → 1160×760，内容区尺寸保持不变。
+（`app.go` 与 `main.go` 的注释里已写明「改 gap 要同步这几个常量」。）
+
+**三态实测**（模拟桌面壳 + 浅灰壁纸）：
+
+| 状态 | body padding | shadow | 内容宽（1640 窗口） |
 | --- | --- | --- | --- |
-| 浏览器态 | 0 | none | 1280 |
-| 桌面态 | 8px | 生效 | 1264 |
-| 最大化 | 0 | none | 1280 |
+| 浏览器态 | 0 | none | 1640（无留白） |
+| 桌面态 | 20px | 两层生效 | 1600 |
+| 最大化 | 0 | none | 全屏 |
 
-对比截图：`screenshots/20-window-shadow-web.png`（前）、`21-window-shadow-desktop.png`（后）。
+效果对比：`screenshots/20-window-shadow-web.png`（前）、`21-window-shadow-desktop.png`（第一版）、
+`22-window-shadow-final.png`（对齐参考图的最终版）。
 
-**代价**：内容区四周少 16px（窗口尺寸不变），1600 宽窗口下几乎无感；
-若希望内容尺寸不变，把 `main.go` 的 `WindowWidth/Height` 各 +16 即可。
+> 调参经验：先定 blur，再定留白（留白 ≥ blur/2 才不会裁出硬边），最后定透明度
+> （0.18~0.20 之间最接近系统窗口；超过 0.25 会显得"贴纸感"）。
