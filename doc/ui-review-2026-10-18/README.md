@@ -290,3 +290,33 @@ SHOT_BASE=http://localhost:5275/ SHOT_OUT=./screenshots node doc/ui-review-2026-
 
 **仍未做**（按计划留到后续）：UI-03 tab 分组与计数、UI-04/05 菜单与底栏分组、UI-06 响应空态精简、
 UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 示例集合、UI-17 术语气泡、UI-20 统计口径。
+
+---
+
+## 8. 窗口外框阴影（2026-10-18 追加）
+
+**诉求**：无边框窗口在深色或杂色壁纸上"糊"进背景，看不出是一个独立窗口。
+
+**改动**（`1394246`）：
+- `body` 让出 `--app-frame-gap`（桌面态 8px）+ `box-sizing: border-box`；
+- `.app` 加 `box-shadow: var(--app-shadow-window)`：
+  浅色 `0 8px 24px -4px rgba(0,0,0,.28) + 0 1px 3px rgba(0,0,0,.12)`，
+  暗色 `0 10px 28px -6px rgba(0,0,0,.7) + 0 1px 3px rgba(0,0,0,.5)`；
+- 仅 Wails 桌面壳启用（App.vue 按 `hasWailsRuntime()` 写 `data-shell`），
+  浏览器态 `gap=0 / shadow=none`，否则 devserver 里会多出一圈白边；
+- 最大化时 `--app-frame-gap:0` + `--app-shadow-window:none`，屏幕边缘不会露出阴影带。
+
+**为什么必须留白**：`.app` 铺满窗口，`box-shadow` 画在 border-box **外侧**，
+窗口矩形会把它裁掉——没有那 8px 透明边，阴影等于没加。
+
+**实测**（1280×800）：
+| 状态 | body padding | shadow | 内容宽 |
+| --- | --- | --- | --- |
+| 浏览器态 | 0 | none | 1280 |
+| 桌面态 | 8px | 生效 | 1264 |
+| 最大化 | 0 | none | 1280 |
+
+对比截图：`screenshots/20-window-shadow-web.png`（前）、`21-window-shadow-desktop.png`（后）。
+
+**代价**：内容区四周少 16px（窗口尺寸不变），1600 宽窗口下几乎无感；
+若希望内容尺寸不变，把 `main.go` 的 `WindowWidth/Height` 各 +16 即可。
