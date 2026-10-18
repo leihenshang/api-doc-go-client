@@ -72,8 +72,19 @@ type ProjectApp interface {
 	ListResponseExamples(reqUID string) ([]*collection.ResponseExample, error)
 	SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error)
 	ListDocs() ([]*collection.DocEntry, error)
+	// ReadDoc 读单篇文档（含正文）；uid 不存在时返回错误。
+	ReadDoc(uid string) (*collection.DocEntry, error)
 	CreateDoc(name, folder string) (*collection.DocEntry, error)
 	SaveDoc(d *collection.DocEntry) error
+	// SaveDocExpectHash 带并发写保护地保存文档（expectHash 为空则不校验）。
+	SaveDocExpectHash(d *collection.DocEntry, expectHash string) error
+	// DocFileHash 文档文件的当前磁盘哈希（不存在返回空串），供写前校验与 get_doc 回传。
+	DocFileHash(uid string) string
+	// MoveDoc 把文档移动到目标分组目录（destFolder 为空 = 集合根）。
+	MoveDoc(uid, destFolder string) error
+	// RenameDoc 只改 frontmatter 里的显示名（文件名不变）。
+	RenameDoc(uid, name string) error
+	DeleteDoc(uid string) error
 }
 
 // NewAppFunc 构造项目级运行时的工厂。

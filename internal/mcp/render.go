@@ -306,3 +306,40 @@ func renderWorkspaceSelected(it WorkspaceItem, selected string) string {
 	return fmt.Sprintf("已选定默认工作目录：%s（%s，%s）\n后续工具可以省略 project 参数（仍可显式指定）。当前默认目标：%s",
 		it.Path, it.Name, perm, selected)
 }
+
+// renderDocs list_docs 的结果：一篇文档一行（名称 · 路径 · 字节数）+ 下一层的 uid。
+func renderDocs(project string, docs []DocItem) string {
+	if len(docs) == 0 {
+		return fmt.Sprintf("项目 %s 里没有文档条目。用 create_doc 新建。"+
+			"（文档是集合树里独立的 Markdown 文件；接口自带的说明走 request.docs，不在这里）", project)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "项目 %s 共 %d 篇文档：\n", project, len(docs))
+	for _, d := range docs {
+		fmt.Fprintf(&sb, "\n- %s · %s · %d 字节\n  uid %s\n", d.Name, d.Path, d.Size, d.UID)
+	}
+	sb.WriteString("\n用 get_doc 读正文（返回的 hash 可回传给 update_doc.ifMatch）。")
+	return sb.String()
+}
+
+// renderDocDetail get_doc / create_doc / update_doc 的结果：头部元信息 + 正文原文。
+func renderDocDetail(d *DocDetail) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s\n路径 %s · uid %s", d.Name, d.Path, d.UID)
+	if d.Hash != "" {
+		// 只展示 12 位（同 renderDetail）：可直接回传给 update_doc.ifMatch
+		fmt.Fprintf(&sb, " · hash %s…", d.Hash[:min(12, len(d.Hash))])
+	}
+	sb.WriteString("\n")
+	if strings.TrimSpace(d.Content) == "" {
+		sb.WriteString("\n（正文为空，可用 update_doc 写入）\n")
+		return sb.String()
+	}
+	// 正文原样给出：AI 要能一字不差地改它，不做转义/截断（大小由 list_docs 的字节数提示）
+	sb.WriteString("\n")
+	sb.WriteString(d.Content)
+	if !strings.HasSuffix(d.Content, "\n") {
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}

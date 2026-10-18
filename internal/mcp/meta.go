@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// 本文件是 19 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
+// 本文件是 24 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
 // 注册描述。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
 // 不允许在别处再硬编码一份工具风险/读写分类。
 //
@@ -48,9 +48,9 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 19 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 24 个（ValidateMetas 锁定）。
 var toolMetas = []ToolMeta{
-	// ---- 8 个只读工具（只读模式也注册）----
+	// ---- 10 个只读工具（只读模式也注册）----
 	{
 		Name: "list_workspaces", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
 		Description: "列出 MCP 可访问的工作目录（客户端授权的白名单）与其中的项目、当前默认目标。白名单为空时 AI 无法读写任何集合 —— 需要时请让用户在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加。",
@@ -83,8 +83,16 @@ var toolMetas = []ToolMeta{
 		Name: "get_doc_template", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
 		Description: "返回「接口说明（docs）」的分节结构契约：与客户端一键「生成接口文档」的 Markdown 骨架逐节对齐（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注，含列名与 {{host}} 掩码规则）。写 docs 前先取本模板，保证客户端展示与导出渲染一致。无需项目上下文。",
 	},
+	{
+		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
+		Description: "列出项目里的文档条目（集合树里独立的 .md，可挂在任意分组目录下）。注意与接口自带的说明区分：接口说明是 request.docs（见 get_request_detail），不在这里。query 可按文档名/路径模糊过滤。返回每篇文档的 uid/名称/路径/字节数；读正文用 get_doc。",
+	},
+	{
+		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
+		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的 hash：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动。uid 来自 list_docs。",
+	},
 
-	// ---- 5 个集合写工具（只读模式不注册）----
+	// ---- 8 个集合写工具（只读模式不注册）----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
 		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。同名会在分组内自动加序号。",
@@ -104,6 +112,18 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
 		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
+	},
+	{
+		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Description: "新建文档条目（集合树里独立的 .md，可挂在任意分组目录下：folder 留空=集合根）。content 可一次给 Markdown 正文，留空则先建空文档。注意与接口说明区分：接口说明走 create_request/update_request 的 docs 字段。",
+	},
+	{
+		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Description: "修改已有文档（只改传入的字段）：content 覆盖正文（传空串=清空）、name 改显示名（文件名不变）、folder 移动到别的分组目录（传空串=移到集合根）。ifMatch 传 get_doc 返回的 hash 可检测期间的外部改动并拒绝覆盖（不传则最后写者赢）。",
+	},
+	{
+		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Description: "移除文档条目。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
 	},
 
 	// ---- 5 个环境/变量写工具（只读模式不注册）----
@@ -162,7 +182,7 @@ func ToolNames() []string {
 }
 
 // NamesForMode 返回指定模式下应注册的工具名集合：
-// readOnly=true 时仅 InReadOnly 的工具（8 读 + send_request = 9 个）。
+// readOnly=true 时仅 InReadOnly 的工具（10 读 + send_request = 11 个）。
 func NamesForMode(readOnly bool) []string {
 	out := make([]string, 0, len(toolMetas))
 	for _, m := range toolMetas {
@@ -177,7 +197,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 19
+	const expectTools = 24
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}

@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **19 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **24 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -17,19 +17,21 @@
 | 查询 | `search_requests` | 模糊搜索（「记得内容、记不清名字」时最该用） |
 | 查询 | `list_envs` | 有哪些环境与变量（**敏感值只回掩码**，每个环境带 `hash`） |
 | 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
+| 查询 | `list_docs` / `get_doc` | 集合里的**文档条目**（独立 .md）：列清单 / 读正文（带 `hash` 供冲突保护） |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带完整 body/settings/respDoc） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest） |
 | 写 | `update_request` | 改请求（params/settings/respDoc 均可局部更新）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
+| 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
 | 写 | `set_env_var` / `delete_env_var` | 单个变量的 upsert / 删除（敏感值回填掩码 = 不改） |
 
 各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
 
-工具按风险分三级（服务端元数据表锁定）：**low = 8 个只读工具**（随便用，无副作用）；**medium = `send_request`**
-（真实网络外发）；**high = 10 个写工具**（落盘修改集合/环境）。客户端**内嵌服务**默认对 medium/high 的每次调用
+工具按风险分三级（服务端元数据表锁定）：**low = 10 个只读工具**（随便用，无副作用）；**medium = `send_request`**
+（真实网络外发）；**high = 13 个写工具**（落盘修改集合/环境）。客户端**内嵌服务**默认对 medium/high 的每次调用
 **弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
 `-require-consent` 约束。
 
@@ -214,6 +216,31 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 `docs` 本身是自由文本不做强校验，但 AI 写 docs 前先取本模板可保证客户端展示与导出渲染一致；
 模板里「响应字段」一节与 `respDoc` 同源，两边都写时内容需一致。
 
+### 4.12 文档条目工具：`list_docs` / `get_doc` / `create_doc` / `update_doc` / `delete_doc`
+
+先分清两种「文档」，它们的载体完全不同：
+
+| | 载体 | 用什么工具 |
+|---|---|---|
+| 接口说明 `docs` | 存在**请求文件**的 frontmatter 里，跟着接口走 | `create_request` / `update_request` 的 `docs` 字段（结构取 `get_doc_template`） |
+| 文档条目 | 集合树里**独立的 `.md`**，有自己的 uid 与路径，可挂在任意分组目录下 | 本节这 5 个工具 |
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `list_docs` | `project?`、`query?` | 列清单（名称/路径/字节数）；`query` 按名称与路径模糊过滤 |
+| `get_doc` | `project?`、`uid` ✅ | 读正文（Markdown 原文）+ `hash`；`hash` 回传给 `update_doc.ifMatch` |
+| `create_doc` | `project?`、`name` ✅、`folder?`、`content?` | `folder` 留空 = 集合根；`content` 可一次给全文，留空先建空文档 |
+| `update_doc` | `project?`、`uid` ✅、`content?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`name` 改显示名（文件名不变）、`folder` 换分组（空串=根） |
+| `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
+
+```json
+// 读一篇再改正文（带冲突保护）
+{"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae"}
+{"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae","content":"# 接入指南\n…","ifMatch":"<get_doc 返回的 hash>"}
+```
+
+`get_request_detail` 返回的 `relatedDocs` 里能看到「与该接口相关的文档条目」，拿其中的 uid 直接 `get_doc` 即可。
+
 ## 五、典型工作流（可以直接对 AI 这么说）
 
 | 目标 | 这么说 | AI 会依次调用 |
@@ -225,6 +252,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | 安全地改接口 | 「给 ping 的地址加 `?from=ai`，别覆盖别人的改动」 | `get_request_detail` 拿 hash → `update_request(ifMatch=…)` |
 | 搭环境变量 | 「建 staging 环境：host=…、apiKey 是敏感值；把 host 停用」 | `create_env` → `set_env_var(enabled=false)` → `list_envs` |
 | 改环境名/删环境 | 「把 staging 改名成 uat，然后把 uat 删掉」 | `rename_env` → `delete_env` |
+| 补一篇独立文档 | 「在 docs 下写一篇《接入指南》，把这些内容整理进去」 | `list_docs`（避免重名）→ `create_doc(folder=docs, content=…)`（或 `get_doc` → `update_doc(ifMatch=…)`） |
 
 只读模式（`-readonly`）下 AI 只能查 + 试发（不落盘），适合放行给「只答疑/查文档」的机器人。
 

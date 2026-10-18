@@ -5,25 +5,27 @@ import (
 	"testing"
 )
 
-// TestValidateMetas 元数据表完整性：19 项、name 唯一、risk 合法、无别名正式项。
+// TestValidateMetas 元数据表完整性：24 项、name 唯一、risk 合法、无别名正式项。
 func TestValidateMetas(t *testing.T) {
 	if err := ValidateMetas(); err != nil {
 		t.Fatalf("元数据自检失败: %v", err)
 	}
 }
 
-// TestToolNamesStable 锁定 19 个对外工具名基线（改名/增删 = 破坏 MCP 契约，必须显式更新这里）。
+// TestToolNamesStable 锁定 24 个对外工具名基线（改名/增删 = 破坏 MCP 契约，必须显式更新这里）。
 func TestToolNamesStable(t *testing.T) {
 	want := []string{
 		"list_workspaces", "use_workspace", "list_projects", "get_project_modules",
 		"get_request_detail", "search_requests", "list_envs", "get_doc_template",
+		"list_docs", "get_doc",
 		"create_request", "create_module", "create_project", "update_request", "delete_request",
+		"create_doc", "update_doc", "delete_doc",
 		"create_env", "rename_env", "delete_env", "set_env_var", "delete_env_var",
 		"send_request",
 	}
 	got := ToolNames()
-	if len(got) != 19 {
-		t.Fatalf("正式工具数 = %d，期望 19", len(got))
+	if len(got) != 24 {
+		t.Fatalf("正式工具数 = %d，期望 24", len(got))
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("工具名基线漂移：\n got=%v\nwant=%v", got, want)
@@ -31,11 +33,12 @@ func TestToolNamesStable(t *testing.T) {
 }
 
 // TestRiskClassification 风险三档与正交标记：
-// 8 读=low；send_request=medium+NetEgress；10 个落盘写=high+Write；5 个环境工具 EnvWrite。
+// 10 读=low；send_request=medium+NetEgress；13 个落盘写=high+Write；5 个环境工具 EnvWrite。
 func TestRiskClassification(t *testing.T) {
 	readers := []string{
 		"list_workspaces", "use_workspace", "list_projects", "get_project_modules",
 		"get_request_detail", "search_requests", "list_envs", "get_doc_template",
+		"list_docs", "get_doc",
 	}
 	for _, name := range readers {
 		m, ok := MetaOf(name)
@@ -63,6 +66,7 @@ func TestRiskClassification(t *testing.T) {
 
 	writers := []string{
 		"create_request", "create_module", "create_project", "update_request", "delete_request",
+		"create_doc", "update_doc", "delete_doc",
 		"create_env", "rename_env", "delete_env", "set_env_var", "delete_env_var",
 	}
 	envWriters := map[string]bool{
@@ -86,14 +90,14 @@ func TestRiskClassification(t *testing.T) {
 	}
 }
 
-// TestNamesForMode 只读模式 = 8 读 + send_request 共 9 个；全模式 19 个。
+// TestNamesForMode 只读模式 = 10 读 + send_request 共 11 个；全模式 24 个。
 func TestNamesForMode(t *testing.T) {
-	if got := NamesForMode(false); len(got) != 19 {
-		t.Errorf("全模式工具数 = %d，期望 19", len(got))
+	if got := NamesForMode(false); len(got) != 24 {
+		t.Errorf("全模式工具数 = %d，期望 24", len(got))
 	}
 	ro := NamesForMode(true)
-	if len(ro) != 9 {
-		t.Fatalf("只读模式工具数 = %d，期望 9：%v", len(ro), ro)
+	if len(ro) != 11 {
+		t.Fatalf("只读模式工具数 = %d，期望 11：%v", len(ro), ro)
 	}
 	roSet := map[string]bool{}
 	for _, n := range ro {
@@ -101,7 +105,8 @@ func TestNamesForMode(t *testing.T) {
 	}
 	for _, name := range append([]string{"send_request"},
 		"list_workspaces", "use_workspace", "list_projects", "get_project_modules",
-		"get_request_detail", "search_requests", "list_envs", "get_doc_template") {
+		"get_request_detail", "search_requests", "list_envs", "get_doc_template",
+		"list_docs", "get_doc") {
 		if !roSet[name] {
 			t.Errorf("只读模式应注册 %s", name)
 		}

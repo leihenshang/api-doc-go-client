@@ -1,0 +1,35 @@
+{
+  "properties": {
+    "content": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "folder": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "ifMatch": {
+      "type": "string"
+    },
+    "name": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "project": {
+      "type": "string"
+    },
+    "uid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid"
+  ],
+  "type": "object"
+}
