@@ -161,12 +161,26 @@ body.dragging.row * {
   --app-side-w: 260px;
   /* 窗口外框圆角（轻微）：外壳按此裁切，圆角外透出桌面背景 */
   --app-radius-window: 10px;
+  /* 窗口外框留白：给 .app 的 box-shadow 留出绘制空间（否则阴影被窗口矩形裁掉）。
+     浏览器态默认 0；只有 Wails 桌面壳（data-shell=desktop）才启用，见下方规则。 */
+  --app-frame-gap: 0px;
+  /* 窗口外阴影：让无边框窗口和桌面上其它窗口有明显层次（浅色桌面用中性灰） */
+  --app-shadow-window: none;
+}
+
+/* 桌面壳：留 8px 透明边 + 一圈柔和阴影，窗口边界不再"贴"在桌面上。
+   窗口本身已透明（main.go 的 WindowIsTranslucent），这圈留白与阴影都画在窗口内。 */
+:root[data-shell='desktop'] {
+  --app-frame-gap: 8px;
+  --app-shadow-window: 0 8px 24px -4px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* 最大化（双击标题栏 / 标题栏按钮 / Win+↑）时窗口铺满屏幕：圆角会让四角透出桌面
    （窗口本身是透明的），故归零。状态由 TitleBar 写到根节点的 data-window 上。 */
 :root[data-window='max'] {
   --app-radius-window: 0px;
+  --app-frame-gap: 0px;
+  --app-shadow-window: none;
 }
 
 /* 暗色：底 #17181a / 面板 #1e1f22；主色沿用品牌绿，但在深底上提亮一档保证对比度 */
@@ -242,7 +256,15 @@ body.dragging.row * {
   --app-shadow-menu: 0 8px 20px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
+/* 暗色窗口外阴影：深色桌面上更重一档，否则与背景糊在一起 */
+:root[data-theme='dark'][data-shell='desktop'] {
+  --app-shadow-window: 0 10px 28px -6px rgba(0, 0, 0, 0.7), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
 body {
+  /* 外框留白：把窗口四周让出 --app-frame-gap，阴影才画得出来（桌面态 8px，其余 0）。 */
+  padding: var(--app-frame-gap);
+  box-sizing: border-box;
   /* 内置字体优先：不依赖系统是否装了中文字体；后面的系统字体仅作兜底。 */
   font-family: 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;

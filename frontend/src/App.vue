@@ -53,12 +53,16 @@ import {
     zhCN
 } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { hasWailsRuntime } from '@/lib/ipc'
 import { useI18n } from 'vue-i18n'
 
 const coll = useCollectionStore()
 const tabs = useTabsStore()
 const settings = useSettingsStore()
 const { t, locale } = useI18n()
+
+// 标记运行壳：只有 Wails 桌面壳才给窗口加外框留白 + 阴影（浏览器态留白会变成一圈白边）。
+document.documentElement.dataset.shell = hasWailsRuntime() ? 'desktop' : 'web'
 
 const naiveLocale = computed(() => (locale.value === 'en-US' ? enUS : zhCN))
 const naiveDateLocale = computed(() => (locale.value === 'en-US' ? dateEnUS : dateZhCN))
@@ -1148,6 +1152,9 @@ watch(
      描边让圆角在浅色桌面上也有清晰边界。 */
   border-radius: var(--app-radius-window);
   border: 1px solid var(--app-border);
+  /* 窗口外阴影：桌面态由 --app-shadow-window 提供（body 已让出 --app-frame-gap 的留白），
+     浏览器态为 none。最大化时两者都归零，不会在屏幕边缘露出一圈阴影。 */
+  box-shadow: var(--app-shadow-window);
   overflow: hidden;
 }
 
