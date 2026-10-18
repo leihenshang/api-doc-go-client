@@ -281,7 +281,7 @@ SHOT_BASE=http://localhost:5275/ SHOT_OUT=./screenshots node doc/ui-review-2026-
 | UI-08 | 目录卡片 hover 出现复制按钮（路径被截断时可完整取用） | `Overview.vue` |
 | UI-09 | 响应耗时 `0 ms` → `<1 ms` | `ResponsePanel.vue` |
 | UI-10 | 响应区主按钮「保存」→ **「保存响应」**，与页签「保存」（保存请求）区分 | `SaveDropdown.vue` + i18n |
-| UI-13 | 文档编辑器源码/预览 50/50 → **44/56**，表格不再断行 | `DocEditor.vue` |
+| UI-13 | 文档编辑器源码/预览 50/50 → **44/56**，表格不再断行（此条做法有误，已由 §9 修正回 50/50） | `DocEditor.vue` |
 | UI-18 | 设置页三按钮 → **「取消 / 保存」**（勾选项本就即时生效） | `SettingsDialog.vue` |
 | UI-19 | 中文界面去掉 `Collection` / `Send`：页签「集合」、按钮「发送」、`Sending`→「发送中」 | i18n |
 
@@ -325,3 +325,106 @@ UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 
 
 > 调参经验：先定 blur，再定留白（留白 ≥ blur/2 才不会裁出硬边），最后定透明度
 > （0.18~0.20 之间最接近系统窗口；超过 0.25 会显得"贴纸感"）。
+
+---
+
+## 9. 文档编辑器布局修正（2026-10-18 追加，`2e7dd87`）
+
+**现象**（用户截图红框 1、2）：左侧 Markdown 源码区只占半栏多一点的一条窄带，
+正文十几字就折行；右侧预览的标题「快速开始」上方空出约 20px，与左侧首行不在一条水平线上。
+
+### 9.1 红框 1：源码区宽度只有 259px（预览 588px）
+
+上一轮 UI-13 写的规则是：
+
+```css
+.body.edit :deep(.md-editor-input-wrapper) { flex: 0 0 44%; width: 44%; }
+```
+
+按字面 44% 应该接近半栏，实测却只有 259px（约整幅 1176 的 22%）。**根因是百分比的解析基准
+不是我以为的那一层，而且这两个 wrapper 根本不是 flex 项**：
+
+```
+.md-editor-content-wrapper      flex, w=1176      ← 真正的分栏容器
+├── .md-editor-custom-scrollbar block, w=588     ← 左"列"（已经是整幅的一半）
+│   └── .md-editor-input-wrapper block, w=?      ← 列内的普通块，不是 flex 项
+└── .md-editor-custom-scrollbar block, w=588     ← 右"列"
+    └── .md-editor-preview-wrapper block, w=588
+```
+
+实测数据（`getComputedStyle` + `getBoundingClientRect`）：
+
+| 元素 | display | 宽度 | 说明 |
+| --- | --- | --- | --- |
+| `.md-editor-content-wrapper` | flex | 1176 | 分栏发生在这里 |
+| `.md-editor-custom-scrollbar`（左） | block | 588 | 每列固定 50% |
+| `.md-editor-input-wrapper` | block | **258.7** | 父级是上面那个 588 的列 |
+
+两点结论：
+1. 两个 wrapper 是 `display: block`、父级也是 `block`，**不是 flex 项**，所以写在上面的
+   `flex: 0 0 44%` 里只有 `flex-basis` 完全无效（`display:block` 不参与 flex 布局）；
+2. 真正决定宽度的是 `width: 44%`，它的百分比按**列宽 588** 解析 —— 44% × 588 = **258.7px**，
+   相当于整幅的 22%。于是源码区只剩一条窄栏，正文提前折行。
+
+修复：既然 md-editor-v3 本身已经是 50/50，把列内块恢复成"填满所在列"即可：
+
+```css
+.body.edit :deep(.md-editor-input-wrapper),
+.body.edit :deep(.md-editor-preview-wrapper) {
+  width: auto;      /* 块级元素填满父列（588），不再按百分比缩 */
+  min-width: 0;     /* 窄窗口下允许收缩，长行不顶开列宽 */
+}
+```
+
+实测：`input-wrapper` 258.7 → **588**，`preview-wrapper` **588**，两侧严格相等（1176 / 2）。
+
+> 顺带推翻了 UI-13 的判断：当初改成 44/56 是为了让预览里的表格不断行，但表格断行
+> 其实是**源码区被压窄**导致的整体观感问题，不是比例不够。50/50 下表格在 588px 里
+> 排版正常（见 `23-doc-split-fixed.png` 的「变量 / 说明」表），所以回退到等分。
+>
+> 另外，上一版修复里我先写成 `flex: 1 1 0`（等分），复核时发现它对 `display:block` 的
+> wrapper 毫无作用 —— 数值没变，只是"看起来修对了"。这类"无效但无害"的声明容易掩盖真实
+> 机制，所以最终版本删掉了 flex 行，只留 `width/min-width`。
+
+> 顺带推翻了 UI-13 的判断：当初改成 44/56 是为了让预览里的表格不断行，但表格断行
+> 其实是**源码区被压窄**导致的整体观感问题，不是比例不够。50/50 下表格在 588px 里
+> 排版正常（见 `23-doc-split-fixed.png` 的「变量 / 说明」表），所以回退到等分。
+
+### 9.2 红框 2：预览标题顶部 20px 空白
+
+预览首元素是 `<h2>`（font-size 24px），UA 默认 `margin: 0.83em 0` ≈ **19.92px** 上外边距。
+普通块级容器的首子元素外边距会**穿透**（margin collapsing）到容器外，视觉上等于容器上边距，
+标题仍贴着容器顶边；但实测 `.md-editor-preview` 的计算样式是
+`display: flow-root`（独立 BFC）**且** `padding-top: 10px` —— 这两个条件任一成立都会挡住
+外边距穿透，于是 19.92px 原封不动留在容器内部，标题落在 `容器顶 157 + padding 10 + margin 19.92 ≈ 187`，
+而左侧源码首行在 **167**，两边差 20px，看起来就是"预览顶部多了一块空白"。
+
+修复：把预览首元素的上外边距归零（只针对首元素，第二段起仍保留正常段间距）：
+
+```css
+.body.edit :deep(.md-editor-preview > :first-child) { margin-top: 0; }
+```
+
+实测：首元素 `margin-top` 19.92px → **0px**，预览首元素 top **187 → 167**，
+与源码首行 top **167** 完全对齐。
+
+### 9.3 验证
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 源码区宽度 | 259px | **588px** |
+| 预览区宽度 | 588px | **588px** |
+| 预览首元素 `margin-top` | 19.92px | **0px** |
+| 预览首元素 top / 源码首行 top | 187 / 167（错位 20px） | **167 / 167** |
+
+`vue-tsc --noEmit`、`i18n:check`（KEYS_MATCH 702）通过；截图
+`screenshots/23-doc-split-fixed.png`（修复后）对比 `04-doc-editor.png`（修复前）。
+
+> 经验一：给第三方组件写覆盖样式前，先用 `querySelector` + `getComputedStyle` 打出它的
+> **真实 DOM 层级、`display` 和盒宽**。md-editor-v3 这类组件在"你以为的容器"和"实际子元素"
+> 之间多套了一层（`.md-editor-custom-scrollbar`），百分比与 `:first-child` 都会在这层失效；
+> 而 `display:block` 的元素根本不参与 flex 布局，往上写 `flex` 只是自我安慰。
+>
+> 经验二：`margin collapsing` 的直觉要按容器实际样式验证。这里挡住穿透的是
+> `display: flow-root`（BFC）+ `padding-top`，不是 `overflow`（实测 `.md-editor-preview`
+> 的 `overflow` 仍是 `visible`）。
