@@ -36,11 +36,11 @@ func main() {
 		// 初始尺寸只给「安全下限」：真正尺寸在 DomReady 里按屏幕可用范围决定（见 app.DomReady）——
 		// Width/Height 是逻辑像素，高分屏（125% 缩放）下逻辑屏可能只有 1536×960，
 		// 首选 1600×1000 放不下就会被系统居中到屏幕外（顶部/底部被推出）。
-		// 数值含窗口外框留白（前端 --app-frame-gap 20px ×2），MinWidth 1120 对应内容 1080。
-		Width:     1160,
-		Height:    760,
-		MinWidth:  1160,
-		MinHeight: 760,
+		// 数值含窗口外框留白（前端 --app-frame-gap 32px ×2），MinWidth 1184 对应内容 1120。
+		Width:     1184,
+		Height:    784,
+		MinWidth:  1184,
+		MinHeight: 784,
 		// 无边框窗口：标题栏由前端自绘（design-spec §2），拖动区靠 CSS --wails-draggable
 		Frameless: true,
 		// 先隐藏：DomReady 里自适应尺寸/位置后再显示，避免启动瞬间闪一下超大窗口

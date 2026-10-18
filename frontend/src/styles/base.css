@@ -46,6 +46,18 @@ body,
   background: transparent;
 }
 
+/* 页面永不滚动：外壳尺寸由窗口决定，滚动全部交给各面板自己的容器。
+   这不只是"整洁"——body 的 padding 就是阴影的绘制空间，文档一旦被撑出滚动条，
+   底部那段留白会被挤出视口，阴影就在窗口底边被硬切（表现为"底部阴影没有渐隐"）。
+
+   **只能给 html/body，不能给 #app**：#app 与 .app 同高、且没有 padding，
+   一旦它 overflow:hidden，.app 向外的整圈阴影会被裁在 #app 的 padding box 上（实测底部直接消失）；
+   而 body 有 32px padding，padding box 正好是整窗，阴影落在里面不会被裁。 */
+html,
+body {
+  overflow: hidden;
+}
+
 /* 弹窗打开时整页布局被挤扁的根因：
    naive-ui 的 useLockHtmlScroll 用 `window.innerWidth - html.offsetWidth` 估算滚动条宽度，
    再给 <html> 加 margin-right 补偿。界面缩放（uiScale）是把 zoom 设在 <html> 上的，
@@ -168,14 +180,20 @@ body.dragging.row * {
   --app-shadow-window: none;
 }
 
-/* 桌面壳：留 8px 透明边 + 一圈柔和阴影，窗口边界不再"贴"在桌面上。
-   窗口本身已透明（main.go 的 WindowIsTranslucent），这圈留白与阴影都画在窗口内。 */
+/* 桌面壳：留 32px 透明边 + 一圈柔和阴影，窗口边界不再"贴"在桌面上。
+   窗口本身已透明（main.go 的 WindowIsTranslucent），这圈留白与阴影都画在窗口内。
+
+   **留白不是审美值，是被阴影的"尾巴"决定的**：box-shadow 只能画在窗口矩形以内，
+   阴影一旦伸到窗口边就被裁断，切口处仍有可见灰度差，看起来就是"阴影到边缘一刀切、没有渐隐"。
+   实测（把留白临时放大到 60px 后逐行扫亮度，直到与桌面同亮度）：
+     浅色 `0 8px 32px -6px .16` 需要 **28px**；暗色 `0 8px 26px -6px .55` 需要 **24px**。
+   取 32px = 28 + 4px 余量；改下面的模糊/偏移/扩散后必须重测这个值，不能拍脑袋写。 */
 :root[data-shell='desktop'] {
-  --app-frame-gap: 20px;
+  --app-frame-gap: 32px;
   /* 两层阴影（对齐参考图那种「大扩散、无硬边」的悬浮感）：
      ① 0/2px 贴边阴影——只负责把窗口边缘从背景里"切"出来，很淡；
-     ② 大扩散柔光——blur 30 需要 ≥20px 的留白才不会在窗口边界被裁成一条硬边。 */
-  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.05), 0 6px 28px -4px rgba(0, 0, 0, 0.18);
+     ② 大扩散柔光——blur 32 的尾巴长约 28px，留白 32px 刚好让它自然衰减到 0。 */
+  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.05), 0 8px 32px -6px rgba(0, 0, 0, 0.16);
 }
 
 /* 最大化（双击标题栏 / 标题栏按钮 / Win+↑）时窗口铺满屏幕：圆角会让四角透出桌面
@@ -259,13 +277,15 @@ body.dragging.row * {
   --app-shadow-menu: 0 8px 20px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-/* 暗色窗口外阴影：深色桌面上更重一档，否则与背景糊在一起 */
+/* 暗色窗口外阴影：深色桌面上更重一档，否则与背景糊在一起。
+   尾巴实测 24px（留白 32px，余量 8px），别再把 blur 调到 30 以上。 */
 :root[data-theme='dark'][data-shell='desktop'] {
-  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.4), 0 12px 32px -6px rgba(0, 0, 0, 0.62);
+  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 26px -6px rgba(0, 0, 0, 0.55);
 }
 
 body {
-  /* 外框留白：把窗口四周让出 --app-frame-gap，阴影才画得出来（桌面态 8px，其余 0）。 */
+  /* 外框留白：把窗口四周让出 --app-frame-gap，阴影尾巴才衰减得完（桌面态 32px，其余 0）。
+     值由阴影实测尾巴长度决定，见 :root[data-shell='desktop'] 的注释。 */
   padding: var(--app-frame-gap);
   box-sizing: border-box;
   /* 内置字体优先：不依赖系统是否装了中文字体；后面的系统字体仅作兜底。 */
