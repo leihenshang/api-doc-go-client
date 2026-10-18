@@ -760,3 +760,52 @@ func TestExportDocHeadingShifted(t *testing.T) {
 		t.Fatalf("文档正文标题未降级（期望 h4，比文档标题深一级）:\n%s", htmlOut)
 	}
 }
+
+// 导出 HTML 的版式约定（2026-10-18 调整）：
+//   - 正文容器默认占视口 90%（不再固定 1100px）；
+//   - 右侧大纲是完整描边的卡片，可收起/展开（收起靠 .layout 上的类，把手在窗口右缘）；
+//   - 「显示全部」按钮及其 showAll 逻辑已移除。
+//
+// 这里锁住骨架字符串：改样式/脚本时若漏掉其中一处（例如只删按钮不删样式），会被这条用例拦住。
+func TestExportHTMLOutlinePanel(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "用户"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	r, err := c.CreateRequest("用户", "用户-列表", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.URL = "{{host}}/api/user/list"
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+
+	out, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+
+	// 版式：90% 宽度 + 大纲四边描边 + 收起/展开三件套
+	for _, want := range []string{
+		"max-width: 90%",
+		".ol { flex: 0 0 200px",
+		"padding: 10px 12px; border: 1px solid #e3e3e3; border-radius: 10px;",
+		`class="ol-toggle"`,
+		`class="ol-open"`,
+		".layout.ol-collapsed .ol",
+		".layout.ol-empty .ol",
+		"function olApply()",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("HTML 缺 %q", want)
+		}
+	}
+
+	// 「显示全部」按钮与逻辑必须彻底移除（样式、标记、脚本一处不留）
+	for _, gone := range []string{"toc-all", "显示全部", "showAll"} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("HTML 仍含已移除的 %q", gone)
+		}
+	}
+}
