@@ -70,6 +70,7 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE node ADD COLUMN synced_hash TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node ADD COLUMN base_rev INTEGER NOT NULL DEFAULT 0`,
 	} {
+		// 列已存在时 ALTER 会报错，这正是幂等补列的正常路径；真正的建库失败在上面的 Exec 里已返回。
 		_, _ = db.Exec(alter)
 	}
 	// 收权：索引里有请求 URL（可能带 user:pass@）与标题，不应被同机其他用户读取。

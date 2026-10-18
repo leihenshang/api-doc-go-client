@@ -725,6 +725,7 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 
 	// 回写引擎侧状态（cursor + 响应示例推送状态）
 	b = eng.Bind
+	// 绑定落盘失败只影响「下次打开自动恢复」，本轮同步已生效；不回滚以免把用户刚同步的内容当成失败。
 	_ = syncengine.SaveBind(c.Dir, b)
 	// 同步后重建索引
 	_ = c.RebuildIndex()

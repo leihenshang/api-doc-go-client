@@ -53,6 +53,9 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "三仓 share 版本一致性（P2-2）"
   bash "$ROOT/scripts/share-version.sh"
 
+  step "静默吞错棘轮（P2-4）"
+  bash "$ROOT/scripts/silent-error.sh"
+
   step "go build"
   (cd "$ROOT" && go build ./...)
 

@@ -198,6 +198,7 @@ func (a *JSONLAuditor) initFile() error {
 	st, _ := f.Stat()
 	_ = f.Close()
 	// 权限收敛：文件可能由旧版本/其它工具以更宽权限创建
+	// 审计文件权限收紧：某些文件系统/挂载点不支持 chmod，失败不影响审计本身。
 	_ = os.Chmod(a.path, fileMode)
 	if st != nil {
 		a.size = st.Size()
@@ -312,6 +313,7 @@ func (a *JSONLAuditor) writeOne(evIn Event) {
 		a.logf("audit write: %v", werr)
 		return
 	}
+	// 权限收紧失败（文件系统不支持 chmod）不影响审计写入本身。
 	_ = os.Chmod(a.path, fileMode)
 
 	needRotate := false

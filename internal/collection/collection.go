@@ -120,6 +120,7 @@ func Open(dir string) (*Collection, error) {
 	}
 	// 首次打开：给一个默认环境，便于立刻体验变量替换
 	if _, err := os.Stat(filepath.Join(abs, "environments")); os.IsNotExist(err) {
+		// 默认环境只是「开箱即用」的便利项：写失败时用户自己建环境即可，不该阻断 Open。
 		_ = c.SaveEnv(Env{Name: "dev", Vars: []Var{{
 			Name: "host", Value: "http://127.0.0.1:8080", Enabled: true,
 		}}})
@@ -1963,6 +1964,7 @@ func (c *Collection) refreshIndexNode(r *Request, full string, data []byte) {
 	n.Title = r.Name
 	n.Method = r.Method
 	n.URL = r.URL
+	// 索引只是搜索加速表：这一条写失败，下次 RebuildIndex 会补齐。
 	_ = db.Upsert(n)
 }
 

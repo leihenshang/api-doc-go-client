@@ -368,7 +368,7 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）。
 	// it.Payload 即服务端版本快照，一并存入副本，应用内解决冲突时才能「采用服务器版本」。
 	if it.Type == "api" {
-		e.saveLocalIfDirty(it.UID, it.ItemRev, it.Payload)
+		e.saveLocalIfDirty(rep, it.UID, it.ItemRev, it.Payload)
 	}
 
 	var err error
@@ -386,6 +386,7 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	// 拉取应用后立即固化：用文件最新 hash（索引里还是旧值）
 	if req, err := e.Coll.ReadRequest(it.UID); err == nil {
 		if h := e.Coll.FileHashOf(req.Path); h != "" {
+			// 标记同步状态失败最多让下一轮重复拉取一次（幂等），不该中断整轮 pull。
 			_ = e.Coll.MarkSynced(it.UID, h, it.ItemRev)
 		}
 	} else {
@@ -397,7 +398,7 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 
 // saveLocalIfDirty 本地有未推送改动时，先落冲突副本再让远端覆盖（§4.4 LWW + 副本）。
 // serverPayload 为该条目的服务端版本（SyncPayload JSON），缺它则副本只能选本地。
-func (e *Engine) saveLocalIfDirty(uid string, serverRev int64, serverPayload []byte) {
+func (e *Engine) saveLocalIfDirty(rep *Report, uid string, serverRev int64, serverPayload []byte) {
 	nodes, err := e.Coll.DirtyNodes()
 	if err != nil {
 		return
@@ -407,7 +408,10 @@ func (e *Engine) saveLocalIfDirty(uid string, serverRev int64, serverPayload []b
 			continue
 		}
 		if req, err := e.Coll.ReadRequest(uid); err == nil {
-			_, _ = e.Coll.SaveConflictCopy(req, serverRev, serverPayload)
+			// 冲突副本是本地改动的唯一留底：写失败必须让用户看到，否则改动会被远端版本直接盖掉。
+			if _, cerr := e.Coll.SaveConflictCopy(req, serverRev, serverPayload); cerr != nil && rep != nil {
+				rep.Errors = append(rep.Errors, req.UID+": 保存冲突副本失败（本地改动可能未留存）："+cerr.Error())
+			}
 		}
 		return
 	}
@@ -615,7 +619,7 @@ func (e *Engine) applyVariable(uid string, p Payload) error {
 		})
 	}
 	if err := e.Coll.SaveEnv(env); err != nil {
-		return err
+		return err // 变量落盘失败必须上报：静默会让本地与服务端值不一致
 	}
 	if e.Bind.VarHashes == nil {
 		e.Bind.VarHashes = map[string]string{}
@@ -627,20 +631,27 @@ func (e *Engine) applyVariable(uid string, p Payload) error {
 }
 
 func (e *Engine) applyDelete(it Item, rep *Report) {
+	// 删除失败必须让用户看到：本地没删掉但服务端已删，下次同步会重新「复活」它，
+	// 表现为「删了又回来」。此前这里是 `_ =`，全都静默吞掉。
+	fail := func(err error) {
+		if err != nil {
+			rep.Errors = append(rep.Errors, it.Type+" "+it.UID+": 本地删除失败："+err.Error())
+		}
+	}
 	switch it.Type {
 	case "api":
-		_ = e.Coll.DeleteRequest(it.UID)
+		fail(e.Coll.DeleteRequest(it.UID))
 	case "group":
 		// 组删除只移除 folder.yml 语义，保留子文件（§4.5）
 		if dir := e.findDirByUID(it.UID); dir != "" {
-			_ = os.Remove(filepath.Join(e.Coll.Dir, filepath.FromSlash(dir), "folder.yml"))
+			fail(os.Remove(filepath.Join(e.Coll.Dir, filepath.FromSlash(dir), "folder.yml")))
 		}
 	case "example":
-		_ = e.Coll.DeleteResponseExampleByUID(it.UID)
+		fail(e.Coll.DeleteResponseExampleByUID(it.UID))
 		delete(e.Bind.ExampleHashes, it.UID)
 	// J11-2.4：文档删除（进 .trash，可恢复）；清掉已推送记录，避免下次再推一次删除
 	case "doc":
-		_ = e.Coll.DeleteDoc(it.UID)
+		fail(e.Coll.DeleteDoc(it.UID))
 		delete(e.Bind.DocHashes, it.UID)
 	case "variable":
 		e.removeVarByUID(it.UID)
@@ -663,6 +674,8 @@ func (e *Engine) removeVarByUID(uid string) {
 		}
 	}
 	env.Vars = kept
+	// 服务端已删该变量：本地写回失败只影响这一份环境文件（下次同步会重试），
+	// 但它不该让整轮 apply 失败，否则后面的条目都被卡住。
 	_ = e.Coll.SaveEnv(env)
 }
 
@@ -694,6 +707,7 @@ func (e *Engine) removeEnvByUID(uid string) {
 			delete(e.Bind.VarHashes, v.UID)
 		}
 	}
+	// 环境文件移入 .trash 失败也要清摘要：留着旧摘要只会让下一轮重复推同一个删除。
 	_ = e.Coll.DeleteEnv(env.Name)
 	delete(e.Bind.EnvHashes, uid)
 }
@@ -977,7 +991,9 @@ func (e *Engine) applyPushResults(rep *Report, resp *PushResp, meta map[string]d
 			e.applyPushed(m, r)
 		case "conflict":
 			rep.Conflicts++
-			e.writeConflictCopy(m.uid, r)
+			if err := e.writeConflictCopy(m.uid, r); err != nil {
+				rep.Errors = append(rep.Errors, err.Error())
+			}
 			// 冲突不 MarkSynced，下次仍 dirty
 			if m.isDelete {
 				allOk = false
@@ -1144,6 +1160,7 @@ func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
 	if h == "" {
 		h = "synced" // 分组等无文件 hash 的条目用哨兵值
 	}
+	// 同上：标记失败 → 下轮重推该条（服务端按 op_id 幂等去重），不影响正确性。
 	_ = e.Coll.MarkSynced(m.uid, h, r.ItemRev)
 }
 
@@ -1156,15 +1173,20 @@ type dirtyMeta struct {
 }
 
 // writeConflictCopy 冲突：本地版本进 .conflicts/（R8，不带可同步 uid）。
-func (e *Engine) writeConflictCopy(uid string, r OpResult) {
+// 返回错误而不是吞掉：副本是用户改动的唯一留底，写失败必须让调用方记进 Report。
+func (e *Engine) writeConflictCopy(uid string, r OpResult) error {
 	if uid == "" {
-		return
+		return nil
 	}
 	req, err := e.Coll.ReadRequest(uid)
 	if err != nil {
-		return
+		// 读不出来通常意味着本地已经没有这条（例如刚被删）：不算副本写失败
+		return nil
 	}
-	_, _ = e.Coll.SaveConflictCopy(req, r.ItemRev, r.Server)
+	if _, cerr := e.Coll.SaveConflictCopy(req, r.ItemRev, r.Server); cerr != nil {
+		return fmt.Errorf("%s: 保存冲突副本失败（本地改动可能未留存）：%w", uid, cerr)
+	}
+	return nil
 }
 
 func newOpID() string {
