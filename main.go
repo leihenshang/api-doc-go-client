@@ -36,11 +36,12 @@ func main() {
 		// 初始尺寸只给「安全下限」：真正尺寸在 DomReady 里按屏幕可用范围决定（见 app.DomReady）——
 		// Width/Height 是逻辑像素，高分屏（125% 缩放）下逻辑屏可能只有 1536×960，
 		// 首选 1600×1000 放不下就会被系统居中到屏幕外（顶部/底部被推出）。
-		// 数值含窗口外框留白（前端 --app-frame-gap 32px ×2），MinWidth 1184 对应内容 1120。
-		Width:     1184,
-		Height:    784,
-		MinWidth:  1184,
-		MinHeight: 784,
+		// 数值含窗口外框留白（前端 --app-frame-gap，桌面态 32px；Windows 不预留，见 app.windowFrameInset）。
+		// 内容区固定 1120×720 起，随平台换算成窗口尺寸。
+		Width:     app.MinWindowWidth(),
+		Height:    app.MinWindowHeight(),
+		MinWidth:  app.MinWindowWidth(),
+		MinHeight: app.MinWindowHeight(),
 		// 无边框窗口：标题栏由前端自绘（design-spec §2），拖动区靠 CSS --wails-draggable
 		Frameless: true,
 		// 先隐藏：DomReady 里自适应尺寸/位置后再显示，避免启动瞬间闪一下超大窗口
@@ -57,8 +58,13 @@ func main() {
 		// wails dev 的 Ctrl+C 打到应用时也走这里（见 internal/app 的 watchSignals 注释）。
 		OnShutdown: core.Shutdown,
 		Bind:       []interface{}{core},
-		// 三端都显式开透明：Linux 侧由 gdk_screen_is_composited 守卫（无合成器时保持不透明），
-		// Windows 侧走 DWM（< 22621 退化为 blur-behind），macOS 侧置 window.opaque = NO。
+		// 三端都开透明：Linux 由 gdk_screen_is_composited 守卫（无合成器时保持不透明），
+		// macOS 置 window.opaque = NO，Windows 走 DWM（Win11 22H2+ 是系统材质，
+		// 更早的系统退化成 blur-behind）。
+		//
+		// 注意：Windows 上的透明**不是逐像素的**，页面透明的像素会被填成系统材质（浅色下近乎白色）。
+		// 所以前端在 windows 下把外框留白归零、不画自绘阴影（见 styles/base.css 的 windows 覆盖），
+		// 外壳直接铺满窗口、阴影交给系统的 Aero 阴影 —— 否则那圈留白就是一圈厚白框。
 		Windows: &windows.Options{WindowIsTranslucent: true, WebviewIsTransparent: true},
 		Mac:     &mac.Options{WindowIsTranslucent: true, WebviewIsTransparent: true},
 		Linux: &linux.Options{

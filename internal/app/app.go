@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	// 标准库的 runtime 与下面的 wails runtime 同名，这里起别名避免撞车。
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -172,17 +174,40 @@ func (a *App) emitAppEvent(name string, payload any) {
 
 // 初始窗口几何（逻辑像素；Wails 的 Width/Height 与 ScreenGetAll 都是逻辑像素）。
 //
-// 尺寸里已含窗口外框留白：前端 body 用 `--app-frame-gap`（桌面态 32px）给阴影让位，
-// 所以这里比「内容尺寸」各多 2×32=64 —— 改 gap 时必须同步这两个常量及 main.go 的
-// MinWidth/MinHeight，否则内容区会真的缩水（32px 是阴影尾巴的实测长度，不是随便加的，见 base.css）。
+// 窗口尺寸 = 内容尺寸 + 四周的前端留白。留白来自 `--app-frame-gap`（给自绘阴影让位，见 base.css），
+// 但它**不是每个平台都有**：Windows 拿不到逐像素透明（Wails 走 blur-behind / SystemBackdropType），
+// 留白会变成窗口四周一圈厚白框，所以前端在 windows 上把留白归零、改用系统自带的 Aero 阴影与圆角。
+// 因此这里按平台算，内容区在三端都是同一尺寸（1600×1000 / 最小 1120×720）。
 const (
-	preferredWindowWidth  = 1664
-	preferredWindowHeight = 1064
+	contentWindowWidth  = 1600
+	contentWindowHeight = 1000
+	minContentWidth     = 1120
+	minContentHeight    = 720
+	// frameGap 与前端 --app-frame-gap 的桌面态取值保持一致（改了要同步，见 base.css）
+	frameGap = 32
 	// 首选尺寸四周留白下限：避免窗口贴着屏幕边缘
 	windowFitMargin = 24
 	// 任务栏 / Dock 的保守预留：ScreenGetAll 只给显示器矩形，不含工作区
 	windowVerticalReserve = 64
 )
+
+// windowFrameInset 是窗口尺寸里为前端阴影留白预留的总量（四周各一份）。
+// Windows 不预留（见上面的说明），返回 0。
+func windowFrameInset() int {
+	if goruntime.GOOS == "windows" {
+		return 0
+	}
+	return 2 * frameGap
+}
+
+var (
+	preferredWindowWidth  = contentWindowWidth + windowFrameInset()
+	preferredWindowHeight = contentWindowHeight + windowFrameInset()
+)
+
+// MinWindowWidth / MinWindowHeight 供 main.go 设置启动尺寸下限（同样含留白）。
+func MinWindowWidth() int  { return minContentWidth + windowFrameInset() }
+func MinWindowHeight() int { return minContentHeight + windowFrameInset() }
 
 // startup Wails 生命周期。
 // Startup Wails 生命周期钩子（必须导出：OnStartup 引用跨包方法）。

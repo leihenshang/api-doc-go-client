@@ -53,7 +53,7 @@ import {
     zhCN
 } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
-import { hasWailsRuntime } from '@/lib/ipc'
+import { hasWailsRuntime, runtimePlatform } from '@/lib/ipc'
 import { useI18n } from 'vue-i18n'
 
 const coll = useCollectionStore()
@@ -63,6 +63,8 @@ const { t, locale } = useI18n()
 
 // 标记运行壳：只有 Wails 桌面壳才给窗口加外框留白 + 阴影（浏览器态留白会变成一圈白边）。
 document.documentElement.dataset.shell = hasWailsRuntime() ? 'desktop' : 'web'
+// 标记平台：Windows 的窗口不是逐像素透明（见 styles/base.css 的 windows 覆盖），留白会变成厚白框。
+document.documentElement.dataset.platform = runtimePlatform()
 
 const naiveLocale = computed(() => (locale.value === 'en-US' ? enUS : zhCN))
 const naiveDateLocale = computed(() => (locale.value === 'en-US' ? dateEnUS : dateZhCN))

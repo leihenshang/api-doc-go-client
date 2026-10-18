@@ -434,7 +434,7 @@ UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 
 
 ---
 
-## 10. 底部外框阴影"不渐隐"的修正（2026-10-18 追加，`aa3726d`）
+## 10. 底部外框阴影"不渐隐"的修正（2026-10-18 追加，`aa3726d`；仅 Linux / macOS，Windows 见 §11）
 
 **现象**（用户截图）：窗口左右上三边的阴影看着是渐隐的，只有**最底部**像被一刀切断，
 阴影到窗口下边缘就没了，边缘处还能看到一条比桌面略深的痕迹。
@@ -492,3 +492,70 @@ UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 
 > 教训：阴影这类"看起来只是审美"的参数，**留白是被几何决定的、不是拍脑袋的数字**。
 > 改成 `blur / offset / spread` 之后必须重新量尾巴，否则哪天又会在底部露出硬边。
 > 量法就是本文用的土办法：把留白临时调到很大，逐行读像素，直到与背景同亮度。
+
+---
+
+## 11. Windows 上外框变成一圈厚白框（2026-10-18 追加）
+
+**现象**（用户 Windows 截图）：窗口四周是一圈约 30px 的浅白色厚边框，阴影就画在这圈白底上，
+看起来像给窗口套了一个白色相框。
+
+### 11.1 证据
+
+对 1472×985 的截图逐像素扫：从窗口外缘往里 40px（设备像素）都是 **255 → 244 的白色渐变**，
+到 x=40 才出现外壳自身的 1px 边框（227）——也就是说，`--app-frame-gap` 这圈本该透出桌面的留白，
+在 Windows 上被填成了白色，阴影画在白底上，于是"留白"变成了"白框"。
+
+### 11.2 根因：Windows 没有逐像素透明（Wails v2.16.0 源码）
+
+`main.go` 已经开了 `WindowIsTranslucent: true, WebviewIsTransparent: true`，但 Windows 上这条路
+不是"透明"而是"系统材质"：
+
+| 系统 | Wails 走的分支 | 透明像素变成什么 |
+| --- | --- | --- |
+| Win11 22H2+（build ≥ 22621） | `EnableTranslucency` → `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)` | Mica / Acrylic 类**系统材质**（浅色下近乎纯白） |
+| 更早的系统 | `SetTranslucentBackground` → `SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND)` | 桌面模糊 + 提亮，浅色壁纸下接近白色 |
+| Linux | GTK + 合成器 | 真正的逐像素 alpha |
+| macOS | `window.opaque = NO` | 真正的逐像素 alpha |
+
+分支判定见 `internal/frontend/desktop/windows/window.go:126` 与 `win32/theme.go:47`
+（`SupportsBackdropTypes()` = `IsWindowsVersionAtLeast(10, 0, 22621)`）。
+所以那圈留白在 Windows 上**注定会被填色**，与 CSS 阴影参数无关 —— 参数调多少都只影响"白框里的灰"。
+
+### 11.3 修法：Windows 不画自绘外框
+
+1. 前端加平台标记（`lib/ipc.ts` 的 `runtimePlatform()`，用 UA 同步判断，避免首帧闪一下别平台样式）：
+   `documentElement.dataset.platform = 'windows' | 'darwin' | 'linux'`。
+2. `base.css` 增加 Windows 覆盖（放在暗色阴影规则**之后**，靠源序压住同特异度的暗色规则）：
+
+   ```css
+   :root[data-shell='desktop'][data-platform='windows'] {
+     --app-frame-gap: 0px;     /* 留白会变成白框 */
+     --app-radius-window: 0px; /* 圆角交给 DWM；CSS 再裁会在四角露出窗口底色 */
+     --app-shadow-window: none;/* 阴影交给系统的 Aero 阴影 */
+   }
+   ```
+3. 窗口尺寸按平台算（`internal/app/app.go` 的 `windowFrameInset()` Windows 返回 0）：
+   内容区在三端都是 1600×1000 / 最小 1120×720，`main.go` 改用 `app.MinWindowWidth()/MinWindowHeight()`。
+
+**为什么阴影可以不要**：Wails 的 `framelessWithDecorations = Frameless && !DisableFramelessWindowDecorations`
+（`window.go:64`，默认 false）会在无边框模式下 `DwmExtendFrameIntoClientArea`，
+即**保留系统窗口装饰**：Aero 阴影 + Win11 圆角。自绘阴影在 Windows 上本来就是多余的，
+而且它才是白框的成因。
+
+### 11.4 验证（浏览器模拟 1600×1000，切换 data-platform 读计算样式）
+
+| 场景 | body padding | .app 矩形 | 圆角 | 自绘阴影 |
+| --- | --- | --- | --- | --- |
+| 浏览器（web） | 0 | 0,0,1600×1000 | 10px | none |
+| 桌面壳 · linux | **32px** | 32,32,1536×936 | 10px | 两层层阴影 |
+| 桌面壳 · windows | **0** | **0,0,1600×1000**（铺满窗口） | **0** | **none** |
+| 最大化 | 0 | 铺满 | 0 | none |
+
+外观见 `screenshots/26-windows-no-frame.png`（模拟 Windows：内容直接顶到窗口边，没有白圈）。
+
+> 教训：跨端"看起来一样"的 CSS 效果，底层能力可能完全不同。凡是**依赖透明**的效果
+> （外框留白、圆角透出、半透明遮罩），都必须先确认该端的窗口是否真的支持逐像素 alpha ——
+> Windows 的 `WindowIsTranslucent` 名字很像，实际是系统材质合成。
+> 另外，阴影/留白这类几何参数最好由**一个来源**（这里的 `frameGap`）推出来，
+> 再让窗口尺寸、前端令牌、平台覆盖都引用它，避免三处各写一个数字。
