@@ -24,7 +24,8 @@ import (
 
 // ---- 导入（Postman / OpenAPI，共享内核见 share 的 postman / openapi 包）----
 
-// ImportCollection 把 Postman 或 OpenAPI 文本导入到 parent 分组下（format：postman / openapi）。
+// ImportCollection 把外部数据导入到 parent 分组下
+// （format：postman / openapi / apidocgo；Bruno 走 ImportBrunoDir 选目录）。
 func (a *App) ImportCollection(parent, format, text string) (*collection.ImportSummary, error) {
 	c, err := a.requireCollection()
 	if err != nil {
@@ -35,10 +36,13 @@ func (a *App) ImportCollection(parent, format, text string) (*collection.ImportS
 		return c.ImportPostman(parent, []byte(text))
 	case "openapi":
 		return c.ImportOpenAPI(parent, []byte(text))
+	case "apidocgo":
+		// 本客户端导出的集合整包（目录 + 请求 + 文档），无损回灌
+		return c.ImportBundle(parent, []byte(text))
 	case "bruno":
 		return nil, fmt.Errorf("Bruno 请使用 ImportBrunoDir 选择目录导入")
 	}
-	return nil, fmt.Errorf("不支持的导入格式：%s（仅支持 postman / openapi）", format)
+	return nil, fmt.Errorf("不支持的导入格式：%s（仅支持 postman / openapi / apidocgo）", format)
 }
 
 // ImportBrunoDir 导入原生 Bruno 集合目录（按本客户端格式解析）。
@@ -548,7 +552,7 @@ func renderBodyForCode(b collection.Body, vars map[string]string) string {
 
 // ---- 导出（H10）----
 
-// ExportDoc 导出集合文档（format：markdown | html）。
+// ExportDoc 导出集合（format：markdown | html | apidocgo）。
 // desktop 弹「另存为」；headless 落 headlessDir。返回保存路径（取消时为空串）。
 func (a *App) ExportDoc(format, defaultName string) (string, error) {
 	c, err := a.requireCollection()
@@ -556,23 +560,29 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 		return "", err
 	}
 	var content string
+	var raw []byte
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "markdown", "md":
 		content, err = c.ExportMarkdown()
 	case "html":
 		content, err = c.ExportHTML()
+	case "apidocgo":
+		// 集合整包（目录 + 请求 + 文档），可被其他 api-doc-go 客户端直接导入
+		raw, err = c.ExportBundle()
 	default:
-		return "", fmt.Errorf("不支持的导出格式：%s（仅支持 markdown / html）", format)
+		return "", fmt.Errorf("不支持的导出格式：%s（仅支持 markdown / html / apidocgo）", format)
 	}
 	if err != nil {
 		return "", err
 	}
 	name := strings.TrimSpace(defaultName)
 	if name == "" {
-		if strings.EqualFold(format, "html") {
+		name = c.Name + ".md"
+		switch {
+		case strings.EqualFold(format, "html"):
 			name = c.Name + ".html"
-		} else {
-			name = c.Name + ".md"
+		case strings.EqualFold(format, "apidocgo"):
+			name = c.Name + ".apidocgo.json"
 		}
 	}
 	var path string
@@ -580,7 +590,7 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 		path = filepath.Join(a.headlessDir, filepath.Base(name))
 	} else if ctx := a.appCtx(); ctx != nil {
 		picked, err := runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{
-			Title:           "导出文档",
+			Title:           "导出",
 			DefaultFilename: name,
 		})
 		if err != nil {
@@ -593,7 +603,10 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 	} else {
 		return "", errors.New("应用未就绪")
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if raw == nil {
+		raw = []byte(content)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return "", fmt.Errorf("写入导出文件: %w", err)
 	}
 	return path, nil

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 导入（H9）：Postman Collection JSON / OpenAPI JSON → 当前集合的指定分组。
+// 导入（H9）：Postman / OpenAPI / api-doc-go 集合包 → 当前集合的指定分组。
 import { NButton, NInput, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -25,6 +25,7 @@ const formatOptions = computed(() => [
   { label: t('import.formatPostman'), value: 'postman' },
   { label: t('import.formatOpenapi'), value: 'openapi' },
   { label: t('import.formatBruno'), value: 'bruno' },
+  { label: t('import.formatApiDocGo'), value: 'apidocgo' },
 ])
 
 const destOptions = computed(() => {
