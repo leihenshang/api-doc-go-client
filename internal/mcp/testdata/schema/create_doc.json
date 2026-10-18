@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "content": {
+      "type": "string"
+    },
+    "folder": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}

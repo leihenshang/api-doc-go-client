@@ -116,7 +116,7 @@ func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts
 }
 
 // addTool 按 meta.go 中的名称取描述注册一个工具；名字不在元数据表里即装配缺陷。
-// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，19 个业务 handler 零改动。
+// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，24 个业务 handler 零改动。
 // 必须在内部构造**字面签名**的闭包交给 mcp.AddTool —— 若用具名 coreHandler[In] 类型，
 // SDK 的 ToolHandlerFor[In,Out] 泛型推断无法把具名类型与类型参数合一。
 func addTool[In any](ts *toolSet, server *mcp.Server, name string,
@@ -348,6 +348,9 @@ func (ts *toolSet) registerReadTools(server *mcp.Server) {
 	addTool(ts, server, "search_requests", ts.searchRequests)
 	addTool(ts, server, "list_envs", ts.listEnvs)
 	addTool(ts, server, "get_doc_template", ts.getDocTemplate)
+	// 文档条目：只读两个（列表不含正文，取全文走 get_doc）
+	addTool(ts, server, "list_docs", ts.listDocs)
+	addTool(ts, server, "get_doc", ts.getDoc)
 }
 
 // ---- 工作目录（白名单 + 默认目标）----
@@ -384,6 +387,10 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_project", ts.createProject)
 	addTool(ts, server, "update_request", ts.updateRequest)
 	addTool(ts, server, "delete_request", ts.deleteRequest)
+	// 文档条目的写操作：新建 / 局部更新（正文·改名·移动）/ 删除（进 .trash）
+	addTool(ts, server, "create_doc", ts.createDoc)
+	addTool(ts, server, "update_doc", ts.updateDoc)
+	addTool(ts, server, "delete_doc", ts.deleteDoc)
 	ts.registerEnvWriteTools(server)
 }
 
@@ -554,6 +561,42 @@ func (ts *toolSet) getDocTemplate(_ context.Context, _ *mcp.CallToolRequest, _ g
 	})
 }
 
+// ---- 文档条目（集合里的独立 .md；与 request.docs 区分）----
+
+// listDocsIn list_docs 的入参。
+type listDocsIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Query   string `json:"query,omitempty" jsonschema:"按文档名 / 路径模糊过滤；留空返回全部"`
+}
+
+func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in listDocsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		docs, err := ts.svc.ListDocs(in.Project, in.Query)
+		if err != nil {
+			return "", err
+		}
+		return renderDocs(in.Project, docs), nil
+	})
+}
+
+// getDocIn get_doc 的入参。
+type getDocIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID     string `json:"uid" jsonschema:"文档 uid（list_docs 返回）"`
+}
+
+func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		d, err := ts.svc.GetDoc(in.Project, in.UID)
+		if err != nil {
+			return "", err
+		}
+		return renderDocDetail(d), nil
+	})
+}
+
 // createModuleIn create_module 的入参。
 type createModuleIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
@@ -630,6 +673,51 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 			return "", err
 		}
 		return fmt.Sprintf("已移除请求 %s（文件已移入 .trash，可人工找回）", in.UID), nil
+	})
+}
+
+// createDocArg create_doc 的入参（复用 service 结构，json/描述已写好）。
+type createDocArg = CreateDocInput
+
+func (ts *toolSet) createDoc(_ context.Context, req *mcp.CallToolRequest, in createDocArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		d, err := ts.svc.CreateDoc(in)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已创建文档 %s（uid=%s，路径 %s，项目 %s，%d 字节）",
+			d.Name, d.UID, d.Path, in.Project, d.Size), nil
+	})
+}
+
+// updateDocArg update_doc 的入参。
+type updateDocArg = UpdateDocInput
+
+func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in updateDocArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		d, err := ts.svc.UpdateDoc(in)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已更新文档 %s（uid=%s，路径 %s，%d 字节）", d.Name, d.UID, d.Path, d.Size), nil
+	})
+}
+
+// deleteDocIn delete_doc 的入参（比 deleteIn 多一句说明：这条是文档不是接口）。
+type deleteDocIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID     string `json:"uid" jsonschema:"要移除的文档 uid（list_docs 返回）"`
+}
+
+func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in deleteDocIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		if err := ts.svc.DeleteDoc(in.Project, in.UID); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", in.UID), nil
 	})
 }
 

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -110,6 +111,13 @@ func summarizeArgs(tool string, req *mcp.CallToolRequest) string {
 					auth["keys"] = names // 个别来源会把 headers 挂进 auth
 				}
 				out[k] = auth
+			}
+			continue
+		case "content":
+			// 文档正文：可能很长、也可能含密钥（示例里的 token）。弹窗只需要知道「要写多少字」，
+			// 原文一律不外送（与 curl/headers 的处理口径一致）。
+			if sv, ok := v.(string); ok {
+				out[k] = fmt.Sprintf("<%d 字符>", len([]rune(sv)))
 			}
 			continue
 		case "body":

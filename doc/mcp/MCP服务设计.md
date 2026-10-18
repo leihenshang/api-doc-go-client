@@ -23,7 +23,7 @@ mcpserver -allow-writable D:\collections -http 0.0.0.0:8189 -http-token <令牌>
 | `-http` | 留空 = 只走 stdio；给了地址则同时提供 streamable HTTP（路径 `/mcp`）。只给端口（`:8189`）按**回环**处理，跨主机必须显式写 `0.0.0.0:8189` |
 | `-http-token` | HTTP 的 Bearer 令牌。**监听非回环且未给时自动生成并打印到 stderr**（不落盘，重启即换）；客户端内嵌服务在启用且为空时自动生成并**落盘** |
 | `-http-allow-origin` | 浏览器来源白名单（逗号分隔，`*` = 任意）。带 `Origin` 的请求必须命中，否则 403 |
-| `-readonly` | 只注册只读工具（`InReadOnly` 的 9 个）；`send_request` 仍可用但不保存响应示例 |
+| `-readonly` | 只注册只读工具（`InReadOnly` 的 11 个）；`send_request` 仍可用但不保存响应示例 |
 | `-require-consent` | 无头严格模式（T2）：注入 `mcpauth.DenyAuthorizer`，`send_request` 与全部写工具**一律拒绝**（没有 UI 可应答授权弹窗，fail-closed）；只读工具不受影响 |
 
 **stdio 授权器差异**：独立 mcpserver 默认**不注入**授权器（AI 自动化调用无人可点确认），风险拦截靠
@@ -66,12 +66,12 @@ Claude Desktop 配置：
 - **懒加载**：首次访问某项目才 `OpenCollection` 并起该项目的 fsnotify 监听；`refresh=true` 重新扫描。
 - 读操作前 `ReloadCollection`（重扫 + 重建索引），因为扫描与索引是「打开时快照」。
 
-## 三、工具清单（19 个）
+## 三、工具清单（24 个）
 
 名称/描述/风险级别/读写标记的**单一事实源是 `meta.go`**（T1）：`Risk`（low/medium/high）、`Write`（落盘）、
 `NetEgress`（真实外发）、`EnvWrite`（触碰 `*.secrets.yml`）、`InReadOnly`（只读模式仍注册）。
-`ValidateMetas` 锁定「正式工具恒 19 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
-风险分级是 T2 授权与 T3 审计的判定依据：**low = 8 个只读工具；medium = `send_request`（网络外发）；high = 10 个落盘写工具**。
+`ValidateMetas` 锁定「正式工具恒 24 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
+风险分级是 T2 授权与 T3 审计的判定依据：**low = 10 个只读工具；medium = `send_request`（网络外发）；high = 13 个落盘写工具**。
 
 | 工具 | 风险 | 作用 | 关键入参 |
 |---|---|---|---|
@@ -82,6 +82,8 @@ Claude Desktop 配置：
 | `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例） | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
 | `search_requests` | low | 模糊搜索（可跨项目） | `query`、`project?`、`limit?` |
 | `get_doc_template` | low | 接口说明（docs）的 Markdown 分节结构契约（对齐前端 buildApiDoc） | — |
+| `list_docs` | low | 文档条目清单（集合树里的独立 .md；名称/路径/字节数） | `project?`、`query?` |
+| `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`） | `project?`、`uid` |
 | `list_envs` | low | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
 | `send_request` | medium | 发送并可选保存示例（唯一网络外发工具，只读模式也注册） | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
 | `create_request` | high | 创建请求（手填 / cURL / 复制；可带完整 body/settings/respDoc） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
@@ -89,6 +91,9 @@ Claude Desktop 配置：
 | `create_project` | high | 新建项目（目录 + manifest，只能在白名单内的可写目录里建） | `name`、`dirName?`、`root?`（留空 = 第一个可写目录） |
 | `update_request` | high | 局部修改（含 params/settings/respDoc）/ 移动模块 | `project?`、`uid`、各可选字段、`ifMatch?` |
 | `delete_request` | high | 移除请求（进 `.trash`） | `project?`、`uid` |
+| `create_doc` | high | 新建文档（可挂在任意分组目录，可带正文） | `project?`、`name`、`folder?`、`content?` |
+| `update_doc` | high | 改正文 / 改名 / 移动分组（局部更新） | `project?`、`uid`、`content?`、`name?`、`folder?`、`ifMatch?` |
+| `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
 | `create_env` | high | 新建环境（可带初始变量） | `project?`、`name`、`vars?` |
 | `rename_env` | high | 环境改名 | `project?`、`name`、`newName`、`ifMatch?` |
 | `delete_env` | high | 删除环境 | `project?`、`name` |
@@ -134,7 +139,7 @@ Claude Desktop 配置：
 
 ## 七、交互式授权与调用审计（T2 / T3）
 
-**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（19 个业务 handler 零改动）——
+**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（24 个业务 handler 零改动）——
 `recover（panic 转工具级错误）→ 风险授权（非 low 才走）→ 业务 → 收尾恰好一条审计`。
 拒绝/异常一律 `isError: true` 的工具级错误，AI 能读到并纠正，不是协议级 error。
 
@@ -198,8 +203,8 @@ Claude Desktop 配置：
 cmd/mcpserver/main.go       flag（-allow/-allow-writable/-root/-http/-readonly/-require-consent…）+ 传输选择（stdio / HTTP）；
                             stdio 形态也装配 mcpaudit（落配置目录）与 -require-consent 的 DenyAuthorizer（T2/T3）
 internal/mcp/server.go      装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层；透传 Authorizer/Auditor/Transport）
-internal/mcp/meta.go        19 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
-internal/mcp/tools.go       19 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
+internal/mcp/meta.go        24 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
+internal/mcp/tools.go       24 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
 internal/mcp/doctpl.go      get_doc_template 的 docs 结构契约文案（对齐前端 lib/genDocs.ts，变更需两侧同步）
 internal/mcp/authz_args.go  授权弹窗的入参脱敏 summarizeArgs（白名单键 + 敏感值掩码，T2）
 internal/mcp/service.go     语义实现（不 import SDK，可单测/复用）
