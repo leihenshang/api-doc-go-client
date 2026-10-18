@@ -14,6 +14,7 @@ import {
     SettingsOutline,
     SwapVerticalOutline,
     TimeOutline,
+    DocumentTextOutline,
 } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
 import { NIcon, NInput, NModal } from 'naive-ui'
@@ -21,7 +22,7 @@ import type { Component } from 'vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-type Scope = 'all' | 'request' | 'env' | 'command'
+type Scope = 'all' | 'request' | 'doc' | 'env' | 'command'
 type Kind = Exclude<Scope, 'all'>
 
 interface Item {
@@ -51,6 +52,8 @@ const emit = defineEmits<{
   'update:show': [v: boolean]
   /** 打开请求；root 非空且不是活动根时，接收方应先切根再打开 */
   'open-request': [uid: string, root?: string]
+  /** 打开文档（同样是 uid + 所属根） */
+  'open-doc': [uid: string, root?: string]
   'switch-env': [name: string]
   command: [key: string]
 }>()
@@ -149,6 +152,20 @@ function collectRequests(
       collectRequests(n.children ?? [], [...trail, n.name], out, meta)
       continue
     }
+    // 文档不是请求：不能落到下面的 'request' 分支，否则会被当成 method 缺省的 GET 接口
+    // （命令面板里显示成「GET 接入指南」，点开还会走请求页签）。
+    if (n.type === 'doc') {
+      out.push({
+        id: n.uid,
+        kind: 'doc',
+        label: n.name,
+        path: trail.join(' / '),
+        icon: DocumentTextOutline,
+        root: meta.root,
+        coll: meta.coll,
+      })
+      continue
+    }
     out.push({
       id: n.uid,
       kind: 'request',
@@ -225,6 +242,7 @@ function close(): void {
 
 function activate(item: Item): void {
   if (item.kind === 'request') emit('open-request', item.id, item.root)
+  else if (item.kind === 'doc') emit('open-doc', item.id, item.root)
   else if (item.kind === 'env') emit('switch-env', item.id)
   else emit('command', item.id)
   close()

@@ -14,6 +14,7 @@ import {
     CloseCircleOutline,
     CloseOutline,
     CopyOutline,
+    DocumentTextOutline,
     LayersOutline,
     SaveOutline,
 } from '@vicons/ionicons5'
@@ -186,7 +187,10 @@ onBeforeUnmount(() => {
         @keydown.enter="emit('select', tab.key)" @contextmenu.prevent="openMenu(i, $event)"
         @dragstart="onDragStart(i, $event)" @dragover.prevent="onDragOver($event)" @drop="onDrop(i, $event)"
         @dragend="dragFrom = -1">
-        <method-tag :method="tab.request.method" />
+        <!-- 只有请求页签才有方法；文档页签此前被套了 blankRequest 的默认 GET，
+             显示成「GET 接入指南」，会被误读成一个 GET 接口。 -->
+        <method-tag v-if="tab.kind === 'request'" :method="tab.request.method" />
+        <n-icon v-else :component="DocumentTextOutline" :size="13" class="doc-ic" />
         <span v-if="tab.dirty || tab.draft" class="dot" :title="t('tab.unsaved')" />
         <span class="tt">{{ tab.title }}</span>
         <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')"

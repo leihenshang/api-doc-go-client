@@ -323,6 +323,12 @@ async function openHistoryRequest(uid: string): Promise<void> {
   await openRequestInRoot(uid, findRootOfUid(uid))
 }
 
+/** 打开文档（命令面板用）：跨根时先切根，再开文档页签。 */
+async function openDocInRoot(uid: string, root?: string): Promise<void> {
+  if (root && root !== coll.activeRoot) await activateRoot(root)
+  await tabs.openDocTab(uid)
+}
+
 /** 重载某个根（外部改动 / 手工触发）：只刷新它的树，不动其它根。 */
 async function reloadRoot(root: string): Promise<void> {
   try {
@@ -1073,7 +1079,7 @@ watch(
       <mock-dialog v-model:show="showMock" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
       <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
-        :active-root="coll.activeRoot" @open-request="openRequestInRoot" @switch-env="pickEnv" @command="onCommand" />
+        :active-root="coll.activeRoot" @open-request="openRequestInRoot" @open-doc="openDocInRoot" @switch-env="pickEnv" @command="onCommand" />
 
       <!-- 导入 cURL：粘贴命令 → 解析预览 → 开成未落盘草稿 tab -->
       <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
