@@ -172,12 +172,12 @@ func (a *App) emitAppEvent(name string, payload any) {
 
 // 初始窗口几何（逻辑像素；Wails 的 Width/Height 与 ScreenGetAll 都是逻辑像素）。
 //
-// 尺寸里已含窗口外框留白：前端 body 用 `--app-frame-gap`（桌面态 20px）给阴影让位，
-// 所以这里比「内容尺寸」各多 2×20=40 —— 改 gap 时必须同步这两个常量及 main.go 的
-// MinWidth/MinHeight，否则内容区会真的缩水。
+// 尺寸里已含窗口外框留白：前端 body 用 `--app-frame-gap`（桌面态 32px）给阴影让位，
+// 所以这里比「内容尺寸」各多 2×32=64 —— 改 gap 时必须同步这两个常量及 main.go 的
+// MinWidth/MinHeight，否则内容区会真的缩水（32px 是阴影尾巴的实测长度，不是随便加的，见 base.css）。
 const (
-	preferredWindowWidth  = 1640
-	preferredWindowHeight = 1040
+	preferredWindowWidth  = 1664
+	preferredWindowHeight = 1064
 	// 首选尺寸四周留白下限：避免窗口贴着屏幕边缘
 	windowFitMargin = 24
 	// 任务栏 / Dock 的保守预留：ScreenGetAll 只给显示器矩形，不含工作区
