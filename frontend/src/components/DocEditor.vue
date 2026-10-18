@@ -116,18 +116,23 @@ function onContent(v: string): void {
 }
 
 /* 源码 / 预览各占一半。
-   注意：**不要**给这两个 wrapper 设百分比 flex-basis —— 它们不是
-   `.md-editor-content` 的直接子元素（中间还隔着一层），百分比基准是那层而不是外层，
-   写 44% 实际只算出 22%，源码区会被压成一条窄栏、文本提前折行。 */
+   实测层级：.md-editor-content-wrapper(flex, 1176) → .md-editor-custom-scrollbar(block, 588)
+   → .md-editor-input-wrapper / -preview-wrapper(block, 588)。
+   md-editor-v3 本身已经是 50/50，"列"是 custom-scrollbar；两个 wrapper 是列内的普通块，
+   **不是 flex 项**，对它们写 flex 属性不生效。唯一能改宽度的是 width，而 width 的百分比
+   按「列宽」（588）解析，不是按整幅（1176）——上一版写 width: 44% 因此只得到 44% × 588 ≈ 259px
+   （约整幅的 22%），源码区被压成一条窄栏、正文提前折行。 */
 .body.edit :deep(.md-editor-input-wrapper),
 .body.edit :deep(.md-editor-preview-wrapper) {
-  flex: 1 1 0;
   width: auto;
   min-width: 0;
 }
 
-/* 预览首元素的 margin-top 归零：h2 自带 1.2em 上外边距，而预览是 overflow 滚动容器，
-   外边距不会穿透到容器外，于是标题比左侧源码首行低了 30px 左右（顶部一片空白）。 */
+/* 预览首元素的 margin-top 归零。
+   预览容器 `.md-editor-preview` 是 display: flow-root（独立 BFC）+ padding-top 10px，
+   首元素 h2（24px，UA 默认 margin 0.83em）约 20px 的上外边距不会穿透到容器外，
+   而是整段压在标题上方，标题因此比左侧源码首行低 20px（实测 top 187 vs 167），
+   看起来像"预览顶部多了一块空白"。只清首元素，第二段起保留正常段间距。 */
 .body.edit :deep(.md-editor-preview > :first-child) {
   margin-top: 0;
 }
