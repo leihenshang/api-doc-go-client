@@ -593,8 +593,14 @@ func (c *Collection) ExportHTML() (string, error) {
 	b.WriteString(`<main class="content">`)
 	b.WriteString(body)
 	b.WriteString(`</main>`)
-	// 当前请求的右侧大纲：.ol-list 由 JS 在单节展示时按小节/生成标签动态填充
-	b.WriteString(`<nav class="ol" aria-label="当前页目录"><div class="ol-title">目录</div><div class="ol-list"></div></nav>`)
+	// 当前请求的右侧大纲：.ol-list 由 JS 在单节展示时按小节/生成标签动态填充。
+	// 头部带「收起」按钮；收起后 .ol 整块 display:none（正文自动铺满），
+	// 窗口右缘露出 .ol-open 把手用于展开 —— 两者的显隐都由 .layout 上的类控制（见模板里的 olApply）。
+	b.WriteString(`<nav class="ol" aria-label="当前页目录">`)
+	b.WriteString(`<div class="ol-head"><div class="ol-title">目录</div>`)
+	b.WriteString(`<button type="button" class="ol-toggle" aria-expanded="true" aria-label="收起目录" title="收起目录">›</button>`)
+	b.WriteString(`</div><div class="ol-list"></div></nav>`)
+	b.WriteString(`<button type="button" class="ol-open" aria-label="展开目录" title="展开目录">‹</button>`)
 	b.WriteString(`</div>`)
 	b.WriteString(htmlScriptBlock)
 	return b.String(), nil
@@ -616,8 +622,6 @@ func buildExportTOC(name string, tree []*Node, res *scanResult) string {
 	toc.WriteString(`<div class="toc-title">目录</div>`)
 	// 目录搜索：输入时过滤并自动展开命中节点的祖先（见底部 <script>）
 	toc.WriteString(`<input type="search" class="toc-search" placeholder="搜索目录…" aria-label="搜索目录">`)
-	// 显示全部：退出「单节展示」模式，右侧恢复列出所有 API
-	toc.WriteString(`<button type="button" class="toc-all">显示全部</button>`)
 	toc.WriteString(`<ul class="toc-list">`)
 	// 集合名（对应正文第一个标题 toc-0）
 	toc.WriteString(`<li class="toc-root"><a href="#`)

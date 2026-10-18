@@ -627,3 +627,75 @@ if (key === 'all') { toggleRootAll(root); return }
 > 共享 `computed` 菜单本身没问题，但只要有一项走的是"遍历 props.roots"这类全量实现，
 > 就一定会在多根场景下越界；同理，"视图操作"（展开/收起/滚动）不要顺手做"切换/写入"。
 
+---
+
+## 13. 导出 HTML 的版式调整：90% 宽度 / 大纲描边与收起 / 移除「显示全部」（2026-10-18 追加）
+
+导出产物在 `internal/collection/export{,_template}.go` 里拼装（样式与脚本是包级字符串常量）。
+本轮三项改动：
+
+| 需求 | 改动 |
+| --- | --- |
+| 文档默认内容宽度 90% | `.layout { max-width: 1100px }` → `max-width: 90%` |
+| 右侧大纲完整描边 + 可收起/展开 | `.ol` 从"只留左边线"改成**四边描边 + 圆角 + 浅底卡片**；头部加「收起」按钮，收起后整块 `display:none`，窗口右缘出现展开把手 |
+| 移除「显示全部」 | 删掉 `.toc-all` 按钮标记、`.toc-all` 样式、`showAll()` 及其监听 |
+
+### 13.1 显示状态只留一个出口
+
+收起态和"条目不足"是两套隐藏原因，早先各自改 `style.display` 很容易互相覆盖
+（典型 bug：手动收起后切换小节，`buildOutline` 又把面板显示回来）。现在两者都收敛到
+`.layout` 上的两个类，由 `olApply()` 统一结算：
+
+```js
+function olApply(){
+  var has = olHas();                                   // 大纲条目 ≥ 2
+  layout.classList.toggle('ol-empty', !has);           // 条目太少：面板隐藏
+  layout.classList.toggle('ol-collapsed', has && olCollapsed); // 手动收起：面板隐藏 + 露把手
+}
+```
+
+CSS 侧：
+
+```css
+.layout.ol-collapsed .ol,
+.layout.ol-empty .ol { display: none; }        /* 不留半条边框，正文自动铺满 */
+.layout.ol-collapsed .ol-open { display: inline-flex; }  /* 只有"有大纲且被收起"才给把手 */
+@media (max-width: 720px) { .ol, .layout.ol-collapsed .ol-open { display: none !important; } }
+```
+
+这样"收起"与"条目不足"不会叠加出第三种状态，窄屏也不会留一个点了没反应的浮标。
+
+### 13.2 实测（Chromium 1440×900，样例文档由真实模板字符串拼装）
+
+| 状态 | .ol | 展开把手 | .layout 类 | 正文宽 |
+| --- | --- | --- | --- | --- |
+| 初始（展开） | block，四边 1px，radius 10 | none | `layout` | 760 |
+| 点「收起」 | **none** | **flex** | `ol-collapsed` | **984**（+224 = 200 列 + 24 gap） |
+| 收起状态下切小节 | none | flex | `ol-collapsed` | 984 |
+| 点把手展开 | block | none | `layout` | 760 |
+| 切到单条目小节 | none | **none** | `ol-empty` | 984 |
+| 窄屏 640 + 收起 | none | **none** | `ol-collapsed` | 548（占满） |
+
+正文容器宽度比恒为 **0.9**（1440 与 640 两档实测），`aria-expanded` 随状态在 `true/false` 间切换。
+
+### 13.3 顺手修掉的窄屏错位
+
+媒体查询里 `.layout` 变成 `flex-direction: column` 后，继承来的 `align-items: flex-start`
+会让交叉轴（宽度）按 max-content 收缩 —— 实测 640 宽下 `.toc` 占满、`.content` 只有 **337px**。
+补 `align-items: stretch` 后与目录同宽（548）。
+
+### 13.4 验证方式（本机没有 Go 工具链）
+
+用 `scripts` 之外的一次性脚本 `.tmp/gen_export_preview.py` 从 Go 源码里抽出
+`htmlDocHead / htmlStyleBlock / htmlScriptBlock` 与 `.ol` 标记，拼一份样例文档，
+在 Chromium 里量上面这张表；`pageerror` 全程为空说明脚本块语法没问题。
+
+同时新增单测 `TestExportHTMLOutlinePanel`（`internal/collection/export_test.go`），
+把 90% 宽度、大纲描边、三件套标记，以及「`toc-all` / 显示全部 / `showAll` 必须不存在」锁住 ——
+**该用例与既有 Go 测试一样，本机无法运行**，需在有 Go 的机器上确认。
+
+> 教训：这类"模板里写死样式 + 少量 JS"的产物，最容易在**删除功能**时留下半套东西
+> （按钮没了样式还在、逻辑没了标记还在）。所以移除项也用断言反向锁死，
+> 而不是只检查新加的东西存在。
+
+

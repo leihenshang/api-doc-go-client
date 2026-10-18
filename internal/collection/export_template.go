@@ -22,7 +22,9 @@ const htmlStyleBlock = `</title>
   * { box-sizing: border-box; }
   body { font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
          margin: 0; padding: 0; color: #202124; background: #fff; }
-  .layout { display: flex; gap: 24px; max-width: 1100px; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
+  /* 正文容器默认占视口的 90%（左右各留 5%），不再固定 1100px —— 宽屏下文档铺开更好读，
+     过长的行由各区块自己控制（表格/代码块横向溢出滚动，不撑破页面）。 */
+  .layout { display: flex; gap: 24px; max-width: 90%; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
   /* 左侧 sticky 目录树（集合树）：窄栏、浅底卡片，滚动时固定 */
   .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
          border: 1px solid #e3e3e3; border-radius: 10px; background: #f5f6f8; padding: 12px 14px; font-size: 13px; }
@@ -32,11 +34,6 @@ const htmlStyleBlock = `</title>
     border: 1px solid #e3e3e3; border-radius: 6px; font-size: 13px; font-family: inherit;
     color: #202124; background: #fff; outline: none; }
   .toc-search:focus { border-color: #18a058; }
-  /* 显示全部：退出单节展示模式 */
-  .toc-all { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 5px 8px;
-    border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #18a058;
-    font-size: 12px; font-family: inherit; cursor: pointer; }
-  .toc-all:hover { border-color: #18a058; background: #f0faf3; }
   .toc-list, .toc ul { list-style: none; margin: 0; padding: 0; }
   /* 嵌套目录：保留左侧缩进，并加树形连接线（风格对齐 client 侧栏树） */
   .toc ul { padding-left: 14px; }
@@ -95,13 +92,34 @@ const htmlStyleBlock = `</title>
   h1 .tm, h2 .tm, h3 .tm, h4 .tm, h5 .tm, h6 .tm { margin-right: 8px; }
   .content { flex: 1 1 auto; min-width: 0; }
   /* 当前请求的右侧大纲（item 9 正解：URL/参数/请求头/文档内容等小节，点击跳转）；
-     内容由 JS 在单节展示时动态生成，不足两项时隐藏 */
-  .ol { flex: 0 0 180px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
-        font-size: 12px; padding: 2px 0 12px 12px; border-left: 1px solid #e3e3e3; }
-  .ol-title { font-weight: 600; color: #6b7280; margin-bottom: 6px; }
+     内容由 JS 在单节展示时动态生成，不足两项时隐藏。
+     外观与左侧目录同款卡片：四边完整描边 + 圆角 + 浅底，不再只靠一条左边线分隔。 */
+  .ol { flex: 0 0 200px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
+        font-size: 12px; padding: 10px 12px; border: 1px solid #e3e3e3; border-radius: 10px;
+        background: #fafbfc; }
+  .ol-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .ol-title { font-weight: 600; color: #6b7280; }
+  /* 收起按钮：标题右侧的小方块图标按钮（与目录卡片的轻量风格一致） */
+  .ol-toggle { flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid #e3e3e3; border-radius: 5px; background: #fff; color: #6b7280;
+        font-family: inherit; font-size: 13px; line-height: 1; cursor: pointer; }
+  .ol-toggle:hover { border-color: #18a058; color: #18a058; background: #f0faf3; }
   .ol a { display: block; color: #555; text-decoration: none; padding: 2px 6px; border-radius: 4px;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ol a:hover { background: #f0faf3; color: #18a058; }
+  /* 收起态：整块 display:none —— 既不占宽度，也不留半条边框；正文自动铺满。
+     只有"有大纲且被手动收起"时才在右侧贴边露出展开把手（.ol-collapsed 由 JS 维护）。 */
+  .layout.ol-collapsed .ol,
+  .layout.ol-empty .ol { display: none; }
+  .ol-open { position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+        display: none; align-items: center; justify-content: center;
+        width: 22px; height: 56px; padding: 0; border: 1px solid #e3e3e3; border-right: none;
+        border-radius: 8px 0 0 8px; background: #fff; color: #6b7280;
+        font-family: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+        box-shadow: -1px 0 6px rgba(0, 0, 0, .06); }
+  .ol-open:hover { border-color: #18a058; color: #18a058; background: #f0faf3; }
+  .layout.ol-collapsed .ol-open { display: inline-flex; }
   h1,h2,h3,h4,h5,h6 { margin: 1.4em 0 0.6em; font-weight: 600; line-height: 1.3; scroll-margin-top: 16px; }
   h1 { font-size: 1.8em; border-bottom: 1px solid #e3e3e3; padding-bottom: 0.3em; }
   code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -114,11 +132,14 @@ const htmlStyleBlock = `</title>
   hr { border: none; border-top: 1px solid #e3e3e3; margin: 1.6em 0; }
   blockquote { margin: 0.6em 0; padding: 0.4em 1em; border-left: 3px solid #18a058; background: #f5f6f8; color: #555; }
   strong { font-weight: 600; }
-  /* 窄屏：集合树排到正文上方、右侧大纲隐藏（小节跳转在窄屏价值低） */
+  /* 窄屏：集合树排到正文上方、右侧大纲隐藏（小节跳转在窄屏价值低）。
+     收起态的展开把手也一并隐藏，否则窄屏上会留一个点了没反应的浮标。 */
   @media (max-width: 720px) {
-    .layout { flex-direction: column; gap: 12px; padding: 16px 14px; }
+    /* 竖排后 align-items 从 flex-start 改回 stretch：否则内容列会按 max-content 收缩，
+       出现"目录占满宽、正文只有半宽"的错位（flex-direction: column 时 cross axis 是宽度）。 */
+    .layout { flex-direction: column; gap: 12px; padding: 16px 14px; align-items: stretch; }
     .toc { flex: 0 0 auto; position: static; max-height: none; width: 100%; }
-    .ol { display: none; }
+    .ol, .layout.ol-collapsed .ol-open { display: none !important; }
   }
 </style>
 </head>
@@ -206,19 +227,31 @@ const htmlScriptBlock = `
   }
 
   // ---- 当前请求的右侧大纲（item 9）：单节展示时把节内小节/生成标签收集成可点击目录 ----
+  var layout = document.querySelector('.layout');
   var olNav = document.querySelector('.ol');
   var olList = olNav ? olNav.querySelector('.ol-list') : null;
+  var olToggle = olNav ? olNav.querySelector('.ol-toggle') : null;
+  var olOpen = document.querySelector('.ol-open');
   var olSeq = 0;
+  // 用户手动收起后一直保持收起（切节重建大纲时也不自动弹回），直到点展开把手
+  var olCollapsed = false;
   function olId(el){ if(!el.id){ el.id = 'ol-' + (++olSeq); } return el.id; }
   function olEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-  function clearOutline(){
-    if(olList){ olList.innerHTML = ''; }
-    if(olNav){ olNav.style.display = 'none'; }
+  // 大纲是否值得显示：至少两条（只有一条时它和当前标题重复，占一列反而碍事）
+  function olHas(){ return !!(olList && olList.children.length > 1); }
+  // 显示状态**只有一个出口**：面板显隐与展开把手都由 .layout 上的两个类决定，
+  // 避免"手动收起"和"条目不足"两套逻辑各改一次 style 而互相覆盖。
+  function olApply(){
+    if(!layout) return;
+    var has = olHas();
+    layout.classList.toggle('ol-empty', !has);
+    layout.classList.toggle('ol-collapsed', has && olCollapsed);
+    if(olToggle){ olToggle.setAttribute('aria-expanded', has && !olCollapsed ? 'true' : 'false'); }
   }
   // buildOutline 扫描当前节的块级元素：标题（h*）与「以粗体标签开头的段落」（**参数** 等生成内容）
-  // 都进大纲；紧跟标题的代码块是请求 URL，补一个合成条目。不足两项时隐藏。
+  // 都进大纲；紧跟标题的代码块是请求 URL，补一个合成条目。不足两项时整块隐藏。
   function buildOutline(nodes){
-    if(!olList || !olNav) return;
+    if(!olList) return;
     var items = [];
     for(var i=0;i<nodes.length;i++){
       var el = nodes[i], tag = el.tagName;
@@ -238,7 +271,7 @@ const htmlScriptBlock = `
       html += '<a href="#' + olId(it.el) + '"' + pad + '>' + olEsc(it.text) + '</a>';
     }
     olList.innerHTML = html;
-    olNav.style.display = items.length > 1 ? '' : 'none';
+    olApply();
   }
   if(olNav){
     olNav.addEventListener('click', function(e){
@@ -251,14 +284,14 @@ const htmlScriptBlock = `
       if(t) t.scrollIntoView({ behavior:'smooth', block:'start' });
     });
   }
-
-  function showAll(){
-    if(!content) return;
-    var kids = content.children;
-    for(var i=0;i<kids.length;i++){ kids[i].style.display = ''; }
-    clearCurrent();
-    clearOutline(); // 「显示全部」下大纲失去归属，隐藏
+  // 收起 / 展开右侧大纲（收起后正文自动铺满；展开把手贴在窗口右缘）
+  if(olToggle){
+    olToggle.addEventListener('click', function(){ olCollapsed = true; olApply(); });
   }
+  if(olOpen){
+    olOpen.addEventListener('click', function(){ olCollapsed = false; olApply(); });
+  }
+
   // 仅展示 id 对应的那一节：从目标标题起，到下一个同级或更高级标题为止（含其间的所有子节点）。
   function showSection(id){
     if(!content) return;
@@ -290,7 +323,8 @@ const htmlScriptBlock = `
   }
 
   // 点击目录链接：目录(fodler)只在左侧展开/收起子树，右侧不展示其下 API；
-  // 只有点击具体的 API(request) 才在右侧单节展示，集合根点击可看全部。
+  // 只有点击具体的 API(request) 才在右侧单节展示。
+  // 集合名本身是正文里的 h1，点到它等于展示整篇文档（已无单独的全量展示按钮）。
   for(var li=0; li<tocLinks.length; li++){
     tocLinks[li].addEventListener('click', function(e){
       var href = this.getAttribute('href') || '';
@@ -306,9 +340,6 @@ const htmlScriptBlock = `
       showSection(href.slice(1));
     });
   }
-  // 显示全部按钮
-  var allBtn = document.querySelector('.toc-all');
-  if(allBtn){ allBtn.addEventListener('click', showAll); }
 
   // 默认进入单节展示：优先展示第一个 API（request），避免一屏铺满；无 API 时退回第一个标题
   var firstReq = list.querySelector('.toc-request a');
