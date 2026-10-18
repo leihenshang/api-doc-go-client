@@ -11,13 +11,17 @@ const commonBase: GlobalThemeOverrides['common'] = {
         "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
 }
 
-// 浅色：主色 #18a058（= --app-accent）、信息色 #2080f0（= --app-info）、底 #f5f5f5。
+// 浅色：信息色 #2080f0（= --app-info）、底 #f5f5f5。
+//
+// 主色分两个角色（UI-07）：品牌绿 #18a058 保留给 logo/装饰（--app-accent），
+// 但**可交互主色**（按钮底、选中态）必须满足白字 4.5:1 —— #18a058 只有 3.38:1，
+// 因此动作色用加深一档的 #0f7a41（白字 5.41:1，hover #12814a 4.92:1，pressed #0c6b39 6.61:1）。
 const commonLight: GlobalThemeOverrides['common'] = {
     ...commonBase,
-    primaryColor: '#18a058',
-    primaryColorHover: '#36ad6a',
-    primaryColorPressed: '#0c7a43',
-    primaryColorSuppl: '#18a058',
+    primaryColor: '#0f7a41',
+    primaryColorHover: '#12814a',
+    primaryColorPressed: '#0c6b39',
+    primaryColorSuppl: '#0f7a41',
     infoColor: '#2080f0',
     infoColorHover: '#4098fc',
     infoColorPressed: '#1060c0',
@@ -27,7 +31,9 @@ const commonLight: GlobalThemeOverrides['common'] = {
     textColorBase: '#202124',
 }
 
-// 暗色：沿用同一套语义，只把底色/边框换成 base.css 的深夜配值（主色提亮一档 = --app-accent 暗值）。
+// 暗色：沿用同一套语义，只把底色/边框换成 base.css 的深夜配值。
+// 暗色背景上「亮绿 + 白字」只有 2.86:1：这里保留亮绿（作为色块/文字 5.96:1 没问题），
+// 但把 primary 按钮的**文字**改成深色（见 Button.textColorPrimary），对比 5.96:1。
 const commonDark: GlobalThemeOverrides['common'] = {
     ...commonBase,
     primaryColor: '#36ad6a',
@@ -47,6 +53,11 @@ const commonDark: GlobalThemeOverrides['common'] = {
 export function buildThemeOverrides(dark: boolean): GlobalThemeOverrides {
     return {
         common: dark ? commonDark : commonLight,
+        // 暗色下主按钮是亮绿底：白字只有 2.86:1，改用近黑的墨绿字（5.96:1）。
+        // 浅色下主按钮是深绿底，白字 5.41:1 已达标，无需覆盖。
+        Button: dark
+            ? { textColorPrimary: '#06210f', textColorHoverPrimary: '#06210f', textColorPressedPrimary: '#06210f', textColorFocusPrimary: '#06210f' }
+            : {},
         Card: {
             paddingMedium: '16px 20px',
             borderRadiusMedium: '10px',

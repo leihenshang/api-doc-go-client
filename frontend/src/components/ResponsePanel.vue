@@ -132,7 +132,9 @@ async function reloadExamples(): Promise<void> {
 
 const meta = computed(() => {
   if (!display.value) return ''
-  const parts = [`${display.value.timeMs} ms`, formatBytes(display.value.size)]
+  // 亚毫秒级显示 0 会让人怀疑「没发出去」：统一显示 <1 ms（与 Postman 一致）
+  const ms = display.value.timeMs < 1 ? '<1' : String(display.value.timeMs)
+  const parts = [`${ms} ms`, formatBytes(display.value.size)]
   if (display.value.sentSize) parts.push(`↑ ${formatBytes(display.value.sentSize)}`)
   return parts.join(' · ')
 })
