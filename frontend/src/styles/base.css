@@ -171,8 +171,11 @@ body.dragging.row * {
 /* 桌面壳：留 8px 透明边 + 一圈柔和阴影，窗口边界不再"贴"在桌面上。
    窗口本身已透明（main.go 的 WindowIsTranslucent），这圈留白与阴影都画在窗口内。 */
 :root[data-shell='desktop'] {
-  --app-frame-gap: 8px;
-  --app-shadow-window: 0 8px 24px -4px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.12);
+  --app-frame-gap: 20px;
+  /* 两层阴影（对齐参考图那种「大扩散、无硬边」的悬浮感）：
+     ① 0/2px 贴边阴影——只负责把窗口边缘从背景里"切"出来，很淡；
+     ② 大扩散柔光——blur 30 需要 ≥20px 的留白才不会在窗口边界被裁成一条硬边。 */
+  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.05), 0 6px 28px -4px rgba(0, 0, 0, 0.18);
 }
 
 /* 最大化（双击标题栏 / 标题栏按钮 / Win+↑）时窗口铺满屏幕：圆角会让四角透出桌面
@@ -258,7 +261,7 @@ body.dragging.row * {
 
 /* 暗色窗口外阴影：深色桌面上更重一档，否则与背景糊在一起 */
 :root[data-theme='dark'][data-shell='desktop'] {
-  --app-shadow-window: 0 10px 28px -6px rgba(0, 0, 0, 0.7), 0 1px 3px rgba(0, 0, 0, 0.5);
+  --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.4), 0 12px 32px -6px rgba(0, 0, 0, 0.62);
 }
 
 body {
