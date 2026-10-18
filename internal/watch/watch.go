@@ -168,6 +168,7 @@ func (w *Watcher) onFS(root string, ev fsnotify.Event) {
 		if info, serr := os.Stat(ev.Name); serr == nil && info.IsDir() {
 			base := filepath.Base(ev.Name)
 			if !w.skip[base] && !strings.HasPrefix(base, ".") {
+				// 递归监听下新增子目录：Add 失败通常是目录已被删，下一轮扫描会自然收敛。
 				_ = w.w.Add(ev.Name)
 			}
 		}

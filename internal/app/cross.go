@@ -269,6 +269,7 @@ func rollbackCreatedFolders(dest *collection.Collection, dirs []string) {
 		if n == nil || n.UID == "" {
 			continue
 		}
+		// 目标端文件夹已存在时复用即可，删除失败不影响后续写入（新请求会落进同一目录）。
 		_ = dest.DeleteFolder(n.UID)
 	}
 }

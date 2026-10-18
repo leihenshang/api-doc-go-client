@@ -131,6 +131,7 @@ func (c *Collection) writeTrashIndex(m map[string]TrashEntry) {
 			sb.WriteByte('\n')
 		}
 	}
+	// 索引只是 .trash 目录的加速表：写失败最多让回收站少显示几条，文件本身仍在，可重建。
 	_ = os.WriteFile(c.trashIndexFile(), []byte(sb.String()), 0o644)
 }
 

@@ -47,6 +47,7 @@ func (a *App) recordHistory(r *collection.Request, res *runner.Result, sendErr e
 			entry.Response = b
 		}
 	}
+	// 发送历史是辅助功能：写失败不应让一次成功的发送变成失败，用户仍能看到响应。
 	_ = history.Append(entry, limit)
 }
 
