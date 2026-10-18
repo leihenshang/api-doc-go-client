@@ -260,3 +260,40 @@ test('[M4] 启动恢复上限：只恢复前 N 个，其余从工具条「最近
     )
     .toBe(bruno)
 })
+
+/**
+ * 集合级「全部收起 / 全部展开」只作用于**被点的那一个集合**。
+ *
+ * 早先的实现是「遍历 props.roots 全量折叠」，而菜单挂在某一行的集合上，
+ * 于是点 A 集合的「全部收起」会把 B、C 的树一起折掉；用户按行操作时预期是"这一行自己的集合"。
+ * 同时验证这类纯视图操作不会顺手切换活动根（早先它先走了 ensureActive）。
+ */
+test('[M5] 集合级「全部收起/展开」只作用于本集合，且不切活动根', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await app.addCollection('bruno-sample')
+  await openCollection(page, app)
+
+  const roots = page.getByTestId('tree.root')
+  await expect(roots).toHaveCount(2)
+  const basic = roots.filter({ hasText: 'e2e-basic' })
+  const bruno = roots.filter({ hasText: 'e2e-bruno' })
+  // 最后打开的是活动根；下面故意操作**非活动**的 basic
+  await expect(bruno).toHaveClass(/root-active/)
+  await expect(treeRow(page, 'ping')).toHaveCount(1)
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+
+  // ① 收起 basic 的全部：只 basic 的子行消失，另一个集合原样
+  await basic.getByTestId('tree.root.menu').click()
+  await page.getByTestId('tree.root.collapseAll').click()
+  await expect(treeRow(page, 'ping')).toHaveCount(0)
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+  await expect(roots).toHaveCount(2)
+  // 纯视图操作不应切换活动根（否则页签组、当前请求都会被换掉）
+  await expect(bruno).toHaveClass(/root-active/)
+
+  // ② 再展开 basic 的全部：仍然只影响它自己
+  await basic.getByTestId('tree.root.menu').click()
+  await page.getByTestId('tree.root.expandAll').click()
+  await expect(treeRow(page, 'ping')).toHaveCount(1)
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+})

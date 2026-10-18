@@ -117,35 +117,49 @@ const INDENT = 16
  */
 const GUIDE_OFFSET = 8
 
-/** 集合标题 "···" 下拉：集合级动作统一入口（展开/收起、新建分组/请求、导入 curl、重载、关闭）。 */
-const rootMenu = computed(() => [
-  {
-    key: 'all',
-    label: allCollapsed.value ? t('tree.expandAll') : t('tree.collapseAll'),
-    icon: () => h(NIcon, { component: allCollapsed.value ? ExpandOutline : ContractOutline }),
-    testid: allCollapsed.value ? 'tree.root.expandAll' : 'tree.root.collapseAll',
-  },
-  { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }), testid: 'tree.root.newFolder' },
-  { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }), testid: 'tree.root.newRequest' },
-  { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }), testid: 'tree.root.newGrpc' },
-  { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }), testid: 'tree.root.importCurl' },
-  { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }), testid: 'tree.root.sync' },
-  { type: 'divider', key: 'd1' },
-  { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }), testid: 'tree.root.reveal' },
-  { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }), testid: 'tree.root.reload' },
-  { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }), testid: 'tree.root.close' },
-])
+/**
+ * 集合标题 "···" 下拉：集合级动作统一入口（展开/收起、新建分组/请求、导入 curl、重载、关闭）。
+ *
+ * 必须按根生成（不是一份共享的 computed）：菜单挂在**某一个**集合的行上，
+ * 「全部收起 / 全部展开」的文案与 testid 取决于**这个根**的折叠态。
+ * 早先是一份共享菜单 + 全量 toggleAll，结果点 A 集合的「全部收起」把 B、C 也一起收了 ——
+ * 用户按行操作时预期的是"这一行自己的集合"。
+ */
+function rootMenuFor(root: string): DropdownOption[] {
+  const folded = rootAllCollapsed(root)
+  return [
+    {
+      key: 'all',
+      label: folded ? t('tree.expandAll') : t('tree.collapseAll'),
+      icon: () => h(NIcon, { component: folded ? ExpandOutline : ContractOutline }),
+      testid: folded ? 'tree.root.expandAll' : 'tree.root.collapseAll',
+    },
+    { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }), testid: 'tree.root.newFolder' },
+    { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }), testid: 'tree.root.newRequest' },
+    { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }), testid: 'tree.root.newGrpc' },
+    { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }), testid: 'tree.root.importCurl' },
+    { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }), testid: 'tree.root.sync' },
+    { type: 'divider', key: 'd1' },
+    { key: 'reveal', label: t('tree.revealDir'), icon: () => h(NIcon, { component: OpenOutline }), testid: 'tree.root.reveal' },
+    { key: 'reload', label: t('tree.reloadDir'), icon: () => h(NIcon, { component: RefreshOutline }), testid: 'tree.root.reload' },
+    { key: 'close', label: t('tree.closeDir'), icon: () => h(NIcon, { component: CloseOutline }), testid: 'tree.root.close' },
+  ]
+}
 
 /** 集合级动作先切到被点击的工作目录（写操作作用于它），再分发各分支。 */
 async function onRootMenu(root: string, key: string | number): Promise<void> {
-  // 只读动作（打开所在目录）作用于被点击的根本身：不切活动根，避免连带切换页签组
+  // 只读动作（打开所在目录 / 全部收起展开）作用于被点击的根本身：
+  // 不切活动根，避免只是想折一下树就把页签组和当前请求都换掉。
   if (key === 'reveal') {
     emit('reveal-root', root)
     return
   }
+  if (key === 'all') {
+    toggleRootAll(root)
+    return
+  }
   await ensureActive(root)
-  if (key === 'all') toggleAll()
-  else if (key === 'folder') void startAdd(root, '')
+  if (key === 'folder') void startAdd(root, '')
   else if (key === 'req') emit('new-request', '')
   else if (key === 'grpc') emit('new-grpc-request', '')
   else if (key === 'curl') emit('import-curl', '')
@@ -386,23 +400,26 @@ function onSyncRoot(root: string): void {
   emit('sync-root', root)
 }
 
-const allCollapsed = computed(() => {
-  if (!props.roots.length) return false
-  if (props.roots.some((r) => !collapsedRoots.value.has(r.root))) return false
-  const dirs: string[] = []
-  for (const r of props.roots) {
-    const walk = (nodes: TreeNode[]): void => {
-      for (const x of nodes) {
-        if (x.type === 'folder') {
-          dirs.push(folderKey(r.root, x.path))
-          if (x.children) walk(x.children)
-        }
-      }
+/** 某个根下所有分组的折叠键（按该根当前的树遍历；根不存在时为空）。 */
+function folderKeysOf(root: string): string[] {
+  const out: string[] = []
+  const walk = (nodes: TreeNode[]): void => {
+    for (const x of nodes) {
+      if (x.type !== 'folder') continue
+      out.push(folderKey(root, x.path))
+      if (x.children?.length) walk(x.children)
     }
-    walk(r.info.tree)
   }
-  return dirs.every((k) => collapsed.value.has(k))
-})
+  const item = props.roots.find((r) => r.root === root)
+  if (item) walk(treeOf(item))
+  return out
+}
+
+/** 该根是否已「全部收起」：根行收起，且根下每个分组都收起。 */
+function rootAllCollapsed(root: string): boolean {
+  if (!collapsedRoots.value.has(root)) return false
+  return folderKeysOf(root).every((k) => collapsed.value.has(k))
+}
 
 function isCollapsed(root: string, path: string): boolean {
   return !searching.value && collapsed.value.has(folderKey(root, path))
@@ -425,6 +442,27 @@ function toggleRoot(root: string): void {
 }
 
 /**
+ * 收起 / 展开**某一个根**下的全部（根行「···」→「全部收起 / 全部展开」）。
+ *
+ * 只碰这个根的键：`collapsed` 的键是「根 + 路径」，`collapsedRoots` 的键是根本身，
+ * 因此对 A 根全量折叠不会影响 B 根（早先误用了"遍历 props.roots 全收"的实现，
+ * 表现为点一个集合的「全部收起」所有集合一起收）。
+ */
+function toggleRootAll(root: string): void {
+  const fold = !rootAllCollapsed(root)
+  const keys = new Set(collapsed.value)
+  for (const k of folderKeysOf(root)) {
+    if (fold) keys.add(k)
+    else keys.delete(k)
+  }
+  const roots = new Set(collapsedRoots.value)
+  if (fold) roots.add(root)
+  else roots.delete(root)
+  collapsed.value = keys
+  collapsedRoots.value = roots
+}
+
+/**
  * 点根行（集合名这一整片区域）：切活动根，且集合收起时展开它 ——
  * 「点一下就该看到集合下的第一层」，不必去点那个小箭头。只展开不收起：
  * 收起是明确的收缩意图，仍走行内箭头（caret）切换，避免误点把树折掉。
@@ -441,30 +479,6 @@ function onRootRowClick(root: string, ev: MouseEvent): void {
     collapsedRoots.value = next
   }
   emit('activate', root)
-}
-
-function toggleAll(): void {
-  if (allCollapsed.value) {
-    collapsed.value = new Set()
-    collapsedRoots.value = new Set()
-    return
-  }
-  const next = new Set<string>()
-  const roots = new Set<string>()
-  for (const r of props.roots) {
-    roots.add(r.root)
-    const walk = (nodes: TreeNode[]): void => {
-      for (const x of nodes) {
-        if (x.type === 'folder') {
-          next.add(folderKey(r.root, x.path))
-          if (x.children) walk(x.children)
-        }
-      }
-    }
-    walk(r.info.tree)
-  }
-  collapsed.value = next
-  collapsedRoots.value = roots
 }
 
 function fail(e: unknown): void {
@@ -882,7 +896,7 @@ watch(
                 @click.stop="onSyncRoot(row.root)">
                 <n-icon :component="SyncOutline" :size="13" :class="{ spin: rootSyncing(row.root) }" />
               </button>
-              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenu" :render-label="renderMenuLabel"
+              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenuFor(row.root)" :render-label="renderMenuLabel"
                 @select="onRootMenu(row.root, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
                 <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')"
