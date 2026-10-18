@@ -115,6 +115,19 @@ function onContent(v: string): void {
   display: flex;
 }
 
+/* 阅读优先：预览比源码宽（默认 50/50 时表格会被压到断行，见 UI-13）。
+   md-editor 内部两个 wrapper 由它自己的 flex 控制，这里按比例覆盖。 */
+.body.edit :deep(.md-editor-input-wrapper) {
+  flex: 0 0 44%;
+  width: 44%;
+}
+
+.body.edit :deep(.md-editor-preview-wrapper) {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
 /* md-editor-v3 默认 height:500px（固定高），不覆盖就只占半屏 */
 .body.edit :deep(.md-editor) {
   flex: 1 1 auto;

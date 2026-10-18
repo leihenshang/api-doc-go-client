@@ -1053,7 +1053,8 @@ watch(
                   </template>
                 </div>
 
-                <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
+                <overview v-else :info="coll.info" @new-request="newDraft()"
+                  @open-request="openRequestInRoot($event, coll.activeRoot)" @import="showImport = true"
                   @export="exportDoc($event)" @mock="showMock = true" />
               </transition>
             </main>

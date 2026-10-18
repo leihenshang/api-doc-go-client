@@ -262,11 +262,6 @@ function save(): void {
   })()
 }
 
-/** 保存并应用（不关闭窗口）：适合边改边验证的设置项。 */
-function saveApply(): void {
-  void doSave()
-}
-
 /**
  * 勾选类配置即时生效：直接把整份表单写盘（含未保存的文本编辑，符合「勾选即生效」且无需点保存）。
  * 复用 doSave —— 它会 settings.save + 重拉 MCP 状态 + 发 saved。写盘后 form 与 store 一致，dirty 归零。
@@ -614,7 +609,8 @@ function close(): void {
       <div class="ft">
         <span class="sp" />
         <n-button size="small" data-testid="settings.cancel" @click="close">{{ t('common.cancel') }}</n-button>
-        <n-button size="small" :loading="saving" data-testid="settings.saveApply" @click="saveApply">{{ t('settings.saveApply') }}</n-button>
+        <!-- 只留一个主按钮：保存即写盘并立即生效（勾选项本来就是即时的），
+             「保存并应用」与「保存」的差别只有关不关窗，属于低频，去掉以减少选择成本（UI-18）。 -->
         <n-button size="small" type="primary" :loading="saving" data-testid="settings.save" @click="save">{{ t('common.save') }}</n-button>
       </div>
     </template>

@@ -4,9 +4,12 @@ import { NButton, NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import FeatureCards from '@/components/FeatureCards.vue'
+import MethodTag from '@/components/MethodTag.vue'
+import { message } from '@/lib/notice'
 import {
   CloudDownloadOutline,
   CloudUploadOutline,
+  CopyOutline,
   PlayOutline,
 } from '@vicons/ionicons5'
 import type { CollectionInfo, TreeNode } from '@/types'
@@ -16,6 +19,7 @@ const props = defineProps<{ info: CollectionInfo | null }>()
 // （原先散落在集合切换下拉里，现统一收拢到这里，入口更聚焦）。
 const emit = defineEmits<{
   'new-request': []
+  'open-request': [uid: string]
   import: []
   export: [format: 'markdown' | 'html']
   mock: []
@@ -32,6 +36,25 @@ function countRequests(nodes: TreeNode[]): number {
 }
 
 const requests = computed(() => countRequests(props.info?.tree ?? []))
+
+/** 树先序扁平化：概览页给一份「接口清单」，比六张特性卡有用得多（UI-01 的另一半）。 */
+interface FlatReq { uid: string; name: string; method: string; path: string }
+function flatRequests(nodes: TreeNode[], trail: string[], out: FlatReq[]): void {
+  for (const n of nodes) {
+    if (n.type === 'folder') {
+      flatRequests(n.children ?? [], [...trail, n.name], out)
+      continue
+    }
+    if (n.type === 'request') {
+      out.push({ uid: n.uid, name: n.name, method: n.method ?? 'GET', path: trail.join(' / ') })
+    }
+  }
+}
+const requestList = computed<FlatReq[]>(() => {
+  const out: FlatReq[] = []
+  flatRequests(props.info?.tree ?? [], [], out)
+  return out
+})
 const envs = computed(() => props.info?.envs.length ?? 0)
 
 const stats = computed(() => [
@@ -41,15 +64,25 @@ const stats = computed(() => [
   { key: 'files', label: t('overview.files'), value: t('overview.filesValue') },
 ])
 
+// 只留四个最高频的：其余（环境/关闭页签/撤销/重做）在 Ctrl+K 面板与按钮 tooltip 里都有，
+// 常驻 8 组会在首屏堆成两行、把「刚打开的集合」挤下去（UI-02）。
+/** 目录是最需要「完整可读 + 可粘贴」的信息：卡片宽度有限，给一个复制入口兜住（UI-08）。 */
+async function copyDir(): Promise<void> {
+  const dir = props.info?.dir ?? ''
+  if (!dir) return
+  try {
+    await navigator.clipboard.writeText(dir)
+    message.success(t('overview.dirCopied'))
+  } catch {
+    message.error(t('overview.copyFailed'))
+  }
+}
+
 const shortcuts = computed(() => [
   { keys: ['Ctrl', 'K'], label: t('overview.paletteHint') },
   { keys: ['Ctrl', 'Enter'], label: t('overview.send') },
   { keys: ['Ctrl', 'N'], label: t('overview.newRequest') },
-  { keys: ['Ctrl', 'E'], label: t('overview.envHint') },
-  { keys: ['Ctrl', 'W'], label: t('overview.closeTab') },
   { keys: ['Ctrl', 'S'], label: t('overview.save') },
-  { keys: ['Ctrl', 'Z'], label: t('overview.undo') },
-  { keys: ['Ctrl', 'Shift', 'Z'], label: t('overview.redo') },
 ])
 </script>
 
@@ -61,6 +94,10 @@ const shortcuts = computed(() => [
         <div v-for="s in stats" :key="s.key" class="st">
           <span class="sl">{{ s.label }}</span>
           <span class="sv mono" :title="s.value">{{ s.value }}</span>
+          <button v-if="s.key === 'dir'" class="copy" type="button" :title="t('overview.copyDir')"
+            data-testid="overview.copyDir" @click="copyDir">
+            <n-icon :component="CopyOutline" :size="12" />
+          </button>
         </div>
       </div>
       <div class="acts">
@@ -100,11 +137,96 @@ const shortcuts = computed(() => [
       </ul>
     </section>
 
-    <feature-cards />
+    <!-- 有请求时给「接口清单」：既是快速入口，也顶掉原来六张特性卡的位置（UI-01） -->
+    <section v-if="requests > 0" class="list">
+      <div class="list-hd">
+        <h2 class="list-ttl">{{ t('overview.allRequests') }}</h2>
+        <span class="list-count">{{ t('overview.total', { n: requests }) }}</span>
+      </div>
+      <ul class="rows">
+        <li v-for="r in requestList" :key="r.uid">
+          <button class="row" type="button" :data-uid="r.uid" @click="emit('open-request', r.uid)">
+            <method-tag :method="r.method" />
+            <span class="nm">{{ r.name }}</span>
+            <span class="pa">{{ r.path }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
+
+    <!-- 空集合：展示特性卡，帮第一次打开的人认识产品 -->
+    <feature-cards v-if="requests === 0" />
   </div>
 </template>
 
 <style scoped>
+.list {
+  padding: 18px 24px 24px;
+}
+
+.list-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.list-ttl {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text);
+}
+
+.list-count {
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 900px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 10px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--app-hover-soft);
+}
+
+.row .nm {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .pa {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
 .overview {
   flex: 1 1 auto;
   overflow: auto;
@@ -130,6 +252,7 @@ const shortcuts = computed(() => [
 }
 
 .st {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -137,6 +260,32 @@ const shortcuts = computed(() => [
   border: 1px solid var(--app-border);
   border-radius: 8px;
   background: var(--app-panel);
+}
+
+.st .copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.st:hover .copy {
+  display: flex;
+}
+
+.st .copy:hover {
+  background: var(--app-hover);
+  color: var(--app-text);
 }
 
 .sl {

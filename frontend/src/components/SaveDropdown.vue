@@ -43,7 +43,7 @@ function run(action: 'save-file' | 'save-example'): void {
   >
     <template #trigger>
       <button class="save-btn" type="button" data-testid="resp.save">
-        {{ t('common.save') }}
+        {{ t('resp.saveResponseBtn') }}
         <n-icon :component="CaretDownOutline" :size="12" />
       </button>
     </template>
