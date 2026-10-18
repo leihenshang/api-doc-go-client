@@ -965,6 +965,16 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 	if strings.Contains(d.Name(), ".secrets.") {
 		return nil // secret 文件随主环境文件一起处理
 	}
+	// 文档是 .md，frontmatter 之后就是 Markdown 正文，整文件 YAML 解析几乎必然失败
+	// （表格 / 列表 / 缩进都能让 yaml.Unmarshal 报错），必须先按文档解析再谈其它类型。
+	// 此前顺序反了：正文里带 Markdown 表格的文档会在这里被当成「非法 YAML」丢掉，
+	// 表现是「文档保存成功，但树里看不到、搜索结果里也没有」。
+	if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		if doc, err := parseDocFile(rel, data); err == nil {
+			res.docs[doc.UID] = doc
+		}
+		return nil
+	}
 	head, ok := parseScanHead(data)
 	if !ok {
 		return nil // 非法 YAML：跳过（不中断整个扫描）
@@ -975,10 +985,9 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 	case "folder":
 		scanFolderFile(res, dir, head)
 	default:
-		// B19 文档条目：任意目录下的 .md 都算（README.md 已被 scanExtAllowed 排除）。
-		// 此前这里还卡着 dir == docsDir，导致放在分组目录里的 .md 扫不到 ——
-		// 表现就是「新建文档后树里没有 + 打开提示条目不存在」。
-		// parseDocFile 要求 frontmatter 带 uid，普通 markdown 笔记会自动跳过。
+		// 其它类型（含 .md 兜底，正常情况下已在函数开头处理）：不是请求也不是分组，忽略。
+		// 文档条目走 parseDocFile：任意目录下的 .md 都算（README.md 已被 scanExtAllowed 排除），
+		// 要求 frontmatter 带 uid，普通 markdown 笔记会被跳过。
 		if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			if doc, err := parseDocFile(rel, data); err == nil {
 				res.docs[doc.UID] = doc
