@@ -115,17 +115,21 @@ function onContent(v: string): void {
   display: flex;
 }
 
-/* 阅读优先：预览比源码宽（默认 50/50 时表格会被压到断行，见 UI-13）。
-   md-editor 内部两个 wrapper 由它自己的 flex 控制，这里按比例覆盖。 */
-.body.edit :deep(.md-editor-input-wrapper) {
-  flex: 0 0 44%;
-  width: 44%;
-}
-
+/* 源码 / 预览各占一半。
+   注意：**不要**给这两个 wrapper 设百分比 flex-basis —— 它们不是
+   `.md-editor-content` 的直接子元素（中间还隔着一层），百分比基准是那层而不是外层，
+   写 44% 实际只算出 22%，源码区会被压成一条窄栏、文本提前折行。 */
+.body.edit :deep(.md-editor-input-wrapper),
 .body.edit :deep(.md-editor-preview-wrapper) {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: auto;
   min-width: 0;
+}
+
+/* 预览首元素的 margin-top 归零：h2 自带 1.2em 上外边距，而预览是 overflow 滚动容器，
+   外边距不会穿透到容器外，于是标题比左侧源码首行低了 30px 左右（顶部一片空白）。 */
+.body.edit :deep(.md-editor-preview > :first-child) {
+  margin-top: 0;
 }
 
 /* md-editor-v3 默认 height:500px（固定高），不覆盖就只占半屏 */
