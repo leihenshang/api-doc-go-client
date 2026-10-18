@@ -715,6 +715,7 @@ export default {
     formatPostman: 'Postman Collection',
     formatOpenapi: 'OpenAPI',
     formatBruno: 'Bruno 集合',
+    formatApiDocGo: 'api-doc-go 集合包（.apidocgo.json）',
     dest: '目标分组',
     content: '内容',
     pickFile: '选择文件…',
@@ -729,6 +730,7 @@ export default {
   export: {
     markdown: '导出 Markdown',
     html: '导出 HTML',
+    bundle: '导出 api-doc-go 集合',
     saved: '已导出到 {path}',
   },
   mock: {

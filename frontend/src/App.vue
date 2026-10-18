@@ -411,10 +411,11 @@ function onCommand(key: string): void {
   else if (key === 'export-html') void exportDoc('html')
 }
 
-// ---- 导出文档（H10）----
-async function exportDoc(format: 'markdown' | 'html'): Promise<void> {
+// ---- 导出（H10：Markdown / HTML；item 26：集合整包 apidocgo）----
+async function exportDoc(format: 'markdown' | 'html' | 'apidocgo'): Promise<void> {
   try {
-    const path = await api.exportDoc(format, coll.name + (format === 'html' ? '.html' : '.md'))
+    const ext = format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : '.md'
+    const path = await api.exportDoc(format, coll.name + ext)
     if (path) message.success(t('export.saved', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))

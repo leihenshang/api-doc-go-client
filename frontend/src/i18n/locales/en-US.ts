@@ -713,6 +713,7 @@ export default {
     formatPostman: 'Postman Collection',
     formatOpenapi: 'OpenAPI',
     formatBruno: 'Bruno Collection',
+    formatApiDocGo: 'api-doc-go bundle (.apidocgo.json)',
     dest: 'Target folder',
     content: 'Content',
     pickFile: 'Pick file…',
@@ -727,6 +728,7 @@ export default {
   export: {
     markdown: 'Export Markdown',
     html: 'Export HTML',
+    bundle: 'Export api-doc-go collection',
     saved: 'Exported to {path}',
   },
   mock: {

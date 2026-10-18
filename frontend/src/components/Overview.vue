@@ -7,6 +7,7 @@ import FeatureCards from '@/components/FeatureCards.vue'
 import MethodTag from '@/components/MethodTag.vue'
 import { message } from '@/lib/notice'
 import {
+  ArchiveOutline,
   CloudDownloadOutline,
   CloudUploadOutline,
   CopyOutline,
@@ -15,13 +16,13 @@ import {
 import type { CollectionInfo, TreeNode } from '@/types'
 
 const props = defineProps<{ info: CollectionInfo | null }>()
-// 集合概要页承载的常用操作：新建请求 + 导入接口 / 导出 MD / 导出 HTML / 本地 Mock
+// 集合概要页承载的常用操作：新建请求 + 导入接口 / 导出 MD / 导出 HTML / 导出集合包 / 本地 Mock
 // （原先散落在集合切换下拉里，现统一收拢到这里，入口更聚焦）。
 const emit = defineEmits<{
   'new-request': []
   'open-request': [uid: string]
   import: []
-  export: [format: 'markdown' | 'html']
+  export: [format: 'markdown' | 'html' | 'apidocgo']
   mock: []
 }>()
 const { t } = useI18n()
@@ -121,6 +122,13 @@ const shortcuts = computed(() => [
             <n-icon :component="CloudUploadOutline" :size="14" />
           </template>
           {{ t('export.html') }}
+        </n-button>
+        <!-- 集合整包：目录 + 请求 + 文档，可被另一个 api-doc-go 客户端直接导入（item 26） -->
+        <n-button class="act" size="medium" secondary data-testid="overview.exportBundle" @click="emit('export', 'apidocgo')">
+          <template #icon>
+            <n-icon :component="ArchiveOutline" :size="14" />
+          </template>
+          {{ t('export.bundle') }}
         </n-button>
         <n-button class="act" size="medium" secondary data-testid="overview.mock" @click="emit('mock')">
           <template #icon>
