@@ -366,6 +366,27 @@ func walkMDTree(b *strings.Builder, nodes []*Node, res *scanResult, shiftDocs bo
 			}
 			continue
 		}
+		// 文档条目（集合里的 .md）：此前落到 res.reqs 查不到就 continue，导出直接把它丢了 ——
+		// 表现是「导出的 md/html 里只有接口，一篇文档都没有」（B19 让 .md 进了树，导出没跟上）。
+		if n.Type == "doc" {
+			d, ok := res.docs[n.UID]
+			if !ok {
+				continue
+			}
+			title := d.Name
+			if d.Icon != "" {
+				title = d.Icon + " " + title
+			}
+			fmt.Fprintf(b, "%s %s\n\n", pad, title)
+			if body := strings.TrimSpace(d.Content); body != "" {
+				if shiftDocs {
+					// 与请求附带的 Docs 同口径：整体降一级，HTML 单节展示时才归属到这篇文档之下。
+					body = shiftHeadings(body, level+1)
+				}
+				fmt.Fprintf(b, "%s\n\n", body)
+			}
+			continue
+		}
 		r, ok := res.reqs[n.UID]
 		if !ok {
 			continue
@@ -630,8 +651,8 @@ func (t *tocBuilder) nextID() string {
 // isTop 标记顶层，仅第一个顶层目录默认展开（data-default/aria-expanded），嵌套目录一律默认折叠。
 func (t *tocBuilder) walk(nodes []*Node, depth int, isTop bool) {
 	for i, n := range nodes {
-		// doc 节点不进正文标题，TOC 也跳过（与 ExportMarkdown 行为一致）
 		if n.Type == "doc" {
+			t.doc(n)
 			continue
 		}
 		if n.Type == "folder" {
@@ -682,6 +703,31 @@ func (t *tocBuilder) request(n *Node) {
 			t.id += countDocHeadings(r.Docs)
 		}
 	}
+}
+
+// doc 写一个文档条目（集合里的 .md）。
+// 与 request 同理：该条目正文里的标题同样会被 mdToHTML 占用 toc-N，
+// 必须把「自身标题 1 + 正文标题数」都计入计数器，后续节点的锚点才不会错位。
+func (t *tocBuilder) doc(n *Node) {
+	id := t.nextID()
+	t.b.WriteString(`<li class="toc-doc">`)
+	t.b.WriteString(docBadge())
+	t.b.WriteString(`<a href="#`)
+	t.b.WriteString(id)
+	t.b.WriteString(`">`)
+	t.b.WriteString(html.EscapeString(n.Name))
+	t.b.WriteString(`</a></li>`)
+	if t.res != nil {
+		if d, ok := t.res.docs[n.UID]; ok {
+			t.id += countDocHeadings(d.Content)
+		}
+	}
+}
+
+// docBadge 文档条目的前置徽标：复用方法徽标的 .tm 容器（同宽同字号），
+// 只是配色不同，TOC 里请求与文档两类条目才能对齐成一条线。
+func docBadge() string {
+	return `<span class="tm m-doc">DOC</span>`
 }
 
 // mdToHTML 覆盖导出用到的 Markdown 子集（# 标题、``` 代码、**粗体**、`行内代码`、表格、

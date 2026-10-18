@@ -139,7 +139,8 @@ func TestExportHTMLTOC(t *testing.T) {
 	if !equalSet(ids, wantSeq) {
 		t.Fatalf("TOC id 不连续或重复: got=%v want=%v", ids, wantSeq)
 	}
-	// 3) 数量 = 树中 folder/request 节点数 + 1（集合名）；doc 节点不计入
+	// 3) 数量 = 树中 folder/request/doc 节点数 + 1（集合名）
+	//    doc 条目现在也进 TOC（导出必须带上文档），所以这里不能再跳过它们。
 	tree, err := c.Tree()
 	if err != nil {
 		t.Fatalf("Tree: %v", err)
@@ -148,9 +149,6 @@ func TestExportHTMLTOC(t *testing.T) {
 	countNodes = func(nodes []*Node) int {
 		n := 0
 		for _, x := range nodes {
-			if x.Type == "doc" {
-				continue
-			}
 			n++
 			n += countNodes(x.Children)
 		}
@@ -663,5 +661,102 @@ func TestInfoRespUIDs(t *testing.T) {
 	}
 	if len(uids) != 1 || uids[0] != r.UID {
 		t.Fatalf("RespUIDs=%v，期望仅 [%s]", uids, r.UID)
+	}
+}
+
+// TestExportIncludesDocs 导出的 Markdown / HTML 必须包含集合里的文档条目（doc 类型）。
+//
+// 回归背景：`walkMDTree` 只处理 folder 与 request，doc 节点去 res.reqs 里查不到就 continue；
+// 而 TOC 也显式跳过 doc —— 结果是「导出的文档里只有接口，一篇文档都没有」。
+// B19 让 .md 进了集合树之后，导出这条路一直没跟上。
+func TestExportIncludesDocs(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "指南"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	// 一个请求（保证导出里接口与文档混排时的顺序/计数都走到）
+	r, err := c.CreateRequest("指南", "快速开始", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存请求: %v", err)
+	}
+	d, err := c.CreateDoc("接入说明", "", "指南")
+	if err != nil {
+		t.Fatalf("建文档: %v", err)
+	}
+	d.Content = "## 鉴权方式\n\n先取 token。\n\n| 变量 | 说明 |\n| --- | --- |\n| `token` | 访问令牌 |\n\n### 签名\n\n按 app_secret 计算。\n"
+	if err := c.SaveDoc(d); err != nil {
+		t.Fatalf("保存文档: %v", err)
+	}
+
+	md, err := c.ExportMarkdown()
+	if err != nil {
+		t.Fatalf("ExportMarkdown: %v", err)
+	}
+	for _, want := range []string{"接入说明", "鉴权方式", "访问令牌", "签名", "按 app_secret 计算"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("Markdown 缺文档内容 %q:\n%s", want, md)
+		}
+	}
+
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	for _, want := range []string{"toc-doc", "接入说明", "鉴权方式", "访问令牌", "DOC"} {
+		if !strings.Contains(htmlOut, want) {
+			t.Fatalf("HTML 缺文档内容 %q:\n%s", want, htmlOut)
+		}
+	}
+	// 正文 id 必须是连续 0..N-1；TOC 链接是其子集——文档正文里的更深标题（## / ###）
+	// 只出现在正文，不进目录，所以两边不要求相等。
+	ids := collectTOCIDs(htmlOut, `id="toc-`)
+	wantSeq := make([]int, len(ids))
+	for i := range wantSeq {
+		wantSeq[i] = i
+	}
+	if !equalSet(ids, wantSeq) {
+		t.Fatalf("正文锚点不连续或重复: got=%v want=%v", ids, wantSeq)
+	}
+	hrefs := collectTOCIDs(htmlOut, `href="#toc-`)
+	for _, h := range hrefs {
+		found := false
+		for _, id := range ids {
+			if h == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("TOC 链接 #toc-%d 在正文里没有对应锚点（ids=%v）", h, ids)
+		}
+	}
+}
+
+// TestExportDocHeadingShifted HTML 导出时文档正文标题要降级到文档标题之下，
+// 否则「单节展示」按标题级别圈定一节时会把正文整段排除在外。
+func TestExportDocHeadingShifted(t *testing.T) {
+	c := newTestCollection(t)
+	d, err := c.CreateDoc("说明", "", "")
+	if err != nil {
+		t.Fatalf("建文档: %v", err)
+	}
+	d.Content = "## 第二节\n\n正文。\n"
+	if err := c.SaveDoc(d); err != nil {
+		t.Fatalf("保存文档: %v", err)
+	}
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	// 层级链条：docs 文件夹 h2 → 文档标题 h3 → 正文 ## 必须再降一级成 h4，
+	// 这样「单节展示」按标题级别圈节时正文才归属在这篇文档之下。
+	if !strings.Contains(htmlOut, "<h3") || !strings.Contains(htmlOut, "说明") {
+		t.Fatalf("文档标题缺失:\n%s", htmlOut)
+	}
+	if !strings.Contains(htmlOut, ">第二节</h4>") {
+		t.Fatalf("文档正文标题未降级（期望 h4，比文档标题深一级）:\n%s", htmlOut)
 	}
 }

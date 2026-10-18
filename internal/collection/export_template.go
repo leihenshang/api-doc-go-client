@@ -72,7 +72,11 @@ const htmlStyleBlock = `</title>
   /* 请求条目：方法徽标 + 名称横排（对齐客户端集合树 MethodTag：等宽小字、语义色，无底色）；
      item 10：hover / 选中时**整行**（含徽标）上绿底，名称反白；徽标做反色处理 ——
      白底胶囊 + 方法原色文字（各方法颜色不同，白底对全部语义色都有对比度） */
-  .toc-request { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
+  .toc-request, .toc-doc { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
+  .toc-doc > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; padding: 0; }
+  .toc-doc:hover, .toc-doc.selected { background: #18a058; }
+  .toc-doc:hover > a, .toc-doc.selected > a { color: #fff; }
+  .toc-doc:hover .tm, .toc-doc.selected .tm { background: #fff; border-radius: 3px; padding: 0 4px; }
   .toc-request > a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; padding: 0; }
   .toc-request:hover, .toc-request.selected { background: #18a058; }
   .toc-request:hover > a, .toc-request.selected > a { color: #fff; }
@@ -86,6 +90,7 @@ const htmlStyleBlock = `</title>
   .m-patch { color: #8a2be2; }
   .m-grpc { color: #0e94a8; }
   .m-other { color: #8a9199; }
+  .m-doc { color: #6b7280; }
   /* 正文 API 标题内的方法徽标：与标题文字拉开间距（TOC 里由 flex gap 控制，不叠加） */
   h1 .tm, h2 .tm, h3 .tm, h4 .tm, h5 .tm, h6 .tm { margin-right: 8px; }
   .content { flex: 1 1 auto; min-width: 0; }
@@ -196,7 +201,7 @@ const htmlScriptBlock = `
   function clearCurrent(){
     for(var i=0;i<tocLinks.length;i++){ tocLinks[i].classList.remove('current'); }
     // 请求行整行选中态（item 10）：随行清除
-    var rows = list.querySelectorAll('.toc-request.selected');
+    var rows = list.querySelectorAll('.toc-request.selected, .toc-doc.selected');
     for(var j=0;j<rows.length;j++){ rows[j].classList.remove('selected'); }
   }
 
