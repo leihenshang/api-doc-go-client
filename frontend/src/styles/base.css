@@ -187,7 +187,9 @@ body.dragging.row * {
    阴影一旦伸到窗口边就被裁断，切口处仍有可见灰度差，看起来就是"阴影到边缘一刀切、没有渐隐"。
    实测（把留白临时放大到 60px 后逐行扫亮度，直到与桌面同亮度）：
      浅色 `0 8px 32px -6px .16` 需要 **28px**；暗色 `0 8px 26px -6px .55` 需要 **24px**。
-   取 32px = 28 + 4px 余量；改下面的模糊/偏移/扩散后必须重测这个值，不能拍脑袋写。 */
+   取 32px = 28 + 4px 余量；改下面的模糊/偏移/扩散后必须重测这个值，不能拍脑袋写。
+
+   （Windows 不用这套：窗口不透明，留白=0，见文件下方的 windows 覆盖。） */
 :root[data-shell='desktop'] {
   --app-frame-gap: 32px;
   /* 两层阴影（对齐参考图那种「大扩散、无硬边」的悬浮感）：
@@ -283,8 +285,25 @@ body.dragging.row * {
   --app-shadow-window: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 26px -6px rgba(0, 0, 0, 0.55);
 }
 
+/* Windows：窗口**没有真正的逐像素透明**。
+   Wails 在 Win11 22H2+ 走 DWMWA_SYSTEMBACKDROP_TYPE（Mica / Acrylic 这类系统材质），
+   更早的系统退化成 SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND)；
+   两条路都会把页面透明的像素填成系统材质（浅色下几乎是白的）。
+   于是"给阴影留的 32px 透明边"在 Windows 上变成窗口四周一圈厚白框 —— 阴影反而画在白底上，
+   看起来就是"外框有一圈厚边框"（截图与实测见 doc/ui-review-2026-10-18 §11）。
+
+   所以 Windows 不画自绘外框：留白归零（内容直接铺到窗口边）、圆角归零（Win11 的圆角由 DWM 给，
+   CSS 再裁一次会在四角露出窗口底色）、自绘阴影关掉（Frameless 下系统仍会给 Aero 阴影，
+   见 windows.Options.DisableFramelessWindowDecorations 的默认值 false）。 */
+:root[data-shell='desktop'][data-platform='windows'] {
+  --app-frame-gap: 0px;
+  --app-radius-window: 0px;
+  --app-shadow-window: none;
+}
+
 body {
-  /* 外框留白：把窗口四周让出 --app-frame-gap，阴影尾巴才衰减得完（桌面态 32px，其余 0）。
+  /* 外框留白：把窗口四周让出 --app-frame-gap，阴影尾巴才衰减得完
+     （桌面态 32px；Windows 0，那里窗口不透明，留白只会变成一圈厚白框）。
      值由阴影实测尾巴长度决定，见 :root[data-shell='desktop'] 的注释。 */
   padding: var(--app-frame-gap);
   box-sizing: border-box;

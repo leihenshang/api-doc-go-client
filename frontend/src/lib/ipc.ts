@@ -53,6 +53,21 @@ export function hasWailsRuntime(): boolean {
 }
 
 /**
+ * 运行平台（同步判断，保证首帧就用对样式）：windows / darwin / linux / other。
+ *
+ * 用 UA 而不是 `runtime.Environment()`：后者是异步 IPC，等它返回时首帧已经画完，
+ * 会先闪一下别平台的窗口留白。桌面壳里的 UA 由系统 WebView 给出
+ * （Windows 是 WebView2，串里必有 "Windows"），区分三端足够可靠。
+ */
+export function runtimePlatform(): 'windows' | 'darwin' | 'linux' | 'other' {
+  const ua = navigator.userAgent
+  if (ua.includes('Windows')) return 'windows'
+  if (ua.includes('Macintosh') || ua.includes('Mac OS X')) return 'darwin'
+  if (ua.includes('Linux') || ua.includes('X11')) return 'linux'
+  return 'other'
+}
+
+/**
  * 订阅 Go 侧 EventsEmit（桌面端）；devserver 无此通道。
  * 统一转发为 window CustomEvent，App 用 addEventListener 接。
  */
