@@ -125,7 +125,7 @@ func TestEnsureGitignoreKeepsCRLF(t *testing.T) {
 func TestEnsureGitignoreUntouchedWhenComplete(t *testing.T) {
 	dir := t.TempDir()
 	// 顺序与默认清单不同、外加用户自定义行与结尾无换行：都不该被「规整」
-	orig := "*.tmp\nnode_modules/\n.sync.json\n.conflicts/\n.trash/\n*.local.yml\nenvironments/*.secrets.yml\n" + gitignoreBanner
+	orig := "*.tmp\nnode_modules/\n.sync.json\n.sync-deletes.json\n.conflicts/\n.trash/\n*.local.yml\nenvironments/*.secrets.yml\n" + gitignoreBanner
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(orig), 0o644); err != nil {
 		t.Fatalf("写初始 .gitignore: %v", err)
 	}

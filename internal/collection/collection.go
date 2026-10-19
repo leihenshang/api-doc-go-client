@@ -3,6 +3,7 @@
 package collection
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -69,10 +70,12 @@ type Collection struct {
 const gitignoreBanner = "# 客户端自动维护"
 
 const gitignoreContent = gitignoreBanner + "\n" +
-	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.trash/\n.conflicts/\nnode_modules/\n"
+	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.sync-deletes.json\n.trash/\n.conflicts/\nnode_modules/\n"
 
 // gitignoreEntries 需要忽略的条目（由 gitignoreContent 派生，避免同一份清单在两处维护而漂移）：
-// secret 环境文件、本地覆盖、明文存 PAT 的 .sync.json，以及本地目录。
+// secret 环境文件、本地覆盖、明文存 PAT 的 .sync.json、纯本地的待推送删除状态
+// （.sync-deletes.json，P1-10：它和 .sync.json 同类——只对本机有意义，提交进仓库只会产生噪音
+// 并把「删了还没推」这种临时状态共享给别人），以及本地目录。
 var gitignoreEntries = func() []string {
 	lines := strings.Split(gitignoreContent, "\n")
 	out := make([]string, 0, len(lines))
@@ -2075,7 +2078,7 @@ func (c *Collection) DeleteRequest(uid string) error {
 	if err := c.moveToTrash(filepath.Join(c.Dir, filepath.FromSlash(r.Path))); err != nil {
 		return err
 	}
-	c.recordPendingDelete(uid)
+	c.recordPendingDelete(uid, PendingDeleteAPI)
 	return nil
 }
 
@@ -2083,34 +2086,89 @@ func (c *Collection) DeleteRequest(uid string) error {
 
 const pendingDeletesFile = ".sync-deletes.json"
 
-// recordPendingDelete 记一条待推送的删除。
-func (c *Collection) recordPendingDelete(uid string) {
+// 待推送删除的实体类型取值（与服务端 op 的 type 同名）。
+const (
+	// PendingDeleteAPI 请求（接口）条目被删除。
+	PendingDeleteAPI = "api"
+	// PendingDeleteDoc 文档条目被删除。
+	PendingDeleteDoc = "doc"
+)
+
+// PendingDelete 一条待推送的删除墓碑。
+//
+// 为什么必须带 Type：请求与文档共用同一份 .sync-deletes.json，而同步引擎必须按实体类型出网
+// （delete/api/<uid> 与 delete/doc/<uid> 是两类操作）。早前只存 uid 字符串，引擎一律按 api 出网，
+// 于是「删一篇文档」会同时产生 delete/api/<docUid> 与 delete/doc/<docUid> 两条 op；服务端对未知
+// 的 api uid 多半回 rejected，导致 allOk=false、待删列表永远清不掉，每轮重复推送并报错（P1-10）。
+type PendingDelete struct {
+	UID  string `json:"uid"`
+	Type string `json:"type"`
+}
+
+// UnmarshalJSON 反序列化，兼容旧格式。
+//
+// 旧版 .sync-deletes.json 是 ["uid1","uid2"]（纯字符串数组，且旧版只有 DeleteRequest 记墓碑），
+// 所以字符串元素一律按「接口删除」解释；对象元素按字段解析，type 缺失或为空也回落 api
+// （手写/被外部工具改过的文件不该因为少个字段就丢掉一条删除）。
+func (p *PendingDelete) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		p.UID, p.Type = s, PendingDeleteAPI
+		return nil
+	}
+	var obj struct {
+		UID  string `json:"uid"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return err
+	}
+	p.UID, p.Type = obj.UID, obj.Type
+	if p.Type == "" {
+		p.Type = PendingDeleteAPI
+	}
+	return nil
+}
+
+// recordPendingDelete 记一条待推送的删除墓碑（按 uid+type 去重：同一条目被删两次只留一条，
+// 而同一个 uid 恰好既是请求又是文档的极端情形仍然分两条，各自按自己的类型出网）。
+func (c *Collection) recordPendingDelete(uid, typ string) {
 	if uid == "" {
 		return
 	}
+	if typ == "" {
+		typ = PendingDeleteAPI
+	}
 	list := c.LoadPendingDeletes()
-	for _, u := range list {
-		if u == uid {
+	for _, d := range list {
+		if d.UID == uid && d.Type == typ {
 			return
 		}
 	}
-	list = append(list, uid)
+	list = append(list, PendingDelete{UID: uid, Type: typ})
 	c.SavePendingDeletes(list)
 }
 
-// LoadPendingDeletes 读待推送删除列表。
-func (c *Collection) LoadPendingDeletes() []string {
+// LoadPendingDeletes 读待推送删除列表（新旧两种格式都能读，见 PendingDelete.UnmarshalJSON）。
+func (c *Collection) LoadPendingDeletes() []PendingDelete {
 	data, err := os.ReadFile(filepath.Join(c.Dir, pendingDeletesFile))
 	if err != nil {
 		return nil
 	}
-	var list []string
+	var list []PendingDelete
 	_ = json.Unmarshal(data, &list)
 	return list
 }
 
-// SavePendingDeletes 写待推送删除列表。
-func (c *Collection) SavePendingDeletes(list []string) error {
+// SavePendingDeletes 写待推送删除列表（一律写新格式的对象数组）。
+func (c *Collection) SavePendingDeletes(list []PendingDelete) error {
 	if len(list) == 0 {
 		_ = os.Remove(filepath.Join(c.Dir, pendingDeletesFile))
 		return nil

@@ -166,7 +166,7 @@ func TestQAOpenGitignoreAppendsOnlyMissing(t *testing.T) {
 // 结尾无换行）：Open 前后必须一个字节都不变。
 func TestQAOpenGitignoreByteIdenticalWhenComplete(t *testing.T) {
 	dir := t.TempDir()
-	orig := "*.tmp\n.sync.json\nnode_modules/\n.conflicts/\n.trash/\n*.local.yml\nenvironments/*.secrets.yml\n" + gitignoreBanner
+	orig := "*.tmp\n.sync.json\n.sync-deletes.json\nnode_modules/\n.conflicts/\n.trash/\n*.local.yml\nenvironments/*.secrets.yml\n" + gitignoreBanner
 	qaWriteFile(t, dir, ".gitignore", orig, 0o644)
 	before, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	if err != nil {

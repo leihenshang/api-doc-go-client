@@ -318,11 +318,9 @@ func TestQAPushDirtySecondRoundIdempotent(t *testing.T) {
 	}
 }
 
-// TestQAPushDirtyDocDeletePushed 只删除一篇文档：必须推送 doc delete tombstone。
-// 注意 DeleteDoc 会同时往 pendingDeletes 记一条（见 collection.doc.go:173），
-// 而 collectTombstoneOps 一律按 Type="api" 出网，于是同一次删除会出两条 op：
-// 一条 type=api（实体类型错了，既有缺陷，已单独上报 P1）、一条 type=doc（正确）。
-// 本用例只锁「doc delete 必须被推出去」这条回归点。
+// TestQAPushDirtyDocDeletePushed 只删除一篇文档：本轮推送必须**恰好 1 条** op，且是 delete/doc/<uid>。
+// P1-10 已修（墓碑带类型 + collectDocOps 跳过 pending 里的 uid）；此前这里只数 doc 删除的条数、
+// 对多出来的 api 删除仅 t.Logf，同类回归会被放过——现在收紧成条数与类型都断言。
 func TestQAPushDirtyDocDeletePushed(t *testing.T) {
 	f, cli := newFakeServer(t)
 	c, e := newBoundEngine(t, cli)
@@ -350,17 +348,16 @@ func TestQAPushDirtyDocDeletePushed(t *testing.T) {
 		t.Fatal("删除文档也必须调用 Push（否则本地删除永远同步不到服务端）")
 	}
 	ops := qaLastOps(f)
-	if n := qaCountOp(ops, "doc", "delete"); n != 1 {
-		t.Fatalf("应推送 1 条 doc delete，got %d，ops=%+v", n, ops)
+	if len(ops) != 1 {
+		t.Fatalf("一次文档删除必须恰好推送 1 条 op（不得同时发 api 与 doc），got %d，ops=%+v", len(ops), ops)
+	}
+	if op := ops[0]; op.Op != "delete" || op.Type != "doc" || op.UID != d.UID {
+		t.Fatalf("应推送 delete/doc/%s，got %+v", d.UID, op)
 	}
 	if _, ok := e.Bind.DocHashes[d.UID]; ok {
 		t.Fatal("删除推送成功后应清掉该 doc 的 hash 基线")
 	}
-	// 既有缺陷留痕（不在此处判失败，避免把与本次改动无关的问题染红门禁）
-	for _, o := range ops {
-		if o.Type == "api" && o.UID == d.UID {
-			t.Logf("既有缺陷 P1：同一次文档删除还发了一条 type=api 的 delete（uid 是文档 uid），"+
-				"ops=%+v", ops)
-		}
+	if del := c.LoadPendingDeletes(); len(del) != 0 {
+		t.Fatalf("删除推送成功后应清空待删列表（否则每轮重复推送并报错），got %+v", del)
 	}
 }

@@ -967,7 +967,7 @@ func (e *Engine) pushDirty(rep *Report) error {
 			e.addRequestOp(b, n)
 		}
 	}
-	b.collectTombstoneOps(pendingDel)
+	b.collectTombstoneOps(pendingDel, e.Bind.DocHashes)
 	e.collectDocOps(b)
 	e.collectExampleOps(b)
 	e.collectVarOps(b)
@@ -999,10 +999,18 @@ func (e *Engine) pushDirty(rep *Report) error {
 type pushBatch struct {
 	ops  []Op
 	meta map[string]dirtyMeta
+	// pendingDel collectTombstoneOps 本轮已登记过删除的 uid。
+	// collectDocOps 的墓碑分支据此跳过，避免「一次删除发两条 op」（P1-10）：
+	// 走 DeleteDoc 的文档已经在 pendingDeletes 里按 doc 类型发出去了。
+	pendingDel map[string]bool
 }
 
 func newPushBatch(capacity int) *pushBatch {
-	return &pushBatch{ops: make([]Op, 0, capacity), meta: make(map[string]dirtyMeta, capacity)}
+	return &pushBatch{
+		ops:        make([]Op, 0, capacity),
+		meta:       make(map[string]dirtyMeta, capacity),
+		pendingDel: make(map[string]bool, capacity),
+	}
 }
 
 // add 登记一条操作及其元信息。
@@ -1035,11 +1043,30 @@ func (e *Engine) addRequestOp(b *pushBatch, n index.Node) {
 	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
 }
 
-// collectTombstoneOps 本地已删除请求的墓碑（delete），全部推送成功后才清 pendingDeletes。
-func (b *pushBatch) collectTombstoneOps(pendingDel []string) {
-	for _, uid := range pendingDel {
-		b.add(Op{OpID: newOpID(), Op: "delete", Type: "api", UID: uid},
-			dirtyMeta{uid: uid, typ: "api", isDelete: true})
+// collectTombstoneOps 本地已删除条目的墓碑（delete）：Op.Type 与 dirtyMeta.typ 都用条目自带的
+// Type（api / doc），不再一律按 api 出网——否则删一篇文档会多发一条 delete/api/<docUid>，
+// 服务端对未知 api uid 回 rejected 后待删列表永远清不掉（P1-10）。
+// docHashes 是文档推送基线（e.Bind.DocHashes），只为「旧格式墓碑无类型」的迁移兜底而传入；
+// pushBatch 拿不到 Engine，故把需要的这唯一一份数据显式传进来。
+// 全部推送成功后才清 pendingDeletes。
+func (b *pushBatch) collectTombstoneOps(pendingDel []collection.PendingDelete, docHashes map[string]string) {
+	for _, d := range pendingDel {
+		if d.UID == "" {
+			continue
+		}
+		typ := d.Type
+		if typ == "" {
+			typ = collection.PendingDeleteAPI
+		}
+		// 旧格式（无类型）无从得知实体类型，用文档基线兜底：命中 DocHashes 的就是文档，
+		// 否则会以 api 出网、被服务端按未知 uid 拒绝，pendingDeletes 永远清不掉。
+		if typ == collection.PendingDeleteAPI && docHashes[d.UID] != "" {
+			typ = collection.PendingDeleteDoc
+		}
+		// 登记进 b.pendingDel：collectDocOps 的墓碑分支据此跳过同一个 uid（P1-10）。
+		b.pendingDel[d.UID] = true
+		b.add(Op{OpID: newOpID(), Op: "delete", Type: typ, UID: d.UID},
+			dirtyMeta{uid: d.UID, typ: typ, isDelete: true})
 	}
 }
 
@@ -1069,8 +1096,11 @@ func (e *Engine) collectDocOps(b *pushBatch) {
 		b.add(op, dirtyMeta{uid: d.UID, hash: h, typ: "doc"})
 	}
 	// J11-2.2：本地已删除的文档 → tombstone（照抄 collectExampleOps 模式）
+	// 保留这段基于 Bind.DocHashes 的差异检测：文档被用户在资源管理器里直接删掉（不走 DeleteDoc）
+	// 时只有它能发现删除。但走了 DeleteDoc 的 uid 已经在 pendingDeletes 里，由
+	// collectTombstoneOps 按 doc 类型发过一条，这里必须跳过，否则同一次删除会出两条 op（P1-10）。
 	for uid := range e.Bind.DocHashes {
-		if live[uid] {
+		if live[uid] || b.pendingDel[uid] {
 			continue
 		}
 		b.add(Op{OpID: newOpID(), Op: "delete", Type: "doc", UID: uid},
