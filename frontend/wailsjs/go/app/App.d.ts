@@ -88,6 +88,8 @@ export function GrpcSampleMessage(arg1:string,arg2:Array<string>,arg3:string,arg
 
 export function GrpcValidateMessage(arg1:string,arg2:Array<string>,arg3:string,arg4:string,arg5:string):Promise<string>;
 
+export function HideToTray():Promise<void>;
+
 export function ImportBrunoDir(arg1:string):Promise<collection.ImportSummary>;
 
 export function ImportCollection(arg1:string,arg2:string,arg3:string):Promise<collection.ImportSummary>;
@@ -119,6 +121,7 @@ export function ListMCPGrants():Promise<Array<app.MCPGrant>>;
 export function ListResponseExamples(arg1:string):Promise<Array<collection.ResponseExample>>;
 
 export function ListServerProjects(arg1:string,arg2:string):Promise<Array<app.ServerProject>>;
+
 export function ListTrashFor(arg1:string):Promise<Array<collection.TrashEntry>>;
 
 export function LoadGrpcSchema(arg1:string,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;

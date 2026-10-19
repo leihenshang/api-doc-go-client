@@ -557,6 +557,8 @@ export default {
     responseLayout: '响应区位置',
     autoSave: '自动保存',
     autoSaveHint: '编辑后自动写入文件；关闭则为手动保存（Ctrl+S / 关闭页签 / 保存所有）',
+    trayResident: '驻留托盘',
+    trayResidentHint: '关闭窗口时隐藏到系统托盘而非退出；托盘图标菜单可显示窗口或退出',
     layoutRight: '右侧',
     layoutBottom: '底部',
     network: '网络与安全',

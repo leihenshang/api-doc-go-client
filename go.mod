@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
+	github.com/energye/systray v1.0.3
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0

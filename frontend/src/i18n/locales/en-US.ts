@@ -555,6 +555,8 @@ export default {
     responseLayout: 'Response panel',
     autoSave: 'Auto save',
     autoSaveHint: 'Write files as you edit; when off, saving is manual (Ctrl+S / close tab / Save all)',
+    trayResident: 'Stay in tray',
+    trayResidentHint: 'Closing the window hides it to the system tray instead of quitting; use the tray menu to show or exit',
     layoutRight: 'Right',
     layoutBottom: 'Bottom',
     network: 'Network & security',

@@ -55,6 +55,7 @@ type Settings struct {
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
+	TrayResident    bool    `json:"trayResident"`   // 任务栏驻留：关闭窗口 = 隐藏到系统托盘（托盘菜单可显示/退出）；默认关 = 关窗即退出
 	// RestoreLimit 启动时最多恢复几个工作目录。
 	//
 	// 每个打开的根都常驻一个 fsnotify 监听 + 一次索引扫描；Windows 上还会让该目录被占用（删不掉）。

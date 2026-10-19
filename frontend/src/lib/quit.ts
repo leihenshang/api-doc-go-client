@@ -9,6 +9,11 @@ import { useTabsStore } from '@/stores/tabs'
 
 export function requestQuit(): void {
   const settings = useSettingsStore()
+  // 任务栏驻留：关闭窗口 = 隐藏到托盘，不走未保存确认（数据仍在，托盘可再唤出）
+  if (settings.form.trayResident) {
+    windowCtl.hideToTray()
+    return
+  }
   const quitNow = (): void => void windowCtl.quit()
   if (settings.autoSave) {
     quitNow()
