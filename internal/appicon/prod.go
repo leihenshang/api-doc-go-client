@@ -1,4 +1,4 @@
-//go:build !dev
+//go:build !(dev || devbuild)
 
 // Package appicon 提供 Wails Linux 窗口图标与稳定的 WM_CLASS 程序名。
 // prod 版本使用正式版绿色插头图标，程序名为 ApiDocClient。

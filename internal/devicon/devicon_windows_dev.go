@@ -1,4 +1,4 @@
-//go:build windows && dev
+//go:build windows && (dev || devbuild)
 
 // Package devicon 仅开发版 Windows 生效：把窗口/任务栏图标换成 icon-dev.ico。
 //

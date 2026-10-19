@@ -1,4 +1,4 @@
-//go:build !dev
+//go:build !(dev || devbuild)
 
 // 正式版构建标记（不带 dev 标签）。
 package app

@@ -34,7 +34,11 @@ mkdir -p "$BIN"
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   command -v wails >/dev/null || { echo "缺少 wails CLI（或用 SKIP_BUILD=1 复用已有二进制）" >&2; exit 1; }
   wails build -platform "$WAILS_PLATFORM" -clean -o api-doc-client
-  wails build -platform "$WAILS_PLATFORM" -tags dev -clean -o api-doc-client-dev
+  wails build -platform "$WAILS_PLATFORM" -tags devbuild -o api-doc-client-dev
+fi
+# dev 二进制名兼容：SKIP_BUILD 时旧产物可能是 api-doc-client-dev-linux-amd64
+if [ ! -x "$BIN/api-doc-client-dev" ] && [ -x "$BIN/api-doc-client-dev-linux-amd64" ]; then
+  cp -f "$BIN/api-doc-client-dev-linux-amd64" "$BIN/api-doc-client-dev"
 fi
 [ -x "$BIN/api-doc-client" ] || { echo "未找到 $BIN/api-doc-client，请先构建" >&2; exit 1; }
 [ -x "$BIN/api-doc-client-dev" ] || { echo "未找到 $BIN/api-doc-client-dev" >&2; exit 1; }
@@ -77,7 +81,7 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     echo "Maintainer: api-doc-go"
     echo "Section: utils"
     echo "Priority: optional"
-    echo "Depends: libgtk-3-0, libwebkit2gtk-4.1-0"
+    echo "Depends: libgtk-3-0, libwebkit2gtk-4.0-37"
     echo "Description: AI-native, local-first API client"
     echo " Markdown 风格接口文档协作工具的桌面客户端（Postman/Bruno 风格）。"
   } > "$pkg/DEBIAN/control"
