@@ -2177,9 +2177,71 @@ func (c *Collection) SavePendingDeletes(list []PendingDelete) error {
 	return writeFileAtomic(filepath.Join(c.Dir, pendingDeletesFile), data, 0o644)
 }
 
-// ClearPendingDeletes 清空（推送成功后调用）。
+// ClearPendingDeletes 清空（整文件删除）。
+//
+// 仍保留：既有的「全成功即清空」语义与测试还在用它，但这个口径过于粗暴——
+// 同批只要有一条墓碑被服务端永久拒绝，整个列表就永远清不掉（P2-1）。
+// 推送链路请改用 RemovePendingDeletes 按回执逐条清。
 func (c *Collection) ClearPendingDeletes() {
 	_ = os.Remove(filepath.Join(c.Dir, pendingDeletesFile))
+}
+
+// RemovePendingDeletes 按 (uid,type) 移除已成功推送的墓碑；剩余为空时删除文件。
+//
+// 为什么需要「逐条清」而不是「全成功才清空」：服务端对某条墓碑回 rejected 通常是永久性的
+// （条目被服务端锁定 / 权限不足等），需要人工介入，这条留在列表里继续重试是**正确**的；
+// 但同批里已经成功的删除不该被它拖住——整文件清空失败会让下一轮把同批已成功的删除
+// 也重新推一遍，而且换了新的 op_id，服务端「按 op_id 幂等去重」完全失效，
+// 已成功的删除就被无限重推（P2-1）。
+//
+// done 里未出现在列表中的条目一律忽略（例如「文档文件被外部删掉」的 tombstone
+// 只是引擎侧的差异检测产物，从来不在待删列表里）；一条都没命中时不写盘。
+// 剩余条目保持原有顺序，不做重排（顺序稳定，diff 好读、行为可预期）。
+func (c *Collection) RemovePendingDeletes(done []PendingDelete) error {
+	if len(done) == 0 {
+		return nil
+	}
+	type deleteKey struct{ uid, typ string }
+	normalize := func(d PendingDelete) deleteKey {
+		typ := d.Type
+		if typ == "" {
+			typ = PendingDeleteAPI // 与反序列化口径一致：缺省按接口删除
+		}
+		return deleteKey{uid: d.UID, typ: typ}
+	}
+	drop := make(map[deleteKey]bool, len(done))
+	for _, d := range done {
+		if d.UID == "" {
+			continue
+		}
+		drop[normalize(d)] = true
+	}
+	if len(drop) == 0 {
+		return nil
+	}
+
+	list := c.LoadPendingDeletes()
+	rest := make([]PendingDelete, 0, len(list))
+	removed := false
+	for _, d := range list {
+		if drop[normalize(d)] {
+			removed = true
+			continue // 已推送成功，从待删列表里摘掉
+		}
+		rest = append(rest, d)
+	}
+	if !removed {
+		// 一条都没命中：列表未变，直接返回，省一次原子写。
+		return nil
+	}
+	if len(rest) == 0 {
+		// 与 ClearPendingDeletes 口径一致：清空即删文件，不留 "[]" 这样的空壳文件。
+		if err := os.Remove(filepath.Join(c.Dir, pendingDeletesFile)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return c.SavePendingDeletes(rest)
 }
 
 // ---------- 通用 ----------
