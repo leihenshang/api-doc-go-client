@@ -946,9 +946,10 @@ func (e *Engine) pushDirty(rep *Report) error {
 		return err
 	}
 	pendingDel := e.Coll.LoadPendingDeletes()
-	if len(dirty) == 0 && len(pendingDel) == 0 {
-		return nil
-	}
+	// 不能因为 dirty/pendingDeletes 都为空就早退：文档条目、响应示例、环境变量都不进索引，
+	// 走 Bind 的 hash 基线做脏检测（collectDocOps/collectExampleOps/collectVarOps），
+	// 早退会让「只改文档/示例/环境」这一轮完全不推送。真正的「没东西可推」由下面的
+	// len(b.ops) == 0 兜底。
 	// 拓扑序：folder 先，request 后
 	sort.SliceStable(dirty, func(i, j int) bool {
 		return typeRank(dirty[i].Type) < typeRank(dirty[j].Type)

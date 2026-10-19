@@ -65,8 +65,26 @@ type Collection struct {
 
 // ---------- 集合清单（opencollection.yml） ----------
 
-const gitignoreContent = "# 客户端自动维护\n" +
+// gitignoreBanner 自动维护块的标识行：存在即视为「客户端已维护过该文件」。
+const gitignoreBanner = "# 客户端自动维护"
+
+const gitignoreContent = gitignoreBanner + "\n" +
 	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.trash/\n.conflicts/\nnode_modules/\n"
+
+// gitignoreEntries 需要忽略的条目（由 gitignoreContent 派生，避免同一份清单在两处维护而漂移）：
+// secret 环境文件、本地覆盖、明文存 PAT 的 .sync.json，以及本地目录。
+var gitignoreEntries = func() []string {
+	lines := strings.Split(gitignoreContent, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}()
 
 // NewUID 生成实体稳定身份（uuid v4）。环境/变量的 uid 由同步引擎首次推送时补齐。
 func NewUID() string { return uuid.NewString() }
@@ -113,11 +131,10 @@ func Open(dir string) (*Collection, error) {
 	if err := c.writeManifest(); err != nil {
 		return nil, err
 	}
-	// 集合级 .gitignore（幂等）：secret 文件与本地目录不进版本控制
-	gi := filepath.Join(abs, ".gitignore")
-	if _, err := os.Stat(gi); os.IsNotExist(err) {
-		_ = writeFileAtomic(gi, []byte(gitignoreContent), 0o644)
-	}
+	// 集合级 .gitignore（幂等）：secret 文件与本地目录不进版本控制。
+	// 必须能补齐已存在的文件——clone 来的仓库或用户自己 git init 时已有 .gitignore，
+	// 里面没有 .sync.json，明文存 PAT 的它就会被 commit 进版本库（P0-5）。
+	_ = ensureGitignore(abs)
 	// 首次打开：给一个默认环境，便于立刻体验变量替换
 	if _, err := os.Stat(filepath.Join(abs, "environments")); os.IsNotExist(err) {
 		// 默认环境只是「开箱即用」的便利项：写失败时用户自己建环境即可，不该阻断 Open。
@@ -130,6 +147,73 @@ func Open(dir string) (*Collection, error) {
 	// 外部改动监听（D1/D2）
 	_ = c.StartWatch()
 	return c, nil
+}
+
+// ensureGitignore 幂等补齐集合级 .gitignore。
+// 文件不存在时写入全文（与旧行为一致）；已存在时只追加缺失条目，
+// 绝不重写/重排用户已有内容——那是用户的文件，客户端只是往里面补「安全必需」的几行。
+// 逐条按整行（trim 后）比对，重复调用不会再产生重复行。
+func ensureGitignore(dir string) error {
+	gi := filepath.Join(dir, ".gitignore")
+	data, err := os.ReadFile(gi)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		return writeFileAtomic(gi, []byte(gitignoreContent), 0o644)
+	}
+	text := string(data)
+	// 已有行做成集合：用户写成 ".sync.json "、或被编辑器加了行尾空格，也算已忽略，
+	// 否则会追加出一条重复语义的行（只会刷噪音，但没必要）。
+	have := make(map[string]bool, len(gitignoreEntries)+1)
+	bannerSeen := false
+	for _, line := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		if t == gitignoreBanner {
+			bannerSeen = true
+		}
+		have[t] = true
+	}
+	missing := make([]string, 0, len(gitignoreEntries))
+	for _, entry := range gitignoreEntries {
+		if !have[entry] {
+			missing = append(missing, entry)
+		}
+	}
+	if len(missing) == 0 {
+		return nil // 已齐备：一个字节都不动
+	}
+	// 沿用原文件的换行风格（CRLF 文件里混进裸 LF 会让 diff 整片重写）；
+	// 检测方式：首个 '\n' 前面是不是 '\r'（全文统一风格的前提下足够）。
+	eol := "\n"
+	if i := strings.Index(text, "\n"); i > 0 && text[i-1] == '\r' {
+		eol = "\r\n"
+	}
+	var sb strings.Builder
+	// 原文件末尾没有换行时必须先补一个，否则新条目会粘到最后一行末尾上去。
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		sb.WriteString(eol)
+	}
+	if !bannerSeen {
+		sb.WriteString(gitignoreBanner + eol)
+	}
+	for _, entry := range missing {
+		sb.WriteString(entry + eol)
+	}
+	// 已存在的文件走「原地追加」而不是整份重写：原子写是新建 inode + rename，
+	// 会把用户的 0600 放宽成 0644，还会把软链替换成普通文件（真实目标反而没被写入）。
+	f, err := os.OpenFile(gi, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(sb.String()); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // ---------- 外部改动监听（D1/D2）----------
