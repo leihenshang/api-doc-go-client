@@ -16,6 +16,7 @@ import (
 	"api-doc-go-client/internal/mcpaudit"
 	"api-doc-go-client/internal/mcpauth"
 	"api-doc-go-client/internal/mocksrv"
+	"api-doc-go-client/internal/tray"
 	"api-doc-go-client/internal/watch"
 
 	runtime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -67,6 +68,9 @@ type App struct {
 	// quitAllowed 前端已确认退出（Alt+F4 / 系统关闭时先被 WindowShouldClose 拦截，
 	// 前端弹「保存并退出」确认后置 true 再调 Quit，避免直接 Quit 再次触发关闭而循环）
 	quitAllowed bool
+	// 任务栏驻留（系统托盘）：trayOnce 保证管理器只建一次，tray 为 nil = 从未启用
+	tray     *tray.Manager
+	trayOnce sync.Once
 }
 
 // inflightSend 一次在途发送的取消句柄（带工作目录归属，见 sendCancels 的键说明）。
@@ -229,6 +233,8 @@ func (a *App) Startup(ctx context.Context) {
 	if a.settings.MCP.Enabled {
 		a.applyMCP("")
 	}
+	// 任务栏驻留：随设置启动托盘（关闭/开启在 SaveSettings 里即时生效）
+	a.applyTray(a.settings.TrayResident)
 }
 
 // DomReady Wails 生命周期钩子：窗口与 WebView 就绪、首帧渲染前，把初始几何收敛到屏幕内再显示窗口。

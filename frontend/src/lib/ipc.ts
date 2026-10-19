@@ -112,6 +112,8 @@ export const windowCtl = {
     await wailsApp()?.SetQuitAllowed(true)
     await wailsApp()?.Quit()
   },
+  // 任务栏驻留开启时的「关闭」：隐藏窗口（数据仍在，托盘菜单可再唤出）
+  hideToTray: (): void => void wailsApp()?.HideToTray(),
   isMaximised: async (): Promise<boolean> => (await wailsApp()?.WindowIsMaximised()) === true,
 }
 

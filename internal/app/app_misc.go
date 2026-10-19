@@ -351,6 +351,7 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	}
 	a.mu.Lock()
 	jarChanged := a.settings.PersistCookies != norm.PersistCookies
+	trayChanged := a.settings.TrayResident != norm.TrayResident
 	a.settings = norm
 	if jarChanged {
 		a.jar = nil
@@ -358,6 +359,10 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	a.mu.Unlock()
 	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里）
 	a.applyMCP("")
+	// 托盘驻留开关：即时启停
+	if trayChanged {
+		a.applyTray(norm.TrayResident)
+	}
 	return nil
 }
 

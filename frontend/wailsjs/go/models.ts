@@ -571,12 +571,16 @@ export namespace collection {
 	}
 	export class ConflictDetail {
 	    file: string;
+	    kind: string;
 	    ofUid: string;
 	    name: string;
 	    serverRev: number;
 	    createdAt: number;
+	    mode?: string;
 	    diffs: FieldDiff[];
 	    hasPayload: boolean;
+	    preview?: string;
+	    remotePreview?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConflictDetail(source);
@@ -585,12 +589,16 @@ export namespace collection {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.file = source["file"];
+	        this.kind = source["kind"];
 	        this.ofUid = source["ofUid"];
 	        this.name = source["name"];
 	        this.serverRev = source["serverRev"];
 	        this.createdAt = source["createdAt"];
+	        this.mode = source["mode"];
 	        this.diffs = this.convertValues(source["diffs"], FieldDiff);
 	        this.hasPayload = source["hasPayload"];
+	        this.preview = source["preview"];
+	        this.remotePreview = source["remotePreview"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -613,6 +621,7 @@ export namespace collection {
 	}
 	export class ConflictItem {
 	    file: string;
+	    kind: string;
 	    ofUid: string;
 	    name: string;
 	    serverRev: number;
@@ -625,6 +634,7 @@ export namespace collection {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.file = source["file"];
+	        this.kind = source["kind"];
 	        this.ofUid = source["ofUid"];
 	        this.name = source["name"];
 	        this.serverRev = source["serverRev"];
@@ -1195,6 +1205,7 @@ export namespace config {
 	    theme: string;
 	    proxyUrl: string;
 	    autoSave: boolean;
+	    trayResident: boolean;
 	    restoreLimit: number;
 	    mcp: MCPConfig;
 	
@@ -1216,6 +1227,7 @@ export namespace config {
 	        this.theme = source["theme"];
 	        this.proxyUrl = source["proxyUrl"];
 	        this.autoSave = source["autoSave"];
+	        this.trayResident = source["trayResident"];
 	        this.restoreLimit = source["restoreLimit"];
 	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
 	    }

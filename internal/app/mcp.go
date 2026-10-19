@@ -243,6 +243,9 @@ func (a *App) Shutdown(_ context.Context) {
 	}
 	backend := a.mcpBackend
 	a.mu.Unlock()
+	if a.tray != nil {
+		a.tray.Disable() // 收掉托盘图标（systray 内部循环退出）
+	}
 	if backend != nil {
 		backend.Stop() // 释放 MCP 监听端口
 	}

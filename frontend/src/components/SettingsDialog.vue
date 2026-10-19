@@ -383,6 +383,13 @@ function close(): void {
               <span class="hint">{{ t('settings.autoSaveHint') }}</span>
             </n-checkbox>
           </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.trayResident') }}</span>
+            <n-checkbox :checked="form.trayResident" data-testid="settings.trayResident"
+              @update:checked="(v: boolean) => { form.trayResident = v; void applyNow() }">
+              <span class="hint">{{ t('settings.trayResidentHint') }}</span>
+            </n-checkbox>
+          </div>
 
         </div>
 
