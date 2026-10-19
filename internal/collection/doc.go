@@ -157,7 +157,7 @@ func (c *Collection) docPath(rel string) (string, error) {
 	return full, nil
 }
 
-// DeleteDoc 删除文档（移入 .trash）。
+// DeleteDoc 删除文档（移入 .trash），并记一条 type=doc 的待推送墓碑（P1-10）。
 func (c *Collection) DeleteDoc(uid string) error {
 	res, err := c.scan()
 	if err != nil {
@@ -170,7 +170,7 @@ func (c *Collection) DeleteDoc(uid string) error {
 	if err := c.moveToTrash(filepath.Join(c.Dir, filepath.FromSlash(d.Path))); err != nil {
 		return err
 	}
-	c.recordPendingDelete(uid)
+	c.recordPendingDelete(uid, PendingDeleteDoc)
 	return nil
 }
 
