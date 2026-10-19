@@ -983,15 +983,54 @@ func (e *Engine) pushDirty(rep *Report) error {
 	if err != nil {
 		return err
 	}
-	allOk := e.applyPushResults(rep, resp, b.meta)
-	// 删除全部推送成功后才清 pendingDeletes
-	if allOk && len(pendingDel) > 0 {
-		e.Coll.ClearPendingDeletes()
+	// 回执处理（计数、冲突副本、hash 基线）照旧；返回值 allOk 表示「删除类操作是否全部成功」，
+	// 但它不再决定能否清墓碑——见下面的逐条清除。
+	e.applyPushResults(rep, resp, b.meta)
+	// 墓碑按回执逐条清（P2-1）。别用「allOk 才 ClearPendingDeletes」一把清：
+	// 同批只要有一条墓碑被服务端永久拒绝（rejected），整个列表就永远清不掉，
+	// 下一轮会把同批**已成功**的删除也再发一遍——而且用的是新的 op_id，
+	// 服务端按 op_id 做的幂等去重完全失效，已成功的删除就被无限重推。
+	// 被拒的那条留在列表里继续重试是**正确**的（服务端拒绝需要人工介入），
+	// 但它不该拖累同批已经成功的删除。
+	if len(pendingDel) > 0 {
+		if err := e.Coll.RemovePendingDeletes(succeededTombstones(resp, b.meta)); err != nil {
+			// 清不掉不算本轮失败：墓碑还在，下一轮自然重试推送（服务端按 op_id 幂等）。
+			rep.Errors = append(rep.Errors, err.Error())
+		}
 	}
 	if resp.Cursor > e.Bind.Cursor {
 		e.Bind.Cursor = resp.Cursor
 	}
 	return nil
+}
+
+// succeededTombstones 从回执里挑出「本条墓碑推送成功」的条目，供 RemovePendingDeletes 逐条摘除。
+//
+// 只认 b.meta 里带 pendingTypes 的 op：那是 collectTombstoneOps 真正从 .sync-deletes.json
+// 发出去的墓碑；文档/示例由差异检测（collectDocOps/collectExampleOps）发现的删除虽然
+// isDelete 也为真，但它们从来不在待删列表里，交给 RemovePendingDeletes 也只会白写一次盘。
+//
+// 用 pendingTypes（墓碑在文件里记录的类型）而不是 typ：旧格式墓碑无类型时 typ 会被文档基线
+// 纠正成 doc，而文件里存的仍是 api，按 typ 删会摘不掉那条旧条目（P1-10 迁移路径）。
+// 一条 op 可能折叠了多条墓碑（见 collectTombstoneOps），所以是逐条摘、不是一个类型。
+func succeededTombstones(resp *PushResp, meta map[string]dirtyMeta) []collection.PendingDelete {
+	if resp == nil {
+		return nil
+	}
+	done := make([]collection.PendingDelete, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		if r.Status != "ok" {
+			continue // 冲突/被拒：留在线表里下轮重试
+		}
+		m, ok := meta[r.OpID]
+		if !ok || !m.isDelete || len(m.pendingTypes) == 0 {
+			continue
+		}
+		for _, pt := range m.pendingTypes {
+			done = append(done, collection.PendingDelete{UID: m.uid, Type: pt})
+		}
+	}
+	return done
 }
 
 // pushBatch 一批待推送操作及其元信息（回执按 OpID 反查条目）。
@@ -1048,8 +1087,17 @@ func (e *Engine) addRequestOp(b *pushBatch, n index.Node) {
 // 服务端对未知 api uid 回 rejected 后待删列表永远清不掉（P1-10）。
 // docHashes 是文档推送基线（e.Bind.DocHashes），只为「旧格式墓碑无类型」的迁移兜底而传入；
 // pushBatch 拿不到 Engine，故把需要的这唯一一份数据显式传进来。
-// 全部推送成功后才清 pendingDeletes。
+// 清墓碑不在这里做（也不看「是否全部成功」）：pushDirty 按回执逐条 RemovePendingDeletes（P2-1）。
+//
+// 出网前还要按「纠正后的 (uid,type)」去重：类型纠正会把不同类型折叠成同一类型——待删列表里的
+// 异常数据 [{uid,api},{uid,doc}] 若命中 DocHashes，两条会被一起纠正成 doc，同一次 push 就发出
+// 两条一模一样的 delete/doc/<uid>。去重键必须带 type 而不能只用 uid：api 与 doc 在服务端是两类
+// 不同操作（P1-10），只按 uid 合并会把另一类删除整条丢掉（本地墓碑清了、服务端没删）。
+// 被折叠掉的那条墓碑类型并入保留那条的 pendingTypes，这样该 op 成功后两条会一起被摘掉，
+// 否则留下的那条永远推不成功，又变成「无限重推」。
 func (b *pushBatch) collectTombstoneOps(pendingDel []collection.PendingDelete, docHashes map[string]string) {
+	// 出网 op 身份（type + uid）→ OpID：纠正后同一个 (uid,type) 只发一条 op。
+	opByKey := make(map[string]string, len(pendingDel))
 	for _, d := range pendingDel {
 		if d.UID == "" {
 			continue
@@ -1065,8 +1113,23 @@ func (b *pushBatch) collectTombstoneOps(pendingDel []collection.PendingDelete, d
 		}
 		// 登记进 b.pendingDel：collectDocOps 的墓碑分支据此跳过同一个 uid（P1-10）。
 		b.pendingDel[d.UID] = true
-		b.add(Op{OpID: newOpID(), Op: "delete", Type: typ, UID: d.UID},
-			dirtyMeta{uid: d.UID, typ: typ, isDelete: true})
+		// pendingType 记墓碑在文件里**原始**记录的类型：清墓碑必须按它删，
+		// 因为上面可能把 typ 从 api 纠正成 doc（旧格式迁移），而文件里存的还是 api。
+		origType := d.Type
+		if origType == "" {
+			origType = collection.PendingDeleteAPI
+		}
+		key := typ + "\x00" + d.UID
+		if opID, dup := opByKey[key]; dup {
+			// 纠正后撞成同一个出网 op（见函数注释）：不再发第二条，只把原始类型并进去。
+			m := b.meta[opID]
+			m.pendingTypes = append(m.pendingTypes, origType)
+			b.meta[opID] = m
+			continue
+		}
+		op := Op{OpID: newOpID(), Op: "delete", Type: typ, UID: d.UID}
+		opByKey[key] = op.OpID
+		b.add(op, dirtyMeta{uid: d.UID, typ: typ, isDelete: true, pendingTypes: []string{origType}})
 	}
 }
 
@@ -1147,7 +1210,9 @@ func (e *Engine) collectExampleOps(b *pushBatch) {
 	}
 }
 
-// applyPushResults 处理推送回执；返回 allOk（删除类操作是否全部成功，决定能否清 pendingDeletes）。
+// applyPushResults 处理推送回执；返回 allOk（删除类操作是否全部成功）。
+// 注意：allOk 只是诊断口径（P2-1 之后不再决定能否清 pendingDeletes，
+// 墓碑改由 pushDirty 按回执逐条 RemovePendingDeletes）。
 func (e *Engine) applyPushResults(rep *Report, resp *PushResp, meta map[string]dirtyMeta) bool {
 	allOk := true
 	for _, r := range resp.Results {
@@ -1337,6 +1402,12 @@ type dirtyMeta struct {
 	hash     string
 	typ      string
 	isDelete bool
+	// pendingTypes 该 delete op 对应的墓碑在 .sync-deletes.json 里记录的类型（可能多条：
+	// 类型纠正后撞成同一条出网 op 的墓碑会被折叠进来，见 collectTombstoneOps）；
+	// 空表示这条 op 不是墓碑推送（例如 collectDocOps 的差异检测删除，它不在待删列表里）。
+	// 与 typ 可能不同：旧格式墓碑无类型时 typ 会被文档基线纠正成 doc，而文件里存的仍是 api，
+	// 逐条清墓碑必须按文件里的原始类型删，否则那条旧条目永远摘不掉（P1-10 迁移路径）。
+	pendingTypes []string
 }
 
 // writeConflictCopy 冲突：本地版本进 .conflicts/（R8，不带可同步 uid）。
