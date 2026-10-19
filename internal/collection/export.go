@@ -75,12 +75,21 @@ func (c *Collection) SaveConflictCopy(r *Request, serverRev int64, serverPayload
 
 // ConflictItem 一份冲突副本的元信息。
 type ConflictItem struct {
-	File      string `json:"file"`      // .conflicts/ 下的文件名
-	OfUID     string `json:"ofUid"`     // 冲突所属的请求 uid
-	Name      string `json:"name"`      // 副本里的请求名
+	File string `json:"file"` // .conflicts/ 下的文件名
+	// Kind 副本类型：request（接口，字段级副本）| doc | example | env（整文件快照）。
+	// 旧版本只有接口副本，缺省按 request 处理。
+	Kind      string `json:"kind"`
+	OfUID     string `json:"ofUid"`     // 冲突所属条目的 uid
+	Name      string `json:"name"`      // 副本里的条目名
 	ServerRev int64  `json:"serverRev"` // 服务端版本号
 	CreatedAt int64  `json:"createdAt"` // Unix 毫秒
 }
+
+// 冲突详情的渲染方式：字段级差异 / 整文件快照。
+const (
+	ConflictModeFields   = "fields"
+	ConflictModeSnapshot = "snapshot"
+)
 
 // FieldDiff 一个有差异的字段：本地值 → 服务器值。
 type FieldDiff struct {
@@ -92,8 +101,13 @@ type FieldDiff struct {
 // ConflictDetail 冲突详情：副本元信息 + 差异字段列表。
 type ConflictDetail struct {
 	ConflictItem
+	// Mode 渲染方式：缺省（空）= fields（接口字段级）；snapshot = 整文件快照。
+	Mode       string      `json:"mode,omitempty"`
 	Diffs      []FieldDiff `json:"diffs"`
 	HasPayload bool        `json:"hasPayload"` // 旧版本遗留副本可能没有服务器快照
+	// Preview / RemotePreview 仅 snapshot 模式使用：本地版本片段与远端版本摘要。
+	Preview       string `json:"preview,omitempty"`
+	RemotePreview string `json:"remotePreview,omitempty"`
 }
 
 // conflictPayload 服务端同步载荷的最小子集（collection 层不能依赖 syncengine，避免循环引用）。
@@ -121,6 +135,11 @@ func (c *Collection) ListConflicts() ([]ConflictItem, error) {
 		}
 		if _, item, err := c.readConflictFile(e.Name()); err == nil {
 			out = append(out, item)
+			continue
+		}
+		// 非接口条目（文档 / 示例 / 环境）的整文件快照：同一目录、同一列表，状态栏才能计数
+		if _, item, err := c.readSnapshotFile(e.Name()); err == nil {
+			out = append(out, item)
 		}
 	}
 	return out, nil
@@ -138,6 +157,14 @@ func (c *Collection) readConflictFile(file string) (*requestFile, ConflictItem, 
 	if err != nil {
 		return nil, item, fmt.Errorf("冲突副本已损坏：%w", err)
 	}
+	// 通用快照（doc/example/env）也能被 yaml 解成「空请求 + 一堆未知字段」：
+	// 必须在这里拒掉，否则快照会被当成一条没有名字的接口副本展示。
+	if f.Info.Name == "" && f.Info.Type == "" && f.Meta.UID == "" && f.Extra != nil {
+		if _, ok := f.Extra["kind"]; ok {
+			return nil, item, fmt.Errorf("不是接口冲突副本")
+		}
+	}
+	item.Kind = "request"
 	item.File = filepath.Base(file)
 	item.Name = f.Info.Name
 	if f.Extra != nil {
@@ -153,12 +180,16 @@ func (c *Collection) readConflictFile(file string) (*requestFile, ConflictItem, 
 }
 
 // ConflictDetail 提取副本里本地版本与服务器版本的差异字段。
+// 文档 / 示例 / 环境是整文件快照（mode=snapshot），只给预览，不做字段级 diff。
 func (c *Collection) ConflictDetail(file string) (*ConflictDetail, error) {
+	if d, err := c.snapshotDetail(file); err == nil {
+		return d, nil
+	}
 	f, item, err := c.readConflictFile(file)
 	if err != nil {
 		return nil, err
 	}
-	d := &ConflictDetail{ConflictItem: item, Diffs: []FieldDiff{}}
+	d := &ConflictDetail{ConflictItem: item, Mode: ConflictModeFields, Diffs: []FieldDiff{}}
 	sp, ok := f.Extra["server_payload"].(string)
 	if !ok || strings.TrimSpace(sp) == "" {
 		// 旧副本无服务器快照：HasPayload 留 false，前端只允许保留本地
@@ -192,7 +223,13 @@ func (c *Collection) ConflictDetail(file string) (*ConflictDetail, error) {
 //     （下轮 push 是正常的新提交，不再重复冲突）
 //   - "remote" 按服务端快照改写标量字段并固化为已同步
 //   - "copy"   什么都不做（保留副本待手动处理）
+//
+// 文档 / 示例 / 环境的整文件快照走另一条路径：local = 原样写回本地文件，
+// remote = 丢弃副本（远端版本已在 pull 时落地）。
 func (c *Collection) ResolveConflict(file, choice string) error {
+	if snap, _, err := c.readSnapshotFile(file); err == nil {
+		return c.resolveSnapshot(snap, file, choice)
+	}
 	f, item, err := c.readConflictFile(file)
 	if err != nil {
 		return err

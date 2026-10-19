@@ -250,6 +250,20 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class ServerProject {
+	    id: number;
+	    title: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServerProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	    }
+	}
 	export class SyncBindReq {
 	    root: string;
 	    serverUrl: string;

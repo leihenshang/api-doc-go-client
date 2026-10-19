@@ -95,6 +95,50 @@ func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 	return &b, nil
 }
 
+// ServerProject 服务端项目（同步设置的项目选择器用）。
+type ServerProject struct {
+	ID    uint64 `json:"id"`
+	Title string `json:"title"`
+}
+
+// ListServerProjects 用当前填写的服务端地址与令牌拉取可见项目列表。
+//
+// 为什么要这个入口：项目 ID 是纯数字，用户在服务端 Web 与客户端之间来回找很容易填错，
+// 而服务端 GET /api/project 已挂在 AuthOrPAT 下（PAT 可直接访问），一次请求就能列出来。
+// 令牌留空时沿用当前集合已保存的 PAT，避免「先获取项目还得先保存一次」。
+func (a *App) ListServerProjects(serverURL, token string) ([]ServerProject, error) {
+	if strings.TrimSpace(serverURL) == "" {
+		return nil, errors.New("请先填写服务端地址")
+	}
+	base, err := syncengine.ValidateServerURL(serverURL)
+	if err != nil {
+		return nil, err
+	}
+	tok := strings.TrimSpace(token)
+	if tok == "" {
+		if c, cerr := a.requireCollection(); cerr == nil {
+			tok = a.syncTokenOf(c)
+			if tok == "" {
+				if b, berr := syncengine.LoadBind(c.Dir); berr == nil {
+					tok = b.Token
+				}
+			}
+		}
+	}
+	if tok == "" {
+		return nil, errors.New("缺少访问令牌（PAT），请先填写")
+	}
+	projects, err := syncengine.New(base, tok, syncengine.DeviceID()).Projects()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServerProject, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, ServerProject{ID: p.ID, Title: p.Title})
+	}
+	return out, nil
+}
+
 // UnbindSync 解绑活动集合（清空 .sync.json，含 PAT）。
 func (a *App) UnbindSync() error {
 	return a.UnbindSyncFor("")

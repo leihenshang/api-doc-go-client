@@ -28,6 +28,9 @@ type Engine struct {
 	CLI  *Client
 	// Cipher secret 变量值的口令加解密器；nil/空口令时 secret 不出本机（不同步该条）。
 	Cipher *secrets.Cipher
+	// snapped 本轮已留底的冲突副本（kind+路径）：同一环境文件被多个变量的更新
+	// 连续覆盖时只留一份，避免刷出一堆内容相同的副本。
+	snapped map[string]bool
 }
 
 // cipher 返回生效的加解密器：显式注入优先，否则读本机持久化口令（App 每次同步新建 Engine）。
@@ -355,6 +358,7 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 
 	// 响应示例：写 examples/ 文件即可，不进索引/冲突副本体系。
 	if it.Type == "example" {
+		e.snapshotExampleIfDirty(rep, it.UID, p)
 		return e.applyExample(it.UID, p)
 	}
 	// 环境/变量：落 environments/ 文件，摘要记录在 Bind，不进索引与冲突副本体系。
@@ -362,6 +366,7 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 		return e.applyVarEnv(it.UID, p)
 	}
 	if it.Type == "variable" {
+		e.snapshotVarIfDirty(rep, it.UID, p)
 		return e.applyVariable(it.UID, p)
 	}
 
@@ -378,7 +383,12 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	case "api":
 		err = e.applyAPI(it.UID, p)
 	case "doc":
+		// 文档不进索引，本地 dirty 只能靠 DocHashes 判断：覆盖前先把本地版本留底（P0）
+		e.snapshotDocIfDirty(rep, it.UID, p)
 		err = e.applyDoc(it.UID, p)
+		if err == nil {
+			e.rememberDocHash(it.UID)
+		}
 	}
 	if err != nil {
 		return err
@@ -540,6 +550,132 @@ func (e *Engine) applyDoc(uid string, p Payload) error {
 	d.Content = p.Content
 	d.Icon = p.Icon
 	return e.Coll.SaveDoc(d)
+}
+
+// ---- 拉取覆盖前的本地版本留底（P0）----
+//
+// pull 的语义是「服务端版本覆盖本地」，但只有 api 在覆盖前存了 .conflicts/。
+// 文档 / 响应示例 / 变量同样可能是用户在本地改过、还没推上去的，直接覆盖就是静默丢改动。
+// 这里统一按「上次同步基线」判断 dirty，dirty 才留底：整文件快照（原样还原），
+// 不做字段级合并——与「不做字段级三方合并」的既定边界一致。
+
+// snapshotOnce 每个条目（kind+路径）本轮只留一份副本，并计入 Report.Conflicts。
+func (e *Engine) snapshotOnce(rep *Report, kind, uid, name, rel, remote string, local []byte) {
+	if len(local) == 0 || rel == "" {
+		return
+	}
+	if e.snapped == nil {
+		e.snapped = map[string]bool{}
+	}
+	key := kind + "\x00" + rel
+	if e.snapped[key] {
+		return
+	}
+	if _, err := e.Coll.SaveConflictSnapshot(kind, uid, name, rel, local, remote, 0); err != nil {
+		if rep != nil {
+			// 副本是本地改动的唯一留底：写失败必须让用户看到，否则改动会被远端版本直接盖掉。
+			rep.Errors = append(rep.Errors,
+				fmt.Sprintf("%s %s: 保存本地版本副本失败（本地改动可能未留存）：%v", kind, name, err))
+		}
+		return
+	}
+	e.snapped[key] = true
+	if rep != nil {
+		rep.Conflicts++
+	}
+}
+
+// snapshotDocIfDirty 文档在本地有未推送改动时，覆盖前把本地文件原样留底。
+// 基线是 Bind.DocHashes（文档不进索引，没有 synced_hash 可用）。
+func (e *Engine) snapshotDocIfDirty(rep *Report, uid string, p Payload) {
+	d, err := e.Coll.ReadDoc(uid)
+	if err != nil {
+		return // 本地没有这份文档：不存在覆盖
+	}
+	h := e.Coll.FileHashOf(d.Path)
+	if prev, seen := e.Bind.DocHashes[uid]; seen && prev == h {
+		return // 与上次同步一致：没有本地改动
+	}
+	local, err := os.ReadFile(filepath.Join(e.Coll.Dir, filepath.FromSlash(d.Path)))
+	if err != nil {
+		return
+	}
+	e.snapshotOnce(rep, collection.ConflictKindDoc, uid, d.Name, d.Path,
+		"文档「"+p.Name+"」已被远端更新（正文见本地副本）", local)
+}
+
+// rememberDocHash 拉取应用成功后把基线前移到远端内容：否则下一轮会把它当成
+// 本地改动再推回去（mirror 模式下更会每轮重复产生「伪冲突」）。
+func (e *Engine) rememberDocHash(uid string) {
+	d, err := e.Coll.ReadDoc(uid)
+	if err != nil {
+		return
+	}
+	h := e.Coll.FileHashOf(d.Path)
+	if h == "" {
+		return
+	}
+	if e.Bind.DocHashes == nil {
+		e.Bind.DocHashes = map[string]string{}
+	}
+	e.Bind.DocHashes[uid] = h
+}
+
+// snapshotExampleIfDirty 响应示例的本地改动留底（基线 Bind.ExampleHashes）。
+func (e *Engine) snapshotExampleIfDirty(rep *Report, uid string, p Payload) {
+	list, err := e.Coll.ListAllResponseExamples()
+	if err != nil {
+		return
+	}
+	for _, ex := range list {
+		if ex.UID != uid {
+			continue
+		}
+		h := e.Coll.FileHashOf(ex.Path)
+		if prev, seen := e.Bind.ExampleHashes[uid]; seen && prev == h {
+			return
+		}
+		local, rerr := os.ReadFile(filepath.Join(e.Coll.Dir, filepath.FromSlash(ex.Path)))
+		if rerr != nil {
+			return
+		}
+		e.snapshotOnce(rep, collection.ConflictKindExample, uid, ex.Name, ex.Path,
+			"响应示例「"+p.Name+"」已被远端更新", local)
+		return
+	}
+}
+
+// snapshotVarIfDirty 变量被远端覆盖前，把所属环境文件整份留底。
+// 变量和环境共用一份 environments/<name>.yml，所以粒度是「环境文件」而不是单个变量；
+// 远端值只在非 secret 时写进摘要，避免把敏感值复制到 .conflicts/。
+func (e *Engine) snapshotVarIfDirty(rep *Report, uid string, p Payload) {
+	env, _, err := e.envByUID(p.EnvUID)
+	if err != nil || env.Name == "" {
+		return // 本地没有这个环境：不存在覆盖
+	}
+	var localVar *collection.Var
+	for i := range env.Vars {
+		if env.Vars[i].UID == uid {
+			localVar = &env.Vars[i]
+			break
+		}
+	}
+	if localVar == nil {
+		return // 本地没有这个变量：不存在覆盖
+	}
+	if prev, seen := e.Bind.VarHashes[uid]; seen && prev == varHashOf(*localVar) {
+		return
+	}
+	rel := path.Join("environments", env.Name+".yml")
+	local, rerr := os.ReadFile(filepath.Join(e.Coll.Dir, filepath.FromSlash(rel)))
+	if rerr != nil {
+		return
+	}
+	remote := fmt.Sprintf("变量 %s 的远端值（敏感值不在此展示）", p.Name)
+	if !p.Secret {
+		remote = fmt.Sprintf("变量 %s = %s", p.Name, p.Value)
+	}
+	e.snapshotOnce(rep, collection.ConflictKindEnv, env.UID, env.Name, rel, remote, local)
 }
 
 // envByUID 按同步 uid 找本地环境（ListEnvs 已合并 secret 值）。

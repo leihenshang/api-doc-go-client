@@ -4,7 +4,7 @@
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import type { ConflictDetail, SyncBindInfo, SyncBindReq } from '@/types'
+import type { ConflictDetail, ServerProject, SyncBindInfo, SyncBindReq } from '@/types'
 import { NButton, NInput, NInputNumber, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -71,11 +71,39 @@ const modeOptions = computed(() => [
   { label: t('sync.modeMirror'), value: 'mirror' },
 ])
 
+// ---- 项目发现：用当前地址 + 令牌列出服务端可见项目，避免手填数字 ID 出错 ----
+const projects = ref<ServerProject[]>([])
+const projBusy = ref(false)
+
+const projectOptions = computed(() =>
+  projects.value.map((p) => ({ label: `${p.title}（#${p.id}）`, value: p.id })),
+)
+
+async function loadProjects(): Promise<void> {
+  projBusy.value = true
+  error.value = ''
+  try {
+    const list = await api.listServerProjects(serverUrl.value, token.value)
+    projects.value = list
+    if (!list.length) {
+      message.warning(t('sync.projectEmpty'))
+    } else if (list.length === 1) {
+      // 只有一个项目时直接选中；多个时保留当前值让用户自己挑
+      projectId.value = list[0].id
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    projBusy.value = false
+  }
+}
+
 watch(
   [() => props.show, () => props.root],
   async ([v]) => {
     if (!v) return
     error.value = ''
+    projects.value = [] // 换根/重开时清掉上一个服务端的项目列表，避免选错
     try {
       bind.value = (await api.getSyncBindFor(rootId.value)) ?? bind.value
       serverUrl.value = bind.value.serverUrl ?? ''
@@ -220,7 +248,16 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
               {{ t('sync.projectId') }}
               <span class="cl-hint">{{ t('sync.projectIdHint') }}</span>
             </label>
-            <n-input-number v-model:value="projectId" size="small" :min="1" class="full" data-testid="sync.project" />
+            <div class="proj-row">
+              <n-select v-if="projects.length" v-model:value="projectId" :options="projectOptions" size="small"
+                filterable class="full" :placeholder="t('sync.projectPlaceholder')"
+                data-testid="sync.projectSelect" />
+              <n-input-number v-else v-model:value="projectId" size="small" :min="1" class="full"
+                data-testid="sync.project" />
+              <n-button size="small" :loading="projBusy" data-testid="sync.projectFetch" @click="loadProjects">
+                {{ t('sync.projectFetch') }}
+              </n-button>
+            </div>
           </div>
           <div class="cell">
             <label class="cl">{{ t('sync.mode') }}</label>
@@ -328,6 +365,19 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 项目 ID：输入框/下拉 + 获取按钮同一行，窄弹窗里也要放得下 */
+.proj-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.proj-row :deep(.n-input-number),
+.proj-row :deep(.n-select) {
+  flex: 1;
+  min-width: 0;
 }
 
 .pass-row :deep(.n-input) {

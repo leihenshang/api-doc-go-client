@@ -210,6 +210,10 @@ export function ListResponseExamples(arg1) {
   return window['go']['app']['App']['ListResponseExamples'](arg1);
 }
 
+export function ListServerProjects(arg1, arg2) {
+  return window['go']['app']['App']['ListServerProjects'](arg1, arg2);
+}
+
 export function ListTrashFor(arg1) {
   return window['go']['app']['App']['ListTrashFor'](arg1);
 }

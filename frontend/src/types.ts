@@ -624,6 +624,12 @@ export interface SyncBindReq {
   token: string
 }
 
+/** 服务端项目（同步设置的项目选择器用）。 */
+export interface ServerProject {
+  id: number
+  title: string
+}
+
 /** 一轮同步摘要。 */
 export interface SyncReport {
   pulled: number
@@ -638,6 +644,8 @@ export interface SyncReport {
 /** 一份冲突副本。 */
 export interface ConflictItem {
   file: string
+  /** request（接口字段级）| doc | example | env（整文件快照） */
+  kind?: string
   ofUid: string
   name: string
   serverRev: number
@@ -654,9 +662,15 @@ export interface FieldDiff {
 
 /** 冲突详情：副本元信息 + 差异字段。 */
 export interface ConflictDetail extends ConflictItem {
+  /** fields（默认，接口字段级）| snapshot（文档/示例/环境的整文件副本） */
+  mode?: string
   diffs: FieldDiff[]
   /** 旧版本遗留副本可能没有服务器快照，只能保留本地 */
   hasPayload: boolean
+  /** snapshot 模式：本地版本预览 */
+  preview?: string
+  /** snapshot 模式：远端版本摘要 */
+  remotePreview?: string
 }
 
 /** 文档条目（B13）。 */
