@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// 集合概览（Collection tab 的内容）：集合概况 + 常用快捷键 + 六大特性卡。
+// 集合概览（Collection tab 的内容）：集合概况 + 常用快捷键 + 空集合时的六大特性卡。
+// 接口清单已移除：集合下的接口由左侧集合树承担展示与入口，概览页不再重复列一份。
 import { NButton, NIcon } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import FeatureCards from '@/components/FeatureCards.vue'
-import MethodTag from '@/components/MethodTag.vue'
 import { message } from '@/lib/notice'
 import {
   ArchiveOutline,
@@ -20,7 +20,6 @@ const props = defineProps<{ info: CollectionInfo | null }>()
 // （原先散落在集合切换下拉里，现统一收拢到这里，入口更聚焦）。
 const emit = defineEmits<{
   'new-request': []
-  'open-request': [uid: string]
   import: []
   export: [format: 'markdown' | 'html' | 'apidocgo']
   mock: []
@@ -38,24 +37,6 @@ function countRequests(nodes: TreeNode[]): number {
 
 const requests = computed(() => countRequests(props.info?.tree ?? []))
 
-/** 树先序扁平化：概览页给一份「接口清单」，比六张特性卡有用得多（UI-01 的另一半）。 */
-interface FlatReq { uid: string; name: string; method: string; path: string }
-function flatRequests(nodes: TreeNode[], trail: string[], out: FlatReq[]): void {
-  for (const n of nodes) {
-    if (n.type === 'folder') {
-      flatRequests(n.children ?? [], [...trail, n.name], out)
-      continue
-    }
-    if (n.type === 'request') {
-      out.push({ uid: n.uid, name: n.name, method: n.method ?? 'GET', path: trail.join(' / ') })
-    }
-  }
-}
-const requestList = computed<FlatReq[]>(() => {
-  const out: FlatReq[] = []
-  flatRequests(props.info?.tree ?? [], [], out)
-  return out
-})
 const envs = computed(() => props.info?.envs.length ?? 0)
 
 const stats = computed(() => [
@@ -145,96 +126,12 @@ const shortcuts = computed(() => [
       </ul>
     </section>
 
-    <!-- 有请求时给「接口清单」：既是快速入口，也顶掉原来六张特性卡的位置（UI-01） -->
-    <section v-if="requests > 0" class="list">
-      <div class="list-hd">
-        <h2 class="list-ttl">{{ t('overview.allRequests') }}</h2>
-        <span class="list-count">{{ t('overview.total', { n: requests }) }}</span>
-      </div>
-      <ul class="rows">
-        <li v-for="r in requestList" :key="r.uid">
-          <button class="row" type="button" :data-uid="r.uid" @click="emit('open-request', r.uid)">
-            <method-tag :method="r.method" />
-            <span class="nm">{{ r.name }}</span>
-            <span class="pa">{{ r.path }}</span>
-          </button>
-        </li>
-      </ul>
-    </section>
-
-    <!-- 空集合：展示特性卡，帮第一次打开的人认识产品 -->
+    <!-- 空集合：展示特性卡，帮第一次打开的人认识产品；有接口时概览页只留概况/操作，接口交给左侧树 -->
     <feature-cards v-if="requests === 0" />
   </div>
 </template>
 
 <style scoped>
-.list {
-  padding: 18px 24px 24px;
-}
-
-.list-hd {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.list-ttl {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text);
-}
-
-.list-count {
-  font-size: 12px;
-  color: var(--app-muted);
-}
-
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-width: 900px;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 0 10px;
-  height: 30px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--app-text);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.row:hover {
-  background: var(--app-hover-soft);
-}
-
-.row .nm {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row .pa {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--app-muted);
-}
-
 .overview {
   flex: 1 1 auto;
   overflow: auto;

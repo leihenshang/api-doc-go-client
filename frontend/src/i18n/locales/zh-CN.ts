@@ -525,8 +525,6 @@ export default {
     undo: '撤销',
     redo: '重做',
     empty: '集合内还没有请求',
-    allRequests: '接口清单',
-    total: '共 {n} 个',
     copyDir: '复制目录路径',
     dirCopied: '目录路径已复制',
     copyFailed: '复制失败：请检查剪贴板权限后重试',
