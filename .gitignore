@@ -2,6 +2,8 @@
 node_modules/
 frontend/dist/
 build/bin/
+# wails build -nsis 自动写入的 WebView2 引导器（~2MB，每次构建重新生成，不入库）
+build/windows/installer/tmp/
 
 # 本地数据
 *.local.yml
