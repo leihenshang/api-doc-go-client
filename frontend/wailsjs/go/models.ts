@@ -1206,6 +1206,7 @@ export namespace config {
 	    proxyUrl: string;
 	    autoSave: boolean;
 	    trayResident: boolean;
+	    trayCloseAction: string;
 	    restoreLimit: number;
 	    mcp: MCPConfig;
 	
@@ -1228,6 +1229,7 @@ export namespace config {
 	        this.proxyUrl = source["proxyUrl"];
 	        this.autoSave = source["autoSave"];
 	        this.trayResident = source["trayResident"];
+	        this.trayCloseAction = source["trayCloseAction"];
 	        this.restoreLimit = source["restoreLimit"];
 	        this.mcp = this.convertValues(source["mcp"], MCPConfig);
 	    }
