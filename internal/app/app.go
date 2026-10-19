@@ -35,6 +35,9 @@ type App struct {
 	collOrder []string
 	// activeRoot 活动根的标识：所有集合级方法（不带 root 参数的那些）都作用于它
 	activeRoot string
+	// syncMus 按集合的同步互斥量（key = rootKey(c.Dir)）：同一集合同一时刻只允许一轮同步，
+	// 不同根之间互不影响。用 a.mu 保护，懒创建（见 syncMuFor）。
+	syncMus map[string]*sync.Mutex
 	// sendCancels 按「工作目录:请求 uid」记录在途发送（指针身份用于避免旧请求结束时误删新请求）；
 	// 带目录前缀是为了多根并存时不同目录里的同名 uid 不会互相取消。
 	sendCancels map[string]*inflightSend
