@@ -1,4 +1,4 @@
-//go:build dev
+//go:build dev || devbuild
 
 // Package appicon 提供 Wails Linux 窗口图标与稳定的 WM_CLASS 程序名。
 // dev 版本使用开发版图标与程序名，避免与正式版在任务栏混叠。

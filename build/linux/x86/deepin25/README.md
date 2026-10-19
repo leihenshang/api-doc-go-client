@@ -1,10 +1,32 @@
 # 打包流程：Linux · x86(x86_64) · Deepin 25 —— deb 安装包
 
-> 状态：**打包脚本已实现** —— `scripts/build-deb.sh`（构建 → deb 树 → 图标缩放 → dpkg-deb，prod/dev 各一包）；
-> 脚本尚待在 Linux 构建机首次实跑验证（Windows 侧仅做过 `bash -n` 语法校验）。CI 接入等见文末「待实施清单」。
+> 状态：**已在 Deepin 25 实跑打通（2026-10-19，v0.1.0 双包产出）** —— `scripts/build-deb.sh`
+> 一条命令完成 构建 → deb 树 → 图标缩放 → dpkg-deb。CI 接入等见文末「待实施清单」。
 >
 > 目录层级约定：`build/<系统>/<cpu架构>/<os>/`。
 > 本目录对应 **linux + x86_64 + deepin25**，dpkg 架构为 **amd64**。
+
+## 0. 快速开始
+
+```bash
+# 构建机需：Go + Wails CLI + Node + libgtk-3-dev libwebkit2gtk-4.0-dev + dpkg-deb + ImageMagick
+# Go/Node 由 vfox 管理时，先激活：eval "$(vfox activate bash)"
+VERSION=0.1.0 scripts/build-deb.sh           # 完整构建，正式 + dev 各出一包
+VERSION=0.1.0 scripts/build-deb.sh arm64     # 交叉打 arm64（需 aarch64 工具链，见 arm README）
+SKIP_BUILD=1 scripts/build-deb.sh            # 复用 build/bin 现有二进制，仅重新打包
+```
+
+产物：`build/bin/api-doc-client_<版本>_amd64.deb` 与 `build/bin/api-doc-client-dev_<版本>_amd64.deb`。
+
+安装与验证：
+
+```bash
+sudo apt install ./build/bin/api-doc-client_<版本>_amd64.deb
+gtk-launch api-doc-client        # 必须从入口启动，不要 /usr/bin 裸跑（否则 dock 匹配不到）
+```
+
+版本号优先级：`VERSION` 环境变量 > `wails.json info.productVersion` > `0.0.0-dev`。
+（`wails.json` 目前未设 `productVersion`，发版请显式传 `VERSION`。）
 
 ## 1. 目标产物
 
@@ -26,7 +48,7 @@ api-doc-client-dev_<version>_amd64.deb        # 开发版（可与正式版并�
 
 - Go 工具链 + Wails CLI（`wails build`）、Node（前端构建）
 - GTK3 / WebKit2GTK 开发头文件（Wails Linux 前端为 cgo，必须有）：
-  `libgtk-3-dev libwebkit2gtk-4.1-dev`（按项目实际 webkit 版本调整）
+  `libgtk-3-dev libwebkit2gtk-4.0-dev`（Deepin 25 实测为 4.0；若无 4.0 头文件可改 `-tags webkit2_41` 构建 4.1，则 control 的 Depends 同步改为 `libwebkit2gtk-4.1-0`）
 - 打包工具：`dpkg-deb`；图标缩放：ImageMagick（`convert`）或 `rsvg-convert`/`sharp`
 - x86_64 为**本机原生构建**，无需交叉编译环境
 
@@ -38,9 +60,15 @@ api-doc-client-dev_<version>_amd64.deb        # 开发版（可与正式版并�
 # 正式版（build 标签会内嵌 frontend/dist，需先构建前端）
 wails build -platform linux/amd64 -clean -o api-doc-client
 
-# 开发版（dev 标签：开发图标 + 开发版程序名，见 internal/appicon、internal/devicon）
-wails build -platform linux/amd64 -tags dev -clean -o api-doc-client-dev
+# 开发版（devbuild 标签：开发图标 + 开发版程序名，见 internal/appicon、internal/devicon）
+wails build -platform linux/amd64 -tags devbuild -o api-doc-client-dev
 ```
+
+> ⚠️ 两个坑（2026-10-19 实跑踩过）：
+> 1. **不要用 `-tags dev`**：Wails v2.16 库内部保留 `dev`/`production` 标签（`internal/app/app_dev.go` 等），
+>    传 `dev` 会把库内两份互斥实现同时激活，报 `App.Run already declared`。项目自有标签统一用 `devbuild`
+>    （源文件里写作 `dev || devbuild`，兼容 `wails dev` 自动注入的 `dev`）。
+> 2. **第二次构建不要带 `-clean`**：`-clean` 会清空 `build/bin`，把先构建好的正式版二进制删掉。
 
 产物落在 `build/bin/`（已 gitignore），打包时拷入 deb 树。
 
@@ -67,7 +95,11 @@ Architecture: amd64
 Maintainer: api-doc-go
 Section: utils
 Priority: optional
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0
+Depends: libgtk-3-0, libwebkit2gtk-4.0-37
+```
+
+> Depends 必须与二进制**实际链接**的 so 对应（构建后用 `ldd build/bin/api-doc-client | grep -i webkit` 核对）。
+> 默认构建（无 webkit 标签）链 `libwebkit2gtk-4.0.so.37` → `libwebkit2gtk-4.0-37`；若用 `-tags webkit2_41` 构建则写 `libwebkit2gtk-4.1-0`。
 Description: AI-native, local-first API client
  Markdown 风格接口文档协作工具的桌面客户端（Postman/Bruno 风格）。
 ```
@@ -147,8 +179,8 @@ xprop -id $(xdotool search --class ApiDocClient | head -1) WM_CLASS _NET_WM_ICON
 
 ## 5. 待实施清单（先不做）
 
-1. ✅ 已实现（脚本）：`scripts/build-deb.sh` 一条命令完成 构建 → deb 树 → 图标缩放 → `dpkg-deb` 打包（prod/dev 各一个包）
-2. `gdk_set_program_class` cgo 垫片（§4 方式 2）及 `StartupWMClass` 的相应收敛
+1. ✅ 已实现（脚本）：`scripts/build-deb.sh` 一条命令完成 构建 → deb 树 → 图标缩放 → `dpkg-deb` 打包（prod/dev 各一个包），**2026-10-19 已在 Deepin 25 实跑产出 v0.1.0 双包**
+2. `gdk_set_program_class` cgo 垫片（§4 方式 2）及 `StartupWMClass` 的相应收敛；安装后需 `xprop` 实测 WM_CLASS 与 deb 包内 `.desktop`（basename 方案 `api-doc-client`）是否真正匹配
 3. ✅ 已并入脚本（ImageMagick 缩放 16–512 七档，dev 图标自动回落正式图标）
 4. ✅ 已定（脚本）：prod `api-doc-client_<version>_<arch>.deb` / dev `api-doc-client-dev_…`，版本取 `VERSION` 环境变量 > `wails.json info.productVersion` > `0.0.0-dev`
 5. CI 接入（`.github/workflows`）与发布流程
