@@ -8,5 +8,12 @@
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "api-doc-go"
+  },
+  "info": {
+    "companyName": "api-doc-go",
+    "productName": "API Doc Client",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 api-doc-go",
+    "comments": "AI-native, local-first API client (Postman/Bruno style)"
   }
 }
