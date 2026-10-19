@@ -213,6 +213,23 @@ func (c *Client) Meta() (*Meta, error) {
 	return &m, nil
 }
 
+// Project 服务端项目（同步设置里的项目选择器用，只取客户端需要的两个字段）。
+type Project struct {
+	ID    uint64 `json:"id"`
+	Title string `json:"title"`
+}
+
+// Projects 列出当前令牌可见的项目。
+// 端点 GET /api/project 挂在 AuthOrPAT 下，PAT 可直接访问；page_size 取服务端上限 200
+// （个人/团队项目远超这个数量时，选择器只展示前 200 个，仍可手动填 ID）。
+func (c *Client) Projects() ([]Project, error) {
+	var res struct {
+		Items []Project `json:"items"`
+	}
+	err := c.do(http.MethodGet, "/api/project?page_num=1&page_size=200", nil, &res)
+	return res.Items, err
+}
+
 // State 游标。
 func (c *Client) State(projectID uint64) (*State, error) {
 	var s State

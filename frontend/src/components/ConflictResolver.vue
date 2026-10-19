@@ -26,6 +26,10 @@ function quote(v: string): string {
 }
 
 const createdLabel = computed(() => new Date(props.detail.createdAt).toLocaleString())
+
+/** 整文件快照（文档/示例/环境）：没有字段级 diff，只展示本地版本预览。 */
+const isSnapshot = computed(() => props.detail.mode === 'snapshot')
+const kindLabel = computed(() => t(`sync.kind_${props.detail.kind || 'request'}`))
 </script>
 
 <template>
@@ -35,14 +39,27 @@ const createdLabel = computed(() => new Date(props.detail.createdAt).toLocaleStr
       @click="open = !open">
       <n-icon :component="open ? ChevronDownOutline : ChevronForwardOutline" :size="13" class="car" />
       <span class="cr-name">{{ detail.name || detail.file }}</span>
+      <span v-if="isSnapshot" class="tag tag-kind">{{ kindLabel }}</span>
       <span class="cr-rev">rev {{ detail.serverRev }}</span>
       <span v-if="!detail.hasPayload" class="tag tag-old">{{ t('sync.tagOld') }}</span>
     </button>
 
     <!-- 展开内容 -->
     <div v-show="open" class="cr-body">
+      <!-- 整文件快照：本地版本已被远端覆盖，整份另存，可原样恢复 -->
+      <template v-if="isSnapshot">
+        <p class="cr-old" data-testid="conflict.snapshot">
+          {{ t('sync.snapshotHint', { kind: kindLabel }) }}
+        </p>
+        <p v-if="detail.remotePreview" class="snap-meta">
+          {{ t('sync.snapshotRemote') }}：{{ detail.remotePreview }}
+        </p>
+        <div class="snap-hd">{{ t('sync.snapshotLocal') }}</div>
+        <pre v-if="detail.preview" class="snap-local">{{ detail.preview }}</pre>
+      </template>
+
       <!-- 旧版本遗留副本：没有服务器快照，只能保留本地 -->
-      <p v-if="!detail.hasPayload" class="cr-old" data-testid="conflict.old">
+      <p v-else-if="!detail.hasPayload" class="cr-old" data-testid="conflict.old">
         {{ t('sync.oldConflictHint') }}
       </p>
 
@@ -138,6 +155,41 @@ const createdLabel = computed(() => new Date(props.detail.createdAt).toLocaleStr
 .tag-old {
   color: var(--app-warn);
   background: var(--app-warn-tint);
+}
+
+.tag-kind {
+  color: var(--app-muted);
+  background: var(--app-hover-soft);
+}
+
+/* ---- 整文件快照 ---- */
+.snap-meta {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--app-muted);
+}
+
+.snap-hd {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-muted);
+}
+
+.snap-local {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  max-height: 140px;
+  overflow: auto;
+  background: var(--app-danger-tint);
+  color: var(--app-text);
+  font-family: var(--app-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* ---- 展开内容 ---- */

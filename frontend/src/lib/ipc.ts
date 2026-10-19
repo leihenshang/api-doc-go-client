@@ -29,6 +29,7 @@ import type {
   ResponseDoc,
   ResponseExample,
   SendResult,
+  ServerProject,
   Settings,
   SyncBindInfo,
   SyncBindReq,
@@ -359,6 +360,9 @@ export const api = {
   runSync: (token: string) => call<SyncReport>('RunSync', token),
   // 按根（工作目录）版本：侧栏根行刷新/非活动根的冲突页用，不切换活动根
   getSyncBindFor: (root: string) => call<SyncBindInfo>('GetSyncBindFor', root),
+  // 项目发现：用当前地址 + 令牌列服务端可见项目（避免手填数字 ID 出错）
+  listServerProjects: (serverUrl: string, token: string) =>
+    call<ServerProject[] | null>('ListServerProjects', serverUrl, token).then((v) => v ?? []),
   setSyncBindFor: (req: SyncBindReq) => call<SyncBindInfo>('SetSyncBindFor', req),
   unbindSyncFor: (root: string) => call<null>('UnbindSyncFor', root),
   runSyncForRoot: (root: string) => call<SyncReport>('RunSyncForRoot', root),
