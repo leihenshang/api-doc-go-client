@@ -195,6 +195,12 @@ const themeOptions = computed(() => [
   { label: t('settings.themeLight'), value: ThemeLight },
   { label: t('settings.themeDark'), value: ThemeDark },
 ])
+// 关闭窗口的行为（对应 Go 侧 config.TrayClose* 常量）；也是「不再显示」勾选后的可撤销入口
+const trayCloseOptions = computed(() => [
+  { label: t('settings.trayCloseAsk'), value: 'ask' },
+  { label: t('settings.trayCloseTray'), value: 'tray' },
+  { label: t('settings.trayCloseQuit'), value: 'quit' },
+])
 
 watch(
   () => props.show,
@@ -389,6 +395,16 @@ function close(): void {
               @update:checked="(v: boolean) => { form.trayResident = v; void applyNow() }">
               <span class="hint">{{ t('settings.trayResidentHint') }}</span>
             </n-checkbox>
+          </div>
+          <!-- 关闭行为：只在开启驻留后才有意义（关掉驻留 = 关窗必退出，无需选择） -->
+          <div v-if="form.trayResident" class="row">
+            <span class="lbl">{{ t('settings.trayCloseAction') }}</span>
+            <!-- 显式赋值再 applyNow（与本文件其它勾选项同一写法）：v-model + @update:value 并存时
+                 两个 handler 的先后顺序不保证，可能把旧值写盘 -->
+            <n-select :value="form.trayCloseAction" :options="trayCloseOptions" size="small" class="num"
+              data-testid="settings.trayCloseAction"
+              @update:value="(v: 'ask' | 'tray' | 'quit') => { form.trayCloseAction = v; void applyNow() }" />
+            <span class="hint">{{ t('settings.trayCloseActionHint') }}</span>
           </div>
 
         </div>

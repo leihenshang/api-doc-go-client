@@ -20,6 +20,7 @@ const DEFAULTS: Settings = {
   proxyUrl: '',
   autoSave: false,
   trayResident: false,
+  trayCloseAction: 'ask',
   restoreLimit: 8,
   // 内嵌 MCP 服务默认不启用、只监听本机、只读（与 Go 侧 config.Default() 一致）
   // allow = MCP 可访问的工作目录白名单（空 = 不授权任何目录，安全默认）
