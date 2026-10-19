@@ -361,9 +361,12 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 		e.snapshotExampleIfDirty(rep, it.UID, p)
 		return e.applyExample(it.UID, p)
 	}
-	// 环境/变量：落 environments/ 文件，摘要记录在 Bind，不进索引与冲突副本体系。
+	// 环境/变量：落 environments/ 文件，摘要记录在 Bind，不进索引体系。
+	// 环境只有在「服务端改名」时才会动本地文件，那种情况下本地的命名意图会被静默吸收，
+	// 所以覆盖成功后补一份副本（P1-7，见 applyVarEnvWithSnapshot）；
+	// 同名/空名/本地没有该环境都不存在覆盖，不留。
 	if it.Type == "variable_env" {
-		return e.applyVarEnv(it.UID, p)
+		return e.applyVarEnvWithSnapshot(rep, it.UID, p)
 	}
 	if it.Type == "variable" {
 		e.snapshotVarIfDirty(rep, it.UID, p)
@@ -676,6 +679,71 @@ func (e *Engine) snapshotVarIfDirty(rep *Report, uid string, p Payload) {
 		remote = fmt.Sprintf("变量 %s = %s", p.Name, p.Value)
 	}
 	e.snapshotOnce(rep, collection.ConflictKindEnv, env.UID, env.Name, rel, remote, local)
+}
+
+// envSnapshotDraft 一次「服务端改名覆盖本地」的待写副本：旧名字、旧路径、旧文件字节。
+// 字节必须在 applyVarEnv 之前读好——改名会把 environments/<old>.yml 搬进 .trash，之后读不到。
+type envSnapshotDraft struct {
+	name   string
+	rel    string
+	remote string
+	local  []byte
+}
+
+// pendingEnvSnapshot 判定本轮是否真的会发生「服务端改名覆盖本地」，会则把旧文件读进草稿。
+//
+// 窄口子是刻意的，四种情况一律返回 nil（不读、不写、不计数）：
+//   - p.Name 为空：applyVarEnv 直接返回，本地名字不变，什么都没被覆盖；
+//   - 本地没有该环境：这是新建，不存在覆盖，也就没有「被吸收的本地意图」；
+//   - 同名：applyVarEnv 是 no-op；
+//   - 旧主文件读不出来：没有可留底的东西（主文件被外部删掉的情形）。
+//
+// 会被静默吸收的只有**本地的命名意图**：文件内容本身不会丢——applyVarEnv 走
+// collection.RenameEnv，它把 environments/<old>.yml 与 <old>.secrets.yml 一起搬到新名字
+// （旧名进 .trash）。所以副本的用途是「留下本地命名 + 主文件当时的旧样子」。
+//
+// 刻意**不**复制 .secrets.yml：
+//   - 副本会被用户/界面/导出流程直接打开、贴进工单，明文密钥的扩散面就此变大；
+//   - 副本是长期驻留的（环境删掉、改名回滚都不会连带清它），密钥会活得比环境更久；
+//   - 副本要证明的东西不需要密钥——旧名字与主文件内容已足够说明「服务端改了什么」，
+//     而 secret 值本身随 RenameEnv 一起平移，没有丢，需要时看新名字的 secrets 文件即可。
+func (e *Engine) pendingEnvSnapshot(uid string, p Payload) *envSnapshotDraft {
+	if p.Name == "" {
+		return nil // 空名是 no-op：applyVarEnv 直接返回，本地名字不会变
+	}
+	env, _, err := e.envByUID(uid)
+	if err != nil || env.Name == "" || env.Name == p.Name {
+		return nil // 本地没有这个环境（新建）或同名（no-op）：不存在覆盖
+	}
+	rel := path.Join("environments", env.Name+".yml")
+	local, rerr := os.ReadFile(filepath.Join(e.Coll.Dir, filepath.FromSlash(rel)))
+	if rerr != nil {
+		return nil
+	}
+	return &envSnapshotDraft{
+		name:   env.Name,
+		rel:    rel,
+		remote: fmt.Sprintf("服务端把环境 %s 改名为 %s（敏感变量值不在副本内）", env.Name, p.Name),
+		local:  local,
+	}
+}
+
+// applyVarEnvWithSnapshot 应用环境条目，并在**覆盖真的发生之后**才留副本（P1-7）。
+//
+// 两段式是必须的：副本是「本地被覆盖」的证据，只有 applyVarEnv 成功返回时才有资格写。
+// 先写后判会造出假冲突——除了 pendingEnvSnapshot 挡掉的空名/同名/新建，
+// RenameEnv 也可能失败（例如目标名已被本地另一个环境占用），那时本地同样没被覆盖，
+// 却已经多出一份 .conflicts/ 副本和一个 Report.Conflicts 计数，用户会看到并不存在的冲突。
+func (e *Engine) applyVarEnvWithSnapshot(rep *Report, uid string, p Payload) error {
+	draft := e.pendingEnvSnapshot(uid, p) // 旧字节必须在 apply 之前读
+	if err := e.applyVarEnv(uid, p); err != nil {
+		return err // 未发生覆盖：不留副本，错误照原样往上返回
+	}
+	if draft == nil {
+		return nil
+	}
+	e.snapshotOnce(rep, collection.ConflictKindEnv, uid, draft.name, draft.rel, draft.remote, draft.local)
+	return nil
 }
 
 // envByUID 按同步 uid 找本地环境（ListEnvs 已合并 secret 值）。
