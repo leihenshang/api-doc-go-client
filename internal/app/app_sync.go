@@ -6,11 +6,20 @@ package app
 import (
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/syncengine"
 )
+
+// errSyncBusy 该集合已有一轮同步在跑（手动入口直接拒绝，不排队）。
+//
+// 为什么手动拒绝而不是排队：连点两次「立即同步」的用户，排队会让他等满两整轮网络往返，
+// 而第二轮基本是把第一轮刚拉下来的东西再走一遍（多余），且按钮的「同步中」状态与实际
+// 执行轮次对不上。拒绝 + 明确提示更可控——想再跑一次，再点一次就是了。
+// 定时同步遇到它必须**静默跳过**（定时器弹错是噪声）。
+var errSyncBusy = errors.New("该集合正在同步中，请稍后再试")
 
 // ---- 同步（C7 / I1–I6）----
 
@@ -57,11 +66,21 @@ func (a *App) SetSyncBind(serverURL string, projectID uint64, mode, token string
 //
 // PAT 随 .sync.json 持久化（0600）：重启客户端后免重填；本次未填令牌时沿用同一服务端
 // 上已保存的令牌（改模式不必重输）。地址必须通过校验：非回环地址禁止明文 http。
+//
+// 与同步互斥同一把锁：runSyncFor 结尾会把**整份 Bind** 回写（cursor + 引擎侧状态），
+// 若同步进行中改了绑定（地址/项目/令牌），这轮回写会把新设置盖回旧值——令牌可能被静默回滚。
+// 这里「读旧绑定 → 合并 → 写新绑定」本身也是读-改-写，同样需要临界区。
 func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 	c, err := a.collOf(req.Root)
 	if err != nil {
 		return nil, err
 	}
+	mu := a.syncMuFor(c)
+	if !mu.TryLock() {
+		return nil, errSyncBusy // 正在同步：让用户稍后重试，别把新设置写进一轮进行中的回写里
+	}
+	defer mu.Unlock()
+
 	if strings.TrimSpace(req.ServerURL) == "" || req.ProjectID == 0 {
 		return nil, errors.New("服务端地址与项目 ID 必填")
 	}
@@ -145,11 +164,20 @@ func (a *App) UnbindSync() error {
 }
 
 // UnbindSyncFor 解绑指定根。
+//
+// 与同步互斥同一把锁：解绑写的是整份 .sync.json，同步进行中写会被 runSyncFor 结尾的
+// 整份回写盖回来（刚解绑完又被「复活」），所以这里也拒绝而不是排队。
 func (a *App) UnbindSyncFor(root string) error {
 	c, err := a.collOf(root)
 	if err != nil {
 		return err
 	}
+	mu := a.syncMuFor(c)
+	if !mu.TryLock() {
+		return errSyncBusy
+	}
+	defer mu.Unlock()
+
 	b := syncengine.BindInfo{}
 	if err := syncengine.SaveBind(c.Dir, b); err != nil {
 		return err
@@ -172,12 +200,13 @@ func (a *App) SetSyncPassphrase(pass string) error {
 }
 
 // RunSync 在**活动根**上执行一轮同步（先 pull 后 push）。token 为空时用已保存的 PAT。
+// 该集合已有一轮在跑时立即返回 errSyncBusy（不排队，见 errSyncBusy 的说明）。
 func (a *App) RunSync(token string) (*syncengine.Report, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return nil, err
 	}
-	return a.runSyncFor(c, token)
+	return a.runSyncFor(c, token, false)
 }
 
 // RunSyncForRoot 在**指定工作目录**上执行一轮同步，不切换活动根/页签组。
@@ -187,14 +216,52 @@ func (a *App) RunSyncForRoot(root string) (*syncengine.Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.runSyncFor(c, "")
+	return a.runSyncFor(c, "", false)
+}
+
+// syncMuFor 取某集合的同步互斥量（按 rootKey(c.Dir) 归属：不同根并行、同一根串行）。
+// 懒创建在 a.mu 下进行，表本身不会被并发写。
+func (a *App) syncMuFor(c *collection.Collection) *sync.Mutex {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := rootKey(c.Dir)
+	if key == "" {
+		key = c.Dir // 目录名为空是异常态，退化成一个进程级共享锁也比不加锁强
+	}
+	if a.syncMus == nil {
+		a.syncMus = map[string]*sync.Mutex{}
+	}
+	mu, ok := a.syncMus[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		a.syncMus[key] = mu
+	}
+	return mu
 }
 
 // runSyncFor 对指定集合跑一轮同步。
 //
 // 为什么把集合当参数：定时同步的 goroutine 属于某个根，而活动根可能在它跑之前就切换了；
 // 若这里仍取「活动集合」，自动同步会打到用户刚切过去的另一个目录上。
-func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Report, error) {
+//
+// P1-5：整轮互斥。锁覆盖**整个同步体**（读绑定 → 令牌 → 引擎 → 回写 cursor → 重建索引），
+// 而不只是 Engine.RunOne：两轮并发会把同一批 dirty 重复推上去、互相覆盖 .sync.json 的 cursor，
+// 将来接 Git 还会直接撞 index.lock。此前只有 setSyncRunning 这个「给状态栏看的标志」，
+// 读它与设置它不在同一临界区，手动点击与定时器完全可能同时进来。
+//
+// wait 语义：
+//   - false：TryLock，抢不到立即返回 errSyncBusy（手动点击 / 定时器都用这条——定时器不该排队，
+//     下一拍自然会再来）；
+//   - true：Lock 排队（留给「必须跑完一轮」的调用方，例如将来后台补跑一轮 Git 同步）。
+func (a *App) runSyncFor(c *collection.Collection, token string, wait bool) (*syncengine.Report, error) {
+	mu := a.syncMuFor(c)
+	if wait {
+		mu.Lock()
+	} else if !mu.TryLock() {
+		return nil, errSyncBusy
+	}
+	defer mu.Unlock()
+
 	b, err := syncengine.LoadBind(c.Dir)
 	if err != nil || !b.Linked {
 		return nil, errors.New("当前集合未关联服务端项目")
@@ -220,9 +287,12 @@ func (a *App) runSyncFor(c *collection.Collection, token string) (*syncengine.Re
 	cli := syncengine.New(b.ServerURL, tok, syncengine.DeviceID())
 	eng := &syncengine.Engine{Coll: c, Bind: b, CLI: cli}
 
+	// 「同步中」用 defer 复位：RunOne panic 时锁会由上面的 defer 放掉，但状态栏的标志
+	// 若是手动复位的就永远停在「同步中」。defer 也让它覆盖到回写/重建索引结束，比原来更准确。
 	a.setSyncRunning(c, true)
+	defer a.setSyncRunning(c, false)
+
 	rep, err := eng.RunOne()
-	a.setSyncRunning(c, false)
 
 	// 回写引擎侧状态（cursor + 响应示例推送状态）
 	b = eng.Bind
@@ -391,6 +461,10 @@ func (a *App) StopAutoSync() {
 }
 
 // autoSyncOnce 某个根的一轮自动同步：仅 auto 模式且已绑定、未在跑时执行。
+//
+// st.Running 只是先做一次廉价的跳过（省掉读 .sync.json），真正的互斥在 runSyncFor 的锁里：
+// 读 Running 与设置它不在同一临界区，仅凭它无法阻止「手动同步刚好在这一瞬开始」。
+// 抢不到锁说明手动同步正在跑，本轮静默跳过——定时器不弹错、不排队。
 func (a *App) autoSyncOnce(root string) {
 	c, err := a.collOf(root)
 	if err != nil {
@@ -412,7 +486,9 @@ func (a *App) autoSyncOnce(root string) {
 	if token == "" {
 		return
 	}
-	_, _ = a.runSyncFor(c, token)
+	if _, err := a.runSyncFor(c, token, false); errors.Is(err, errSyncBusy) {
+		return // 手动同步正在跑：静默跳过（失败已由 runSyncFor 记进 SyncStatus.LastError）
+	}
 }
 
 // ListConflicts 列出活动集合 .conflicts/ 冲突副本（I4）。
