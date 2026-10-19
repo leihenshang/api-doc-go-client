@@ -119,6 +119,7 @@ export function ListMCPGrants():Promise<Array<app.MCPGrant>>;
 export function ListResponseExamples(arg1:string):Promise<Array<collection.ResponseExample>>;
 
 export function ListServerProjects(arg1:string,arg2:string):Promise<Array<app.ServerProject>>;
+
 export function ListTrashFor(arg1:string):Promise<Array<collection.TrashEntry>>;
 
 export function LoadGrpcSchema(arg1:string,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
