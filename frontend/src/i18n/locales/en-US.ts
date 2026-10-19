@@ -523,8 +523,6 @@ export default {
     undo: 'Undo',
     redo: 'Redo',
     empty: 'No requests in this collection yet',
-    allRequests: 'All requests',
-    total: '{n} total',
     copyDir: 'Copy folder path',
     dirCopied: 'Folder path copied',
     copyFailed: 'Copy failed: check clipboard permission and retry',

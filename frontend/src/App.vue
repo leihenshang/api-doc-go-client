@@ -1061,7 +1061,7 @@ watch(
                 </div>
 
                 <overview v-else :info="coll.info" @new-request="newDraft()"
-                  @open-request="openRequestInRoot($event, coll.activeRoot)" @import="showImport = true"
+                  @import="showImport = true"
                   @export="exportDoc($event)" @mock="showMock = true" />
               </transition>
             </main>
