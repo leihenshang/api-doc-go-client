@@ -1,91 +1,105 @@
 // Package tray 提供系统托盘驻留（任务栏通知区图标）能力，Windows / Linux 通用。
 //
-// 实现基于 energye/systray：Windows 走原生 Shell_NotifyIcon，Linux 走 GTK/AppIndicator
-// （Deepin/DDE 支持 AppIndicator 协议）。macOS 未适配（本项目不发 mac 包）。
+// 实现基于 energye/systray v1.0.3：Windows 走原生 Shell_NotifyIcon，
+// Linux 走 DBus 的 StatusNotifierItem 协议（Deepin/DDE、KDE、GNOME 均支持，无需额外运行库）。
+// macOS 未适配（本项目不发 mac 包）。
 //
-// 生命周期：Enable 在独立 goroutine 里 systray.Run；Disable 调 systray.Quit 结束循环。
-// 菜单：显示主窗口 / 退出 —— 回调由 App 注入（显示 = WindowShow，退出 = 放行关闭守卫后 Quit）。
+// 交互：双击托盘图标 = 显示主窗口；右键 = 菜单（显示主窗口 / 退出）。
 package tray
 
 import (
+	"log"
 	"sync"
 
 	"github.com/energye/systray"
 )
 
-// Callbacks 托盘菜单动作回调（由 App 注入，见 internal/app/tray.go）。
+// Callbacks 托盘交互回调（由 App 注入，见 internal/app/tray.go）。
 type Callbacks struct {
-	OnShow func() // 「显示主窗口」：WindowShow + 前端刷新托盘状态
-	OnQuit func() // 「退出」：等价于用户确认退出（放行守卫 → Quit）
+	OnShow func() // 双击图标 / 菜单「显示主窗口」
+	OnQuit func() // 菜单「退出」：等价于用户确认退出（放行守卫 → Quit）
 }
 
+// Manager 托盘管理器。
+//
+// ⚠️ 进程内只能启动一次，且启动后不可停止（直到进程退出）—— 这是上游库的硬限制：
+//
+//  1. systray.Quit() 由 sync.Once 守护，quitChan 是包级全局 channel，关闭后无法重建；
+//     再次 Run 时 nativeLoop 会立刻从已关闭的 channel 返回，托盘根本起不来。
+//  2. 更糟的是 nativeStart() 在**重新赋值 instance.props 之前**就先触发了 onReady，
+//     于是第二次启动时 onReady 里的 SetIcon 会打到上一条已 Close 的 DBus 连接上：
+//     panic: dbus: connection closed by user —— 而它跑在库自己起的 goroutine 里，
+//     无法被调用方 recover，直接把整个应用进程带走（表现为「程序消失」）。
+//
+// 因此本管理器刻意不提供 Stop：设置里关掉「驻留托盘」只改变关闭窗口的行为，
+// 图标保留到应用退出；进程退出时 DBus 连接断开，桌面会自动摘掉图标，不会留残影。
 type Manager struct {
 	mu      sync.Mutex
-	running bool
+	started bool
 	cb      Callbacks
-	// 点击托盘图标本身（Linux AppIndicator 部分桌面左键单击无事件；Windows 有）
-	onClickCh func()
 }
 
-// NewManager 创建托盘管理器；同一个实例可反复 Enable/Disable。
+// NewManager 创建托盘管理器。
 func NewManager(cb Callbacks) *Manager {
 	return &Manager{cb: cb}
 }
 
-// Enabled 当前托盘是否在运行。
-func (m *Manager) Enabled() bool {
+// Started 托盘是否已启动（含启动失败后不再重试的情况）。
+func (m *Manager) Started() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.running
+	return m.started
 }
 
-// Enable 启动托盘（幂等：已运行则忽略）。阻塞直到 onReady 或出错。
+// Start 启动托盘（幂等，非阻塞）。整个进程生命周期内只有第一次调用真正生效。
 // iconWindows 传 ICO 字节，iconLinux 传 PNG 字节。
-func (m *Manager) Enable(iconWindows, iconLinux []byte) {
+func (m *Manager) Start(iconWindows, iconLinux []byte) {
 	m.mu.Lock()
-	if m.running {
+	if m.started {
 		m.mu.Unlock()
 		return
 	}
-	m.running = true
+	// 先置位再启动：即使 onReady 里出错也不重试 —— 重试正是上面第 2 条崩溃的触发条件。
+	m.started = true
 	m.mu.Unlock()
 
-	systray.Run(func() {
-		setIcon(iconWindows, iconLinux)
-		systray.SetTitle("")
-		systray.SetTooltip(tooltip)
-
-		mShow := systray.AddMenuItem(menuShow, menuShowTip)
-		systray.AddSeparator()
-		mQuit := systray.AddMenuItem(menuQuit, menuQuitTip)
-
-		// energye/systray v1.0.3 为回调式菜单（ClickedCh 已私有化）
-		if m.cb.OnShow != nil {
-			mShow.Click(m.cb.OnShow)
-		}
-		if m.cb.OnQuit != nil {
-			mQuit.Click(m.cb.OnQuit)
-		}
-	}, func() {
-		// onExit：systray.Quit 返回后的收尾
-		m.mu.Lock()
-		m.running = false
-		m.mu.Unlock()
-	})
+	go func() {
+		// onExit 传空实现：我们从不调 Quit，进程退出时由运行时收尾。
+		systray.Run(func() { m.onReady(iconWindows, iconLinux) }, func() {})
+	}()
 }
 
-// Disable 停止托盘（幂等）。
-func (m *Manager) Disable() {
-	m.mu.Lock()
-	running := m.running
-	m.mu.Unlock()
-	if running {
-		systray.Quit()
+// onReady 托盘就绪：装图标、建菜单、挂事件。
+//
+// 这里跑在库自起的 goroutine 上（systray.Register 内部 go func(){ <-readyCh; onReady() }），
+// 任何 panic 都会终止整个进程，所以必须自己 recover —— 托盘坏了不该连累主程序。
+func (m *Manager) onReady(iconWindows, iconLinux []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("tray: 托盘初始化失败（主程序不受影响）: %v", r)
+		}
+	}()
+
+	setIcon(iconWindows, iconLinux)
+	systray.SetTitle("")
+	systray.SetTooltip(tooltip)
+
+	mShow := systray.AddMenuItem(menuShow, menuShowTip)
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem(menuQuit, menuQuitTip)
+
+	// energye/systray v1.0.3 为回调式菜单（ClickedCh 已私有化）
+	if m.cb.OnShow != nil {
+		mShow.Click(m.cb.OnShow)
+		// 双击图标 = 显示主窗口。
+		//   Linux：SNI 规范没有双击，库内用 500ms 间隔把两次 Activate 判定为双击后转 dActivate；
+		//   Windows：WM_LBUTTONDBLCLK → onDClick。
+		systray.SetOnDClick(func(systray.IMenu) { m.cb.OnShow() })
+		// 单击显式设为空实现：Linux 侧若 activate 为 nil，库会向桌面返回
+		// ErrMsgUnknownMethod，部分实现会因此不再上报后续 Activate（双击就废了）。
+		systray.SetOnClick(func(systray.IMenu) {})
 	}
-}
-
-// Restart 用于设置切换（图标/回调变化时其实不必重启，但保证状态干净）。
-func (m *Manager) Restart(iconWindows, iconLinux []byte) {
-	m.Disable()
-	go m.Enable(iconWindows, iconLinux)
+	if m.cb.OnQuit != nil {
+		mQuit.Click(m.cb.OnQuit)
+	}
 }
