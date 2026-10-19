@@ -463,22 +463,29 @@ function toggleRootAll(root: string): void {
 }
 
 /**
- * 点根行（集合名这一整片区域）：切活动根，且集合收起时展开它 ——
- * 「点一下就该看到集合下的第一层」，不必去点那个小箭头。只展开不收起：
- * 收起是明确的收缩意图，仍走行内箭头（caret）切换，避免误点把树折掉。
+ * 点根行（集合名这一整片区域）：
+ * - 非活动根：切过去并确保展开（点一下就能看到集合下的第一层）——切根时不顺手折叠，
+ *   否则「刚切过去却面对一棵空树」；
+ * - 活动根：折叠 / 展开该集合下的分组，点集合名即可折展（与目录行点名字一致），
+ *   不必非去点那个小箭头。
  *
- * 行内控件（caret / ··· 点状菜单 / 徽章 / 下拉）自己处理点击，这里要放行，
- * 不能因为用户只是想打开菜单就顺带切活动根、展开集合。
+ * 行内控件（caret / ··· 点状菜单 / 徽章 / 下拉）自己处理点击，这里一律放行：
+ * 右侧「···」菜单（Side Menu）照常打开，不会因为想折展集合就误触发切根或折叠。
  */
 function onRootRowClick(root: string, ev: MouseEvent): void {
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
-  if (collapsedRoots.value.has(root)) {
-    const next = new Set(collapsedRoots.value)
-    next.delete(root)
-    collapsedRoots.value = next
+  if (root !== props.activeRoot) {
+    // 切到别的根：只保证展开 + 激活，绝不折叠（折叠当前根留给再点一次它的名字）
+    if (collapsedRoots.value.has(root)) {
+      const next = new Set(collapsedRoots.value)
+      next.delete(root)
+      collapsedRoots.value = next
+    }
+    emit('activate', root)
+    return
   }
-  emit('activate', root)
+  toggleRoot(root)
 }
 
 function fail(e: unknown): void {
