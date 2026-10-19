@@ -243,9 +243,8 @@ func (a *App) Shutdown(_ context.Context) {
 	}
 	backend := a.mcpBackend
 	a.mu.Unlock()
-	if a.tray != nil {
-		a.tray.Disable() // 收掉托盘图标（systray 内部循环退出）
-	}
+	// 托盘不在这里收尾：进程退出时 DBus 连接/通知区图标由系统自动摘除，
+	// 而 systray.Quit 是 sync.Once，调了反而会让本进程再也无法重建托盘（见 internal/tray）。
 	if backend != nil {
 		backend.Stop() // 释放 MCP 监听端口
 	}

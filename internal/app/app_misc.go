@@ -359,7 +359,7 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	a.mu.Unlock()
 	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里）
 	a.applyMCP("")
-	// 托盘驻留开关：即时启停
+	// 托盘驻留开关：开启即启动托盘；关闭只改变关窗行为，图标保留到应用退出（见 internal/tray 的说明）
 	if trayChanged {
 		a.applyTray(norm.TrayResident)
 	}
