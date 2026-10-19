@@ -106,6 +106,41 @@ test('[M1] 多工作目录：工具条菜单可切换 / 根可折叠 / 可关闭
   await expect(page.getByTestId('tab.item')).toHaveCount(0)
 })
 
+test('[M1] 点集合名折叠/展开当前根：切别的根只展开不误折，右侧「···」菜单不受影响', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await app.addCollection('bruno-sample')
+  await openCollection(page, app)
+
+  const roots = page.getByTestId('tree.root')
+  const basic = roots.filter({ hasText: 'e2e-basic' })
+  const bruno = roots.filter({ hasText: 'e2e-bruno' })
+  // bruno 是最后打开的活动根，展开态：它的子行「用户-列表」可见
+  await expect(bruno).toHaveClass(/root-active/)
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+
+  // ① 点活动根的集合名：整棵折叠（子行消失）；再点一次展开回来
+  await bruno.locator('.coll-name').click()
+  await expect(treeRow(page, '用户-列表')).toHaveCount(0)
+  await bruno.locator('.coll-name').click()
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+
+  // ② 折叠只作用于被点的根，另一个集合原样（basic 的 ping 一直在）
+  await expect(treeRow(page, 'ping')).toHaveCount(1)
+
+  // ③ 点非活动根的集合名切过去：激活且保持展开，不会因切换被误折
+  await basic.locator('.coll-name').click()
+  await expect(basic).toHaveClass(/root-active/)
+  await expect(bruno).not.toHaveClass(/root-active/)
+  await expect(treeRow(page, 'ping')).toHaveCount(1)
+
+  // ④ 右侧「···」菜单照常：点菜单不触发折展，下拉正常打开（bruno 展开态→显示「全部收起」）
+  await bruno.getByTestId('tree.root.menu').click()
+  await expect(page.getByTestId('tree.root.collapseAll')).toBeVisible()
+  await page.keyboard.press('Escape')
+  // 菜单点击被放行（未误触折展）：bruno 仍是展开态
+  await expect(treeRow(page, '用户-列表')).toHaveCount(1)
+})
+
 test('[M1] 命令面板跨目录搜索：本目录 / 所有目录 + 按目录路由打开', async ({ page, app }) => {
   await app.newCollection('basic')
   await app.addCollection('bruno-sample')
