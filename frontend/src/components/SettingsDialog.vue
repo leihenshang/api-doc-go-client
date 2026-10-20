@@ -355,10 +355,6 @@ function close(): void {
       <div class="body">
         <p v-if="error" class="err">{{ error }}</p>
         <p v-if="notice" class="ok">{{ notice }}</p>
-        <!-- 脏检查提示：有未保存改动时引导用户点保存；MCP 关键字段变化额外提示需重启服务 -->
-        <p v-if="dirty" class="hint dirty" data-testid="settings.dirtyHint">
-          {{ mcpDirty ? t('settings.dirtyMcpRestart') : t('settings.dirtySave') }}
-        </p>
 
         <!-- 分区一：界面 -->
         <div v-show="active === 'appearance'" class="pane" data-testid="settings.pane.appearance">
@@ -627,6 +623,11 @@ function close(): void {
 
     <template #footer>
       <div class="ft">
+        <!-- 脏检查提示：移到底部、紧贴「保存」按钮，用醒目琥珀色常显（不随内容滚动而消失）；
+             MCP 关键字段变化额外提示需重启服务。 -->
+        <p v-if="dirty" class="dirty" data-testid="settings.dirtyHint">
+          {{ mcpDirty ? t('settings.dirtyMcpRestart') : t('settings.dirtySave') }}
+        </p>
         <span class="sp" />
         <n-button size="small" data-testid="settings.cancel" @click="close">{{ t('common.cancel') }}</n-button>
         <!-- 只留一个主按钮：保存即写盘并立即生效（勾选项本来就是即时的），
@@ -854,14 +855,16 @@ function close(): void {
   margin: 0 0 2px;
 }
 
-/* 未保存改动提示条：浅底卡片 + 绿色强调，提醒「点击保存生效」 */
+/* 未保存改动提示：底部胶囊，琥珀色醒目，提醒「点击保存生效」 */
 .dirty {
-  margin: 0 0 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  background: var(--app-surface-2);
-  color: var(--app-accent);
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--app-warn);
+  border-radius: 999px;
+  background: var(--app-warn-tint);
+  color: var(--app-warn);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .err {
@@ -882,6 +885,7 @@ function close(): void {
 
 .ft {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
