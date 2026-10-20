@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -391,13 +392,15 @@ func TestSaveBindRoundTrip(t *testing.T) {
 	if err := SaveBind(dir, in); err != nil {
 		t.Fatalf("SaveBind: %v", err)
 	}
-	// 权限必须是 0600：绑定里含 PAT
-	fi, err := os.Stat(filepath.Join(dir, ".sync.json"))
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Fatalf(".sync.json 权限应为 0600，got %v", fi.Mode().Perm())
+	// 权限必须是 0600：绑定里含 PAT（Windows 无 POSIX 权限位，同 collection 侧惯例跳过）
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(filepath.Join(dir, ".sync.json"))
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Fatalf(".sync.json 权限应为 0600，got %v", fi.Mode().Perm())
+		}
 	}
 	out, err := LoadBind(dir)
 	if err != nil {
