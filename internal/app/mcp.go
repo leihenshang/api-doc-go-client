@@ -80,6 +80,9 @@ type MCPRequest struct {
 	Allow []config.MCPAllowDir
 	// Root 单根便捷写法（旧字段，保留兼容：为空的 Allow + 非空 Root 等价于授权该目录）
 	Root string
+	// InteractiveAuth T2 风险工具弹窗确认开关（nil = 默认开）。
+	// 授权链在服务装配时固化进工具守卫，它参与配置指纹：开关变化需重启才生效。
+	InteractiveAuth *bool
 }
 
 // MCPBackend 内嵌 MCP 服务的实现契约。
@@ -93,6 +96,8 @@ type MCPBackend interface {
 	Start(req MCPRequest) (*MCPStatus, error)
 	// Stop 停止服务（幂等）。
 	Stop()
+	// Refresh 不重启服务地重扫项目目录（打开/切换/关闭工作目录后调用；幂等，未运行时空转）。
+	Refresh()
 	// SetAuthorizer 注入风险工具交互授权器（T2）；nil = 不拦截（stdio 自动化 / 开关关闭）。
 	SetAuthorizer(z mcpauth.Authorizer)
 	// SetAuditor 注入工具调用审计器（T3）；nil = 不落审计。
@@ -198,13 +203,14 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 		backend.SetAuditor(aud)
 	}
 	st, err := backend.Start(MCPRequest{
-		Enabled:      cfg.Enabled,
-		Addr:         cfg.Addr,
-		Port:         cfg.Port,
-		Token:        cfg.Token,
-		ReadOnly:     cfg.ReadOnly,
-		AllowOrigins: cfg.AllowOrigins,
-		Allow:        cfg.Allow,
+		Enabled:         cfg.Enabled,
+		Addr:            cfg.Addr,
+		Port:            cfg.Port,
+		Token:           cfg.Token,
+		ReadOnly:        cfg.ReadOnly,
+		AllowOrigins:    cfg.AllowOrigins,
+		Allow:           cfg.Allow,
+		InteractiveAuth: cloneBool(cfg.InteractiveAuth),
 	})
 	if err != nil {
 		st = &MCPStatus{
@@ -225,6 +231,30 @@ func (a *App) setMCPStatus(st *MCPStatus) {
 	a.mu.Lock()
 	a.mcpStatus = st
 	a.mu.Unlock()
+}
+
+// cloneBool 复制 *bool（nil 保持 nil）：传给 Start 后配置再被改也不影响指纹快照。
+func cloneBool(p *bool) *bool {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+// refreshMCP 不重启地让内嵌 MCP 服务重扫项目目录（打开/切换/关闭工作目录后调用）。
+//
+// 目录授权白名单来自设置，根变化不改变服务配置；以前这里无条件 applyMCP 重启，
+// 会把 AI 客户端的长连接会话掐断。未启用/未注入实现时空转。
+func (a *App) refreshMCP() {
+	a.mu.Lock()
+	backend := a.mcpBackend
+	on := a.settings.MCP.Enabled
+	a.mu.Unlock()
+	if backend == nil || !on {
+		return
+	}
+	backend.Refresh()
 }
 
 // Shutdown 退出前收尾（Wails OnShutdown）：停内嵌 MCP 服务与集合监听。

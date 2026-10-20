@@ -20,6 +20,7 @@ func isolateConfigDir(t *testing.T) {
 type fakeMCPBackend struct {
 	last       MCPRequest
 	starts     int
+	refreshes  int
 	authorizer mcpauth.Authorizer
 	auditor    mcpaudit.Auditor
 }
@@ -35,6 +36,8 @@ func (f *fakeMCPBackend) Start(req MCPRequest) (*MCPStatus, error) {
 }
 
 func (f *fakeMCPBackend) Stop() {}
+
+func (f *fakeMCPBackend) Refresh() { f.refreshes++ }
 
 func (f *fakeMCPBackend) SetAuthorizer(z mcpauth.Authorizer) { f.authorizer = z }
 func (f *fakeMCPBackend) SetAuditor(a mcpaudit.Auditor)      { f.auditor = a }
@@ -112,5 +115,31 @@ func TestApplyMCPWithExplicitToken(t *testing.T) {
 	}
 	if onDisk.MCP.Token != "fixed-token" {
 		t.Fatalf("显式令牌被改写: %q", onDisk.MCP.Token)
+	}
+}
+
+// 打开/切换/关闭工作目录只让 MCP 重扫项目（Refresh），不重启服务（Start）：
+// 重启会把 AI 客户端的长连接会话掉断，而根变化本身不改变服务配置。
+func TestRefreshMCP(t *testing.T) {
+	isolateConfigDir(t)
+	a := NewApp()
+	backend := &fakeMCPBackend{}
+	a.SetMCPBackend(backend)
+
+	// 未启用：空转
+	a.refreshMCP()
+	if backend.refreshes != 0 {
+		t.Fatalf("未启用时不应刷新：%d", backend.refreshes)
+	}
+
+	a.mu.Lock()
+	a.settings.MCP.Enabled = true
+	a.mu.Unlock()
+	a.refreshMCP()
+	if backend.refreshes != 1 {
+		t.Fatalf("启用后应刷新一次：%d", backend.refreshes)
+	}
+	if backend.starts != 0 {
+		t.Fatalf("refreshMCP 不得重启服务：starts=%d", backend.starts)
 	}
 }

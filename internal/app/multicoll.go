@@ -300,10 +300,11 @@ func (a *App) SetActiveCollection(root string) error {
 	return nil
 }
 
-// afterActiveChange 活动根变化后的收尾：内嵌 MCP 的项目根由「活动集合的父目录」推导，需要重建服务。
+// afterActiveChange 活动根变化后的收尾：让内嵌 MCP 重扫项目目录（不重启服务，
+// 目录授权白名单来自设置，根变化本身不改变服务配置）。
 func (a *App) afterActiveChange(mcpOn bool) {
 	if mcpOn {
-		a.applyMCP("")
+		a.refreshMCP()
 	}
 }
 
@@ -351,7 +352,7 @@ func (a *App) CloseCollection(root string) error {
 		_ = mock.Stop()
 	}
 	if mcpOn {
-		a.applyMCP("")
+		a.refreshMCP() // 关闭后重扫项目目录（不重启服务，避免掉断 AI 会话）
 	}
 	return nil
 }

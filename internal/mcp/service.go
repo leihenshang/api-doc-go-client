@@ -210,8 +210,11 @@ type ProjectItem struct {
 	Skipped    string   `json:"skipped,omitempty"`
 }
 
-// Projects 返回当前扫描到的项目条目数（入口日志用）。
+// Projects 返回当前扫描到的项目条目（入口日志与状态展示用）。
 func (s *Service) Projects() []Entry { return s.reg.Entries() }
+
+// ProjectCount 当前扫描到的项目数（状态快照/Refresh 后刷新计数用，免拷贝整个条目表）。
+func (s *Service) ProjectCount() int { return len(s.reg.Entries()) }
 
 // ListProjects 项目列表（query 模糊匹配项目名/路径；refresh=true 重新扫描目录）。
 func (s *Service) ListProjects(query string, refresh bool) ([]ProjectItem, int, error) {

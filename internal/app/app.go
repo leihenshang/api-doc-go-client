@@ -424,9 +424,9 @@ func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	a.mu.Unlock()
 
 	go a.watchLoop(c, key)
-	// MCP 服务的项目根由「活动集合的父目录」推导，新开目录后要重建服务才能看到新项目
+	// 新开工作目录后让 MCP 重扫项目目录（不重启服务；白名单来自设置，根变化不改配置）
 	if mcpOn {
-		a.applyMCP("")
+		a.refreshMCP()
 	}
 	info, err := a.refreshInfo(c)
 	if err != nil {

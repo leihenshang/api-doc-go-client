@@ -361,12 +361,16 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	// 是否常驻托盘由「关闭窗口时」派生：非「直接退出」（即 ask / tray）就常驻。
 	// TrayResident 字段不再单独决定行为，仅保留兼容。
 	trayChanged := trayResidentOf(a.settings.TrayCloseAction) != trayResidentOf(norm.TrayCloseAction)
+	// MCP 分区无论是否改动都调 applyMCP：embed 层按配置指纹判定，
+	// 未真正变化时不重启（不掉断 AI 客户端长连接会话）；同时兼顾
+	// 「启用且令牌为空需自动生成并落盘」的旧行为（令牌变了指纹自然变，该重启）。
 	a.settings = norm
 	if jarChanged {
 		a.jar = nil
 	}
 	a.mu.Unlock()
-	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里）
+	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里；
+	// 未变化时由指纹短路，不会掉断已有会话）
 	a.applyMCP("")
 	// 托盘驻留：转为常驻即启动托盘；转为不常驻只改变关窗行为，图标保留到应用退出（见 internal/tray 的说明）
 	if trayChanged {
