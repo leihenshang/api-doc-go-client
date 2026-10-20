@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package platform 桌面环境兼容处理：抹平不同 Linux 环境下 GTK/WebView 的依赖差异。
 package platform
 
