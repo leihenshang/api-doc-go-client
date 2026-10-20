@@ -15,21 +15,14 @@ import { h, ref } from 'vue'
 
 export function requestQuit(): void {
   const settings = useSettingsStore()
-  if (settings.form.trayResident) {
-    const action = settings.form.trayCloseAction
-    if (action === 'tray') {
-      windowCtl.hideToTray()
-      return
-    }
-    if (action === 'ask') {
-      askTrayOrQuit()
-      return
-    }
-    // 'quit'：不隐藏，落到下面的退出流程
-  } else if (settings.form.trayCloseAction === 'ask') {
-    // 未开启驻留、且仍是默认「询问」：首次关闭也弹框，给用户「放入托盘 / 直接关闭」的选择，
-    // 避免新程序一关就无声退出；选「放入托盘」会顺带开启驻留（见 askTrayOrQuit 的 persist）。
-    // 一旦用户在框里勾了「不再显示」并选直接关闭，trayCloseAction 变为 quit，之后不再打扰。
+  // 关闭行为由单一「关闭窗口时」决定（是否常驻托盘由 Go 侧据此派生）：
+  //   ask = 弹框问「放入托盘 / 直接退出」；tray = 直接隐藏到托盘；quit = 直接退出。
+  const action = settings.form.trayCloseAction
+  if (action === 'tray') {
+    windowCtl.hideToTray()
+    return
+  }
+  if (action === 'ask') {
     askTrayOrQuit()
     return
   }
@@ -45,12 +38,13 @@ function askTrayOrQuit(): void {
   const remember = ref(false)
   const persist = (action: 'tray' | 'quit'): void => {
     if (!remember.value) return
-    // 选「放入托盘」时顺带开启驻留（否则下次启动 Startup 不会 applyTray，图标不再出现）；
-    // 选「直接关闭」只记行为，不动驻留开关。异步落盘即可：紧随的隐藏/退出不依赖它完成。
+    // 选「放入托盘」→ action=tray（Go 据此常驻）；选「直接关闭」→ action=quit（不常驻）。
+    // trayResident 同步写一份，保持与 action 一致（Go 侧实际以 action 为准）。
+    // 异步落盘即可：紧随的隐藏/退出不依赖它完成。
     void settings.save({
       ...settings.form,
-      trayResident: action === 'tray' ? true : settings.form.trayResident,
       trayCloseAction: action,
+      trayResident: action === 'tray',
     })
   }
   dialog.warning({

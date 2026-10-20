@@ -237,8 +237,8 @@ func (a *App) Startup(ctx context.Context) {
 	if a.settings.MCP.Enabled {
 		a.applyMCP("")
 	}
-	// 任务栏驻留：随设置启动托盘（关闭/开启在 SaveSettings 里即时生效）
-	a.applyTray(a.settings.TrayResident)
+	// 任务栏驻留：是否常驻由「关闭窗口时」派生（非「直接退出」即启动托盘）
+	a.applyTray(trayResidentOf(a.settings.TrayCloseAction))
 }
 
 // DomReady Wails 生命周期钩子：窗口与 WebView 就绪、首帧渲染前，把初始几何收敛到屏幕内再显示窗口。

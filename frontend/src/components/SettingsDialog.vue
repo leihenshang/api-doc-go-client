@@ -382,30 +382,26 @@ function close(): void {
             <n-select v-model:value="form.responseLayout" :options="layoutOptions" size="small" class="num"
               data-testid="settings.layout" />
           </div>
-          <div class="row">
+          <div class="row row--stack">
             <span class="lbl">{{ t('settings.autoSave') }}</span>
-            <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
-              @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }">
+            <div class="field">
+              <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
+                @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }" />
               <span class="hint">{{ t('settings.autoSaveHint') }}</span>
-            </n-checkbox>
+            </div>
           </div>
-          <div class="row">
-            <span class="lbl">{{ t('settings.trayResident') }}</span>
-            <n-checkbox :checked="form.trayResident" data-testid="settings.trayResident"
-              @update:checked="(v: boolean) => { form.trayResident = v; void applyNow() }">
-              <span class="hint">{{ t('settings.trayResidentHint') }}</span>
-            </n-checkbox>
-          </div>
-          <!-- 关闭行为：常驻此行（不再 v-if 开关），未开启驻留时禁用置灰，
-               避免开关驻留时这一行忽增忽减导致布局跳动；开启后即可操作。 -->
-          <div class="row" :style="{ opacity: form.trayResident ? 1 : 0.5 }">
+          <!-- 关闭窗口的行为：已把原「驻留托盘」+「关闭窗口时」合并为单个下拉。
+               是否常驻托盘由该值派生（Go 侧：非「直接退出」即常驻），不再单独设开关。 -->
+          <div class="row row--stack">
             <span class="lbl">{{ t('settings.trayCloseAction') }}</span>
-            <!-- 显式赋值再 applyNow（与本文件其它勾选项同一写法）：v-model + @update:value 并存时
-                 两个 handler 的先后顺序不保证，可能把旧值写盘 -->
-            <n-select :value="form.trayCloseAction" :options="trayCloseOptions" size="small" class="num"
-              :disabled="!form.trayResident" data-testid="settings.trayCloseAction"
-              @update:value="(v: 'ask' | 'tray' | 'quit') => { form.trayCloseAction = v; void applyNow() }" />
-            <span class="hint">{{ t('settings.trayCloseActionHint') }}</span>
+            <div class="field">
+              <!-- 显式赋值再 applyNow（与本文件其它勾选项同一写法）：v-model + @update:value 并存时
+                   两个 handler 的先后顺序不保证，可能把旧值写盘 -->
+              <n-select :value="form.trayCloseAction" :options="trayCloseOptions" size="small" class="num"
+                data-testid="settings.trayCloseAction"
+                @update:value="(v: 'ask' | 'tray' | 'quit') => { form.trayCloseAction = v; form.trayResident = v !== 'quit'; void applyNow() }" />
+              <span class="hint">{{ t('settings.trayCloseActionHint') }}</span>
+            </div>
           </div>
 
         </div>
@@ -794,6 +790,19 @@ function close(): void {
 .lbl {
   font-size: 13px;
   width: 130px;
+}
+
+/* 控件 + 长说明竖排：说明换行时左缘对齐控件列（不再塞进 checkbox label 里导致回绕错位） */
+.row--stack {
+  align-items: flex-start;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .num {

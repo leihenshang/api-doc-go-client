@@ -358,7 +358,9 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	}
 	a.mu.Lock()
 	jarChanged := a.settings.PersistCookies != norm.PersistCookies
-	trayChanged := a.settings.TrayResident != norm.TrayResident
+	// 是否常驻托盘由「关闭窗口时」派生：非「直接退出」（即 ask / tray）就常驻。
+	// TrayResident 字段不再单独决定行为，仅保留兼容。
+	trayChanged := trayResidentOf(a.settings.TrayCloseAction) != trayResidentOf(norm.TrayCloseAction)
 	a.settings = norm
 	if jarChanged {
 		a.jar = nil
@@ -366,9 +368,9 @@ func (a *App) SaveSettings(s *config.Settings) error {
 	a.mu.Unlock()
 	// MCP 分区改动后重启内嵌服务（地址/端口/令牌/只读/开关都走这里）
 	a.applyMCP("")
-	// 托盘驻留开关：开启即启动托盘；关闭只改变关窗行为，图标保留到应用退出（见 internal/tray 的说明）
+	// 托盘驻留：转为常驻即启动托盘；转为不常驻只改变关窗行为，图标保留到应用退出（见 internal/tray 的说明）
 	if trayChanged {
-		a.applyTray(norm.TrayResident)
+		a.applyTray(trayResidentOf(norm.TrayCloseAction))
 	}
 	return nil
 }
