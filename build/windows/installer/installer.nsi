@@ -107,6 +107,13 @@ Function .onInit
    # W-1 + W-2：存在旧版卸载器 → 先关闭进程再原地静默卸载旧版，随后走全新安装
    ${If} $PrevLoc != ""
    ${AndIf} ${FileExists} "$PrevLoc\uninstall.exe"
+     # 审核 M#6：taskkill /F 会绕过客户端「未保存改动」守卫。交互模式先明确告知并给退出机会；
+     # 静默安装（/S，脚本/CI 自动化路径）保持强杀不阻断。
+     ${IfNot} ${Silent}
+       MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION '检测到旧版本，安装将关闭并覆盖它。$\n$\n正在运行的客户端若有未保存的修改会丢失；建议先保存并退出后选“取消”，再重新运行安装。$\n$\n仍要继续安装吗？' IDOK p1_kill_old
+       Abort
+     ${EndIf}
+     p1_kill_old:
      DetailPrint "检测到旧版本，正在关闭进程并静默卸载…"
      # 结束运行中的客户端（PRODUCT_EXECUTABLE 无空格，如 api-doc-client.exe）
      ExecWait '$WINDIR\System32\taskkill.exe /IM "${PRODUCT_EXECUTABLE}" /F' $0
