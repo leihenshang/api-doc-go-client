@@ -43,6 +43,10 @@ func (a *App) trayShow() {
 	}
 	runtime.WindowUnminimise(ctx)
 	runtime.WindowShow(ctx)
+	// 隐藏前是最大化（全屏）→ 恢复时重新最大化，否则 WindowHide/Show 会退回普通窗口尺寸。
+	if a.trayWasMaximised.Load() {
+		runtime.WindowMaximise(ctx)
+	}
 }
 
 // trayQuit 托盘菜单「退出」：等价于前端确认退出（放行守卫再 Quit，见 OnBeforeClose 注释）。
@@ -61,5 +65,7 @@ func (a *App) HideToTray() {
 	// 兜底：隐藏前确保托盘已起。正常路径下开启驻留时就已启动，
 	// 但前端可以在任何时刻调到这里 —— 没有托盘图标就把窗口藏起来，应用将再也唤不回来。
 	a.applyTray(true)
+	// 记住隐藏前的最大化态（WindowHide 不保留它），供 trayShow 恢复时重新最大化。
+	a.trayWasMaximised.Store(runtime.WindowIsMaximised(ctx))
 	runtime.WindowHide(ctx)
 }
