@@ -186,10 +186,11 @@ export const useTabsStore = defineStore('tabs', {
   getters: {
     active: (s) => s.tabs.find((t) => t.key === s.activeKey) ?? null,
     count: (s) => s.tabs.length,
-    // 「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘、
+    // 「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘。
     // 冲突页签已挂横幅且 flush 会跳过 —— 都不计入。供切区/退出前的未保存询问复用。
+    // 审核 H#2：不按 kind 排除——doc 页签同样可被 flush 保存，否则「只改了文档」退出时无询问直接丢数据。
     savableTabs: (s): Tab[] =>
-      s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict && (t.kind ?? 'request') === 'request'),
+      s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict),
   },
   actions: {
     /** 打开一条请求（已有 tab 则激活）。 */

@@ -36,16 +36,20 @@ export function requestQuit(): void {
 function askTrayOrQuit(): void {
   const settings = useSettingsStore()
   const remember = ref(false)
-  const persist = (action: 'tray' | 'quit'): void => {
+  const persist = async (action: 'tray' | 'quit'): Promise<void> => {
     if (!remember.value) return
     // 选「放入托盘」→ action=tray（Go 据此常驻）；选「直接关闭」→ action=quit（不常驻）。
     // trayResident 同步写一份，保持与 action 一致（Go 侧实际以 action 为准）。
-    // 异步落盘即可：紧随的隐藏/退出不依赖它完成。
-    void settings.save({
-      ...settings.form,
-      trayCloseAction: action,
-      trayResident: action === 'tray',
-    })
+    // 审核 H#3：必须等待落盘——紧随的 quit 不等它会写配置前就退出，勾选随机丢失。
+    try {
+      await settings.save({
+        ...settings.form,
+        trayCloseAction: action,
+        trayResident: action === 'tray',
+      })
+    } catch {
+      // 落盘失败不阻断关闭流程；下次启动继续 ask
+    }
   }
   dialog.warning({
     title: i18n.global.t('confirm.trayCloseTitle'),
@@ -68,12 +72,11 @@ function askTrayOrQuit(): void {
     positiveText: i18n.global.t('common.toTray'),
     negativeText: i18n.global.t('common.closeDirectly'),
     onPositiveClick: () => {
-      persist('tray')
-      windowCtl.hideToTray()
+      void persist('tray').then(() => windowCtl.hideToTray())
     },
     onNegativeClick: () => {
-      persist('quit')
-      quitWithUnsavedGuard()
+      // 先等选择落盘再走退出守卫，避免「不再显示」随进程退出丢写。
+      void persist('quit').then(() => quitWithUnsavedGuard())
     },
   })
 }
