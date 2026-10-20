@@ -590,7 +590,6 @@ export default {
     mcpAddr: 'Listen address',
     mcpAddrPlaceholder: '127.0.0.1',
     mcpPort: 'Port',
-    mcpPortPlaceholder: '8189',
     mcpReadOnly: 'Read-only mode',
     mcpAllow: 'Accessible workspaces',
     mcpAllowWritable: 'Writable',

@@ -4,6 +4,9 @@ frontend/dist/
 build/bin/
 # wails build -nsis 自动写入的 WebView2 引导器（~2MB，每次构建重新生成，不入库）
 build/windows/installer/tmp/
+# wails build -nsis 生成的 NSIS 工程与宏库（每次 bootstrap 自动重写，不入库；安装包逻辑以手写的 installer.nsi 为权威）
+build/windows/installer/project.nsi
+build/windows/installer/wails_tools.nsh
 
 # 本地数据
 *.local.yml

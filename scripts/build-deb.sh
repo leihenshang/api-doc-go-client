@@ -14,9 +14,18 @@ cd "$(dirname "$0")/.."
 
 ARCH="${1:-amd64}"
 case "$ARCH" in
-  amd64) WAILS_PLATFORM="linux/amd64"; DPKG_ARCH="amd64" ;;
-  arm64) WAILS_PLATFORM="linux/arm64"; DPKG_ARCH="arm64" ;;
-  *) echo "不支持的架构: $ARCH（amd64|arm64）" >&2; exit 1 ;;
+amd64)
+  WAILS_PLATFORM="linux/amd64"
+  DPKG_ARCH="amd64"
+  ;;
+arm64)
+  WAILS_PLATFORM="linux/arm64"
+  DPKG_ARCH="arm64"
+  ;;
+*)
+  echo "不支持的架构: $ARCH（amd64|arm64）" >&2
+  exit 1
+  ;;
 esac
 
 # 版本号：显式 VERSION > wails.json info.productVersion > 兜底
@@ -26,13 +35,44 @@ if [ -z "$VERSION" ]; then
 fi
 [ -n "$VERSION" ] || VERSION="0.0.0-dev"
 
+# ---- 版本合法性校验（deb 侧 L-1，提前拦截避免 dpkg-deb 末尾报晦涩错误）----
+# dpkg 版本格式：[epoch:]upstream[-revision]；upstream 必须以数字开头且含数字；
+# '-' 后的 revision 若含非数字（如 0.1.0-dev），dpkg 判为非法。
+# 这里把非法 revision 用 '~' 连接（0.1.0-dev → 0.1.0~dev，'~' 排序低于正式版，语义=预发布）。
+case "$VERSION" in
+'' | *[!0-9A-Za-z.~+-]*)
+  echo "VERSION='$VERSION' 含 dpkg 非法字符（仅允许 字母 数字 . ~ + -）" >&2
+  exit 1
+  ;;
+esac
+base="${VERSION%%-*}"
+rev="${VERSION#*-}"
+if [ "$VERSION" != "$base" ] && printf '%s' "$rev" | grep -qE '[^0-9]'; then
+  NEW="${base}~${rev}"
+  echo "⚠️  版本号 '$VERSION' 的修订段含非数字，dpkg 判非法；已自动规范化为 '$NEW'（'~'=预发布，排序低于正式版）。" >&2
+  VERSION="$NEW"
+fi
+case "$VERSION" in
+[0-9]*) : ;;
+*)
+  echo "VERSION='$VERSION' 必须以数字开头（dpkg 版本要求）" >&2
+  exit 1
+  ;;
+esac
+
 BIN="build/bin"
-command -v dpkg-deb >/dev/null || { echo "缺少 dpkg-deb（deb 打包必需）" >&2; exit 1; }
+command -v dpkg-deb >/dev/null || {
+  echo "缺少 dpkg-deb（deb 打包必需）" >&2
+  exit 1
+}
 mkdir -p "$BIN"
 
 # ---- 1) 构建二进制（prod / dev 两份；SKIP_BUILD=1 可复用已有产物）----
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  command -v wails >/dev/null || { echo "缺少 wails CLI（或用 SKIP_BUILD=1 复用已有二进制）" >&2; exit 1; }
+  command -v wails >/dev/null || {
+    echo "缺少 wails CLI（或用 SKIP_BUILD=1 复用已有二进制）" >&2
+    exit 1
+  }
   wails build -platform "$WAILS_PLATFORM" -clean -o api-doc-client
   wails build -platform "$WAILS_PLATFORM" -tags devbuild -o api-doc-client-dev
 fi
@@ -40,18 +80,33 @@ fi
 if [ ! -x "$BIN/api-doc-client-dev" ] && [ -x "$BIN/api-doc-client-dev-linux-amd64" ]; then
   cp -f "$BIN/api-doc-client-dev-linux-amd64" "$BIN/api-doc-client-dev"
 fi
-[ -x "$BIN/api-doc-client" ] || { echo "未找到 $BIN/api-doc-client，请先构建" >&2; exit 1; }
-[ -x "$BIN/api-doc-client-dev" ] || { echo "未找到 $BIN/api-doc-client-dev" >&2; exit 1; }
+[ -x "$BIN/api-doc-client" ] || {
+  echo "未找到 $BIN/api-doc-client，请先构建" >&2
+  exit 1
+}
+[ -x "$BIN/api-doc-client-dev" ] || {
+  echo "未找到 $BIN/api-doc-client-dev" >&2
+  exit 1
+}
 
 # ---- 2) 图标缩放（源 1024见 README §5；dev 图标缺失时回落正式图标，不阻塞）----
 SCALE=""
 for cand in magick convert; do
-  if command -v "$cand" >/dev/null; then SCALE="$cand"; break; fi
+  if command -v "$cand" >/dev/null; then
+    SCALE="$cand"
+    break
+  fi
 done
-[ -n "$SCALE" ] || { echo "需要 ImageMagick（magick 或 convert）生成多尺寸图标" >&2; exit 1; }
+[ -n "$SCALE" ] || {
+  echo "需要 ImageMagick（magick 或 convert）生成多尺寸图标" >&2
+  exit 1
+}
 
 SRC_ICON="build/appicon.png"
-[ -f "$SRC_ICON" ] || { echo "缺少 $SRC_ICON（正式图标源）" >&2; exit 1; }
+[ -f "$SRC_ICON" ] || {
+  echo "缺少 $SRC_ICON（正式图标源）" >&2
+  exit 1
+}
 DEV_ICON="internal/appicon/appicon_dev.png"
 [ -f "$DEV_ICON" ] || DEV_ICON="$SRC_ICON"
 
@@ -81,10 +136,13 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     echo "Maintainer: api-doc-go"
     echo "Section: utils"
     echo "Priority: optional"
-    echo "Depends: libgtk-3-0, libwebkit2gtk-4.0-37"
+    # 交替依赖：新发行版（Ubuntu 24.04 / Debian 12+）webkit 已更名 4.1-0，保留 4.0-37 兜底老系统（L-2）
+    echo "Depends: libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37"
+    # Installed-Size 单位 KiB，控制卸载后空间估算（L-5）；此刻二进制与图标已就位
+    echo "Installed-Size: $(du -sk "$pkg" 2>/dev/null | cut -f1)"
     echo "Description: AI-native, local-first API client"
     echo " Markdown 风格接口文档协作工具的桌面客户端（Postman/Bruno 风格）。"
-  } > "$pkg/DEBIAN/control"
+  } >"$pkg/DEBIAN/control"
 
   {
     echo "[Desktop Entry]"
@@ -98,15 +156,16 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     echo "StartupWMClass=$base"
     echo "Categories=Development;Utility;"
     echo "StartupNotify=true"
-  } > "$pkg/usr/share/applications/$package.desktop"
+  } >"$pkg/usr/share/applications/$package.desktop"
 
-  printf '%s\n' '#!/bin/sh' 'set -e' \
-    'update-desktop-database -q /usr/share/applications || true' \
-    'gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true' \
-    > "$pkg/DEBIAN/postinst"
-  printf '%s\n' '#!/bin/sh' 'set -e' \
-    'update-desktop-database -q /usr/share/applications || true' \
-    > "$pkg/DEBIAN/postrm"
+  # 缓存刷新失败改为告警而非静默吞掉（L-4）：桌面图标/启动项没刷新要能被看到，但不阻断安装/卸载
+  printf '%s\n' '#!/bin/sh' \
+    'update-desktop-database -q /usr/share/applications 2>/dev/null || echo "warning: update-desktop-database 刷新失败（不影响安装）" >&2' \
+    'gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || echo "warning: gtk-update-icon-cache 刷新失败（不影响安装）" >&2' \
+    >"$pkg/DEBIAN/postinst"
+  printf '%s\n' '#!/bin/sh' \
+    'update-desktop-database -q /usr/share/applications 2>/dev/null || echo "warning: update-desktop-database 刷新失败（不影响卸载）" >&2' \
+    >"$pkg/DEBIAN/postrm"
   chmod 755 "$pkg/DEBIAN/postinst" "$pkg/DEBIAN/postrm"
 }
 
@@ -114,11 +173,11 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
 deb_prod="$BIN/api-doc-client_${VERSION}_${DPKG_ARCH}.deb"
 deb_dev="$BIN/api-doc-client-dev_${VERSION}_${DPKG_ARCH}.deb"
 
-make_pkg "$BIN/pkg-prod" "api-doc-client"     "API Doc Client"     "$SRC_ICON"  "api-doc-client"
-make_pkg "$BIN/pkg-dev"  "api-doc-client-dev" "API Doc Client Dev" "$DEV_ICON"  "api-doc-client-dev"
+make_pkg "$BIN/pkg-prod" "api-doc-client" "API Doc Client" "$SRC_ICON" "api-doc-client"
+make_pkg "$BIN/pkg-dev" "api-doc-client-dev" "API Doc Client Dev" "$DEV_ICON" "api-doc-client-dev"
 
 dpkg-deb --build --root-owner-group "$BIN/pkg-prod" "$deb_prod"
-dpkg-deb --build --root-owner-group "$BIN/pkg-dev"  "$deb_dev"
+dpkg-deb --build --root-owner-group "$BIN/pkg-dev" "$deb_dev"
 rm -rf "$BIN/pkg-prod" "$BIN/pkg-dev"
 
 echo

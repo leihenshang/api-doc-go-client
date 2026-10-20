@@ -1,4 +1,4 @@
-// Package config 客户端全局设置：落 <用户配置目录>/api-doc-client/config.json。
+// Package config 客户端全局设置：落 <用户配置目录>/<appDir>/config.json（appDir 随构建标签：正式版 api-doc-client、开发版 api-doc-client-dev）。
 package config
 
 import (
@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	appDir       = "api-doc-client"
+	// appDir（配置目录名）与 defaultMCPPort（MCP 默认端口）按构建标签分流，
+	// 见 namespace_prod.go / namespace_dev.go：正式版与开发版各自独立命名空间，
+	// 以便 prod 与 dev 同时运行时互不覆盖配置、互不抢占 MCP 端口。
 	fileName     = "config.json"
 	defaultTTLS  = 30
 	defaultMaxRD = 5
@@ -31,8 +33,8 @@ const (
 	defaultRespSize = 44
 
 	// MCP 服务默认值：默认不启用（用户显式开），只监听本机。
+	// defaultMCPPort 随构建标签分流（见 namespace_prod.go / namespace_dev.go）。
 	defaultMCPAddr = "127.0.0.1"
-	defaultMCPPort = 8189
 	minMCPPort     = 1024
 	maxMCPPort     = 65535
 

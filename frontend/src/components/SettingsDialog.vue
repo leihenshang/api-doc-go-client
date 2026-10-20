@@ -498,7 +498,7 @@ function close(): void {
                 data-testid="settings.mcpAddr" :placeholder="t('settings.mcpAddrPlaceholder')" />
               <span class="lbl port-lbl">{{ t('settings.mcpPort') }}</span>
               <n-input v-model:value="portText" size="small" class="port" :disabled="!form.mcp.enabled" :maxlength="5"
-                data-testid="settings.mcpPort" :placeholder="t('settings.mcpPortPlaceholder')" />
+                data-testid="settings.mcpPort" :placeholder="String(settings.mcpPortDefault)" />
             </div>
           </div>
 
