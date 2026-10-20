@@ -134,7 +134,9 @@ Write-Host "架构=$Arch  版本=$Version  安装范围=$InstallScope  开发版
 if (-not $SkipBuild) {
   $needBootstrap = (-not (Test-Path $WailsTools)) -or (-not (Test-Path $Webview2Setup))
 
-  $wailsArgs = @('build', '-platform', "windows/$Arch", '-clean', '-o', 'api-doc-client')
+  # -o 必须显式带 .exe：wails 的 OutputFilename 只在「未传 -o」时才自动补 .exe，
+  # 一旦传了 -o 就原样使用（见 wails build/base.go），不带后缀会得到无法直接执行的无扩展名文件。
+  $wailsArgs = @('build', '-platform', "windows/$Arch", '-clean', '-o', 'api-doc-client.exe')
   if ($needBootstrap) { $wailsArgs += '-nsis' }
 
   $label = '[1/3] wails 构建正式版'
@@ -154,7 +156,7 @@ if (-not $SkipBuild) {
     # 注意：这里**不能**带 -clean —— 它会清空 build\bin，把刚构建好的正式版 exe 删掉
     # （build-deb.sh 上踩过同一个坑）。
     Write-Host "`n[1/3] wails 构建开发版（-tags devbuild）" -ForegroundColor Cyan
-    & wails build -platform "windows/$Arch" -tags devbuild -o api-doc-client-dev
+    & wails build -platform "windows/$Arch" -tags devbuild -o api-doc-client-dev.exe
     if ($LASTEXITCODE -ne 0) { throw "wails build（dev）失败（退出码 $LASTEXITCODE）" }
   }
 } else {
