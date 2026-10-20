@@ -182,16 +182,17 @@ func TestConsistentWithSharedPackage(t *testing.T) {
 	}
 }
 
-// TestHyphenatedOnlyDivergence 记录「有意差异」：连字符/点号变量名只有客户端支持，
-// 共享包对它是原样保留。这条测试保证差异是**受控**的，而不是谁悄悄改了语法。
-func TestHyphenatedOnlyDivergence(t *testing.T) {
-	vars := map[string]string{"clxone-ipam": "10.0.0.1"}
-	text := "{{clxone-ipam}}"
+// TestWideNamesUnified 审核 H-4 收口：连字符/点号变量名已由共享包原生支持，
+// 客户端 alias 转写 shim 已删除——两端对宽名必须一致（替换 + 不记缺失）。
+func TestWideNamesUnified(t *testing.T) {
+	vars := map[string]string{"clxone-ipam": "10.0.0.1", "a.b": "nested"}
+	text := "{{clxone-ipam}}/{{a.b}}"
 	got, missing := Resolve(text, vars)
-	if got != "10.0.0.1" || len(missing) != 0 {
-		t.Fatalf("客户端应支持连字符变量名，got %q missing=%v", got, missing)
+	if got != "10.0.0.1/nested" || len(missing) != 0 {
+		t.Fatalf("宽名应原生替换：got %q missing=%v", got, missing)
 	}
-	if shared, _ := share.ResolveWithBuiltins(text, table(vars), share.DefaultBuiltins()); shared == "10.0.0.1" {
-		t.Fatal("共享包应不支持连字符名（若已支持，请删除本用例与客户端的转写逻辑）")
+	shared, _ := share.ResolveWithBuiltins(text, table(vars), share.DefaultBuiltins())
+	if shared != got {
+		t.Fatalf("两端不一致：client=%q share=%q", got, shared)
 	}
 }
