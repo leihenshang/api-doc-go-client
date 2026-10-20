@@ -20,6 +20,7 @@
 ##   W-2：升级=「先静默卸载旧版再装」重装模型，杜绝旧文件残留 / 卸载器自覆盖竞争
 ##   W-3：InstallDirRegKey + 补写 InstallLocation，记住并复用上次安装目录，
 ##        不再回落默认目录产生两份安装
+##   W-4：WebView2 未就绪时给出明确安装指引（引导器离线失败不再静默）
 ####
 
 !include "MUI.nsh"
@@ -82,6 +83,7 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe"
 ShowInstDetails show
 
 Var PrevLoc      # 旧版安装目录（HKLM/HKCU 的 InstallLocation）
+Var Wv2Pv        # WebView2 运行时版本（注册表 pv 值），空 = 未就绪
 
 Function .onInit
    !insertmacro wails.checkArchitecture
@@ -116,10 +118,37 @@ Function .onInit
    ${EndIf}
 FunctionEnd
 
+# W-4：WebView2 就绪复检。wails 的 webview2runtime 宏靠在线引导器安装，离线/失败时是静默的，
+# 用户只会看到一个打不开的空窗口。这里装后再查一次注册表，仍缺失就给出明确指引。
+# 静默安装（/S）不打断：写日志 + 设错误码，交由脚本/CI 判定。
+Function CheckWebView2Ready
+  SetRegView 64
+  ReadRegStr $Wv2Pv HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ${If} $Wv2Pv == ""
+    ReadRegStr $Wv2Pv HKLM "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ${EndIf}
+  ${If} $Wv2Pv == ""
+    ReadRegStr $Wv2Pv HKCU "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+  ${EndIf}
+  ${If} $Wv2Pv != ""
+    Return
+  ${EndIf}
+  ; 走到这里 = WebView2 未就绪（多半是引导器离线下载失败）
+  IfSilent 0 show_wv2_msgbox
+    DetailPrint "WebView2 Runtime 未就绪：请联网后重试，或手动安装 https://developer.microsoft.com/microsoft-edge/webview2/"
+    SetErrorLevel 16388
+    Return
+  show_wv2_msgbox:
+    MessageBox MB_OK|MB_ICONEXCLAMATION "未能确认 Microsoft Edge WebView2 运行时已安装（安装时的自动下载需要联网）。$\r$\n$\r$\n本程序依赖 WebView2 显示界面，请先安装它再启动：$\r$\nhttps://developer.microsoft.com/microsoft-edge/webview2/$\r$\n$\r$\n（Windows 10/11 一般已随 Edge 自带；若确认已装，多为离线导致下载失败，联网后重试即可。）"
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime
+
+    # 装完引导器后复检 WebView2 是否真的就绪，缺失则提示用户去装（详见 CheckWebView2Ready）
+    Call CheckWebView2Ready
 
     SetOutPath $INSTDIR
 
