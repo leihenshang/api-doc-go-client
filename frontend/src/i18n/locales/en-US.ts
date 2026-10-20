@@ -557,8 +557,6 @@ export default {
     responseLayout: 'Response panel',
     autoSave: 'Auto save',
     autoSaveHint: 'Write files as you edit; when off, saving is manual (Ctrl+S / close tab / Save all)',
-    trayResident: 'Stay in tray',
-    trayResidentHint: 'Keeps a tray icon so closing the window can hide instead of quit; double-click the icon to restore, right-click for the menu. After turning this off the icon stays until the app exits',
     trayCloseAction: 'On window close',
     trayCloseActionHint: '"Ask every time" prompts on close; if you ticked "Don\'t ask again", change it back here',
     trayCloseAsk: 'Ask every time',

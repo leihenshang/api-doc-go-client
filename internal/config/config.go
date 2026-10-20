@@ -57,9 +57,9 @@ type Settings struct {
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
-	TrayResident    bool    `json:"trayResident"`   // 任务栏驻留：开启后托盘常驻，关闭窗口可隐藏而非退出；默认关 = 关窗即退出
-	// TrayCloseAction 关闭窗口的行为，仅在 TrayResident 开启时生效：
-	//   ask（默认）= 弹框问「放入托盘 / 直接关闭」，勾「不再显示」后把选择写回本字段；
+	TrayResident    bool    `json:"trayResident"`   // Deprecated：实际常驻与否由 TrayCloseAction 派生（trayResidentOf：非 quit 即常驻）；字段仅为旧配置兼容保留，新代码勿以其为准
+	// TrayCloseAction 关闭窗口行为的唯一控制入口（ask/tray 都常驻托盘）：
+	//   ask（默认）= 弹框询问「放入托盘 / 直接关闭」，勾「不再显示」后把选择写回本字段；
 	//   tray       = 直接隐藏到托盘；
 	//   quit       = 直接退出（走未保存改动确认）。
 	TrayCloseAction string `json:"trayCloseAction"`

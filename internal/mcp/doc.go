@@ -150,6 +150,10 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	}
 	if in.Folder != nil {
 		if err := a.MoveDoc(uid, strings.TrimSpace(*in.Folder)); err != nil {
+			// 审核 L#10：正文已按声明顺序先写并校验，move 失败时把已完成步骤说清楚，避免调用方盲重试撞假冲突。
+			if in.Content != nil {
+				return nil, fmt.Errorf("正文已写入成功，但移动到 %q 失败：%w（重试可只传 folder，不重复传 content）", *in.Folder, err)
+			}
 			return nil, err
 		}
 	}
@@ -159,6 +163,9 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 			return nil, errNeedDocName
 		}
 		if err := a.RenameDoc(uid, name); err != nil {
+			if in.Content != nil || in.Folder != nil {
+				return nil, fmt.Errorf("已完成的步骤保留在盘上，仅改名 %q 失败：%w（重试可只传 name）", name, err)
+			}
 			return nil, err
 		}
 	}
