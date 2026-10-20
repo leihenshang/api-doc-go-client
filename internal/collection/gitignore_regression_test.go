@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -185,6 +186,9 @@ func TestQAOpenGitignoreByteIdenticalWhenComplete(t *testing.T) {
 // 以免一个 P2 把整个质量门禁染红——待工程师修好后可把断言收紧到 ==0o600/保留软链。
 func TestQAOpenGitignoreModeAndSymlink(t *testing.T) {
 	t.Run("mode", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows 无 POSIX 权限位，mode 断言不适用（同 gitignore_test 惯例）")
+		}
 		dir := t.TempDir()
 		qaWriteFile(t, dir, ".gitignore", "dist/\n", 0o600)
 
@@ -196,6 +200,9 @@ func TestQAOpenGitignoreModeAndSymlink(t *testing.T) {
 	})
 
 	t.Run("symlink", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows 创建符号链接需要特权（SeCreateSymbolicLinkPrivilege），普通账户不可用")
+		}
 		root := t.TempDir()
 		dir := filepath.Join(root, "coll")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
