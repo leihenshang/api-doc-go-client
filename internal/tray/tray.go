@@ -9,6 +9,7 @@ package tray
 
 import (
 	"log"
+	"runtime"
 	"sync"
 
 	"github.com/energye/systray"
@@ -64,6 +65,12 @@ func (m *Manager) Start(iconWindows, iconLinux []byte) {
 	m.mu.Unlock()
 
 	go func() {
+		// ⚠️ 必须锁 OS 线程：本库 init() 里的 LockOSThread 锁的是 main goroutine（假定你在
+		// main 里直接 Run），但 Wails 独占主线程，只能把 systray.Run 放到新 goroutine 跑。
+		// 若不锁，Windows 下托盘窗口（CreateWindowEx）与消息泵（GetMessage）会随 goroutine
+		// 被调度到不同系统线程，而窗口消息只投递到创建它的那个线程 → 图标收不到点击/双击回调，
+		// 表现为「最小化到托盘不生效 / 唤不回」。
+		runtime.LockOSThread()
 		// onExit 传空实现：我们从不调 Quit，进程退出时由运行时收尾。
 		systray.Run(func() { m.onReady(iconWindows, iconLinux) }, func() {})
 	}()
