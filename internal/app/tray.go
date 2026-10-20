@@ -11,10 +11,17 @@
 package app
 
 import (
+	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/tray"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// trayResidentOf 由「关闭窗口时」的取值派生是否常驻托盘：非「直接退出」（即 ask / tray）就常驻。
+// 合并设置后前端只暴露单个下拉，TrayResident 字段不再单独决定行为（仅保留兼容）。
+func trayResidentOf(closeAction string) bool {
+	return closeAction != config.TrayCloseQuit
+}
 
 // ensureTray 返回托盘管理器（首次调用时创建）。
 func (a *App) ensureTray() *tray.Manager {
