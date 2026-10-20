@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+
 	// 标准库的 runtime 与下面的 wails runtime 同名，这里起别名避免撞车。
 	goruntime "runtime"
 	"strings"
@@ -71,6 +72,9 @@ type App struct {
 	// 任务栏驻留（系统托盘）：trayOnce 保证管理器只建一次，tray 为 nil = 从未启用
 	tray     *tray.Manager
 	trayOnce sync.Once
+	// trayWasMaximised 记录「隐藏到托盘」前窗口是否最大化；WindowHide 不保留最大化态，
+	// 恢复时需据此重新 WindowMaximise，否则全屏状态下最小化到托盘再点开会退回窗口模式。用 atomic 跨 goroutine 读写。
+	trayWasMaximised atomic.Bool
 }
 
 // inflightSend 一次在途发送的取消句柄（带工作目录归属，见 sendCancels 的键说明）。

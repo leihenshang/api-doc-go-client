@@ -26,6 +26,12 @@ export function requestQuit(): void {
       return
     }
     // 'quit'：不隐藏，落到下面的退出流程
+  } else if (settings.form.trayCloseAction === 'ask') {
+    // 未开启驻留、且仍是默认「询问」：首次关闭也弹框，给用户「放入托盘 / 直接关闭」的选择，
+    // 避免新程序一关就无声退出；选「放入托盘」会顺带开启驻留（见 askTrayOrQuit 的 persist）。
+    // 一旦用户在框里勾了「不再显示」并选直接关闭，trayCloseAction 变为 quit，之后不再打扰。
+    askTrayOrQuit()
+    return
   }
   quitWithUnsavedGuard()
 }
@@ -39,8 +45,13 @@ function askTrayOrQuit(): void {
   const remember = ref(false)
   const persist = (action: 'tray' | 'quit'): void => {
     if (!remember.value) return
-    // 异步落盘即可：紧接着的隐藏/退出都不依赖它完成
-    void settings.save({ ...settings.form, trayCloseAction: action })
+    // 选「放入托盘」时顺带开启驻留（否则下次启动 Startup 不会 applyTray，图标不再出现）；
+    // 选「直接关闭」只记行为，不动驻留开关。异步落盘即可：紧随的隐藏/退出不依赖它完成。
+    void settings.save({
+      ...settings.form,
+      trayResident: action === 'tray' ? true : settings.form.trayResident,
+      trayCloseAction: action,
+    })
   }
   dialog.warning({
     title: i18n.global.t('confirm.trayCloseTitle'),
