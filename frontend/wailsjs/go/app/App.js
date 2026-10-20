@@ -226,6 +226,10 @@ export function LoadGrpcSchema(arg1, arg2) {
   return window['go']['app']['App']['LoadGrpcSchema'](arg1, arg2);
 }
 
+export function MCPPortDefault() {
+  return window['go']['app']['App']['MCPPortDefault']();
+}
+
 export function MCPStatusText() {
   return window['go']['app']['App']['MCPStatusText']();
 }
