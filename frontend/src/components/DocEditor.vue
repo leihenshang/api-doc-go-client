@@ -4,13 +4,13 @@
 // B19 起它不再是弹窗内容，而是**文档页签**的编辑区：数据由父组件（App.vue）以
 // tab.doc 传入，编辑经 update:doc 回写 store（标脏），保存由父组件走
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
-import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { isDark } from '@/lib/theme'
+import type { DocTabDoc } from '@/stores/tabs'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { isDark } from '@/lib/theme'
-import type { DocTabDoc } from '@/stores/tabs'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
 const emit = defineEmits<{

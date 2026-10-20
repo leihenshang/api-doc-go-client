@@ -41,7 +41,8 @@ if [[ "$RACE" == "1" ]]; then
 fi
 
 # 包名（去掉 module 前缀） → 覆盖率下限（百分数整数）
-THRESHOLDS=$(cat <<'EOF'
+THRESHOLDS=$(
+    cat <<'EOF'
 internal/app 45
 internal/collection 70
 internal/config 60
@@ -69,9 +70,9 @@ EOF
 
 # go test 的汇总行是并发写的，多个包会挤在同一行（前面还带着上一个包的残留），
 # 所以先按 "ok/FAIL" 把流切开再匹配；逐行解析会漏包。
-PARSED="$(awk '{gsub(/(ok|FAIL)[ \t]+/, "\nOK "); print}' "$LOG" \
-    | sed -n 's/^OK \([^ \t]*\).*coverage: \([0-9.][0-9.]*\)% of statements.*/\1 \2/p' \
-    | sed 's|^api-doc-go-client/||')"
+PARSED="$(awk '{gsub(/(ok|FAIL)[ \t]+/, "\nOK "); print}' "$LOG" |
+    sed -n 's/^OK \([^ \t]*\).*coverage: \([0-9.][0-9.]*\)% of statements.*/\1 \2/p' |
+    sed 's|^api-doc-go-client/||')"
 
 fail=0
 echo
@@ -97,7 +98,7 @@ while read -r pkg min; do
         printf '  ❌ %-28s %s%% < 下限 %s%%\n' "$pkg" "$got" "$min"
         fail=1
     fi
-done <<< "$THRESHOLDS"
+done <<<"$THRESHOLDS"
 
 if [[ "$fail" != "0" ]]; then
     echo
