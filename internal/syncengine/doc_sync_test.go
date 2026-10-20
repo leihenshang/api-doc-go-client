@@ -1,6 +1,8 @@
 package syncengine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"api-doc-go-client/internal/collection"
@@ -51,32 +53,88 @@ func TestFolderUIDByDir(t *testing.T) {
 
 // TestCollectDocOpsTombstone 本地已删除的文档要推 delete（J11-2.2）：
 // Bind.DocHashes 里有记录、ListDocs 里已没有 → 产生 delete op。
+// 另留一篇存活文档：审核 C#1 后「扫空 + 基线有货」会被防呆拒绝，差量墓碑仅在清单非空时生效。
 func TestCollectDocOpsTombstone(t *testing.T) {
 	dir := t.TempDir()
 	c, err := collection.Open(dir)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	// 先建一篇文档并「推送」过（写进 DocHashes）
-	d, err := c.CreateDoc("待删除文档", "", "")
+	// 建两篇文档；A「已推送」后删除，B 存活保证清单非空
+	a, err := c.CreateDoc("待删除文档", "", "")
 	if err != nil {
-		t.Fatalf("create doc: %v", err)
+		t.Fatalf("create doc a: %v", err)
 	}
-	e := &Engine{Coll: c, Bind: BindInfo{DocHashes: map[string]string{d.UID: "hash-old"}}}
+	if _, err := c.CreateDoc("存活文档", "", ""); err != nil {
+		t.Fatalf("create doc b: %v", err)
+	}
+	e := &Engine{Coll: c, Bind: BindInfo{DocHashes: map[string]string{a.UID: "hash-old"}}}
 
 	// 删除该文档（进 .trash），再收集：应产生一条 delete op
-	if err := c.DeleteDoc(d.UID); err != nil {
+	if err := c.DeleteDoc(a.UID); err != nil {
 		t.Fatalf("delete doc: %v", err)
 	}
 	b := newPushBatch(8)
 	e.collectDocOps(b)
 	var deletes int
 	for _, op := range b.ops {
-		if op.Op == "delete" && op.Type == "doc" && op.UID == d.UID {
+		if op.Op == "delete" && op.Type == "doc" && op.UID == a.UID {
 			deletes++
 		}
 	}
 	if deletes != 1 {
 		t.Fatalf("应产生 1 条 doc delete op，实际 %d", deletes)
+	}
+}
+
+// TestCollectDocOpsEmptyGuard 审核 C#1 防呆：磁盘上仍有 .md（但 frontmatter 解析失败被静默丢弃）
+// 而基线有货时，视为扫描异常拒绝批量删除——宁可不推，也决不把远端整仓文档删光。
+// （磁盘真无 .md 的合法墓碑场景由 P1-10 的 TestP110ExternalDocRemovalStillEmitsDocDelete 把关）
+func TestCollectDocOpsEmptyGuard(t *testing.T) {
+	dir := t.TempDir()
+	c, err := collection.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// 一篇永远解析不了的坏 md：ListDocs 成功但清单为空（文件被静默丢弃）
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "broken.md"), []byte("---\nuid: [oops\n---\n正文\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = c
+	e := &Engine{Coll: c, Bind: BindInfo{DocHashes: map[string]string{
+		"uid-a": "h1", "uid-b": "h2",
+	}}}
+	b := newPushBatch(8)
+	e.collectDocOps(b)
+	for _, op := range b.ops {
+		if op.Op == "delete" {
+			t.Fatalf("扫空异常场景不应产生任何删除 op，got %+v", op)
+		}
+	}
+}
+
+// TestCollectExampleOpsEmptyGuard 审核 C#1 同形：examples 目录仍有文件而清单扫空时不产生删除。
+func TestCollectExampleOpsEmptyGuard(t *testing.T) {
+	dir := t.TempDir()
+	c, err := collection.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "examples"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "examples", "junk.yml"), []byte("meta:\n  uid: [oops\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{Coll: c, Bind: BindInfo{ExampleHashes: map[string]string{"uid-x": "h1"}}}
+	b := newPushBatch(8)
+	e.collectExampleOps(b)
+	for _, op := range b.ops {
+		if op.Op == "delete" {
+			t.Fatalf("示例扫空异常不应产生删除 op，got %+v", op)
+		}
 	}
 }

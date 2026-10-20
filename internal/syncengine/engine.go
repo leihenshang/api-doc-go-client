@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -1201,11 +1202,14 @@ func (b *pushBatch) collectTombstoneOps(pendingDel []collection.PendingDelete, d
 	}
 }
 
-// collectDocOps 文档条目（B13）：按内容 hash 做脏检测，只推变化项（首次因无记录全推）。
-// 文档不进索引，用 Bind.DocHashes 记录已推送状态（回执在 applyPushed 里写入），避免每轮全量重推。
-// J11：payload 带 GroupUID（目录归属）；「有推送记录但文件已不在」推 delete tombstone。
+// collectDocOps 文档条目（B13/J11）：按内容 hash 做脏检测只推变化项；本地已删→ tombstone。
+// 安全红线（审核 C#1）：清单读不出或本地意外扫空时，绝不产生删除 op——
+// 「不确定就当已删」会把远端整仓文档删掉，与「删除必进 .trash、覆盖必先留底」原则相悖。
 func (e *Engine) collectDocOps(b *pushBatch) {
-	docs, _ := e.Coll.ListDocs()
+	docs, err := e.Coll.ListDocs()
+	if err != nil {
+		return // 扫描任何一步失败 ≠ 本地全删了：本轮不推文档，交下一轮重试
+	}
 	live := make(map[string]bool, len(docs))
 	for _, d := range docs {
 		if d.UID == "" {
@@ -1230,6 +1234,12 @@ func (e *Engine) collectDocOps(b *pushBatch) {
 	// 保留这段基于 Bind.DocHashes 的差异检测：文档被用户在资源管理器里直接删掉（不走 DeleteDoc）
 	// 时只有它能发现删除。但走了 DeleteDoc 的 uid 已经在 pendingDeletes 里，由
 	// collectTombstoneOps 按 doc 类型发过一条，这里必须跳过，否则同一次删除会出两条 op（P1-10）。
+	// 防呆（审核 C#1，与 P1-10 防线折中）：本地一篇不剩、基线有货、但磁盘上仍存在 .md——
+	// 视为扫描异常（如 frontmatter 全体解析失败被静默丢弃），拒绝批量删除；
+	// 磁盘确实无 .md 时放行：这正是「用户在资源管理器里删光了文档」的合法墓碑场景（P1-10 第④防线）。
+	if len(docs) == 0 && len(e.Bind.DocHashes) > 0 && hasAnyMarkdown(e.Coll.Dir) {
+		return
+	}
 	for uid := range e.Bind.DocHashes {
 		if live[uid] || b.pendingDel[uid] {
 			continue
@@ -1248,10 +1258,46 @@ func parentDir(rel string) string {
 	return dir
 }
 
+// hasAnyMarkdown 磁盘上是否仍存在 .md 文件（跳过 .trash/.git 等隐藏目录）。
+// 供 collectDocOps 扫空防呆：区分「真删光」与「解析失败被静默丢弃」。
+func hasAnyMarkdown(root string) bool {
+	found := false
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(filepath.Base(p), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".md") {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+// dirHasAnyFile 目录是否存在且含任何条目（examples 侧扫空防呆用，顶层判定即可）。
+func dirHasAnyFile(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) > 0
+}
+
 // collectExampleOps 响应示例：按 hash 脏检测推 upsert；
 // 「有推送记录但文件已不在」视为本地删除 → tombstone。
+// 同 collectDocOps 的安全红线（审核 C#1 同形）：读取失败或意外扫空时不产生删除 op。
 func (e *Engine) collectExampleOps(b *pushBatch) {
-	examples, _ := e.Coll.ListAllResponseExamples()
+	examples, err := e.Coll.ListAllResponseExamples()
+	if err != nil {
+		return // 清单读不出≠全删：宁可不推，不能在不确定时批量删远端示例
+	}
+	if len(examples) == 0 && len(e.Bind.ExampleHashes) > 0 && dirHasAnyFile(filepath.Join(e.Coll.Dir, "examples")) {
+		return // 磁盘仍有示例文件而清单为空 → 扫描异常，拒绝批量删除（同 doc 侧防呆）
+	}
 	live := make(map[string]string, len(examples)) // uid → 文件 hash
 	for _, ex := range examples {
 		if ex.UID == "" {
