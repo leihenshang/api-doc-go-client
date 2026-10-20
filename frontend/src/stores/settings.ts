@@ -22,15 +22,19 @@ const DEFAULTS: Settings = {
   trayResident: false,
   trayCloseAction: 'ask',
   restoreLimit: 8,
-  // 内嵌 MCP 服务默认不启用、只监听本机、只读（与 Go 侧 config.Default() 一致）
+  // 内嵌 MCP 服务默认不启用、只监听本机、只读。
+  // 地址默认 127.0.0.1 两端一致；**端口默认不写死**，由后端 MCPPortDefault 下发
+  // （正式版 8189 / 开发版 8190），避免前端硬编码与后端命名空间错配。
   // allow = MCP 可访问的工作目录白名单（空 = 不授权任何目录，安全默认）
-  mcp: { enabled: false, addr: '127.0.0.1', port: 8189, token: '', readOnly: true, allowOrigins: [], allow: [] },
+  mcp: { enabled: false, addr: '127.0.0.1', port: 0, token: '', readOnly: true, allowOrigins: [], allow: [] },
 }
 
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
     form: { ...DEFAULTS } as Settings,
     loaded: false,
+    // MCP 默认端口：由后端 MCPPortDefault 下发（随构建标签变化），供输入框占位与缺失回填。
+    mcpPortDefault: 0,
     // 本次会话已手动切过主题：磁盘值回来时不回滚用户的选择
     themeTouched: false,
   }),
@@ -45,9 +49,17 @@ export const useSettingsStore = defineStore('settings', {
   actions: {
     async load(): Promise<void> {
       try {
-        const loaded = { ...DEFAULTS, ...(await api.getSettings()) }
+        const [remote, portDefault] = await Promise.all([api.getSettings(), api.mcpPortDefault()])
+        this.mcpPortDefault = portDefault || 0
+        const loaded = { ...DEFAULTS, ...remote }
         // 旧配置没有白名单字段：补空数组（UI 会直接读写它，undefined 会炸）
-        loaded.mcp = { ...DEFAULTS.mcp, ...(loaded.mcp ?? {}), allow: loaded.mcp?.allow ?? [] }
+        // 端口缺失/为 0 时用后端下发的默认值兜底，确保初值始终来自后端而非前端硬编码。
+        loaded.mcp = {
+          ...DEFAULTS.mcp,
+          ...(loaded.mcp ?? {}),
+          allow: loaded.mcp?.allow ?? [],
+        }
+        if (!loaded.mcp.port) loaded.mcp.port = this.mcpPortDefault
         this.form = loaded
       } catch {
         this.form = { ...DEFAULTS }

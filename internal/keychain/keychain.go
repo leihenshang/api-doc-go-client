@@ -13,7 +13,8 @@ import (
 )
 
 // service 是本应用在此机器上的唯一密钥环命名空间。
-const service = "api-doc-go-client"
+// 按构建标签分流（见 namespace_prod.go / namespace_dev.go）：正式版与开发版
+// 各用独立命名空间，并存调试时密钥条目互不串味、互不覆盖。
 
 // ErrNotFound 未命中条目（再导出，避免调用方直接依赖 go-keyring 类型）。
 // 「无可用密钥环」不设独立哨兵：go-keyring 各平台错误形态不一，

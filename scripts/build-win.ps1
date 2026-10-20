@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Windows 安装包（NSIS）构建脚本 —— 对应 Linux 侧的 scripts/build-deb.sh。
 
@@ -55,8 +55,12 @@ Set-Location $Root
 
 $BinDir  = Join-Path $Root 'build\bin'
 $NsisDir = Join-Path $Root 'build\windows\installer'
-$ProjNsi = Join-Path $NsisDir 'project.nsi'
-# wails build -nsis 会把内嵌的 WebView2 引导器写到这里；project.nsi 用 File 引用它。
+# 真正打包用的工程文件：手写、纳入版本库，wails 不感知它（不会被 -nsis 重写覆盖）。
+$InstallerNsi = Join-Path $NsisDir 'installer.nsi'
+# wails 生成的宏库（wails.files/webview2runtime/writeUninstaller 等），installer.nsi 靠 !include 复用；
+# 只能由 `wails build -nsis` 生成，勿手改。
+$WailsTools = Join-Path $NsisDir 'wails_tools.nsh'
+# wails build -nsis 会把内嵌的 WebView2 引导器写到这里；installer.nsi 经 wails_tools 的宏 File 引用它。
 # 它在 .gitignore 里（~2MB 二进制），所以「工程文件在、引导器不在」是新克隆的常态，必须一起判。
 $Webview2Setup = Join-Path $NsisDir 'tmp\MicrosoftEdgeWebview2Setup.exe'
 
@@ -69,7 +73,35 @@ function Assert-Tool {
   }
 }
 
-Assert-Tool -Name 'makensis' -Hint '安装 NSIS（https://nsis.sourceforge.io/Download）并确保它在 PATH 里。'
+<#
+  定位 makensis.exe。
+  NSIS 安装包默认**不**勾选「Add installation dir to PATH」，于是：
+    - 即使装了 NSIS，PowerShell 的 Get-Command 也找不到 makensis；
+    - 重开终端也没用（PATH 里根本没有它）。
+  所以先认 PATH，再回落到官方默认安装目录（x86 优先，与安装包一致），
+  拿到绝对路径供后面直接调用。都找不到才报错。
+#>
+function Resolve-Makensis {
+  $cmd = Get-Command 'makensis' -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+
+  $candidates = @()
+  foreach ($vf in 'ProgramFiles(x86)', 'ProgramFiles') {
+    $dir = [Environment]::GetEnvironmentVariable($vf)
+    if ($dir) { $candidates += (Join-Path $dir 'NSIS\makensis.exe') }
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+$script:Makensis = Resolve-Makensis
+if (-not $script:Makensis) {
+  throw "找不到 makensis.exe。安装 NSIS（https://nsis.sourceforge.io/Download）后把它加进 PATH，或确认它装在默认目录（如 ${env:ProgramFiles(x86)}\NSIS\）。"
+}
+Write-Host "makensis = $script:Makensis" -ForegroundColor DarkGray
+
 if (-not $SkipBuild) {
   Assert-Tool -Name 'wails' -Hint '安装 Wails CLI：go install github.com/wailsapp/wails/v2/cmd/wails@latest'
 }
@@ -93,12 +125,14 @@ Write-Host "架构=$Arch  版本=$Version  安装范围=$InstallScope  开发版
 
 # ---- 1) 构建二进制 ----
 #
-# NSIS 工程或 WebView2 引导器缺失时必须带 -nsis：只有这条通道会让 wails 写出
-# project.nsi / wails_tools.nsh / tmp\MicrosoftEdgeWebview2Setup.exe（引导器内嵌在 wails 里，离线可用）。
+# NSIS 宏库或 WebView2 引导器缺失时必须带 -nsis：只有这条通道会让 wails 写出
+# wails_tools.nsh / tmp\MicrosoftEdgeWebview2Setup.exe（引导器内嵌在 wails 里，离线可用）。
+# 注意：wails 只负责生成宏库+引导器（顺带产一个默认命名的 project.nsi 我们不使用），
+# 真正的安装包由本脚本对 installer.nsi 调 makensis 产出。
 # 两者都齐全时就不带 -nsis，免得它顺手产出一个默认命名的安装包造成混淆。
 
 if (-not $SkipBuild) {
-  $needBootstrap = (-not (Test-Path $ProjNsi)) -or (-not (Test-Path $Webview2Setup))
+  $needBootstrap = (-not (Test-Path $WailsTools)) -or (-not (Test-Path $Webview2Setup))
 
   $wailsArgs = @('build', '-platform', "windows/$Arch", '-clean', '-o', 'api-doc-client')
   if ($needBootstrap) { $wailsArgs += '-nsis' }
@@ -127,11 +161,14 @@ if (-not $SkipBuild) {
   Write-Host "`n[1/3] 跳过构建（-SkipBuild）" -ForegroundColor Cyan
 }
 
-if (-not (Test-Path $ProjNsi)) {
-  throw "找不到 $ProjNsi。去掉 -SkipBuild 跑一次，让 wails 生成 NSIS 工程。"
+if (-not (Test-Path $InstallerNsi)) {
+  throw "找不到 $InstallerNsi（安装包逻辑的权威来源，应在版本库里）。"
+}
+if (-not (Test-Path $WailsTools)) {
+  throw "找不到 $WailsTools（installer.nsi 靠 !include 复用其宏）。去掉 -SkipBuild 跑一次，让 wails 生成宏库。"
 }
 if (-not (Test-Path $Webview2Setup)) {
-  throw "找不到 $Webview2Setup（project.nsi 会 File 引用它）。去掉 -SkipBuild 跑一次让 wails 重新写入。"
+  throw "找不到 $Webview2Setup（wails_tools 的 webview2runtime 宏会 File 引用它）。去掉 -SkipBuild 跑一次让 wails 重新写入。"
 }
 
 # ---- 2) makensis 打包 ----
@@ -181,12 +218,12 @@ function New-Installer {
   )
   $defines += $script:ScopeDefines
 
-  # 必须在 installer 目录里跑：project.nsi 全用相对路径
-  # （!include "wails_tools.nsh"、File "tmp\..."、MUI_ICON "..\icon.ico"、OutFile "..\..\bin\..."）
+  # 必须在 installer 目录里跑：installer.nsi 全用相对路径
+  # （!include "wails_tools.nsh"、File "tmp\..."（经宏）、MUI_ICON "..\icon.ico"、OutFile "..\..\bin\..."）
   Push-Location $NsisDir
   try {
     # 先收进变量再打印：既能拿到 stderr，也保证 $LASTEXITCODE 不被管道后续 cmdlet 干扰
-    $output = & makensis @defines 'project.nsi' 2>&1
+    $output = & $script:Makensis @defines 'installer.nsi' 2>&1
     $code = $LASTEXITCODE
   } finally {
     Pop-Location
@@ -238,6 +275,8 @@ foreach ($p in $produced) {
   Write-Host "  $p  ($size)"
 }
 Write-Host ''
+Write-Host '升级说明：本安装包走「先静默卸载旧版再全新安装」，升级前会自动关闭运行中的客户端。'
+Write-Host '注意：machine 与 user 范围是两个独立安装（不同目录/不同注册表 hive），升级请固定同一 -InstallScope。'
 Write-Host '安装：双击上面的 -setup.exe（machine 范围会弹 UAC）。'
 Write-Host '静默安装：  <安装包> /S'
 Write-Host '卸载：      控制面板「程序和功能」，或安装目录下的 uninstall.exe'

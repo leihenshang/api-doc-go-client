@@ -340,6 +340,12 @@ func (a *App) GetSettings() (*config.Settings, error) {
 	return &s, nil
 }
 
+// MCPPortDefault 返回内嵌 MCP 服务的默认端口（由后端按构建标签下发：
+// 正式版 8189、开发版 8190）。前端不自行写死数值，以免与后端命名空间错配。
+func (a *App) MCPPortDefault() int {
+	return config.Default().MCP.Port
+}
+
 // SaveSettings 保存全局设置；Cookie 持久化开关变化时重建 Cookie 罐。
 func (a *App) SaveSettings(s *config.Settings) error {
 	if s == nil {

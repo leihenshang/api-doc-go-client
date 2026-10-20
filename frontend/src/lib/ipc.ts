@@ -308,6 +308,8 @@ export const api = {
     call<ResolveResult>('ResolveText', text, envName).then(normalizeResolve),
   getSettings: () => call<Settings>('GetSettings'),
   saveSettings: (s: Settings) => call<null>('SaveSettings', s),
+  /** MCP 默认端口（后端按构建标签下发，前端不写死） */
+  mcpPortDefault: () => call<number>('MCPPortDefault'),
   mcpStatus: () => call<MCPStatus>('MCPStatusText'),
   applyMCPSettings: () => call<MCPStatus>('ApplyMCPSettings'),
   regenerateMCPToken: () => call<MCPStatus>('RegenerateMCPToken'),

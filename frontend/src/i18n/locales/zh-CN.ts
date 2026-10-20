@@ -592,7 +592,6 @@ export default {
     mcpAddr: '监听地址',
     mcpAddrPlaceholder: '127.0.0.1',
     mcpPort: '端口',
-    mcpPortPlaceholder: '8189',
     mcpReadOnly: '只读模式',
     mcpAllow: '可访问的工作区',
     mcpAllowWritable: '可写',
