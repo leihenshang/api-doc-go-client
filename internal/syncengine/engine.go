@@ -852,12 +852,20 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 			fail(os.Remove(filepath.Join(e.Coll.Dir, filepath.FromSlash(dir), "folder.yml")))
 		}
 	case "example":
-		fail(e.Coll.DeleteResponseExampleByUID(it.UID))
-		delete(e.Bind.ExampleHashes, it.UID)
-	// J11-2.4：文档删除（进 .trash，可恢复）；清掉已推送记录，避免下次再推一次删除
+		// 审核 M#4：仅本地删除成功才清基线——失败时保留记录，避免下一轮把残留文件
+		// 当「首次推送」再 upsert 一遍，把服务端刚删的示例又建回来。
+		if err := e.Coll.DeleteResponseExampleByUID(it.UID); err == nil {
+			delete(e.Bind.ExampleHashes, it.UID)
+		} else {
+			fail(err)
+		}
+	// J11-2.4：文档删除（进 .trash，可恢复）；同样只在成功时清已推送记录
 	case "doc":
-		fail(e.Coll.DeleteDoc(it.UID))
-		delete(e.Bind.DocHashes, it.UID)
+		if err := e.Coll.DeleteDoc(it.UID); err == nil {
+			delete(e.Bind.DocHashes, it.UID)
+		} else {
+			fail(err)
+		}
 	case "variable":
 		e.removeVarByUID(it.UID)
 		delete(e.Bind.VarHashes, it.UID)

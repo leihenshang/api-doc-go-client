@@ -11,6 +11,8 @@ import (
 	"log"
 	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/energye/systray"
 )
@@ -38,6 +40,9 @@ type Manager struct {
 	mu      sync.Mutex
 	started bool
 	cb      Callbacks
+	// ready 在 onReady 完整成功（图标/菜单/回调就绪）后才置位；
+	// started 只表示「发起过启动」，不代表可用——审核 M#5：HideToTray 需要区分两者。
+	ready atomic.Bool
 }
 
 // NewManager 创建托盘管理器。
@@ -45,11 +50,27 @@ func NewManager(cb Callbacks) *Manager {
 	return &Manager{cb: cb}
 }
 
-// Started 托盘是否已启动（含启动失败后不再重试的情况）。
+// Started 托盘是否已发起启动（含启动失败后不再重试的情况）。不代表可用，可用性用 Ready。
 func (m *Manager) Started() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.started
+}
+
+// Ready 托盘图标是否已真正可用（onReady 完整成功；panic/无 SNI 宿主都会停在 false）。
+func (m *Manager) Ready() bool { return m.ready.Load() }
+
+// WaitReady 等待托盘就绪，超时返回 false。供 HideToTray 前调用：
+// 藏窗口之前必须确认图标存在，否则应用再也唤不回来（审核 M#5）。
+func (m *Manager) WaitReady(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for !m.ready.Load() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return true
 }
 
 // Start 启动托盘（幂等，非阻塞）。整个进程生命周期内只有第一次调用真正生效。
@@ -109,4 +130,7 @@ func (m *Manager) onReady(iconWindows, iconLinux []byte) {
 	if m.cb.OnQuit != nil {
 		mQuit.Click(m.cb.OnQuit)
 	}
+	// 菜单/回调全部挂完才置 ready：上方任何 panic 都会跳过这里（recover 后不再往后走），
+	// 外部 WaitReady 超时即知道托盘不可用，从而避免 HideToTray 把应用藏进看不见的地方。
+	m.ready.Store(true)
 }

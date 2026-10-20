@@ -11,6 +11,9 @@
 package app
 
 import (
+	"log"
+	"time"
+
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/tray"
 
@@ -71,7 +74,14 @@ func (a *App) HideToTray() {
 	}
 	// 兜底：隐藏前确保托盘已起。正常路径下开启驻留时就已启动，
 	// 但前端可以在任何时刻调到这里 —— 没有托盘图标就把窗口藏起来，应用将再也唤不回来。
+	// 审核 M#5：Start 只是「发起」；onReady panic（如无 DBus/SNI 宿主、图标设置失败）时
+	// 托盘永远不可用 —— 等就绪，超时则退化为最小化（窗口可见可恢复），绝不藏进看不见的地方。
 	a.applyTray(true)
+	if !a.ensureTray().WaitReady(1200 * time.Millisecond) {
+		log.Printf("tray: 未就绪，HideToTray 退化为最小化（避免应用不可达）")
+		runtime.WindowMinimise(ctx)
+		return
+	}
 	// 记住隐藏前的最大化态（WindowHide 不保留它），供 trayShow 恢复时重新最大化。
 	a.trayWasMaximised.Store(runtime.WindowIsMaximised(ctx))
 	runtime.WindowHide(ctx)
