@@ -46,16 +46,16 @@ function onContent(v: string): void {
         @update:value="onName"
       />
       <span class="sp" />
-      <n-button size="tiny" :type="mode === 'edit' ? 'primary' : 'default'" @click="mode = 'edit'">
+      <n-button size="tiny" :type="mode === 'edit' ? 'primary' : 'default'" data-testid="doc.modeEdit" @click="mode = 'edit'">
         {{ t('editor.edit') }}
       </n-button>
-      <n-button size="tiny" :type="mode === 'preview' ? 'primary' : 'default'" @click="mode = 'preview'">
+      <n-button size="tiny" :type="mode === 'preview' ? 'primary' : 'default'" data-testid="doc.modePreview" @click="mode = 'preview'">
         {{ t('editor.preview') }}
       </n-button>
       <n-button v-if="!readonly" size="tiny" type="primary" data-testid="doc.save" @click="emit('save')">
         {{ t('common.save') }}
       </n-button>
-      <n-button size="tiny" quaternary @click="emit('close')">×</n-button>
+      <n-button size="tiny" quaternary data-testid="doc.close" @click="emit('close')">×</n-button>
     </div>
     <div class="body" :class="mode">
       <md-editor

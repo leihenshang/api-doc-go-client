@@ -31,13 +31,16 @@ const (
 
 // CollectionBundle 集合整包。
 type CollectionBundle struct {
-	Format     string         `json:"format"`
-	Version    int            `json:"version"`
-	ExportedAt string         `json:"exportedAt,omitempty"`
-	Collection BundleInfo     `json:"collection"`
-	Folders    []BundleFolder `json:"folders,omitempty"`
-	Requests   []*Request     `json:"requests,omitempty"`
-	Docs       []DocEntry     `json:"docs,omitempty"`
+	Format     string     `json:"format"`
+	Version    int        `json:"version"`
+	ExportedAt string     `json:"exportedAt,omitempty"`
+	Collection BundleInfo `json:"collection"`
+	// RedactedAuth 导出时被抹掉凭据值的请求数（审核 L#9：导出文件常被分享，
+	// basic 口令 / bearer token / apikey 值不外带；认证类型与参数名保留，接收方自行补值）。
+	RedactedAuth int            `json:"redactedAuthCount,omitempty"`
+	Folders      []BundleFolder `json:"folders,omitempty"`
+	Requests     []*Request     `json:"requests,omitempty"`
+	Docs         []DocEntry     `json:"docs,omitempty"`
 }
 
 // BundleInfo 集合本身的元信息（名称用于导入后建同名顶层分组）。
@@ -68,6 +71,7 @@ func (c *Collection) ExportBundle() ([]byte, error) {
 	// 按树先序遍历：目录、请求、文档的顺序与客户端侧栏一致，导入后顺序也就保住了
 	// （导入侧逐个创建，seq 由 nextSeq 递增分配）。
 	var walk func(nodes []*Node)
+	redacted := 0
 	walk = func(nodes []*Node) {
 		for _, n := range nodes {
 			switch n.Type {
@@ -83,6 +87,14 @@ func (c *Collection) ExportBundle() ([]byte, error) {
 				// 运行期字段不外带：ExpectHash 是本机读盘时的哈希，BaseRev 是同步基线
 				cp.ExpectHash = ""
 				cp.BaseRev = 0
+				// 审核 L#9：认证凭据值（口令/token/apikey 值）不随导出外发；
+				// 类型与 username/key/in 保留（非机密、接收方补值需要）。
+				if cp.Auth != nil && (cp.Auth.Password != "" || cp.Auth.Token != "" || cp.Auth.Value != "") {
+					a := *cp.Auth
+					a.Password, a.Token, a.Value = "", "", ""
+					cp.Auth = &a
+					redacted++
+				}
 				b.Requests = append(b.Requests, &cp)
 			case "doc":
 				d, ok := res.docs[n.UID]
@@ -94,6 +106,7 @@ func (c *Collection) ExportBundle() ([]byte, error) {
 		}
 	}
 	walk(c.treeFromScan(res))
+	b.RedactedAuth = redacted
 	return json.MarshalIndent(b, "", "  ")
 }
 

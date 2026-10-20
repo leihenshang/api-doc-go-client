@@ -559,8 +559,6 @@ export default {
     responseLayout: '响应区位置',
     autoSave: '自动保存',
     autoSaveHint: '编辑后自动写入文件；关闭则为手动保存（Ctrl+S / 关闭页签 / 保存所有）',
-    trayResident: '驻留托盘',
-    trayResidentHint: '开启后托盘常驻，关闭窗口可隐藏而非退出；双击托盘图标唤出窗口，右键出菜单。关闭本选项后图标会保留到应用退出',
     trayCloseAction: '关闭窗口时',
     trayCloseActionHint: '「每次询问」会在关闭时弹框让你选；勾过「不再显示」后可在这里改回来',
     trayCloseAsk: '每次询问',

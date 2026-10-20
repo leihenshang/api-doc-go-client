@@ -80,6 +80,13 @@ while read -r pkg min; do
     [[ -z "${pkg:-}" ]] && continue
     got="$(printf '%s\n' "$PARSED" | awk -v p="$pkg" '$1 == p {print $2; found=1} END {if (!found) print "missing"}')"
     if [[ "$got" == "missing" ]]; then
+        # 当前平台没有测试文件（如 internal/platform 的测试全部带 !windows 标签）：
+        # 不属于“包改名/静默失控”，警告但不染红；有测试却没 coverage 才判失败。
+        ntests="$(go list -f '{{len .TestGoFiles}}{{len .XTestGoFiles}}' "./$pkg" 2>/dev/null || echo x)"
+        if [[ "$ntests" == "00" ]]; then
+            echo "  ⚠️  ${pkg}：当前平台无测试文件，跳过"
+            continue
+        fi
         echo "  ⚠️  ${pkg}: 本次未产出覆盖率（包名改了？）"
         fail=1
         continue

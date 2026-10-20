@@ -792,6 +792,9 @@ export const useTabsStore = defineStore('tabs', {
       if (!uid) return
       const tab = this.tabs.find((x) => x.uid === uid)
       if (tab) void this.close(tab.key, { save: false }) // 文件已不在这个根里，别再写盘
+      // 审核 L#8：saveSession 自 B19 起写 {uid,kind} 对象，旧数据是纯 string——比较须过 idOf，
+      // 否则跨根清理永久失配（残留 uid 靠恢复容错兜住）。
+      const idOf = (x: string | { uid: string }): string => (typeof x === 'string' ? x : x.uid)
       const coll = useCollectionStore()
       for (const r of coll.roots) {
         try {
@@ -799,11 +802,11 @@ export const useTabsStore = defineStore('tabs', {
           if (!raw) continue
           const data = JSON.parse(raw) as TabSession
           const uids = data.uids ?? []
-          if (!uids.includes(uid)) continue
+          if (!uids.some((x) => idOf(x) === uid)) continue
           localStorage.setItem(
             sessionKey(r.root),
             JSON.stringify({
-              uids: uids.filter((x) => x !== uid),
+              uids: uids.filter((x) => idOf(x) !== uid),
               activeUid: data.activeUid === uid ? '' : data.activeUid,
             }),
           )

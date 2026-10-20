@@ -39,13 +39,14 @@ function askTrayOrQuit(): void {
   const persist = async (action: 'tray' | 'quit'): Promise<void> => {
     if (!remember.value) return
     // 选「放入托盘」→ action=tray（Go 据此常驻）；选「直接关闭」→ action=quit（不常驻）。
-    // trayResident 同步写一份，保持与 action 一致（Go 侧实际以 action 为准）。
+    // trayResident 同步写一份，与 SettingsDialog 口径一致（ask/tray 都常驻，仅 quit 不常驻；
+    // Go 侧实际由 trayResidentOf(action) 派生，本字段仅保留兼容）。
     // 审核 H#3：必须等待落盘——紧随的 quit 不等它会写配置前就退出，勾选随机丢失。
     try {
       await settings.save({
         ...settings.form,
         trayCloseAction: action,
-        trayResident: action === 'tray',
+        trayResident: action !== 'quit',
       })
     } catch {
       // 落盘失败不阻断关闭流程；下次启动继续 ask
