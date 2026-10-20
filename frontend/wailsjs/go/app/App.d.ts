@@ -126,6 +126,8 @@ export function ListTrashFor(arg1:string):Promise<Array<collection.TrashEntry>>;
 
 export function LoadGrpcSchema(arg1:string,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
 
+export function MCPPortDefault():Promise<number>;
+
 export function MCPStatusText():Promise<app.MCPStatus>;
 
 export function MockStatus():Promise<mocksrv.Status>;

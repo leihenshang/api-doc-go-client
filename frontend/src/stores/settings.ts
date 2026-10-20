@@ -1,10 +1,10 @@
 // 全局设置：网络策略 + 本地数据容量 + 界面（主题 / 缩放倍率 / 响应区位置）。
 // 界面相关项需全局响应式，因此抽成 store，App.vue 直接消费。
 // 主题另有 lib/theme.ts 负责写 DOM（含 localStorage 缓存），本 store 只负责与磁盘设置同步。
-import { defineStore } from 'pinia'
 import { api } from '@/lib/ipc'
 import { applyTheme, isDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import type { Settings } from '@/types'
+import { defineStore } from 'pinia'
 
 const DEFAULTS: Settings = {
   insecureSsl: false,

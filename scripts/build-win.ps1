@@ -173,10 +173,25 @@ if (-not (Test-Path $Webview2Setup)) {
 
 # ---- 2) makensis 打包 ----
 
-$exeProd = Join-Path $BinDir 'api-doc-client.exe'
-$exeDev  = Join-Path $BinDir 'api-doc-client-dev.exe'
-if (-not (Test-Path $exeProd)) { throw "未找到 $exeProd，请先构建。" }
-if ($Dev -and -not (Test-Path $exeDev)) { throw "未找到 $exeDev，请先构建（-Dev）。" }
+# wails 在部分环境下产出的二进制不带 .exe 后缀（内容仍是合法 Windows PE，file 验过 MZ/PE32+），
+# 且加不加后缀不稳定。这里两种都认（优先 .exe），源文件扩展名不影响打包：
+# installer.nsi 的 wails.files 用 File "/oname=${PRODUCT_EXECUTABLE}" 强制落成 api-doc-client.exe。
+function Resolve-BuiltBinary {
+  param([Parameter(Mandatory)][string]$Base)
+  foreach ($cand in @("$Base.exe", $Base)) {
+    $p = Join-Path $BinDir $cand
+    if (Test-Path $p) { return $p }
+  }
+  return $null
+}
+
+$exeProd = Resolve-BuiltBinary 'api-doc-client'
+if (-not $exeProd) { throw "未找到 build\bin\api-doc-client(.exe)，请先构建（或去掉 -SkipBuild）。" }
+$exeDev = $null
+if ($Dev) {
+  $exeDev = Resolve-BuiltBinary 'api-doc-client-dev'
+  if (-not $exeDev) { throw "未找到 build\bin\api-doc-client-dev(.exe)，请先构建（-Dev）。" }
+}
 
 # 按架构选 wails_tools.nsh 认的那个宏名；只传一个，ARCH 就由它决定
 $script:BinaryDefine = if ($Arch -eq 'arm64') { 'ARG_WAILS_ARM64_BINARY' } else { 'ARG_WAILS_AMD64_BINARY' }
