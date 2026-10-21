@@ -1,41 +1,16 @@
 <script setup lang="ts">
-// 「响应字段」分段的字段表：字段 / 类型 / 含义 + 删除操作。
-// item 24：值列与变量书签已移除——当时的响应数据/响应头改在「响应数据 / 响应头」子页签看；
-// 字段来自用户点击「更新响应字段」后的解析结果，本组件只负责展示与编辑含义。
+// 「响应字段」分段的字段表：字段路径 / 类型 / 值（均只读）/ 含义（唯一可编辑列）。
+// 与请求体表格同构：字段由上方「响应数据」实时解析生成（表格只读，不加/删字段），
+// 只有「含义」可写回 RespDoc（description），随文件落盘、随同步往返 Web 端、并对 MCP 可见。
 import type { FieldRow } from '@/lib/responseFields';
-import { NButton, NInput, NPopconfirm } from 'naive-ui';
-import { ref } from 'vue';
+import { NInput } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 
 defineProps<{ rows: FieldRow[] }>()
 const emit = defineEmits<{
   meaning: [path: string, value: string]
-  remove: [path: string]
-  removeMany: [paths: string[]]
-  clear: []
 }>()
 const { t } = useI18n()
-
-const checked = ref(new Set<string>())
-
-function toggle(path: string): void {
-  if (checked.value.has(path)) checked.value.delete(path)
-  else checked.value.add(path)
-  // 触发响应式更新
-  checked.value = new Set(checked.value)
-}
-
-function removeOne(path: string): void {
-  checked.value.delete(path)
-  checked.value = new Set(checked.value)
-  emit('remove', path)
-}
-
-function removeChecked(): void {
-  if (!checked.value.size) return
-  emit('removeMany', [...checked.value])
-  checked.value = new Set()
-}
 </script>
 
 <template>
@@ -43,47 +18,19 @@ function removeChecked(): void {
     <div class="fh">
       <span class="ft">{{ t('resp.fields') }}<span class="num">{{ rows.length }}</span></span>
       <span class="fd">{{ t('resp.fieldsHint') }}</span>
-      <span class="sp" />
-      <!-- popconfirm 的 trigger / default 槽必须恰好一个子节点，否则 naive 的 getFirstSlotVNode
-           会抛错并中断面板渲染（症状：点了没反应）。故把条件放在 popconfirm 自身而非槽内容上。 -->
-      <n-popconfirm v-if="checked.size" @positive-click="removeChecked">
-        <template #trigger>
-          <n-button size="tiny" type="error" tertiary data-testid="resp.fields.removeChecked">
-            {{ t('resp.fieldsRemoveChecked', { n: checked.size }) }}
-          </n-button>
-        </template>
-        <span>{{ t('resp.fieldsRemoveConfirm', { n: checked.size }) }}</span>
-      </n-popconfirm>
-      <n-popconfirm @positive-click="emit('clear')">
-        <template #trigger>
-          <n-button size="tiny" quaternary data-testid="resp.fields.clear">{{ t('resp.fieldsClear') }}</n-button>
-        </template>
-        <span>{{ t('resp.fieldsClearConfirm') }}</span>
-      </n-popconfirm>
     </div>
     <div class="tr th">
-      <span class="ckcol" />
       <span>{{ t('resp.field') }}</span>
       <span>{{ t('resp.type') }}</span>
+      <span>{{ t('resp.example') }}</span>
       <span>{{ t('resp.meaning') }}</span>
-      <span class="opcol" />
     </div>
-    <div v-for="f in rows" :key="f.path" class="tr" data-testid="resp.fields.row" :data-path="f.path"
-      :class="{ on: checked.has(f.path) }">
-      <span class="ckcol">
-        <input type="checkbox" :checked="checked.has(f.path)" data-testid="resp.fields.check"
-            @change="toggle(f.path)" />
-      </span>
+    <div v-for="f in rows" :key="f.path" class="tr" data-testid="resp.fields.row" :data-path="f.path">
       <span class="mono fp" data-testid="resp.fields.path" :title="f.path">{{ f.path }}</span>
       <span class="mono ftype">{{ f.type }}</span>
+      <span class="mono fval" data-testid="resp.fields.value" :title="f.value">{{ f.value }}</span>
       <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning" :placeholder="t('common.optional')"
         @update:value="emit('meaning', f.path, $event)" />
-      <span class="opcol">
-        <button class="rm" type="button" :title="t('common.delete')" data-testid="resp.fields.remove"
-          @click="removeOne(f.path)">
-          ×
-        </button>
-      </span>
     </div>
   </section>
 
@@ -124,13 +71,9 @@ function removeChecked(): void {
   color: var(--app-muted);
 }
 
-.sp {
-  flex: 1;
-}
-
 .tr {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1.4fr) 70px minmax(0, 1.4fr) 24px;
+  grid-template-columns: minmax(0, 1.4fr) 80px minmax(0, 1fr) minmax(0, 1.4fr);
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
@@ -142,20 +85,7 @@ function removeChecked(): void {
   background: var(--app-surface-2);
   color: var(--app-muted);
   font-size: 11.5px;
-}
-
-.tr.on {
-  background: var(--app-info-tint);
-}
-
-.ckcol {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ckcol input {
-  cursor: pointer;
+  border-top: none;
 }
 
 .fp {
@@ -165,28 +95,12 @@ function removeChecked(): void {
   color: var(--app-code-key);
 }
 
-.ftype {
+.ftype,
+.fval {
   color: var(--app-muted);
-}
-
-.opcol {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.rm {
-  border: none;
-  background: none;
-  color: var(--app-placeholder);
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  padding: 0;
-}
-
-.rm:hover {
-  color: var(--app-danger, #d03050);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fields-empty {

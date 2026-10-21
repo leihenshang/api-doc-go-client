@@ -49,7 +49,8 @@ frontend/e2e/
 │   regression-theme.spec.ts       §5-18/19/7：主题、圆角/遮罩、语言、Markdown 转义
 │   regression-autosave.spec.ts    保存模型：手动/自动、冲突条两个出口、外部改动回填
 │   regression-session.spec.ts     会话恢复、快捷键、取消发送、Cookie 面板、撤销重做
-│   response-save-vars.spec.ts     保存▾ 菜单与字段表变量书签
+│   response-save-vars.spec.ts     保存▾ 菜单与字段表（值列只读）
+│   response-fields-manual.spec.ts 响应数据可编辑 → 实时派生字段表 / 非法 JSON 保留 / 含义落盘
 │   req-body-highlight.spec.ts     JSON 体着色与高亮层对齐
 │   tree-dnd.spec.ts               集合树指针拖拽
 │   tree-guides.spec.ts            集合树连接线：缩进 / 祖先竖线延续 / └ 收线 / 横线落在行中线 / 根行接出线与深度 0 同列 / 集合字号层级

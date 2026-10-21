@@ -3,6 +3,7 @@
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
 import BodyFieldsTable from '@/components/BodyFieldsTable.vue'
 import FindBar from '@/components/FindBar.vue'
+import GenDocDialog from '@/components/GenDocDialog.vue'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
@@ -18,7 +19,7 @@ import { buildApiDoc } from '@/lib/genDocs'
 import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
-import { dialog, message } from '@/lib/notice'
+import { message } from '@/lib/notice'
 import { loadFields, rowsFromDoc } from '@/lib/responseFields'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
@@ -172,33 +173,21 @@ function toggleDocsEditing(): void {
 const hasDoc = computed(() => (docs.value ?? '').trim().length > 0)
 
 /**
- * 生成并覆写 Docs：请求示例取 curl 代码；响应字段取**请求模型 RespDoc**（侧栏 Resp 节点同一份，
+ * 生成接口文档（不直接覆写 Docs）：请求示例取 curl 代码；响应字段取**请求模型 RespDoc**（侧栏 Resp 节点同一份，
  * 草稿 / gRPC 回退本地一次性存档）；响应示例从已保存示例里挑最新一个 JSON 体。
- * Docs 已有内容时先弹覆盖确认（用户显式同意才重写）。成功不提示，失败才提示。
+ * 结果先弹「生成文档」对话框（预览/编辑 + 覆盖/追加/下载），由用户显式选择落点。
  */
+const showGen = ref(false)
+const genText = ref('')
+
 async function genDocs(): Promise<void> {
-  if (hasDoc.value) {
-    const ok = await new Promise<boolean>((resolve) => {
-      dialog.warning({
-        title: t('docs.overwriteTitle'),
-        content: t('docs.overwriteWarn'),
-        positiveText: t('docs.overwriteOk'),
-        negativeText: t('common.cancel'),
-        onPositiveClick: () => resolve(true),
-        onNegativeClick: () => resolve(false),
-        onClose: () => resolve(false),
-        onMaskClick: () => resolve(false),
-      })
-    })
-    if (!ok) return
-  }
   try {
     const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
     const fromModel = rowsFromDoc(props.tab.request.respDoc)
     const fields = fromModel.length ? fromModel : loadFields(props.tab.uid)
     const examples = await api.listResponseExamples(props.tab.uid)
     const ex = examples.find((e) => !e.response.binary && /^[{[]/.test((e.response.body ?? '').trim()))
-    docs.value = buildApiDoc({
+    genText.value = buildApiDoc({
       request: props.tab.request,
       curl,
       fields,
@@ -218,25 +207,44 @@ async function genDocs(): Promise<void> {
         colName: t('docs.colName'),
         colValue: t('docs.colValue'),
         colType: t('docs.colType'),
+        colExample: t('docs.colExample'),
         colDesc: t('docs.colDesc'),
         colRequired: t('docs.colRequired'),
         requiredYes: t('docs.requiredYes'),
       },
     })
+    showGen.value = true
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
   }
 }
 
-/** 下载 Docs：把当前 Docs 内容经原生保存对话框落盘为 .md（复用 SaveResponseBody 的写盘能力）。 */
-async function downloadDoc(): Promise<void> {
+/** 对话框回传的落点：覆盖/追加只改 Docs（随自动保存落盘 + 同步）；下载走原生保存对话框。 */
+function onGenApply(p: { mode: 'overwrite' | 'append' | 'download'; text: string }): void {
+  if (p.mode === 'overwrite') {
+    docs.value = p.text
+  } else if (p.mode === 'append') {
+    const cur = (docs.value ?? '').trim()
+    docs.value = cur ? `${cur}\n\n${p.text}` : p.text
+  } else {
+    void downloadText(p.text)
+  }
+}
+
+/** 把指定 Markdown 经原生保存对话框落盘为 .md（复用 SaveResponseBody 的写盘能力）。 */
+async function downloadText(content: string): Promise<void> {
   try {
     const safeName = (props.tab.request.name || 'request').replace(/[\\/:*?"<>|]/g, '_')
-    const path = await api.saveResponseBody(`${safeName}.md`, false, docs.value)
+    const path = await api.saveResponseBody(`${safeName}.md`, false, content)
     if (path) message.success(t('docs.downloaded', { path }))
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
   }
+}
+
+/** 工具栏「下载」：下载当前 Docs 内容。 */
+async function downloadDoc(): Promise<void> {
+  await downloadText(docs.value ?? '')
 }
 
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
@@ -320,21 +328,49 @@ const jsonBroken = computed(
 )
 
 // ---- 请求体「原文 / 表格」视图（仅 JSON 体）----
-// 表格按字段路径展平（复用响应字段的 extractFields 口径），值列只读，备注列写回 body.descs 随同步往返。
+// 原文即 JSON 本体，表格按字段路径展平（复用响应字段的 extractFields 口径），
+// 值列只读、备注列写回 body.descs 随同步往返。有了原文就不再加独立的「示例」视图。
 type BodyView = 'raw' | 'table'
 const bodyView = ref<BodyView>('raw')
 const bodyRows = computed(() => toBodyRows(props.tab.request.body.raw, props.tab.request.body.descs))
+/**
+ * form / multipart 的请求数据示例：根据表格行（启用且有名字）拼出。
+ * form = urlencoded 串；multipart = 带 boundary 的分段示意（文件值行以 <file> 占位）。
+ * 只读展示，不新增字段、不影响实际发送。
+ */
+const formExample = computed(() => {
+  const b = props.tab.request.body
+  const rows = (b.form ?? []).filter((f) => f.enabled && f.name.trim())
+  if (!rows.length) return ''
+  if (b.type === 'form') {
+    return rows.map((f) => `${encodeURIComponent(f.name)}=${encodeURIComponent(f.value)}`).join('&')
+  }
+  if (b.type === 'multipart') {
+    const boundary = '<boundary>'
+    const parts = rows.map((f) => {
+      const isFile = f.type === 'file'
+      const disp = isFile
+        ? `Content-Disposition: form-data; name="${f.name}"; filename="${f.value}"`
+        : `Content-Disposition: form-data; name="${f.name}"`
+      return `--${boundary}\n${disp}\n\n${isFile ? '<file>' : f.value}`
+    })
+    return `${parts.join('\n')}\n--${boundary}--`
+  }
+  return ''
+})
 /** 编辑某字段备注：写回 body.descs（空则删项）并标脏；切换视图不标脏，只有备注改动才 dirty。 */
 function onBodyDesc(path: string, note: string): void {
   props.tab.request.body.descs = withBodyDesc(props.tab.request.body.descs, path, note)
   touch()
 }
 
-// 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）
+// 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）；
+// 响应字段子页签也复位到「响应数据」（否则会沿用上一个请求停留的字段表格/响应头）。
 watch(
   () => props.tab.key,
   () => {
     seg.value = isGrpcReq.value ? 'schema' : 'params'
+    respView.value = 'body'
     tabs.refreshResolve()
     initFields()
   },
@@ -343,12 +379,11 @@ watch(
 // ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
 // 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
 // 字段表状态与「防抖写回 respDoc」逻辑见 composables/useResponseFields。
-const { fields, hasResp, initFields, setMeaning, removeField, removeFieldsByPath, clearFields } =
-  useResponseFields({
-    getTab: () => props.tab,
-    isGrpc: () => isGrpcReq.value,
-    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
-  })
+const { fields, sample, hasResp, initFields, onSampleInput, setMeaning } = useResponseFields({
+  getTab: () => props.tab,
+  isGrpc: () => isGrpcReq.value,
+  onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+})
 
 // 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
 
@@ -378,32 +413,21 @@ function setContentType(v: string): void {
   touch()
 }
 
-// 响应数据快照格式化（item 24）：JSON 类型能 parse 就缩进 2 格美化，其余类型与解析失败时原文展示。
-const respSnapPretty = computed(() => {
-  const raw = respSnap.value?.sample ?? ''
-  if (!raw.trim()) return ''
-  if (respContentType.value !== 'json') return raw
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2)
-  } catch {
-    return raw
-  }
-})
+// ---- Resp 分段子页签（item 8）：响应数据 / 响应头 / 字段表格（默认先看响应数据） ----
+type RespView = 'fields' | 'body' | 'headers'
+const respView = ref<RespView>('body')
+const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
-// 响应区「更新响应字段」成功后，请求编辑器切到 Resp 分段并展示最新字段表。
+// 响应区「更新响应字段」成功后：切到 Resp 分段并直接看「字段表格」（其余情形默认停在响应数据）。
 watch(
   () => tabs.respFocus,
   (f) => {
     if (f?.key !== props.tab.key) return
     seg.value = 'resp'
+    respView.value = 'fields'
     initFields()
   },
 )
-
-// ---- Resp 分段子页签（item 8）：字段表格 / 当时的响应数据 / 当时的响应头 ----
-type RespView = 'fields' | 'body' | 'headers'
-const respView = ref<RespView>('fields')
-const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
 // ---- 编辑区页内查找（textarea 版；逻辑见 composables/useTextareaFind）----
 const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, openFind, applyFind, findNext, findPrev } =
@@ -479,8 +503,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
           </div>
           <div class="arow">
             <span class="lbl">{{ t('auth.in') }}</span>
-            <n-select v-model:value="auth.in" :options="authInOptions" size="small" class="atype"
-              data-testid="auth.in" @update:value="touch" />
+            <n-select v-model:value="auth.in" :options="authInOptions" size="small" class="atype" data-testid="auth.in"
+              @update:value="touch" />
           </div>
         </template>
       </div>
@@ -502,25 +526,33 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             </span>
           </div>
           <!-- JSON 体：原文 / 表格 两视图（表格按字段路径编辑备注，写回 body.descs 随同步往返）；
-               纯文本、表单沿用原编辑器。切换视图不标脏，只有备注改动才 dirty。 -->
+               原文就是请求数据本身，不再单设示例视图。纯文本、表单沿用原编辑器。切换视图不标脏，只有备注改动才 dirty。 -->
           <template v-if="bodyType === 'json'">
             <div class="resp-sub" role="group">
               <button class="sub-tab" :class="{ on: bodyView === 'raw' }" type="button" data-testid="body.viewTab"
                 data-view="raw" @click="bodyView = 'raw'">{{ t('editor.bodyTabRaw') }}</button>
               <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
                 data-view="table" @click="bodyView = 'table'">
-                {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length }}</span>
+                {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length
+                  }}</span>
               </button>
             </div>
             <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />
-            <json-body-editor v-else v-model="tab.request.body.raw" :rows="12"
-              :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+            <json-body-editor v-else v-model="tab.request.body.raw" :rows="12" :placeholder="t('editor.rawPlaceholder')"
+              @input="touch" />
           </template>
           <n-input v-else-if="bodyType === 'text'" v-model:value="tab.request.body.raw" type="textarea" :rows="12"
             class="mono raw" :placeholder="t('editor.rawPlaceholder')" @input="touch" />
-          <key-value-table v-else-if="bodyType === 'form' || bodyType === 'multipart'" :rows="tab.request.body.form"
-            :label="bodyType === 'form' ? t('editor.bodyForm') : t('editor.bodyMultipart')"
-            :show-type="bodyType === 'multipart'" @change="touch" />
+          <!-- form / multipart：键值表格直接编辑；下方根据表格字段给一份只读的请求数据示例（不新增字段）。 -->
+          <template v-else-if="bodyType === 'form' || bodyType === 'multipart'">
+            <key-value-table :rows="tab.request.body.form"
+              :label="bodyType === 'form' ? t('editor.bodyForm') : t('editor.bodyMultipart')"
+              :show-type="bodyType === 'multipart'" @change="touch" />
+            <div v-if="formExample" class="bex">
+              <div class="bex-hd">{{ t('editor.bodyExampleFromFields') }}</div>
+              <pre class="body-example mono" data-testid="body.formExample">{{ formExample }}</pre>
+            </div>
+          </template>
         </div>
       </template>
       <div v-else-if="seg === 'vars'" class="script-pane">
@@ -567,8 +599,6 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
           <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
         </div>
         <div class="resp-sub" role="group">
-          <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" data-testid="resp.segTab"
-            data-view="fields" @click="respView = 'fields'">{{ t('editor.respTabFields') }}</button>
           <button class="sub-tab" :class="{ on: respView === 'body' }" type="button" data-testid="resp.segTab"
             data-view="body" @click="respView = 'body'">
             {{ t('editor.respTabBody') }}<span v-if="respSnap?.status" class="sub-badge">{{ respSnap.status }}</span>
@@ -578,11 +608,20 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
               respSnap.headers.length }}</span>
           </button>
+          <!-- 字段表格放到最后（由「响应数据」派生，先看数据再看字段表） -->
+          <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" data-testid="resp.segTab"
+            data-view="fields" @click="respView = 'fields'">{{ t('editor.respTabFields') }}</button>
         </div>
-        <response-fields v-if="respView === 'fields'" :rows="fields" @meaning="setMeaning" @remove="removeField"
-          @remove-many="removeFieldsByPath" @clear="clearFields" />
-        <pre v-else-if="respView === 'body'" class="resp-snap mono" data-testid="resp.segBody">{{ respSnapPretty ||
-          t('editor.respSnapEmpty') }}</pre>
+        <!-- 字段表格：由「响应数据」子页签的合法 JSON 实时派生（表格只读，只能逐行写含义） -->
+        <div v-if="respView === 'fields'" class="resp-fields">
+          <response-fields :rows="fields" @meaning="setMeaning" />
+        </div>
+        <!-- 响应数据：可编辑；合法 JSON 时自动生成「字段表格」（非法/空则不覆盖既有表） -->
+        <div v-else-if="respView === 'body'" class="resp-data">
+          <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
+          <n-input :value="sample" type="textarea" :rows="16" class="mono resp-data-ta" data-testid="resp.dataInput"
+            :disabled="readonly" :placeholder="t('editor.respDataPh')" @update:value="onSampleInput" />
+        </div>
         <div v-else class="resp-heads" data-testid="resp.segHeaders">
           <div v-if="!respSnap?.headers?.length" class="resp-heads-empty">{{ t('editor.respSnapEmpty') }}</div>
           <div v-for="(h, i) in respSnap?.headers ?? []" :key="`${h.name}-${i}`" class="hrow"
@@ -617,6 +656,9 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
         </template>
       </div>
     </div>
+
+    <!-- 生成接口文档结果弹窗（预览/编辑 + 覆盖/追加/下载） -->
+    <gen-doc-dialog v-model:show="showGen" :text="genText" @apply="onGenApply" />
   </div>
 </template>
 
@@ -782,6 +824,30 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 }
 
 /* Resp 分段子页签（item 8）：字段表格 / 响应数据 / 响应头 快照切换 */
+/* 字段表格：由「响应数据」派生，仅表格本身 */
+.resp-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 「响应数据」可编辑区：提示 + 文本域 */
+.resp-data {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resp-data-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--app-muted);
+}
+
+.resp-data-ta :deep(textarea) {
+  font-size: 12.5px;
+}
+
 /* 响应类型行：下拉 + 类型徽标（与子页签同排风格） */
 .resp-ct {
   display: flex;
@@ -862,6 +928,40 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   word-break: break-all;
   overflow: auto;
   max-height: calc(100% - 52px);
+}
+
+/* 请求体 JSON 示例（只读）：与响应快照同款的代码块观感 */
+.body-example {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-code-bg, var(--app-surface-2, transparent));
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* form/multipart 根据字段生成的只读示例：小标题 + 代码块 */
+.bex {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
+.bex-hd {
+  font-size: 11.5px;
+  color: var(--app-muted);
+  margin-bottom: 2px;
+}
+
+.bex .body-example {
+  flex: 0 0 auto;
+  max-height: 220px;
 }
 
 .resp-heads {

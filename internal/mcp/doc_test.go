@@ -95,3 +95,18 @@ func TestDocCRUD(t *testing.T) {
 		t.Fatalf("删除后应为空: %+v %v", left, err)
 	}
 }
+
+// get_doc_template 必须与前端 buildApiDoc（lib/genDocs.ts）的骨架对齐：
+// 含「请求体」一节、响应字段表示例值列、请求示例附 JSON 代码块。
+// 防两端漂移（曾因模板漏「请求体」而让 AI 复现 H15 漏 body 章的回归）。
+func TestDocTemplateAlignedWithGenDocs(t *testing.T) {
+	_, svc := setup(t)
+	tpl := svc.DocTemplate()
+	for _, want := range []string{
+		"## 请求参数", "## 请求体", "## 请求示例", "## 响应字段", "示例值", "```json",
+	} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("模板缺少 %q（与 genDocs 输出漂移）:\n%s", want, tpl)
+		}
+	}
+}

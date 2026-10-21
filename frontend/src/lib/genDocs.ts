@@ -25,6 +25,7 @@ export interface ApiDocLabels {
   colName: string // 参数名
   colValue: string // 值（请求体表单体列）
   colType: string // 类型
+  colExample: string // 示例值（响应字段表体列）
   colDesc: string // 说明
   colRequired: string // 必选
   requiredYes: string // 必选列默认值（是 / Yes）
@@ -64,6 +65,15 @@ function maskHost(url: string): string {
 /** 只保留 URL 的路径部分：去掉查询串与锚点（查询参数交由「请求参数」表体现）。 */
 function urlPathOnly(url: string): string {
   return url.replace(/[?#].*$/, '')
+}
+
+/** 把 JSON 原文缩进 2 格美化；解析失败（含 {{变量}} 占位）原样返回。 */
+function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text.trim()
+  }
 }
 
 export function buildApiDoc(input: ApiDocInput): string {
@@ -130,16 +140,22 @@ export function buildApiDoc(input: ApiDocInput): string {
   // 请求示例 curl（把生成命令里的主机也替换成 {{host}}）
   const curlAuth = authorityOf(rawUrl)
   const curlOut = curlAuth && curl.includes(curlAuth) ? curl.split(curlAuth).join('{{host}}') : curl
-  if (curlOut.trim()) {
-    out.push(`## ${L.reqExample}`, '', '```shell', curlOut.trimEnd(), '```', '')
+  // JSON 体的「请求数据示例」：缩进美化后的原文（含变量占位则原样），与 curl 同节展示
+  const reqBodyJson = body && body.type === 'json' && bodyRaw ? prettyJson(bodyRaw) : ''
+  if (curlOut.trim() || reqBodyJson) {
+    out.push(`## ${L.reqExample}`, '')
+    if (curlOut.trim()) out.push('```shell', curlOut.trimEnd(), '```', '')
+    if (reqBodyJson) out.push('```json', reqBodyJson, '```', '')
   }
 
-  // 响应字段（参数名=字段路径、类型=f.type（空则 string）、说明=f.meaning；必选默认「是」）
+  // 响应字段（参数名=字段路径、类型=f.type（空则 string）、示例值=f.value、说明=f.meaning；必选默认「是」）
   if (fields.length) {
-    const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
-    out.push(`## ${L.resFields}`, `| ${hdr} |`, '| --- | --- | --- | --- |')
+    const hdr = [L.colName, L.colRequired, L.colType, L.colExample, L.colDesc].join(' | ')
+    out.push(`## ${L.resFields}`, `| ${hdr} |`, '| --- | --- | --- | --- | --- |')
     for (const f of fields)
-      out.push(`| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.meaning)} |`)
+      out.push(
+        `| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.value)} | ${esc(f.meaning)} |`,
+      )
     out.push('')
   }
 

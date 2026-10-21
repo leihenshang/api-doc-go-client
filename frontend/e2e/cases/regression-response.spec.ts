@@ -49,8 +49,7 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
 
     // 给 value 字段（两次响应取值都为 1）填含义
     const valueMeaning = page
-      .getByTestId('resp.fields.row')
-      .filter({ has: page.locator('.fp', { hasText: 'value' }) })
+      .locator('[data-testid="resp.fields.row"][data-path="value"]')
       .getByTestId('resp.fields.meaning')
       .locator('input')
     await valueMeaning.fill('业务主体')
@@ -72,7 +71,7 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await expect(rows.first()).toBeVisible()
     expect(await rows.count()).toBeGreaterThan(2) // total / items.0.id / items.0.name / items.1.* 
     await expect(
-      page.getByTestId('resp.fields.row').filter({ has: page.locator('.fp', { hasText: 'value' }) }),
+      page.locator('[data-testid="resp.fields.row"][data-path="value"]'),
     ).toHaveCount(0) // 覆盖：旧字段消失
 
     // 取消分支：有旧字段时取消不覆盖
@@ -100,8 +99,7 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await sendUrl(page, app, '{{host}}/json/flat')
     await page.getByTestId('resp.updateFields').click()
     const valueMeaning = page
-      .getByTestId('resp.fields.row')
-      .filter({ has: page.locator('.fp', { hasText: 'value' }) })
+      .locator('[data-testid="resp.fields.row"][data-path="value"]')
       .getByTestId('resp.fields.meaning')
       .locator('input')
     await valueMeaning.fill('旧说明')
@@ -145,6 +143,8 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     await expect(page.getByTestId('resp.exnote')).toBeVisible()
     await expect(page.getByTestId('resp.exnote')).toContainText('正在查看已保存的示例')
     await expect(page.getByTestId('resp.status')).toContainText('200')
+    // 连接/性能计数只属实时响应：回看已保存示例时不展示（不写入示例文件/不随同步）
+    await expect(page.getByTestId('resp.conn')).toHaveCount(0)
     await page.getByTestId('resp.backToLive').click()
     await expect(page.getByTestId('resp.exnote')).toHaveCount(0)
 

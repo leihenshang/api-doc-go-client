@@ -302,6 +302,16 @@ export interface SendResult {
   trailers?: KV[] | null
   /** 脚本/断言产物（无脚本时缺省） */
   script?: ScriptResult | null
+  /** 本次跟随的重定向次数（仅实时响应，不落盘/同步） */
+  redirects?: number
+  /** 实际连接的对端地址 host:port（仅实时响应） */
+  remoteAddr?: string
+  /** 协商的 TLS 版本（如 TLS 1.3；非 TLS 为空） */
+  tlsVersion?: string
+  /** 协商的 TLS 套件（如 TLS_AES_256_GCM_SHA384） */
+  tlsCipher?: string
+  /** 连接是否复用（keep-alive 命中已有连接） */
+  reused?: boolean
 }
 
 /** 保存的响应示例里的请求快照（internal/collection.ExampleRequest）。 */

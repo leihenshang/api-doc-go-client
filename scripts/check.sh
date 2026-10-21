@@ -20,24 +20,44 @@ SKIP_BUILD=0
 RACE="-race"
 for arg in "$@"; do
   case "$arg" in
-    --fast) MODE="fast" ;;
-    --smoke) MODE="smoke" ;;
-    --full) MODE="full" ;;
-    --e2e-ui) MODE="e2e-ui" ;;
-    --skip-build) SKIP_BUILD=1 ;;
-    --no-race) RACE="" ;;
-    -h | --help)
-      sed -n '2,13p' "$0"
-      exit 0
-      ;;
-    *)
-      echo "未知参数：$arg（可用：--fast / --smoke / --full / --e2e-ui / --skip-build / --no-race）" >&2
-      exit 2
-      ;;
+  --fast) MODE="fast" ;;
+  --smoke) MODE="smoke" ;;
+  --full) MODE="full" ;;
+  --e2e-ui) MODE="e2e-ui" ;;
+  --skip-build) SKIP_BUILD=1 ;;
+  --no-race) RACE="" ;;
+  -h | --help)
+    sed -n '2,13p' "$0"
+    exit 0
+    ;;
+  *)
+    echo "未知参数：$arg（可用：--fast / --smoke / --full / --e2e-ui / --skip-build / --no-race）" >&2
+    exit 2
+    ;;
   esac
 done
 
-step() { echo; echo "== $* =="; }
+step() {
+  echo
+  echo "== $* =="
+}
+
+# -race 需要 cgo + C 编译器（Windows 上是 gcc/MinGW）。没装工具链的本地默认降级为不开 race 并提示，
+# 而不是在 go test -race 处直接失败（CI 环境有 gcc，仍按默认 -race 跑竞态检测）。
+# 显式传 --no-race 时 RACE 已为空，不重复检测。
+if [[ -n "$RACE" ]] && [[ "$MODE" != "e2e-ui" ]]; then
+  ccfound=""
+  for c in gcc cc clang; do
+    if command -v "$c" >/dev/null 2>&1; then
+      ccfound="$c"
+      break
+    fi
+  done
+  if [[ -z "$ccfound" ]]; then
+    RACE=""
+    echo "⚠️  未检测到 C 编译器（gcc/cc/clang）：本次单测自动跳过 -race（CI 有 gcc，仍会跑竞态检测）。"
+  fi
+fi
 
 # ---- 静态检查与单测（所有模式都跑，--e2e-ui 除外） ----
 
@@ -96,24 +116,24 @@ run_e2e() {
 }
 
 case "$MODE" in
-  e2e-ui)
-    step "Playwright UI（退出后手动 Ctrl+C）"
-    (cd "$ROOT/frontend" && npx playwright test --ui)
-    ;;
-  smoke)
-    build_frontend
-    if ! run_e2e --grep @smoke; then
-      echo "-> e2e 失败。缺浏览器时先跑：cd frontend && npx playwright install chromium" >&2
-      exit 1
-    fi
-    ;;
-  full)
-    build_frontend
-    if ! run_e2e --grep-invert @demo; then
-      echo "-> e2e 失败。缺浏览器时先跑：cd frontend && npx playwright install chromium" >&2
-      exit 1
-    fi
-    ;;
+e2e-ui)
+  step "Playwright UI（退出后手动 Ctrl+C）"
+  (cd "$ROOT/frontend" && npx playwright test --ui)
+  ;;
+smoke)
+  build_frontend
+  if ! run_e2e --grep @smoke; then
+    echo "-> e2e 失败。缺浏览器时先跑：cd frontend && npx playwright install chromium" >&2
+    exit 1
+  fi
+  ;;
+full)
+  build_frontend
+  if ! run_e2e --grep-invert @demo; then
+    echo "-> e2e 失败。缺浏览器时先跑：cd frontend && npx playwright install chromium" >&2
+    exit 1
+  fi
+  ;;
 esac
 
 echo

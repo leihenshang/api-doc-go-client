@@ -53,8 +53,9 @@ export function extractFields(text: string): FieldRow[] {
 
     // 数组：按结构描述，不逐元素展开
     if (Array.isArray(v)) {
+      // 空数组只在有路径时占一行（根数组 [] 不产生空路径行）
       if (v.length === 0) {
-        push(path, 'array')
+        if (path) push(path, 'array')
         return
       }
       push(path, 'array')
@@ -156,15 +157,18 @@ export function rowsFromDoc(doc?: ResponseDoc | null): FieldRow[] {
     }))
 }
 
-/** 字段表行 → RespDoc 参数行（客户端无 required 概念，恒 false；含义即 description）。 */
+/** 字段表行 → RespDoc 参数行（客户端无 required 概念，恒 false；含义即 description）。
+ * 手动录入但未填路径的空行不落盘（fieldName 为空无意义），避免给 respDoc 写入空字段名。 */
 export function paramsFromRows(rows: FieldRow[]): ResponseParam[] {
-  return rows.map((r) => ({
-    fieldName: r.path,
-    type: r.type,
-    required: false,
-    description: r.meaning,
-    example: r.value,
-  }))
+  return rows
+    .filter((r) => r.path.trim() !== '')
+    .map((r) => ({
+      fieldName: r.path,
+      type: r.type,
+      required: false,
+      description: r.meaning,
+      example: r.value,
+    }))
 }
 
 /** 根据响应体文本推断根 JSON 类型（{→object、[→array，其余空串）。 */
@@ -178,21 +182,30 @@ export function rootJsonType(text: string): string {
 /** buildRespDoc 用到的「本次快照」：各字段可为 undefined，表示本次没有该信息、应回退既有 respDoc。 */
 export interface RespDocLive {
   type?: string
+  /** 响应数据原文：传空串是**真实值**（用户清空了数据），只有 undefined 才回退旧值 */
   sample?: string
+  /** 响应内容类型（json/text/xml/...）；不传则沿用既有 doc 的值（避免编辑时被重置） */
+  contentType?: string
   status?: number
   headers?: KV[]
 }
 
 /**
- * 组装 ResponseDoc：字段表(params)恒由 rows 重新导出；其余四字段按「本次快照优先、缺省回退既有 doc」的
- * 统一优先级取值 —— 请求编辑器（只改字段、不动快照）与响应面板（带本次响应快照）共用同一套规则，
- * 避免两处字段集合/快照策略漂移。字符串用 `||`（空串视为缺省），status/headers 用 `??`（0 / undefined 判定）。
+ * 组装 ResponseDoc：字段表(params)恒由 rows 重新导出；其余字段按「本次快照优先、缺省回退既有 doc」的
+ * 统一优先级取值 —— 请求编辑器（只改字段/数据）与响应面板（带本次响应快照）共用同一套规则。
+ * sample 用 nullish 语义：空串是用户真实清空的数据，不能用 `||` 回落成旧值（否则清空后旧 body 又复活）。
+ * status/headers 同理（0 / undefined 判定）。
  */
 export function buildRespDoc(rows: FieldRow[], base: ResponseDoc | null | undefined, live: RespDocLive): ResponseDoc {
+  // 用户显式清空响应数据（sample=""）时，type 也一并清空：
+  // Go 侧 UpdateResponseDoc 在 type/params/sample 全空时会把整段 respdoc 移除，不留空壳。
+  const cleared = live.sample !== undefined && live.sample.trim() === ''
   return {
-    type: live.type || base?.type || '',
+    type: cleared ? '' : live.type || base?.type || '',
     params: paramsFromRows(rows),
-    sample: live.sample || base?.sample || '',
+    sample: live.sample !== undefined ? live.sample : base?.sample || '',
+    // 内容类型不随字段/数据编辑丢失：未显式传时继承既有 doc
+    contentType: live.contentType !== undefined ? live.contentType : base?.contentType || '',
     // 字段表编辑不动快照：状态码/响应头本次没有就原样带回（item 8）
     status: live.status ?? base?.status ?? 0,
     headers: live.headers ?? base?.headers ?? [],
@@ -247,4 +260,26 @@ export async function persistRespDoc(ctx: RespDocPersistCtx): Promise<boolean> {
   if (ctx.immediate) return apply()
   ctx.timer.current = setTimeout(() => void apply(), ctx.debounceMs ?? 600)
   return true
+}
+
+// ---- 待写防抖的跨组件取消（审查 M2）----
+// 编辑器（useResponseFields）与响应面板（ResponsePanel）各自持有防抖计时器，
+// 若两边同时有未落盘内容，「面板立即写」可能被「编辑器晚到的旧快照」回滚。
+// 这里按「请求 uid」登记编辑器的取消函数，面板在立即写前调用 cancelPendingFor(uid)，
+// 丢掉旧的待写（面板手上的快照更新）。
+const pendingCancelers = new Map<string, () => void>()
+
+/** 登记某请求的「取消待写」函数（编辑器初始化/切请求时调用）。 */
+export function registerPendingCancel(uid: string, fn: () => void): void {
+  if (uid) pendingCancelers.set(uid, fn)
+}
+
+/** 注销某请求的取消函数（切走/卸载时调用）。 */
+export function unregisterPendingCancel(uid: string): void {
+  if (uid) pendingCancelers.delete(uid)
+}
+
+/** 取消该请求尚未触发的防抖写回（无登记时无操作）。 */
+export function cancelPendingFor(uid: string): void {
+  pendingCancelers.get(uid)?.()
 }
