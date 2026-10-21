@@ -8,7 +8,8 @@ import {
   ChevronDownOutline,
   FolderOpenOutline,
   LayersOutline,
-  SearchOutline
+  SearchOutline,
+  TrashOutline
 } from '@vicons/ionicons5'
 import { NDropdown, NIcon } from 'naive-ui'
 import { computed, h } from 'vue'
@@ -24,6 +25,8 @@ const props = defineProps<{
   activeRoot: string
   /** 最近打开过、当前没打开的目录（启动恢复有上限，超出的从这里一键补开） */
   recent: { dir: string; name: string }[]
+  /** 最近打开历史是否非空（即使全部都已打开，也允许清理历史） */
+  hasRecent: boolean
 }>()
 // 注意：不要写 `const { name, envs, currentEnv } = props` —— 解构 props 会丢掉响应性，
 // 环境列表变了（新建/改名/删除环境）下拉仍是首次渲染时的那份，看起来就像「切不过去」。
@@ -37,6 +40,8 @@ const emit = defineEmits<{
   'update:currentEnv': [v: string]
   /** 打开一个「最近打开过、当前没打开」的工作目录 */
   'open-dir': [dir: string]
+  /** 清理「最近打开」历史（不影响当前已打开的根） */
+  'clear-recent': []
 }>()
 
 const { t } = useI18n()
@@ -70,6 +75,15 @@ const menu = computed(() => [
   ...(recentOptions.value.length
     ? [{ type: 'group' as const, key: 'recent', label: t('toolbar.recentDirs'), children: recentOptions.value }]
     : []),
+  ...(props.hasRecent
+    ? [
+      {
+        key: 'recent-clear',
+        label: t('toolbar.clearRecent'),
+        icon: () => h(NIcon, { component: TrashOutline }),
+      },
+    ]
+    : []),
   { key: 'open', label: t('toolbar.openOther'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
 ])
 
@@ -83,6 +97,7 @@ function onMenu(key: string | number): void {
     return
   }
   if (key === 'open') emit('open-other')
+  if (key === 'recent-clear') emit('clear-recent')
 }
 </script>
 

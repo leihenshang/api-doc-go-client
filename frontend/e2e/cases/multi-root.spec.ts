@@ -106,6 +106,36 @@ test('[M1] 多工作目录：工具条菜单可切换 / 根可折叠 / 可关闭
   await expect(page.getByTestId('tab.item')).toHaveCount(0)
 })
 
+test('[M1] 集合切换下拉：清理最近打开记录', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await app.addCollection('bruno-sample')
+  await openCollection(page, app)
+
+  const roots = page.getByTestId('tree.root')
+  const bruno = roots.filter({ hasText: 'e2e-bruno' })
+  await expect(roots).toHaveCount(2)
+  // 关掉一个根，让它只留在「最近打开」里
+  await bruno.getByTestId('tree.root.menu').click()
+  await page.getByTestId('tree.root.close').click()
+  await confirmButton(page).click()
+  await expect(roots).toHaveCount(1)
+
+  await page.getByTestId('toolbar.collection').click()
+  const recentGroup = page.locator('.n-dropdown-option-body--group').filter({ hasText: t('toolbar.recentDirs') })
+  await expect(recentGroup).toBeVisible()
+  const clear = page.locator('.n-dropdown-option-body__label').filter({ hasText: t('toolbar.clearRecent') })
+  await expect(clear).toBeVisible()
+  await clear.click()
+
+  // 只清历史，不影响当前打开的根
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('client.recentDirs'))).toBeNull()
+  await expect(treeRow(page, 'ping')).toBeVisible()
+  await page.getByTestId('toolbar.collection').click()
+  await expect(page.locator('.n-dropdown-option-body--group').filter({ hasText: t('toolbar.recentDirs') })).toHaveCount(0)
+  await expect(page.locator('.n-dropdown-option-body__label').filter({ hasText: t('toolbar.clearRecent') })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+})
+
 test('[M1] 点集合名折叠/展开当前根：切别的根只展开不误折，右侧「···」菜单不受影响', async ({ page, app }) => {
   await app.newCollection('basic')
   await app.addCollection('bruno-sample')

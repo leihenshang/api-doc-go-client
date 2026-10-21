@@ -30,7 +30,7 @@ import { buildThemeOverrides } from '@/lib/naiveTheme'
 import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
-import { savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
+import { clearRecentDirs as clearStoredRecentDirs, savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
@@ -139,6 +139,9 @@ function dirName(dir: string): string {
   return parts[parts.length - 1] ?? dir
 }
 
+/** 「最近打开」清理后手动触发重算：localStorage 本身不是响应式的。 */
+const recentRev = ref(0)
+
 /**
  * 最近打开过、当前没打开的目录：启动恢复有数量上限（设置里的「启动恢复目录数」），
  * 超出的不静默丢 —— 它们出现在工具条「最近打开」里，一点就开。
@@ -147,11 +150,26 @@ function dirName(dir: string): string {
  * 只含恢复成功的那几个，用它就等于把没恢复的目录忘了；关掉某个根时也一样。
  */
 const recentDirs = computed(() => {
+  void recentRev.value
   const open = new Set(coll.roots.map((r) => r.info.dir.trim().toLowerCase()))
   return savedRecentDirs()
     .filter((d) => !open.has(d.trim().toLowerCase()))
     .map((d) => ({ dir: d, name: dirName(d) }))
 })
+/** 历史里可能只剩当前已打开的根（recentDirs 会过滤掉），仍应允许清理。 */
+const hasRecentHistory = computed(() => {
+  void recentRev.value
+  // roots 也要作为依赖：打开集合会 pushRecentDir，但 localStorage 不是响应式的
+  void coll.roots.length
+  return savedRecentDirs().length > 0
+})
+
+/** 清理最近打开记录；当前打开的根不受影响，仍由 client.dirs 恢复。 */
+function clearRecentHistory(): void {
+  clearStoredRecentDirs()
+  recentRev.value++
+  message.success(t('toolbar.recentCleared'))
+}
 
 /** 按目录找已打开的根（Windows 上目录大小写不敏感）。 */
 function rootOfDir(dir: string): string {
@@ -1006,8 +1024,9 @@ watch(
         <!-- 集合 / 环境 / 本地搜索并入标题栏（原先独占一行的工具栏） -->
         <toolbar v-if="coll.ready && coll.info" :name="coll.name" :dir="coll.dir" :envs="coll.info.envs"
           :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
-          @activate="activateRoot" @open-dir="openCollection" @open-other="openCollection('')"
-          @palette="showPalette = true" @manage-env="showEnvManager = true" @update:currentEnv="pickEnv" />
+          :has-recent="hasRecentHistory" @clear-recent="clearRecentHistory" @activate="activateRoot"
+          @open-dir="openCollection" @open-other="openCollection('')" @palette="showPalette = true"
+          @manage-env="showEnvManager = true" @update:currentEnv="pickEnv" />
       </title-bar>
 
       <n-spin :show="coll.loading">
@@ -1119,7 +1138,7 @@ watch(
         <template #footer>
           <div class="modal-ft">
             <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
-              }}</n-button>
+            }}</n-button>
             <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{
               t('prompt.discard') }}</n-button>
             <n-button size="small" type="primary" :disabled="!draftForm.name.trim()" :loading="savingDraft"
