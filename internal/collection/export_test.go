@@ -225,6 +225,21 @@ func TestExportHTMLTOCToggleSearch(t *testing.T) {
 			t.Fatalf("HTML 缺少目录搜索框 %q:\n%s", want, htmlOut)
 		}
 	}
+	// 1b) 搜索框固定在树上方：滚动从 nav 下沉到 .toc-list（nav 自身 overflow hidden）
+	for _, want := range []string{
+		`.toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: hidden;`,
+		`.toc-list { flex: 1 1 auto; min-height: 0; overflow: auto; }`,
+	} {
+		if !strings.Contains(htmlOut, want) {
+			t.Fatalf("HTML 缺少搜索框固定/树内滚布局 %q:\n%s", want, htmlOut)
+		}
+	}
+	// 1c) 树节点带 title：名称被 ellipsis 截断时悬停可看全名
+	for _, want := range []string{`title="A 请求"`, `title="B 请求"`, `title="A"`} {
+		if !strings.Contains(htmlOut, want) {
+			t.Fatalf("HTML 树节点缺少完整名称 title %q", want)
+		}
+	}
 	// 2) 折叠开关（每个 folder 一个）与折叠 CSS 规则
 	if !strings.Contains(htmlOut, `.toc-folder[aria-expanded="false"] > ul`) {
 		t.Fatalf("HTML 缺少折叠 CSS 规则:\n%s", htmlOut)
