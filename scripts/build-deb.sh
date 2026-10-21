@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # A13 · deb 打包脚本（流程来源：build/linux/{x86,arm}/deepin25/README.md）
 #
-# 一条命令完成：wails 构建（prod + dev 两个二进制）→ deb 目录树 → 图标多尺寸 → dpkg-deb 打包。
-# 必须在 Linux 构建机执行（依赖 wails / node / dpkg-deb / ImageMagick）。
+# 一条命令完成：wails 构建（prod + dev 两个二进制）→ 依赖探测 → deb 目录树 → 图标多尺寸 → dpkg-deb 打包。
+# 必须在 Linux 构建机执行（依赖 wails / node / dpkg-deb / ImageMagick / binutils（readelf））。
 #
 # 用法：
 #   scripts/build-deb.sh                 # 默认 amd64，正式 + dev 各出一包
@@ -89,7 +89,35 @@ fi
   exit 1
 }
 
-# ---- 2) 图标缩放（源 1024见 README §5；dev 图标缺失时回落正式图标，不阻塞）----
+# ---- 2) 依赖探测：Depends 必须与二进制实际链接的 WebKit soname 一致 ----
+# apt 对 "A | B" 只会装其中一个；若装的是另一种 soname，包能装上但程序启动失败。
+# 用 readelf 读 DT_NEEDED（对交叉编译的 arm64 ELF 同样有效），写精确依赖。
+need_webkit() {
+  local bin="$1" soname
+  command -v readelf >/dev/null || {
+    echo "缺少 readelf（binutils），无法探测 WebKit 依赖" >&2
+    return 1
+  }
+  soname="$(readelf -d "$bin" 2>/dev/null | grep -oE 'libwebkit2gtk-4\.[01]\.so\.[0-9]+' | head -n1 || true)"
+  case "$soname" in
+  libwebkit2gtk-4.1.so.0) echo 'libwebkit2gtk-4.1-0' ;;
+  libwebkit2gtk-4.0.so.37) echo 'libwebkit2gtk-4.0-37' ;;
+  *)
+    echo "无法从 $bin 探测 WebKit soname（readelf 未命中 4.0/4.1）" >&2
+    return 1
+    ;;
+  esac
+}
+
+WEBKIT_DEP="$(need_webkit "$BIN/api-doc-client")" || exit 1
+DEV_WEBKIT_DEP="$(need_webkit "$BIN/api-doc-client-dev")" || exit 1
+if [ "$WEBKIT_DEP" != "$DEV_WEBKIT_DEP" ]; then
+  echo "prod/dev 的 WebKit 依赖不一致：$WEBKIT_DEP vs $DEV_WEBKIT_DEP（请用相同 tags 构建）" >&2
+  exit 1
+fi
+echo "WebKit 依赖：$WEBKIT_DEP（按二进制实际 soname 生成）"
+
+# ---- 3) 图标缩放（源 1024见 README §5；dev 图标缺失时回落正式图标，不阻塞）----
 SCALE=""
 for cand in magick convert; do
   if command -v "$cand" >/dev/null; then
@@ -136,8 +164,8 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     echo "Maintainer: api-doc-go"
     echo "Section: utils"
     echo "Priority: optional"
-    # 交替依赖：新发行版（Ubuntu 24.04 / Debian 12+）webkit 已更名 4.1-0，保留 4.0-37 兜底老系统（L-2）
-    echo "Depends: libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37"
+    # Depends 由上面的 readelf 探测结果生成：必须与二进制实际链接的 soname 一致（L-2）
+    echo "Depends: libgtk-3-0, $WEBKIT_DEP"
     # Installed-Size 单位 KiB，控制卸载后空间估算（L-5）；此刻二进制与图标已就位
     echo "Installed-Size: $(du -sk "$pkg" 2>/dev/null | cut -f1)"
     echo "Description: AI-native, local-first API client"
@@ -169,7 +197,7 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
   chmod 755 "$pkg/DEBIAN/postinst" "$pkg/DEBIAN/postrm"
 }
 
-# ---- 3) 组树并打包（prod 与 dev 独立包名，可共存安装）----
+# ---- 4) 组树并打包（prod 与 dev 独立包名，可共存安装）----
 deb_prod="$BIN/api-doc-client_${VERSION}_${DPKG_ARCH}.deb"
 deb_dev="$BIN/api-doc-client-dev_${VERSION}_${DPKG_ARCH}.deb"
 

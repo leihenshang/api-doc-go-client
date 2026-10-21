@@ -19,7 +19,8 @@
 | 二进制安装名 | `/usr/bin/api-doc-client` | 同左（`WM_CLASS` 约定不变） |
 
 `.desktop`、`StartupWMClass`、图标、依赖库名等与 x86 完全相同（脚本按 `StartupWMClass=$base` 生成，
-`Depends` 为 `libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37` 交替依赖）。
+`Depends` 由脚本用 `readelf` 按二进制实际 soname 自动生成：`libgtk-3-0` + `libwebkit2gtk-4.1-0` 或
+`libwebkit2gtk-4.0-37`，prod/dev 一致校验；详见 x86 文档 §3 步骤 3）。
 
 ## 2. 构建机要求（重要）
 
@@ -34,6 +35,8 @@ aarch64 的 GTK/WebKit 头文件与 sysroot，实践中代价很高。推荐三�
 
 > WM_CLASS 采用「固定二进制名」方案（与上游 §4 方式 1 一致），
 > 不依赖 `gdk_set_program_class` cgo 垫片，两种架构行为一致，无额外成本。
+>
+> 脚本用 `readelf` 探测 WebKit 依赖，构建机需有 binutils（gcc 工具链通常已带）。
 
 ## 3. 待实施清单
 
