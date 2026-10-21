@@ -3,9 +3,10 @@
 import { expect, test } from '../helpers/app'
 import { hoverAndClick } from '../helpers/dom'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, send, treeRow } from '../helpers/ui'
+import { openCollection, openRequest, send, treeRow, treeRowByUid } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
+const API_UID = '22222222-2222-4222-8222-222222222222'
 
 async function sendUrl(page: import('@playwright/test').Page, app: import('../helpers/app').AppFixture, url: string) {
     const { patchRequest } = await import('../helpers/api')
@@ -82,5 +83,34 @@ test.describe('回收站与历史详情', () => {
         await expect(detail).toContainText('probe') // 请求参数
         await expect(detail).toContainText('hl') // 参数值
         await expect(detail).toContainText('Content-Type') // 响应头快照
+    })
+
+    test('[T3] 非空分组：勾选删除所有子项 → 整棵进回收站 → 预览并恢复', async ({ page, app }) => {
+        await app.newCollection('basic')
+        await openCollection(page, app)
+
+        await hoverAndClick(treeRowByUid(page, API_UID), 'tree.row.delete')
+        const dlg = page.locator('.n-dialog:visible')
+        const del = dlg.getByRole('button', { name: t('common.delete') })
+        await expect(page.getByTestId('tree.deleteChildren')).toBeVisible()
+        await expect(del).toBeDisabled()
+        await page.getByTestId('tree.deleteChildren').click()
+        await expect(del).toBeEnabled()
+        await del.click()
+        await expect(treeRow(page, 'api')).toHaveCount(0)
+
+        // 回收站里是按 folder 展示的整棵目录，可预览文件清单并恢复到原位
+        await page.getByTestId('statusbar.trash').click()
+        await expect(page.locator('.n-modal').filter({ hasText: t('trash.title') })).toBeVisible()
+        const row = page.getByTestId('trash.row').first()
+        await expect(row).toContainText(t('trash.kindFolder'))
+        await row.getByTestId('trash.preview').click()
+        await expect(page.getByTestId('trash.previewBody').first()).toContainText('ping.yml')
+        await row.getByTestId('trash.restore').click()
+        await page.locator('.n-dropdown-option').filter({ hasText: t('trash.targetOriginal') }).click()
+        await expect(page.getByTestId('trash.row')).toHaveCount(0)
+        await expect(treeRow(page, 'api')).toBeVisible()
+        await expect(treeRow(page, 'ping')).toBeVisible()
+        await page.keyboard.press('Escape')
     })
 })

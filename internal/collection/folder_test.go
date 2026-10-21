@@ -147,6 +147,60 @@ func TestDeleteFolderRefusesNonEmpty(t *testing.T) {
 	}
 }
 
+func TestDeleteFolderTreeToTrashAndRestore(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "api"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	if err := c.CreateFolder("api", "sub"); err != nil {
+		t.Fatalf("建子分组: %v", err)
+	}
+	if _, err := c.CreateRequest("api", "ping", "GET"); err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	uid, _ := c.folderUID("api")
+
+	// 非空分组走 DeleteFolder 仍拒绝；递归删除整棵进 .trash
+	if err := c.DeleteFolder(uid); err == nil {
+		t.Fatalf("DeleteFolder 对非空分组应拒绝")
+	}
+	if err := c.DeleteFolderTree(uid); err != nil {
+		t.Fatalf("DeleteFolderTree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "api")); !os.IsNotExist(err) {
+		t.Fatalf("非空分组应被整棵移走")
+	}
+
+	// 回收站按 folder 条目展示，并可整棵恢复（含子分组与请求）
+	list, err := c.ListTrash()
+	if err != nil {
+		t.Fatalf("ListTrash: %v", err)
+	}
+	var hit *TrashEntry
+	for i := range list {
+		if list[i].Kind == "folder" && list[i].Origin == "api" {
+			hit = &list[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatalf("回收站应有 folder 条目，实际: %+v", list)
+	}
+	rel, err := c.RestoreTrash(hit.File, "")
+	if err != nil {
+		t.Fatalf("RestoreTrash: %v", err)
+	}
+	if rel != "api" {
+		t.Fatalf("恢复路径不符: %q", rel)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "api", "sub", "folder.yml")); err != nil {
+		t.Fatalf("子分组未恢复: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "api", "ping.yml")); err != nil {
+		t.Fatalf("请求未恢复: %v", err)
+	}
+}
+
 func TestRenameRequestKeepsPathAndUnknownFields(t *testing.T) {
 	c := newTestCollection(t)
 	r, err := c.CreateRequest("", "旧名", "GET")

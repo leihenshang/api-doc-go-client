@@ -377,6 +377,7 @@ export default {
     delDoc: '删除文档',
     docCrossRoot: '文档暂不支持跨工作目录移动',
     confirmDelFolder: '确认删除分组「{name}」？',
+    deleteChildrenConfirm: '确认删除所有子项？危险：该分组下还有 {n} 个子项（请求 / 子分组 / 文档），删除后可在回收站恢复。',
     confirmDelRequest: '确认删除请求「{name}」？删除后可在 .trash 找回。',
     confirmDelDoc: '确认删除文档「{name}」？删除后可在 .trash 找回。',
     externalChange: '检测到外部改动：{n} 个页签有未保存编辑，已保留编辑未覆盖；可手动 ⟳ 重载',
