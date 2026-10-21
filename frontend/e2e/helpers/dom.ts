@@ -19,6 +19,7 @@ export async function hoverAndClick(row: Locator, testId: string, timeout = 15_0
     if (await menu.count()) {
       await menu.click({ timeout: 1_500 })
     }
-    await row.page().getByTestId(testId).first().click({ timeout: 1_500 })
+    // 只点当前可见的菜单项：旧下拉常留在 DOM 里，全局 first() 可能点到已隐藏的旧项
+    await row.page().locator(`[data-testid="${testId}"]:visible`).first().click({ timeout: 1_500 })
   }).toPass({ timeout })
 }
