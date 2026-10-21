@@ -7,8 +7,15 @@ import { resetSettings } from './settings'
 /**
  * 打开应用并进入集合。
  * 首次访问是欢迎页（点「打开集合目录…」）；浏览器里已存过 client.lastDir 时会自动打开，故两种都兼容。
+ *
+ * 默认会点击所有根行展开树（既有用例都默认要看到请求行）；验证「默认收起」的用例传
+ * `{ expandRoots: false }`。生产行为每次启动/重开全部收起，不记忆展开状态。
  */
-export async function openCollection(page: Page, app: AppFixture): Promise<void> {
+export async function openCollection(
+  page: Page,
+  app: AppFixture,
+  opts: { expandRoots?: boolean } = {},
+): Promise<void> {
   await resetSettings(app) // 先复位设置再加载页面，保证用例从默认状态开始
   // 清掉「上次打开的工作目录」再进页面：应用启动会按它恢复多根，而 e2e 只想要
   // newCollection 打开的那一个（同一 worker 的 localStorage 会跨用例残留）。
@@ -19,14 +26,30 @@ export async function openCollection(page: Page, app: AppFixture): Promise<void>
     localStorage.removeItem('client.recentDirs') // 「最近打开」也要清：否则跨用例串味
   })
   await page.goto(app.url)
-  await reopenApp(page)
+  await reopenApp(page, opts)
 }
 
-/** 刷新/重进应用后回到工作台（自动打开过就不再点欢迎页按钮） */
-export async function reopenApp(page: Page): Promise<void> {
+/** 展开所有根行（按 data-expanded 判断，已展开的不重复点击）。 */
+export async function expandAllRoots(page: Page): Promise<void> {
+  const roots = page.getByTestId('tree.root')
+  await expect(roots.first()).toBeVisible()
+  const n = await roots.count()
+  for (let i = 0; i < n; i++) {
+    const root = roots.nth(i)
+    if ((await root.getAttribute('data-expanded')) === 'true') continue
+    await root.getByTestId('tree.root.caret').click()
+  }
+}
+
+/** 刷新/重进应用后回到工作台（自动打开过就不再点欢迎页按钮）；默认展开所有根以兼容既有用例。 */
+export async function reopenApp(
+  page: Page,
+  opts: { expandRoots?: boolean } = {},
+): Promise<void> {
   const welcome = page.getByRole('button', { name: t('welcome.open') })
   if (await welcome.isVisible().catch(() => false)) await welcome.click()
   await expect(page.getByTestId('toolbar.collection')).toBeVisible()
+  if (opts.expandRoots !== false) await expandAllRoots(page)
 }
 
 /** 侧栏：按显示名取分组行 / 请求行 */

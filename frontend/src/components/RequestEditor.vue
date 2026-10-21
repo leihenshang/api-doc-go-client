@@ -21,6 +21,7 @@ import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { message } from '@/lib/notice'
 import { loadFields, rowsFromDoc } from '@/lib/responseFields'
+import { detectTextKind, prettyText } from '@/lib/textFormat'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
@@ -312,14 +313,14 @@ function touch(): void {
   tabs.touch(props.tab.key)
 }
 
-// 一键美化请求体 JSON；非法 JSON 原样保留，交给用户自查
-function formatJson(): void {
-  try {
-    props.tab.request.body.raw = JSON.stringify(JSON.parse(props.tab.request.body.raw), null, 2)
-    touch()
-  } catch {
-    return
-  }
+// 一键格式化请求体：JSON 缩进 / XML 标签缩进；非 JSON/XML 或解析失败时保持原文
+/** 文本体里是否可能是 JSON/XML（只看前缀，用于按钮显隐；真正格式化时再解析）。 */
+const bodyFormatKind = computed(() => detectTextKind(props.tab.request.body.raw))
+function formatBody(): void {
+  const out = prettyText(props.tab.request.body.raw)
+  if (!out) return
+  props.tab.request.body.raw = out.text
+  touch()
 }
 
 /** JSON 模式下语法有误（只在内容非空、且不含 {{变量}} 时判断）。 */
@@ -384,6 +385,15 @@ const { fields, sample, hasResp, initFields, onSampleInput, setMeaning } = useRe
   isGrpc: () => isGrpcReq.value,
   onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
 })
+
+/** 响应数据里是否可能是 JSON/XML（只看前缀，用于按钮显隐）。 */
+const respDataKind = computed(() => detectTextKind(sample.value))
+/** 一键格式化响应数据：写回 sample（合法 JSON/XML 才生效），字段表格随之重算。 */
+function formatRespData(): void {
+  const out = prettyText(sample.value)
+  if (!out) return
+  onSampleInput(out.text)
+}
 
 // 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
 
@@ -518,7 +528,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               { label: t('editor.bodyForm'), value: 'form' },
               { label: t('editor.bodyMultipart'), value: 'multipart' },
             ]" size="small" class="btype" data-testid="body.type" @update:value="bodyType = $event" />
-            <button v-if="bodyType === 'json'" class="fmt" type="button" @click="formatJson">
+            <button v-if="bodyType === 'json' || (bodyType === 'text' && bodyFormatKind)" class="fmt" type="button"
+              data-testid="body.format" @click="formatBody">
               {{ t('editor.formatJson') }}
             </button>
             <span v-if="bodyType === 'json' && jsonBroken" class="fmtbad" data-testid="body.jsonBroken">
@@ -534,7 +545,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
                 data-view="table" @click="bodyView = 'table'">
                 {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length
-                }}</span>
+                  }}</span>
               </button>
             </div>
             <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />
@@ -618,7 +629,13 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
         </div>
         <!-- 响应数据：可编辑；合法 JSON 时自动生成「字段表格」（非法/空则不覆盖既有表） -->
         <div v-else-if="respView === 'body'" class="resp-data">
-          <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
+          <div class="resp-data-hd">
+            <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
+            <button v-if="respDataKind" class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
+              @click="formatRespData">
+              {{ t('editor.formatJson') }}
+            </button>
+          </div>
           <n-input :value="sample" type="textarea" :rows="16" class="mono resp-data-ta" data-testid="resp.dataInput"
             :disabled="readonly" :placeholder="t('editor.respDataPh')" @update:value="onSampleInput" />
         </div>
@@ -842,6 +859,21 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   margin: 0;
   font-size: 11.5px;
   color: var(--app-muted);
+}
+
+.resp-data-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resp-data-hd .resp-data-hint {
+  flex: 1 1 auto;
+}
+
+.fmt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .resp-data-ta :deep(textarea) {

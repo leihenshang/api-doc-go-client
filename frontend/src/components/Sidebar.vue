@@ -11,29 +11,29 @@ import { useCollectionStore } from '@/stores/collection'
 import { useTabsStore } from '@/stores/tabs'
 import type { CollectionSummary, TreeNode } from '@/types'
 import {
-    AddOutline,
-    ArrowDownOutline,
-    ArrowUpOutline,
-    CheckmarkOutline,
-    ChevronDownOutline,
-    ChevronForwardOutline,
-    CloseOutline,
-    ContractOutline,
-    CreateOutline,
-    DocumentTextOutline,
-    EllipsisHorizontalOutline,
-    ExpandOutline,
-    FolderOpenOutline,
-    GitNetworkOutline,
-    OpenOutline,
-    RefreshOutline,
-    SearchOutline,
-    Star,
-    StarOutline,
-    SwapVerticalOutline,
-    SyncOutline,
-    TerminalOutline,
-    TrashOutline
+  AddOutline,
+  ArrowDownOutline,
+  ArrowUpOutline,
+  CheckmarkOutline,
+  ChevronDownOutline,
+  ChevronForwardOutline,
+  CloseOutline,
+  ContractOutline,
+  CreateOutline,
+  DocumentTextOutline,
+  EllipsisHorizontalOutline,
+  ExpandOutline,
+  FolderOpenOutline,
+  GitNetworkOutline,
+  OpenOutline,
+  RefreshOutline,
+  SearchOutline,
+  Star,
+  StarOutline,
+  SwapVerticalOutline,
+  SyncOutline,
+  TerminalOutline,
+  TrashOutline
 } from '@vicons/ionicons5'
 import type { DropdownOption, InputInst } from 'naive-ui'
 import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
@@ -82,8 +82,13 @@ const tabs = useTabsStore()
 const keyword = ref('')
 /** 分组折叠态（键 = 根 + 路径，见 folderKey） */
 const collapsed = ref(new Set<string>())
-/** 工作目录折叠态（每个根行上的箭头） */
-const collapsedRoots = ref(new Set<string>())
+/**
+ * 工作目录展开态（仅本次会话，不落盘）。
+ * 初值恒为空 => 首次打开 / 进程重启 / 页面 reload 后所有根默认收起。
+ * 注意：最小化、关闭到托盘只是隐藏窗口（WindowHide/Show），Sidebar 不卸载，
+ * 因此展开态会原样保留；只有组件重建才回到全部收起。避免记忆展开集合带来的复杂性。
+ */
+const expandedRoots = ref<Set<string>>(new Set())
 const treeEl = ref<HTMLElement | null>(null)
 const editing = ref<{ root: string; uid: string; value: string } | null>(null)
 const adding = ref<{ root: string; parent: string } | null>(null)
@@ -137,6 +142,7 @@ function rootMenuFor(root: string): DropdownOption[] {
     { key: 'folder', label: t('tree.newFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }), testid: 'tree.root.newFolder' },
     { key: 'req', label: t('tree.newRequest'), icon: () => h(NIcon, { component: AddOutline }), testid: 'tree.root.newRequest' },
     { key: 'grpc', label: t('grpc.newRequest'), icon: () => h(NIcon, { component: GitNetworkOutline }), testid: 'tree.root.newGrpc' },
+    { key: 'doc', label: t('tree.newDoc'), icon: () => h(NIcon, { component: DocumentTextOutline }), testid: 'tree.row.newDoc' },
     { key: 'curl', label: t('curl.title'), icon: () => h(NIcon, { component: TerminalOutline }), testid: 'tree.root.importCurl' },
     { key: 'sync', label: t('sync.settings'), icon: () => h(NIcon, { component: SyncOutline }), testid: 'tree.root.sync' },
     { type: 'divider', key: 'd1' },
@@ -162,6 +168,7 @@ async function onRootMenu(root: string, key: string | number): Promise<void> {
   if (key === 'folder') void startAdd(root, '')
   else if (key === 'req') emit('new-request', '')
   else if (key === 'grpc') emit('new-grpc-request', '')
+  else if (key === 'doc') emit('new-doc', '')
   else if (key === 'curl') emit('import-curl', '')
   else if (key === 'sync') emit('sync')
   else if (key === 'reload') emit('reload-root', root)
@@ -178,7 +185,11 @@ const closeShow = ref(false)
 const closeTarget = ref('')
 
 function confirmCloseRoot(): void {
-  if (closeTarget.value) emit('close-root', closeTarget.value)
+  if (closeTarget.value) {
+    // 关闭集合即忘掉本次会话的展开态：重新打开时根行回到默认收起
+    setRootExpanded(closeTarget.value, false)
+    emit('close-root', closeTarget.value)
+  }
   closeShow.value = false
   closeTarget.value = ''
 }
@@ -304,13 +315,34 @@ function folderKey(root: string, path: string): string {
   return `${root}\n${path}`
 }
 
+/** 根的真实折叠态（搜索时不改变持久化状态）。 */
+function isRootFolded(root: string): boolean {
+  return !expandedRoots.value.has(root)
+}
+
+/** 视觉折叠态：搜索时强制展开，让命中结果可见；清空搜索后恢复原状态。 */
+function isRootCollapsed(root: string): boolean {
+  return !searching.value && isRootFolded(root)
+}
+
+function setRootExpanded(root: string, open: boolean): void {
+  const next = new Set(expandedRoots.value)
+  if (open) next.add(root)
+  else next.delete(root)
+  expandedRoots.value = next
+}
+
+function expandRoot(root: string): void {
+  if (isRootFolded(root)) setRootExpanded(root, true)
+}
+
 /**
  * 根行下方有没有可见内容（子行，或正在输入的「新建分组」行）。
  * 决定根行要不要从展开图标向下接一条连接线：收起 / 空集合时不画，
  * 否则会留下一截悬空的竖线。
  */
 function rootHasVisibleKids(root: string): boolean {
-  if (collapsedRoots.value.has(root)) return false
+  if (isRootCollapsed(root)) return false
   if (adding.value?.root === root && adding.value.parent === '') return true
   const item = props.roots.find((r) => r.root === root)
   return !!item && treeOf(item).length > 0
@@ -338,7 +370,7 @@ const rows = computed<Row[]>(() => {
     // 搜索时该根没有命中：整根隐藏（否则多根平铺会被一堆空根行淹没）
     if (searching.value && tree.length === 0) continue
     out.push({ root: r.root, isRoot: true, node: null, depth: -1, last: true, lines: [] })
-    if (collapsedRoots.value.has(r.root)) continue
+    if (isRootCollapsed(r.root)) continue
     walk(r.root, tree, 0, [])
   }
   if (!searching.value && favUids.size) {
@@ -415,10 +447,9 @@ function folderKeysOf(root: string): string[] {
   return out
 }
 
-/** 该根是否已「全部收起」：根行收起，且根下每个分组都收起。 */
+/** 该根是否已「全部收起」：根行收起时子项均不可见，即视为全部收起（分组态留待展开时恢复）。 */
 function rootAllCollapsed(root: string): boolean {
-  if (!collapsedRoots.value.has(root)) return false
-  return folderKeysOf(root).every((k) => collapsed.value.has(k))
+  return isRootFolded(root)
 }
 
 function isCollapsed(root: string, path: string): boolean {
@@ -435,16 +466,13 @@ function toggle(root: string, path: string): void {
 
 /** 折叠/展开单个工作目录（根行上的箭头）。 */
 function toggleRoot(root: string): void {
-  const next = new Set(collapsedRoots.value)
-  if (next.has(root)) next.delete(root)
-  else next.add(root)
-  collapsedRoots.value = next
+  setRootExpanded(root, isRootFolded(root))
 }
 
 /**
  * 收起 / 展开**某一个根**下的全部（根行「···」→「全部收起 / 全部展开」）。
  *
- * 只碰这个根的键：`collapsed` 的键是「根 + 路径」，`collapsedRoots` 的键是根本身，
+ * 只碰这个根的键：`collapsed` 的键是「根 + 路径」，`expandedRoots` 的键是根本身，
  * 因此对 A 根全量折叠不会影响 B 根（早先误用了"遍历 props.roots 全收"的实现，
  * 表现为点一个集合的「全部收起」所有集合一起收）。
  */
@@ -455,11 +483,11 @@ function toggleRootAll(root: string): void {
     if (fold) keys.add(k)
     else keys.delete(k)
   }
-  const roots = new Set(collapsedRoots.value)
-  if (fold) roots.add(root)
-  else roots.delete(root)
+  const roots = new Set(expandedRoots.value)
+  if (fold) roots.delete(root)
+  else roots.add(root)
   collapsed.value = keys
-  collapsedRoots.value = roots
+  expandedRoots.value = roots
 }
 
 /**
@@ -477,11 +505,7 @@ function onRootRowClick(root: string, ev: MouseEvent): void {
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
   if (root !== props.activeRoot) {
     // 切到别的根：只保证展开 + 激活，绝不折叠（折叠当前根留给再点一次它的名字）
-    if (collapsedRoots.value.has(root)) {
-      const next = new Set(collapsedRoots.value)
-      next.delete(root)
-      collapsedRoots.value = next
-    }
+    expandRoot(root)
     emit('activate', root)
     return
   }
@@ -537,6 +561,7 @@ async function startAdd(root: string, parent: string): Promise<void> {
   editing.value = null
   addValue.value = ''
   await ensureActive(root)
+  expandRoot(root)
   adding.value = { root, parent }
   if (parent) {
     const key = folderKey(root, parent)
@@ -816,22 +841,25 @@ function scrollToRow(root: string, uid: string): void {
 
 // 点页签（或切换页签）→ 集合树同步选中：展开（该根 / 祖先分组）并滚动到可见位置。
 // 同时监听 revealTick：重复点当前页签时 activeUid 不变，没有它就不会触发。
+// 首次挂载 / 启动恢复会话时不自动展开根：默认保持收起，是否展开由上次记忆决定；
+// 只有用户后续切页签才自动展开。
+let firstReveal = true
 watch(
   [() => props.activeUid, () => props.revealTick],
   async ([uid]) => {
+    const initial = firstReveal
+    firstReveal = false
     if (!uid) return
     const root = coll.activeRoot
     const item = props.roots.find((r) => r.root === root)
     if (!item) return
     const trail = ancestorPaths(item.info.tree, uid)
-    const unfoldRoot = collapsedRoots.value.has(root)
+    const unfoldRoot = isRootFolded(root)
     const folded = (trail ?? []).filter((p) => collapsed.value.has(folderKey(root, p)))
-    if (unfoldRoot || folded.length) {
-      const roots = new Set(collapsedRoots.value)
-      roots.delete(root)
+    if (!initial && !coll.restoring && (unfoldRoot || folded.length)) {
+      expandRoot(root)
       const next = new Set(collapsed.value)
       for (const p of folded) next.delete(folderKey(root, p))
-      collapsedRoots.value = roots
       collapsed.value = next
       await nextTick()
     }
@@ -880,7 +908,8 @@ watch(
             'root-active': row.root === props.activeRoot,
             'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.ok,
             'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && !dropHint.ok,
-          }" :style="{ paddingLeft: '8px' }" :data-root="row.root" :data-path="''" data-testid="tree.root"
+          }" :style="{ paddingLeft: '8px' }" :data-root="row.root" :data-path="''"
+            :data-expanded="isRootCollapsed(row.root) ? 'false' : 'true'" data-testid="tree.root"
             @click="onRootRowClick(row.root, $event)">
             <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
             <span v-if="rootHasVisibleKids(row.root)" class="guides" aria-hidden="true" data-testid="tree.root.guides">
@@ -888,14 +917,13 @@ watch(
             </span>
             <button class="caret" data-testid="tree.root.caret" :title="t('tree.expandAll')"
               @click.stop="toggleRoot(row.root)">
-              <n-icon :component="collapsedRoots.has(row.root) ? ChevronForwardOutline : ChevronDownOutline"
-                :size="13" />
+              <n-icon :component="isRootCollapsed(row.root) ? ChevronForwardOutline : ChevronDownOutline" :size="13" />
             </button>
             <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-            }}</span>
+              }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -903,8 +931,8 @@ watch(
                 @click.stop="onSyncRoot(row.root)">
                 <n-icon :component="SyncOutline" :size="13" :class="{ spin: rootSyncing(row.root) }" />
               </button>
-              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenuFor(row.root)" :render-label="renderMenuLabel"
-                @select="onRootMenu(row.root, $event)">
+              <n-dropdown trigger="click" placement="bottom-start" :options="rootMenuFor(row.root)"
+                :render-label="renderMenuLabel" @select="onRootMenu(row.root, $event)">
                 <!-- 不能加 @click.stop：会拦在 NDropdown 的包装层之前，导致下拉打不开（同分组行「＋」） -->
                 <button class="act" type="button" data-testid="tree.root.menu" :title="t('tree.more')"
                   :aria-label="t('tree.more')">
@@ -1270,8 +1298,14 @@ watch(
    方法徽标默认 10px（给页签 / 请求栏那种紧凑场景），树上比 12.5px 的请求名小一截；
    字号不同时，相同 line-height 下两者的基线会差出 1px 以上，看着就是两个字错位。
    这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。 */
+.row>.mt {
+  font-size: 12.5px;
+}
+
 .row>.mt,
-.row>/* B19：文档行图标（与 method-tag 同列对齐） */
+.row>
+
+/* B19：文档行图标（与 method-tag 同列对齐） */
 .dicon {
   flex: 0 0 auto;
   color: var(--app-muted);

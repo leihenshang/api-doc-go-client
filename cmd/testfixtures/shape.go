@@ -20,8 +20,14 @@ func binaryBytes(size int) []byte {
 // 按 UTF-8 合法性判断二进制」这条分支（声明 text/* 则信任声明、不判二进制）。
 var latin1Bytes = []byte{0xff, 0xfe, 0x41, 0xc3, 0x28, 0x42, 0x80}
 
-// registerShapeRoutes 注册「响应形态」端点：二进制 / gzip / 非 UTF-8。
+// registerShapeRoutes 注册「响应形态」端点：二进制 / gzip / 非 UTF-8 / XML。
 func registerShapeRoutes(mux *http.ServeMux) {
+	// 单行 XML：客户端「美化」应缩进为多行；「原始」保持一行。
+	mux.HandleFunc("/xml/flat", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<root><item id="1">a</item><item id="2">b</item></root>`))
+	})
 	mux.HandleFunc("/binary", func(w http.ResponseWriter, r *http.Request) {
 		kb := queryInt(r, "kb", 1)
 		w.Header().Set("Content-Type", "application/octet-stream")

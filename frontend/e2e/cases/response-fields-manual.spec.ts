@@ -81,4 +81,20 @@ test.describe('响应字段：响应数据可编辑、自动生成表格', () =>
         await expect.poll(file, { timeout: 5000 }).not.toContain('keep')
         await expect.poll(file, { timeout: 5000 }).not.toContain('respdoc')
     })
+
+    test('响应数据支持 JSON / XML 一键格式化', async ({ page, app }) => {
+        await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+        await tab(page, 'body').click()
+
+        await dataInput(page).fill('{"a":1,"b":[2]}')
+        await page.getByTestId('resp.formatData').click()
+        await expect(dataInput(page)).toHaveValue('{\n  "a": 1,\n  "b": [\n    2\n  ]\n}')
+
+        await dataInput(page).fill('<root><a>1</a></root>')
+        await page.getByTestId('resp.formatData').click()
+        await expect(dataInput(page)).toHaveValue('<root>\n  <a>1</a>\n</root>')
+    })
 })

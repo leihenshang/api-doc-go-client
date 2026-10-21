@@ -5,8 +5,8 @@ import CodeGenDialog from '@/components/CodeGenDialog.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
 import CurlImportDialog from '@/components/CurlImportDialog.vue'
-import EnvManager from '@/components/EnvManager.vue'
 import DocEditor from '@/components/DocEditor.vue'
+import EnvManager from '@/components/EnvManager.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
 import McpConsentDialog from '@/components/McpConsentDialog.vue'
@@ -25,7 +25,7 @@ import Toolbar from '@/components/Toolbar.vue'
 import TrashDialog from '@/components/TrashDialog.vue'
 import Welcome from '@/components/Welcome.vue'
 import { useSplitLayout } from '@/composables/useSplitLayout'
-import { api, onAppEvent } from '@/lib/ipc'
+import { api, hasWailsRuntime, onAppEvent, runtimePlatform } from '@/lib/ipc'
 import { buildThemeOverrides } from '@/lib/naiveTheme'
 import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
@@ -37,23 +37,22 @@ import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
 import type { AuthzRequest, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import {
-    NButton,
-    NConfigProvider,
-    NForm,
-    NFormItem,
-    NIcon,
-    NInput,
-    NModal,
-    NSpin,
-    NTreeSelect,
-    darkTheme,
-    dateEnUS,
-    dateZhCN,
-    enUS,
-    zhCN
+  NButton,
+  NConfigProvider,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NModal,
+  NSpin,
+  NTreeSelect,
+  darkTheme,
+  dateEnUS,
+  dateZhCN,
+  enUS,
+  zhCN
 } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
-import { hasWailsRuntime, runtimePlatform } from '@/lib/ipc'
 import { useI18n } from 'vue-i18n'
 
 const coll = useCollectionStore()
@@ -182,8 +181,14 @@ async function openCollection(dir: string): Promise<void> {
   await tabs.reset(mode === 'save')
   try {
     await coll.open(dir)
-    // 恢复该根的 tab 现场（uid 仍在集合内才打开）
-    await tabs.restoreSession()
+    // 打开集合时恢复 tab 现场，但同样不让 activeUid 把根自动展开：集合树默认收起，展开态由记忆决定
+    coll.restoring = true
+    try {
+      await tabs.restoreSession()
+    } finally {
+      await nextTick()
+      coll.restoring = false
+    }
     void refreshSyncStatus()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -366,30 +371,37 @@ async function restoreRoots(): Promise<void> {
   const dirs = saved.slice(0, limit)
   const wantActive = savedActiveDir()
   if (!dirs.length) return
-  if (saved.length > dirs.length) {
-    message.info(t('welcome.restoreTruncated', { n: dirs.length, m: saved.length - dirs.length }), {
-      duration: 8000,
-    })
-  }
-  let firstError = ''
-  for (const d of dirs) {
-    try {
-      await coll.open(d)
-    } catch (e) {
-      if (!firstError) firstError = `${d}: ${e instanceof Error ? e.message : String(e)}`
+  coll.restoring = true
+  try {
+    if (saved.length > dirs.length) {
+      message.info(t('welcome.restoreTruncated', { n: dirs.length, m: saved.length - dirs.length }), {
+        duration: 8000,
+      })
     }
+    let firstError = ''
+    for (const d of dirs) {
+      try {
+        await coll.open(d)
+      } catch (e) {
+        if (!firstError) firstError = `${d}: ${e instanceof Error ? e.message : String(e)}`
+      }
+    }
+    if (!coll.roots.length) {
+      if (firstError) message.error(t('welcome.restoreFailed', { msg: firstError }))
+      return
+    }
+    const active = rootOfDir(wantActive)
+    if (active && active !== coll.activeRoot) {
+      await coll.setActive(active)
+    }
+    await tabs.restoreSession()
+    void refreshSyncStatus()
+    if (firstError) message.warning(t('welcome.restoreFailed', { msg: firstError }), { duration: 8000 })
+  } finally {
+    // 等一次 watcher flush 再解除：恢复会话写入 activeUid 的 watch 可能在 finally 之后才跑
+    await nextTick()
+    coll.restoring = false
   }
-  if (!coll.roots.length) {
-    if (firstError) message.error(t('welcome.restoreFailed', { msg: firstError }))
-    return
-  }
-  const active = rootOfDir(wantActive)
-  if (active && active !== coll.activeRoot) {
-    await coll.setActive(active)
-  }
-  await tabs.restoreSession()
-  void refreshSyncStatus()
-  if (firstError) message.warning(t('welcome.restoreFailed', { msg: firstError }), { duration: 8000 })
 }
 
 function pickEnv(name: string): void {
@@ -1003,12 +1015,11 @@ watch(
           <div class="body">
             <aside class="side">
               <sidebar :roots="coll.roots" :active-root="coll.activeRoot" :active-uid="tabs.active?.uid ?? ''"
-                :reveal-tick="treeRevealTick" :busy-sync-roots="syncingRoots" @activate="activateRoot" @reload-root="reloadRoot"
-                @reveal-root="revealRoot" @close-root="closeRoot" @open="tabs.openRequest($event)"
-                @new-request="newDraft" @new-grpc-request="newGrpcDraft" @new-doc="newDocAt"
-                @import-curl="openCurl"
-                @sync="openSyncSettings()" @sync-root="syncRootNow" @open-collection="openCollection('')"
-                @create-collection="openCollection" />
+                :reveal-tick="treeRevealTick" :busy-sync-roots="syncingRoots" @activate="activateRoot"
+                @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
+                @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
+                @new-doc="newDocAt" @import-curl="openCurl" @sync="openSyncSettings()" @sync-root="syncRootNow"
+                @open-collection="openCollection('')" @create-collection="openCollection" />
             </aside>
 
             <!-- 侧栏拖宽手柄：夹在 [标题自然宽, 页面 50%] 之间，松手记入 localStorage -->
@@ -1060,8 +1071,7 @@ watch(
                   </template>
                 </div>
 
-                <overview v-else :info="coll.info" @new-request="newDraft()"
-                  @import="showImport = true"
+                <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
                   @export="exportDoc($event)" @mock="showMock = true" />
               </transition>
             </main>
@@ -1069,8 +1079,8 @@ watch(
 
           <status-bar :requests="requestCount" :envs="coll.info.envs.length" :sync="syncStatus" :mcp="mcpStatus"
             :saving-count="tabs.savingCount" :last-saved-at="tabs.lastSavedAt" @open-sync="openSyncSettings()"
-            @history="showHistory = true" @trash="showTrash = true" @cookies="showCookies = true" @settings="showSettings = true"
-            @mcp="openMcpSettings" />
+            @history="showHistory = true" @trash="showTrash = true" @cookies="showCookies = true"
+            @settings="showSettings = true" @mcp="openMcpSettings" />
         </template>
 
         <welcome v-else :last-dir="lastDir" @open="openCollection" />
@@ -1087,7 +1097,8 @@ watch(
       <mock-dialog v-model:show="showMock" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
       <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
-        :active-root="coll.activeRoot" @open-request="openRequestInRoot" @open-doc="openDocInRoot" @switch-env="pickEnv" @command="onCommand" />
+        :active-root="coll.activeRoot" @open-request="openRequestInRoot" @open-doc="openDocInRoot" @switch-env="pickEnv"
+        @command="onCommand" />
 
       <!-- 导入 cURL：粘贴命令 → 解析预览 → 开成未落盘草稿 tab -->
       <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
@@ -1108,7 +1119,7 @@ watch(
         <template #footer>
           <div class="modal-ft">
             <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
-            }}</n-button>
+              }}</n-button>
             <n-button v-if="!draftSaveOnly" size="small" data-testid="draft.discard" @click="discardDraft">{{
               t('prompt.discard') }}</n-button>
             <n-button size="small" type="primary" :disabled="!draftForm.name.trim()" :loading="savingDraft"
