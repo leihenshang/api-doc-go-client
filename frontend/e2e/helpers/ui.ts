@@ -41,6 +41,16 @@ export async function expandAllRoots(page: Page): Promise<void> {
   }
 }
 
+/** 展开所有有子节点的目录（生产默认目录也收起；既有用例统一展开后再操作）。 */
+export async function expandAllFolders(page: Page): Promise<void> {
+  // 每轮只点当前第一个折叠目录：展开后可能露出下一层，重新查询直到没有可展开目录。
+  for (let pass = 0; pass < 12; pass++) {
+    const folded = page.locator('[data-testid="tree.row"][data-kind="folder"][data-collapsed="true"]')
+    if ((await folded.count()) === 0) return
+    await folded.first().getByTestId('tree.row.caret').click()
+  }
+}
+
 /** 刷新/重进应用后回到工作台（自动打开过就不再点欢迎页按钮）；默认展开所有根以兼容既有用例。 */
 export async function reopenApp(
   page: Page,
@@ -52,7 +62,12 @@ export async function reopenApp(
     await welcome.click({ timeout: 3000 }).catch(() => undefined)
   }
   await expect(page.getByTestId('toolbar.collection')).toBeVisible()
-  if (opts.expandRoots !== false) await expandAllRoots(page)
+  if (opts.expandRoots !== false) {
+    await expandAllRoots(page)
+    await expandAllFolders(page)
+    // 连续展开会触发多次树重渲染：给首屏一点稳定时间，避免紧跟的悬停菜单点到旧行
+    await page.waitForTimeout(100)
+  }
 }
 
 /** 侧栏：按显示名取分组行 / 请求行 */

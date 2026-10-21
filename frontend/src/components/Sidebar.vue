@@ -82,6 +82,8 @@ const tabs = useTabsStore()
 const keyword = ref('')
 /** 分组折叠态（键 = 根 + 路径，见 folderKey） */
 const collapsed = ref(new Set<string>())
+/** 已见过的目录键：只对首次出现的目录补折叠，树刷新时不覆盖用户手动的展开态。 */
+const seenFolders = new Set<string>()
 /**
  * 工作目录展开态（仅本次会话，不落盘）。
  * 初值恒为空 => 首次打开 / 进程重启 / 页面 reload 后所有根默认收起。
@@ -314,6 +316,25 @@ function treeOf(root: CollectionSummary): TreeNode[] {
 function folderKey(root: string, path: string): string {
   return `${root}\n${path}`
 }
+
+/** 新目录默认折叠：首次出现时加入 collapsed；用户之后手动展开的目录已记录在 seenFolders，不会被再次收起。 */
+function markNewFolders(root: string, nodes: TreeNode[], next: Set<string>): void {
+  for (const n of nodes) {
+    if (n.type !== 'folder') continue
+    const key = folderKey(root, n.path)
+    if (!seenFolders.has(key)) {
+      seenFolders.add(key)
+      next.add(key)
+    }
+    if (n.children?.length) markNewFolders(root, n.children, next)
+  }
+}
+function collapseNewFolders(): void {
+  const next = new Set(collapsed.value)
+  for (const r of props.roots) markNewFolders(r.root, r.info.tree, next)
+  if (next.size !== collapsed.value.size) collapsed.value = next
+}
+watch(() => props.roots, collapseNewFolders, { deep: true, immediate: true })
 
 /** 根的真实折叠态（搜索时不改变持久化状态）。 */
 function isRootFolded(root: string): boolean {
@@ -770,6 +791,21 @@ function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
   emit('open', node.uid)
 }
 
+/** 移动成功后展开目标目录（若搬的是分组，连新建的那层也展开），否则默认折叠会让用户以为没搬成功。 */
+function revealMoved(targetRoot: string, destPath: string, node: TreeNode): void {
+  const paths = [destPath]
+  if (node.type === 'folder') paths.push(destPath ? `${destPath}/${node.name}` : node.name)
+  const next = new Set(collapsed.value)
+  for (const p of paths) {
+    if (!p) continue
+    const key = folderKey(targetRoot, p)
+    // 先标 seen：即使 loadRoots 的 deep watch 晚一拍，也不会把刚展开的搬入目录又收起
+    seenFolders.add(key)
+    next.delete(key)
+  }
+  collapsed.value = next
+}
+
 /** 执行移动：同目录改上级；跨目录则把请求 / 分组整棵搬到另一个工作目录。 */
 async function performMove(
   root: string,
@@ -797,19 +833,18 @@ async function performMove(
         tabs.forgetRequest(node.uid)
       }
       message.success(t('tree.movedToDir', { name: rootName(destRoot) }))
+      await nextTick()
+      expandRoot(destRoot)
+      revealMoved(destRoot, destPath, node)
       return
     }
     await ensureActive(root)
     if (node.type === 'folder') await coll.moveFolder(node.uid, destPath)
     else if (node.type === 'doc') await coll.moveDoc(node.uid, destPath)
     else await coll.moveRequest(node.uid, destPath)
-    // 目标分组若是折叠的会自动展开，否则用户看不到「移动成功了」
-    const key = folderKey(root, destPath)
-    if (destPath && collapsed.value.has(key)) {
-      const next = new Set(collapsed.value)
-      next.delete(key)
-      collapsed.value = next
-    }
+    // 目标分组（含新搬过去的分组本身）展开，否则用户看不到「移动成功了」
+    await nextTick()
+    revealMoved(root, destPath, node)
     // 已打开的页签要同步路径（面包屑与后续保存都靠它）
     if (node.type === 'request' || node.type === 'doc') tabs.syncPath(node.uid, destPath)
     // 成功不再弹提示：落点横线 + 树即时刷新已经把结果说清楚了，多一条 toast 只是噪音
@@ -923,7 +958,7 @@ watch(
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-            }}</span>
+              }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -967,6 +1002,7 @@ watch(
             'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
             'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && !dropHint.ok,
           }" :data-root="row.root" :data-uid="row.node?.uid" :data-kind="row.node?.type" :data-path="row.node?.path"
+            :data-collapsed="row.node?.type === 'folder' && row.node.children?.length ? (isCollapsed(row.root, row.node.path) ? 'true' : 'false') : undefined"
             data-testid="tree.row"
             :aria-current="row.node?.uid === props.activeUid && row.root === props.activeRoot ? 'true' : undefined"
             :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
