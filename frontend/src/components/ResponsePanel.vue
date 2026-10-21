@@ -486,7 +486,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel')
-            }}</n-button>
+          }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
           </n-button>
@@ -503,7 +503,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel')
-            }}</n-button>
+          }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
             {{ t('resp.fieldsOverwriteOk') }}
           </n-button>
