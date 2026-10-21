@@ -56,6 +56,8 @@ export default {
     switchCollection: 'Switch collection',
     workspaces: 'Workspaces',
     recentDirs: 'Recent workspaces',
+    clearRecent: 'Clear recent workspaces',
+    recentCleared: 'Recent workspaces cleared',
   },
   local: {
     offline: 'Offline ready',

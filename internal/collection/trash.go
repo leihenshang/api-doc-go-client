@@ -61,6 +61,8 @@ func legacyTrashBase(name string) (base string, at int64) {
 }
 
 // moveToTrash 把文件或目录移入 .trash 并记索引（索引尽力而为：失败不影响已完成的移动）。
+// Windows 上目录 rename 可能被资源管理器/编辑器/杀毒软件短暂占用而返回 Access is denied：
+// 先短暂重试；仍失败时改为逐项搬进目标目录，最后删除空的源目录（失败会回滚已搬文件）。
 func (c *Collection) moveToTrash(full string) error {
 	trash := filepath.Join(c.Dir, trashDirName)
 	if err := os.MkdirAll(trash, 0o755); err != nil {
@@ -75,12 +77,97 @@ func (c *Collection) moveToTrash(full string) error {
 		rel = filepath.ToSlash(r)
 	}
 	name := share.TrashName(filepath.Base(full), time.Now())
-	if err := os.Rename(full, filepath.Join(trash, name)); err != nil {
-		return err
+	dest := filepath.Join(trash, name)
+	if err := renameWithRetry(full, dest); err != nil {
+		if !st.IsDir() {
+			return fmt.Errorf("移入回收站失败（文件可能被其他程序占用）: %w", err)
+		}
+		if ferr := c.moveDirContentsToTrash(full, dest); ferr != nil {
+			return fmt.Errorf("移入回收站失败（目录可能被其他程序占用，请关闭资源管理器/编辑器后重试）: %v；逐项搬运失败: %w", err, ferr)
+		}
 	}
 	base, _ := legacyTrashBase(name)
 	c.appendTrashIndex(TrashEntry{File: name, Origin: rel, Kind: trashKind(rel, st.IsDir()), Name: base, DeletedAt: time.Now().UnixMilli()})
 	return nil
+}
+
+// renameWithRetry 给 Windows 的短暂占用留一点释放时间（杀软扫描/索引器/资源管理器预览）。
+func renameWithRetry(src, dst string) error {
+	var err error
+	for i := 0; i < 3; i++ {
+		if err = os.Rename(src, dst); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(80*(i+1)) * time.Millisecond)
+	}
+	return err
+}
+
+type trashMove struct {
+	src string
+	dst string
+	dir bool
+}
+
+// moveDirContentsToTrash 逐项搬运目录内容作为 rename 的回退：不重命名源目录本身，
+// 因此能绕过「目录句柄被占用」；任一文件失败则把已搬内容回滚，源目录保持完整。
+func (c *Collection) moveDirContentsToTrash(src, dst string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("回收站目标已存在: %s", filepath.Base(dst))
+	}
+	// 先建目标根：空目录也能在回收站里保留一条 folder 记录
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	moved := make([]trashMove, 0, 16)
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if p == src {
+			return nil
+		}
+		rel, e := filepath.Rel(src, p)
+		if e != nil {
+			return e
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			if e := os.MkdirAll(target, 0o755); e != nil {
+				return e
+			}
+			moved = append(moved, trashMove{src: p, dst: target, dir: true})
+			return nil
+		}
+		if e := renameWithRetry(p, target); e != nil {
+			return e
+		}
+		moved = append(moved, trashMove{src: p, dst: target})
+		return nil
+	})
+	if err == nil {
+		err = os.RemoveAll(src)
+	}
+	if err != nil {
+		rollbackTrashMoves(moved)
+		_ = os.RemoveAll(dst)
+		return err
+	}
+	return nil
+}
+
+// rollbackTrashMoves 反向恢复已搬文件；空目录留在目标侧，由调用方统一清掉。
+func rollbackTrashMoves(moved []trashMove) {
+	for i := len(moved) - 1; i >= 0; i-- {
+		m := moved[i]
+		if m.dir {
+			_ = os.MkdirAll(m.src, 0o755)
+			_ = os.Remove(m.dst)
+			continue
+		}
+		_ = os.MkdirAll(filepath.Dir(m.src), 0o755)
+		_ = os.Rename(m.dst, m.src)
+	}
 }
 
 func (c *Collection) trashIndexFile() string {

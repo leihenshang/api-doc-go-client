@@ -56,6 +56,11 @@ export function pushRecentDir(dir: string): void {
   localStorage.setItem(RECENT_KEY, JSON.stringify(next.slice(0, RECENT_MAX)))
 }
 
+/** 清空「最近打开」历史（不影响当前打开的根）。 */
+export function clearRecentDirs(): void {
+  localStorage.removeItem(RECENT_KEY)
+}
+
 /**
  * 启动时要恢复的工作目录：优先新的 client.dirs，其次旧版本的 client.lastDir（自动迁移）。
  * 只读 localStorage，不碰后端，便于 App.vue 在挂载时决定要开哪些根。

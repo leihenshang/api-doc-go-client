@@ -56,6 +56,8 @@ export default {
     switchCollection: '切换集合',
     workspaces: '工作目录',
     recentDirs: '最近打开',
+    clearRecent: '清理最近打开记录',
+    recentCleared: '最近打开记录已清理',
   },
   local: {
     offline: '离线可用',

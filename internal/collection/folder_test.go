@@ -201,6 +201,50 @@ func TestDeleteFolderTreeToTrashAndRestore(t *testing.T) {
 	}
 }
 
+func TestDeleteFolderTreeWithWatcher(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "gorup1"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	if _, err := c.CreateRequest("gorup1", "ping", "GET"); err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	if err := c.StartWatch(); err != nil {
+		t.Fatalf("StartWatch: %v", err)
+	}
+	defer c.StopWatch()
+	uid, _ := c.folderUID("gorup1")
+	if err := c.DeleteFolderTree(uid); err != nil {
+		t.Fatalf("监听目录下递归删除失败（Windows 句柄）: %v", err)
+	}
+}
+
+func TestMoveDirContentsToTrashFallback(t *testing.T) {
+	c := newTestCollection(t)
+	if err := c.CreateFolder("", "gorup1"); err != nil {
+		t.Fatalf("建分组: %v", err)
+	}
+	if err := c.CreateFolder("gorup1", "sub"); err != nil {
+		t.Fatalf("建子分组: %v", err)
+	}
+	if _, err := c.CreateRequest("gorup1", "ping", "GET"); err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	src := filepath.Join(c.Dir, "gorup1")
+	dst := filepath.Join(c.Dir, trashDirName, "manual.gorup1")
+	if err := c.moveDirContentsToTrash(src, dst); err != nil {
+		t.Fatalf("逐项搬入回收站: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("源目录应已清空删除")
+	}
+	for _, rel := range []string{"folder.yml", "ping.yml", "sub/folder.yml"} {
+		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("回收站缺少 %s: %v", rel, err)
+		}
+	}
+}
+
 func TestRenameRequestKeepsPathAndUnknownFields(t *testing.T) {
 	c := newTestCollection(t)
 	r, err := c.CreateRequest("", "旧名", "GET")
