@@ -288,6 +288,15 @@ func (a *App) DeleteFolder(uid string) error {
 	return c.DeleteFolder(uid)
 }
 
+// DeleteFolderTree 递归删除分组（整棵进 .trash，可在回收站恢复）。
+func (a *App) DeleteFolderTree(uid string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.DeleteFolderTree(uid)
+}
+
 func (a *App) RenameRequest(uid, name string) error {
 	c, err := a.requireCollection()
 	if err != nil {

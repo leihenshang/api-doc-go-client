@@ -55,7 +55,7 @@ test.describe('集合文件层与会话', () => {
     expect(readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('probe=1')
   })
 
-  test('[B4] 树操作：空分组可见 / 重命名不动目录与 uid / 非空分组拒删 / 删除进 .trash', async ({ page, app }) => {
+  test('[B4] 树操作：空分组可见 / 重命名不动目录与 uid / 删除请求进 .trash', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
 
@@ -74,12 +74,7 @@ test.describe('集合文件层与会话', () => {
     expect(existsSync(path.join(dir, 'empty-renamed'))).toBe(false)
     expect(readCollectionFile(dir, 'empty/folder.yml') ?? '').toContain('empty-renamed')
 
-    // 非空分组（api 内有 ping）拒绝删除
-    await hoverAndClick(treeRowByUid(page, API_UID), 'tree.row.delete')
-    await confirmButton(page).click()
-    await expect(treeRow(page, 'api')).toBeVisible()
-    expect(existsSync(path.join(dir, 'api/folder.yml'))).toBe(true)
-
+    // 非空分组的递归删除与回收站恢复由 trash.spec.ts [T3] 覆盖；这里只测请求删除
     // 删除请求 → 移入 .trash，树中消失，且校验接口不再返回
     await hoverAndClick(treeRowByUid(page, PING_UID), 'tree.row.delete')
     await confirmButton(page).click()

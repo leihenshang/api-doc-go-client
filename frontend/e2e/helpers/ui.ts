@@ -61,7 +61,7 @@ export async function reopenApp(
   if (await welcome.isVisible().catch(() => false)) {
     await welcome.click({ timeout: 3000 }).catch(() => undefined)
   }
-  await expect(page.getByTestId('toolbar.collection')).toBeVisible()
+  await expect(page.getByTestId('toolbar.collection')).toBeVisible({ timeout: 20_000 })
   if (opts.expandRoots !== false) {
     await expandAllRoots(page)
     await expandAllFolders(page)

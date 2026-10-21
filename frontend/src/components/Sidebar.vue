@@ -36,7 +36,7 @@ import {
   TrashOutline
 } from '@vicons/ionicons5'
 import type { DropdownOption, InputInst } from 'naive-ui'
-import { NDropdown, NIcon, NInput, NModal } from 'naive-ui'
+import { NCheckbox, NDropdown, NIcon, NInput, NModal } from 'naive-ui'
 import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -185,6 +185,37 @@ async function onRootMenu(root: string, key: string | number): Promise<void> {
 // 关闭工作目录的居中确认（目标根 + 显隐分开存，弹窗文案用名称）
 const closeShow = ref(false)
 const closeTarget = ref('')
+
+// 删除非空分组：必须勾选「删除所有子项」才能确认（整棵移入 .trash，可恢复）
+const deleteShow = ref(false)
+const deleteTarget = ref<{ root: string; node: TreeNode } | null>(null)
+const deleteAgreed = ref(false)
+const deleteChildCount = computed(() => {
+  const n = deleteTarget.value?.node
+  return n ? countDescendants(n) : 0
+})
+function countDescendants(node: TreeNode): number {
+  let out = 0
+  for (const c of node.children ?? []) {
+    out += 1
+    if (c.type === 'folder') out += countDescendants(c)
+  }
+  return out
+}
+/** 收集整棵目录下的请求/文档 uid：递归删除后顺手关掉已失效的页签。 */
+function collectLeafUids(node: TreeNode, out: string[]): void {
+  for (const c of node.children ?? []) {
+    if (c.type === 'folder') collectLeafUids(c, out)
+    else if (c.type === 'request' || c.type === 'doc') out.push(c.uid)
+  }
+}
+function confirmTreeDelete(): void {
+  const tgt = deleteTarget.value
+  if (!tgt || !deleteAgreed.value) return
+  deleteShow.value = false
+  deleteAgreed.value = false
+  void removeFolder(tgt.root, tgt.node, true)
+}
 
 function confirmCloseRoot(): void {
   if (closeTarget.value) {
@@ -615,10 +646,15 @@ async function submitAdd(): Promise<void> {
 }
 
 // ---- 删除 ----
-async function removeFolder(root: string, node: TreeNode): Promise<void> {
+async function removeFolder(root: string, node: TreeNode, recursive = false): Promise<void> {
+  const leafUids: string[] = []
+  if (recursive) collectLeafUids(node, leafUids)
   try {
     await ensureActive(root)
-    await coll.deleteFolder(node.uid)
+    if (recursive) await coll.deleteFolderTree(node.uid)
+    else await coll.deleteFolder(node.uid)
+    // 整棵删除后这些页签已没有源文件，关掉避免点开报“文件不存在”
+    for (const uid of leafUids) tabs.forgetRequest(uid)
   } catch (e) {
     fail(e)
   }
@@ -725,6 +761,13 @@ function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request' 
       : kind === 'doc'
         ? t('tree.confirmDelDoc', { name: n.name })
         : t('tree.confirmDelRequest', { name: n.name })
+  // 非空分组：弹带「删除所有子项」复选框的危险确认（未勾选则确认按钮禁用）
+  if (kind === 'folder' && (n.children?.length ?? 0) > 0) {
+    deleteTarget.value = { root, node: n }
+    deleteAgreed.value = false
+    deleteShow.value = true
+    return
+  }
   dialog.warning({
     title,
     content,
@@ -958,7 +1001,7 @@ watch(
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
             <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-              }}</span>
+            }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -1117,6 +1160,19 @@ watch(
       :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" @positive-click="confirmCloseRoot"
       @negative-click="closeShow = false" @close="closeShow = false" @esc="closeShow = false" />
 
+    <!-- 删除非空分组：必须勾选「删除所有子项」；整棵移入 .trash，可在回收站恢复 -->
+    <n-modal v-model:show="deleteShow" preset="dialog" type="warning" :title="t('tree.delDir')"
+      :positive-text="t('common.delete')" :negative-text="t('common.cancel')"
+      :positive-button-props="{ disabled: !deleteAgreed }" @positive-click="confirmTreeDelete"
+      @negative-click="deleteShow = false" @close="deleteShow = false" @esc="deleteShow = false">
+      <p class="del-text">
+        {{ deleteTarget ? t('tree.confirmDelFolder', { name: deleteTarget.node.name }) : '' }}
+      </p>
+      <n-checkbox v-model:checked="deleteAgreed" data-testid="tree.deleteChildren">
+        {{ t('tree.deleteChildrenConfirm', { n: deleteChildCount }) }}
+      </n-checkbox>
+    </n-modal>
+
     <!-- 创建集合：名称即目录名；确认后 emit 给 App 走统一 openCollection 流程 -->
     <n-modal v-model:show="createShow" preset="dialog" type="info" :title="t('sidebar.createTitle')"
       :positive-text="t('common.create')" :negative-text="t('common.cancel')" @positive-click="confirmCreate"
@@ -1171,6 +1227,13 @@ watch(
 
 .op-sp {
   flex: 1 1 auto;
+}
+
+/* 删除非空分组的危险确认文案 */
+.del-text {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--app-text-2);
 }
 
 /* 创建集合弹窗：标签 + 名称输入一行排布 */

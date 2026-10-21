@@ -377,6 +377,7 @@ export default {
     delDoc: 'Delete document',
     docCrossRoot: 'Documents cannot be moved across workspaces yet',
     confirmDelFolder: 'Delete folder “{name}”?',
+    deleteChildrenConfirm: 'Delete all child items? Danger: this folder still has {n} child items (requests / subfolders / docs). They can be restored from Trash.',
     confirmDelRequest: 'Delete request “{name}”? It can be recovered from .trash.',
     confirmDelDoc: 'Delete document “{name}”? It can be recovered from .trash.',
     externalChange: 'External changes detected: {n} tab(s) have unsaved edits — kept, not overwritten; reload with ⟳ if needed',

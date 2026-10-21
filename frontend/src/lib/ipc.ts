@@ -263,6 +263,8 @@ export const api = {
   createFolder: (parent: string, name: string) => call<null>('CreateFolder', parent, name),
   renameFolder: (uid: string, name: string) => call<null>('RenameFolder', uid, name),
   deleteFolder: (uid: string) => call<null>('DeleteFolder', uid),
+  /** 递归删除分组：整棵进 .trash（前端须先勾选「删除所有子项」）。 */
+  deleteFolderTree: (uid: string) => call<null>('DeleteFolderTree', uid),
   readRequest: (uid: string) => call<RequestDoc>('ReadRequest', uid).then(normalizeRequest),
   saveRequest: (r: RequestDoc) => call<null>('SaveRequest', r),
   renameRequest: (uid: string, name: string) => call<null>('RenameRequest', uid, name),

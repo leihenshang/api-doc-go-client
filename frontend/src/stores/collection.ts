@@ -225,6 +225,11 @@ export const useCollectionStore = defineStore('collection', {
       await api.deleteFolder(uid)
       await this.reload()
     },
+    /** 递归删除分组（含子分组/请求/文档，整棵进 .trash）。 */
+    async deleteFolderTree(uid: string): Promise<void> {
+      await api.deleteFolderTree(uid)
+      await this.reload()
+    },
     async renameRequest(uid: string, name: string): Promise<void> {
       await api.renameRequest(uid, name)
       await this.reload()

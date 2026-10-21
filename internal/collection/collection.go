@@ -1667,17 +1667,36 @@ func (c *Collection) RenameFolder(uid, name string) error {
 
 // DeleteFolder 删除空分组（有子分组/请求时拒绝，避免误删）；目录移入 .trash。
 func (c *Collection) DeleteFolder(uid string) error {
-	dir, err := c.findDir(uid)
+	dir, err := c.folderDirForDelete(uid)
 	if err != nil {
 		return err
-	}
-	if dir == "" {
-		return fmt.Errorf("不能删除集合根目录")
 	}
 	if !c.folderEmpty(dir) {
 		return fmt.Errorf("分组非空：请先删除其下的分组与请求")
 	}
 	return c.moveToTrash(filepath.Join(c.Dir, filepath.FromSlash(dir)))
+}
+
+// DeleteFolderTree 递归删除分组：连同子分组、请求、文档整棵移入 .trash。
+// 前端必须在确认框勾选「删除所有子项」后才调用；回收站按 folder 条目整棵恢复。
+func (c *Collection) DeleteFolderTree(uid string) error {
+	dir, err := c.folderDirForDelete(uid)
+	if err != nil {
+		return err
+	}
+	return c.moveToTrash(filepath.Join(c.Dir, filepath.FromSlash(dir)))
+}
+
+// folderDirForDelete 定位可删除的分组目录（拒绝集合根）。
+func (c *Collection) folderDirForDelete(uid string) (string, error) {
+	dir, err := c.findDir(uid)
+	if err != nil {
+		return "", err
+	}
+	if dir == "" {
+		return "", fmt.Errorf("不能删除集合根目录")
+	}
+	return dir, nil
 }
 
 // RenameRequest 改请求显示名（文件名与 uid 保持不变）。

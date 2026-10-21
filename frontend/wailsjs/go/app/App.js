@@ -82,6 +82,10 @@ export function DeleteFolder(arg1) {
   return window['go']['app']['App']['DeleteFolder'](arg1);
 }
 
+export function DeleteFolderTree(arg1) {
+  return window['go']['app']['App']['DeleteFolderTree'](arg1);
+}
+
 export function DeleteFromTrash(arg1, arg2) {
   return window['go']['app']['App']['DeleteFromTrash'](arg1, arg2);
 }
