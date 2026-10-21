@@ -1,6 +1,10 @@
 package collection
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // TestCreateDocInFolderAppearsInTree 回归：分组目录里新建的文档必须能被扫到 ——
 // 既出现在集合树（挂在该分组下），也能被 ListDocs/ReadDoc 找到。
@@ -69,6 +73,39 @@ func TestCreateDocInFolderAppearsInTree(t *testing.T) {
 	walk(info.Tree, "")
 	if !inGroup {
 		t.Fatalf("文档节点应挂在 api 分组下")
+	}
+}
+
+// TestMoveDocRootToFolder 回归：根级文档（docs/ 默认位）拖入已有分组后，
+// 文件应真的落到目标目录，uid 与文件名主干不变。
+func TestMoveDocRootToFolder(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := c.CreateFolder("", "api"); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	d, err := c.CreateDoc("根级文档", "", "")
+	if err != nil {
+		t.Fatalf("CreateDoc: %v", err)
+	}
+	if d.Path != "docs/根级文档.md" {
+		t.Fatalf("根级文档默认路径不符: %q", d.Path)
+	}
+	if err := c.MoveDoc(d.UID, "api"); err != nil {
+		t.Fatalf("MoveDoc: %v", err)
+	}
+	got, err := c.ReadDoc(d.UID)
+	if err != nil {
+		t.Fatalf("ReadDoc: %v", err)
+	}
+	if got.Path != "api/根级文档.md" {
+		t.Fatalf("移动后路径不符: %q", got.Path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "api", "根级文档.md")); err != nil {
+		t.Fatalf("目标文件不存在: %v", err)
 	}
 }
 

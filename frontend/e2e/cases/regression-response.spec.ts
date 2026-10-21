@@ -302,6 +302,26 @@ test.describe('响应区：响应字段（覆盖更新 / 说明继承）与响�
     expect(geo.lines).toBeGreaterThan(2) // 向下折行展开
   })
 
+  test('[E25] 响应体原文：XML 支持一键美化（美化/原始可来回切）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await sendUrl(page, app, '{{host}}/xml/flat')
+
+    const raw = page.getByTestId('resp.rawBody')
+    await expect(raw).toContainText('<root>')
+    // 默认美化：单行 XML 被缩进为多行
+    expect(await raw.evaluate((el) => el.textContent)).toContain('\n  <item id="1">a</item>')
+
+    // 原始：恢复一行原文
+    await page.getByTestId('resp.raw').click()
+    await expect(raw).toHaveText('<root><item id="1">a</item><item id="2">b</item></root>')
+
+    // 再美化：保持多行（XML 与 JSON 的「美化」同一入口）
+    await page.getByTestId('resp.pretty').click()
+    expect(await raw.evaluate((el) => el.textContent)).toContain('\n  <item id="2">b</item>')
+  })
+
   test('[E24] 文件类响应（.md / Content-Disposition）提示下载、不解析内容', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)

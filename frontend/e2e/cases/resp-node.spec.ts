@@ -4,7 +4,7 @@ import { patchRequest } from '../helpers/api'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, reopenApp, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -77,6 +77,7 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
 
     // 刷新重开：respdoc 仍随请求文件落盘（数据没丢），但树渲染完成后依旧没有 Resp 节点
     await page.reload()
+    await reopenApp(page) // 每次重开树默认收起：用例需要请求行，先展开
     await expect(page.getByTestId('tree.row').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('tree.resp.name')).toHaveCount(0)
     expect(readCollectionFile(dir, 'api/ping.yml')).toContain('respdoc')
@@ -92,6 +93,7 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
       body: { type: 'json', raw: '{"uid": "u-42", "vip": true}', form: [], descs: { uid: '用户ID' } },
     })
     await page.reload()
+    await reopenApp(page) // 每次重开树默认收起：用例需要请求行，先展开
     await expect(page.getByTestId('tree.row').first()).toBeVisible({ timeout: 10_000 })
     await page.locator('[data-testid="tree.row"][data-kind="request"]').first().click()
 

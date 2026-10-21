@@ -119,4 +119,29 @@ test.describe('请求体 JSON 着色', () => {
     await page.keyboard.press('Control+s')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('用户名')
   })
+
+  test('[B6] 请求体 JSON / XML 一键格式化（文本体 XML 同样生效）', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await useJsonBody(page)
+
+    // JSON：压缩 → 缩进
+    const raw = page.getByTestId('req.bodyRaw')
+    await raw.fill('{"a":1,"b":[2,3]}')
+    await page.getByTestId('body.format').click()
+    await expect(raw).toHaveValue('{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}')
+
+    // 文本类型里的 XML：同样给格式化按钮；非法 XML 保持原样
+    await page.locator('.btype').click()
+    await page.locator('.n-base-select-option').filter({ hasText: t('editor.bodyText') }).first().click()
+    const ta = page.locator('.body-pane textarea').first()
+    await ta.fill('<root><item id="1">a</item></root>')
+    await page.getByTestId('body.format').click()
+    await expect(ta).toHaveValue('<root>\n  <item id="1">a</item>\n</root>')
+
+    await ta.fill('<root><item></root>')
+    await page.getByTestId('body.format').click()
+    await expect(ta).toHaveValue('<root><item></root>')
+  })
 })

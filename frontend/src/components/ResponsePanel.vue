@@ -13,6 +13,7 @@ import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { buildRespDoc, cancelPendingFor, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
 import { detectFileResponse } from '@/lib/responseFile'
+import { detectTextKind, prettyText } from '@/lib/textFormat'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
@@ -70,16 +71,12 @@ const display = computed<SendResult | null>(() => {
 
 const body = computed(() => display.value?.body ?? '')
 
-const isJson = computed(() => /^[{[]/.test(body.value.trim()))
+// 原文/美化共用：JSON 走树视图，XML 走格式化文本；无法解析时保持原文。
+const bodyKind = computed(() => detectTextKind(body.value))
+const isJson = computed(() => bodyKind.value === 'json')
 
-const rawText = computed(() => {
-  if (view.value === 'raw' || !isJson.value) return body.value
-  try {
-    return JSON.stringify(JSON.parse(body.value), null, 2)
-  } catch {
-    return body.value
-  }
-})
+const prettyBody = computed(() => prettyText(body.value)?.text ?? body.value)
+const rawText = computed(() => (view.value === 'raw' ? body.value : prettyBody.value))
 
 const headerCount = computed(() => display.value?.headers?.length ?? 0)
 const trailerCount = computed(() => display.value?.trailers?.length ?? 0)
@@ -486,7 +483,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel')
-            }}</n-button>
+          }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
           </n-button>
@@ -503,7 +500,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel')
-            }}</n-button>
+          }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
             {{ t('resp.fieldsOverwriteOk') }}
           </n-button>

@@ -7,9 +7,9 @@
 // 环境、同步…）在后端都作用于**活动根**，这些 getter 一律取活动根的数据 —— 于是既有组件
 // （RequestBar / EnvPicker / Overview / StatusBar / CommandPalette …）不用改一行。
 // 按根区分的状态（标签会话、环境选择、收藏）都以 root 为键。
-import { defineStore } from 'pinia'
 import { api } from '@/lib/ipc'
 import type { CollectionInfo, CollectionSummary, DocEntry, Env, RequestDoc, TreeNode } from '@/types'
+import { defineStore } from 'pinia'
 
 /** 取活动根的概要：getter 里不引用别的 getter（避免 Pinia 的 this 推断问题）。 */
 function activeOf(state: {
@@ -86,6 +86,8 @@ export const useCollectionStore = defineStore('collection', {
     /** 是否已经打开过至少一个根（欢迎页/工作台切换用） */
     ready: false,
     loading: false,
+    /** 启动恢复多根/会话中：集合树暂不自动展开（默认收起由 Sidebar 的记忆决定） */
+    restoring: false,
     currentEnv: '',
     lastError: '',
     /** 收藏的请求 uid（localStorage: client.fav.<root>） */
