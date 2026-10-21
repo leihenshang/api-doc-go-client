@@ -6,7 +6,7 @@
 
 - Wails v2（Go 内核 + webview）
 - 前端：Vue 3 + TypeScript + Vite + Pinia + Vue Router + Naive UI + axios
-- 共享规则：[api-doc-go-share](https://github.com/leihenshang/api-doc-go-share)（`require v0.10.3`）
+- 共享规则：[api-doc-go-share](https://github.com/leihenshang/api-doc-go-share)（`require v0.12.0`）
 
 ## 目录结构
 

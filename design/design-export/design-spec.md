@@ -1,6 +1,6 @@
 # 本地优化 API Client 设计规格（Naive UI 风格）
 
-> 基于 Bruno 的本地化改造原型，配色遵循 Naive UI 默认主题。
+> 本地优先 API Client 的设计原型，配色遵循 Naive UI 默认主题。
 > 交付图：01-main-ui.png（主界面）、02-command-palette.png（Ctrl+K 命令面板）、03-features.png（特性说明卡）、04-vertical-layout.png（竖向布局预览）。
 
 ## 1. 设计 Token

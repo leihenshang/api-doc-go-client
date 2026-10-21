@@ -25,7 +25,7 @@ install_entry() {
 Type=Application
 Name=${name#api-doc-client}
 GenericName=API Client
-Comment=AI-native、local-first 的 API 客户端（Postman/Bruno 风格）
+Comment=AI-native、local-first 的 API 客户端
 Exec=$exec_path
 Icon=$icon_path
 Terminal=false

@@ -1,4 +1,4 @@
-// Package collection 客户端集合的文件层：本地目录即集合（Bruno 风格），
+// Package collection 客户端集合的文件层：本地目录即集合，
 // 文件是真相源。目录布局见设计文档《客户端与同步架构设计》§3.1。
 package collection
 
