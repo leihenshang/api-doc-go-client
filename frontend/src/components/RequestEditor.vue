@@ -252,7 +252,7 @@ const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN')
 const mdTheme = computed(() => (isDark.value ? 'dark' : 'light'))
 const mdPreviewTheme = computed(() => (isDark.value ? 'github' : 'default'))
 
-// 页签角标：该段有内容时显示小圆点（仿 Bruno）
+// 页签角标：该段有内容时显示小圆点
 const hasParams = computed(() => props.tab.request.params.some((p) => p.name.trim()))
 const hasHeaders = computed(() => props.tab.request.headers.some((h) => h.name.trim()))
 const hasBody = computed(
@@ -534,7 +534,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
                 data-view="table" @click="bodyView = 'table'">
                 {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length
-                  }}</span>
+                }}</span>
               </button>
             </div>
             <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />

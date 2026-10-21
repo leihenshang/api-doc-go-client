@@ -141,7 +141,7 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     # Installed-Size 单位 KiB，控制卸载后空间估算（L-5）；此刻二进制与图标已就位
     echo "Installed-Size: $(du -sk "$pkg" 2>/dev/null | cut -f1)"
     echo "Description: AI-native, local-first API client"
-    echo " Markdown 风格接口文档协作工具的桌面客户端（Postman/Bruno 风格）。"
+    echo " Markdown 风格接口文档协作工具的桌面客户端。"
   } >"$pkg/DEBIAN/control"
 
   {
@@ -149,7 +149,7 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
     echo "Type=Application"
     echo "Name=$disp"
     echo "GenericName=API Client"
-    echo "Comment=AI-native、local-first 的 API 客户端（Postman/Bruno 风格）"
+    echo "Comment=AI-native、local-first 的 API 客户端"
     echo "Exec=/usr/bin/$base"
     echo "Icon=$package"
     echo "Terminal=false"

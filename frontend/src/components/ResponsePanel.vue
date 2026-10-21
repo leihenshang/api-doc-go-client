@@ -137,7 +137,7 @@ async function reloadExamples(): Promise<void> {
 
 const meta = computed(() => {
   if (!display.value) return ''
-  // 亚毫秒级显示 0 会让人怀疑「没发出去」：统一显示 <1 ms（与 Postman 一致）
+  // 亚毫秒级显示 0 会让人怀疑「没发出去」：统一显示 <1 ms
   const ms = display.value.timeMs < 1 ? '<1' : String(display.value.timeMs)
   const parts = [`${ms} ms`, formatBytes(display.value.size)]
   if (display.value.sentSize) parts.push(`↑ ${formatBytes(display.value.sentSize)}`)
@@ -486,7 +486,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel')
-          }}</n-button>
+            }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
           </n-button>
@@ -503,7 +503,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       <template #footer>
         <div class="modal-ft">
           <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel')
-          }}</n-button>
+            }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
             {{ t('resp.fieldsOverwriteOk') }}
           </n-button>
