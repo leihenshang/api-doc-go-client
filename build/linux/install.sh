@@ -20,7 +20,7 @@ mkdir -p "$APPS_DIR"
 install_entry() {
   local name="$1" exec_path="$2" icon_path="$3" wm_class="$4"
   local desktop="$APPS_DIR/$name.desktop"
-  cat > "$desktop" <<EOF
+  cat >"$desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=${name#api-doc-client}
@@ -39,8 +39,8 @@ EOF
 DO_PROD=1
 DO_DEV=1
 case "${1:-}" in
-  --prod) DO_DEV=0 ;;
-  --dev)  DO_PROD=0 ;;
+--prod) DO_DEV=0 ;;
+--dev) DO_PROD=0 ;;
 esac
 
 if [ "$DO_PROD" = "1" ]; then
