@@ -131,6 +131,12 @@ test.describe('请求体 JSON 着色', () => {
     await raw.fill('{"a":1,"b":[2,3]}')
     await page.getByTestId('body.format').click()
     await expect(raw).toHaveValue('{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}')
+    // 一键复制（与响应数据同一套按钮）；粘贴板校验
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.getByTestId('body.copy').click()
+    // Windows 剪贴板会把 LF 规范成 CRLF，比较前先归一分行符
+    const copied = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')
+    expect(copied).toBe('{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}')
 
     // 文本类型里的 XML：同样给格式化按钮；非法 XML 保持原样
     await page.locator('.btype').click()

@@ -1,4 +1,4 @@
-// 编辑区页内查找（textarea 版）：在 JSON / 文本请求体、脚本、Docs 源码等 textarea 上
+// 编辑区页内查找（textarea 版）：在 JSON / 文本请求体、响应数据、脚本、Docs 源码等 textarea 上
 // 用原生选区做「上一个 / 下一个」跳转。从 RequestEditor 抽出，组件只提供分段状态查询与容器 ref。
 import FindBar from '@/components/FindBar.vue'
 import { findInTextareas, selectTextareaMatch, type TextareaMatch } from '@/lib/find'
@@ -12,6 +12,8 @@ export interface TextareaFindCtx {
     getDocsEditing: () => boolean
     /** 请求体类型（body 分段用：仅 json/text 可查找） */
     getBodyType: () => string
+    /** 响应数据子页签（resp 分段用：仅 body 视图有可编辑 textarea） */
+    getRespView?: () => string
     /** 是否 gRPC 请求（message 分段的 JSON textarea 支持查找） */
     isGrpc: () => boolean
 }
@@ -33,6 +35,7 @@ export function useTextareaFind(ctx: TextareaFindCtx) {
     function findable(): boolean {
         const seg = ctx.getSeg()
         if (seg === 'body') return ctx.getBodyType() === 'json' || ctx.getBodyType() === 'text'
+        if (seg === 'resp') return ctx.getRespView?.() === 'body'
         if (seg === 'script') return true
         if (seg === 'docs') return ctx.getDocsEditing()
         // gRPC 请求消息是 JSON textarea，同样支持查找
@@ -76,7 +79,7 @@ export function useTextareaFind(ctx: TextareaFindCtx) {
     }
 
     watch(
-        [findKw, () => ctx.getSeg(), () => ctx.getDocsEditing(), () => ctx.getBodyType(), findOn],
+        [findKw, () => ctx.getSeg(), () => ctx.getDocsEditing(), () => ctx.getBodyType(), () => ctx.getRespView?.(), findOn],
         async () => {
             // 切到没有可查找 textarea 的分段（或 Docs 切回预览）：查找条自动收起
             if (findOn.value && !findable()) {

@@ -268,6 +268,7 @@ export default {
     bodyMultipart: 'Multipart form',
     formatJson: 'Format',
     jsonBroken: 'Invalid JSON syntax',
+    formatBroken: 'Invalid format: JSON or XML only',
     formatUrl: 'Format URL',
     rawPlaceholder: 'Request body (supports {\'{variables}\'})',
     bodyTabRaw: 'Raw',
