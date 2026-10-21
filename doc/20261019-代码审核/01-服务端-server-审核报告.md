@@ -6,8 +6,9 @@
 
 | 指标 | 数值 |
 |---
-> **修复进度（2026-10-20）**：✅ C-1（resolveTable includeSecret，/mock 排除明文 secret；回归入 TestMockResponse）、✅ C-2（12 端点权限位 + 表驱动 TestAuditC2）、✅ H-9 关联项已在 share v0.12.0 两端 bump。
-> ⬜ 其余 H-1〜H-8/H-10〜H-22、M-1〜M-66、L-1〜L-12 未动，**下一轮从 H-1 按序推进**。
+> **修复进度（2026-10-21）**：✅ C-1（resolveTable includeSecret，/mock 排除明文 secret；回归入 TestMockResponse）、✅ C-2（12 端点权限位 + 表驱动 TestAuditC2）、✅ H-9 关联项已在 share v0.12.0 两端 bump。
+> ✅ **H-1〜H-10 已收口**（2026-10-21 本轮）：H-1 鉴权回源刷新（AuthOrPATWithRefresh + Service.LoadPrincipal）；H-2/H-3 同步 limit 入口收敛（clampChangeLimit/clampSnapshotLimit）；H-4 分组环检测（UpdateGroup 前置校验 + groupMoveCyclic visited/深度/错误区分）；H-5 导入递归深度上限 32 + DTO 数量/路径上限；H-6 导入/上传 MaxBytesReader；H-7 SetLeader 同事务清旧负责人（Repo.ClearLeaders）；H-8 三条导入路径补 ext_uid + 快照计数/分页按 ext_uid<>'' 同口径；H-9 更新变量沿用旧 ext_uid；H-10 变量/环境/响应示例改软删除（业务读 getActive、快照 tombstone、job/cleanup 到期物理清理）。回归测试：`internal/service/review_high_test.go`（含同步 round-trip 用例已改为墓碑断言）。
+> ⬜ **H-11〜H-22、M-1〜M-66、L-1〜L-12 未动**，下一轮从 H-11 推进；**H-11（同步载荷明文 secret 的掩码/提权口径）需先确认产品决策**。
 |---|
 | Go 文件总数 | 113（82 源文件 + 31 测试文件） |
 | 源码行数（非测试） | 11,045 |

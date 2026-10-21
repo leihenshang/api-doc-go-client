@@ -472,7 +472,7 @@ export default {
     fieldsClearConfirm: '确认清空全部字段？',
     findInResponse: '在响应中查找',
     save: '保存响应',
-    saveHint: '按 Bruno 方式存入集合 examples/ 目录',
+    saveHint: '存入集合 examples/ 目录',
     saveResponse: '保存响应示例',
     exampleName: '示例名称',
     exampleNamePlaceholder: '如：200 成功',
@@ -550,7 +550,7 @@ export default {
   },
   feature: {
     title: '本地优先 · 六大特性',
-    subtitle: '基于 Bruno 的本地化改造，所有能力围绕“快、稳、可私有部署”设计',
+    subtitle: '本地优先的接口协作与调试客户端：所有能力围绕“快、稳、可私有部署”设计',
     plainTitle: '纯文本存储',
     plainDesc: '请求以纯文本 YAML 保存在本地目录，任何编辑器可直接查看、修改与 diff。',
     offlineTitle: '离线优先',

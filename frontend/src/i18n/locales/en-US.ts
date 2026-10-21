@@ -471,7 +471,7 @@ export default {
     fieldsClearConfirm: 'Clear all fields?',
     findInResponse: 'Find in response',
     save: 'Save response',
-    saveHint: 'Save into the collection examples/ directory (Bruno style)',
+    saveHint: 'Save into the collection examples/ directory',
     saveResponse: 'Save response example',
     exampleName: 'Example name',
     exampleNamePlaceholder: 'e.g. 200 OK',
@@ -548,7 +548,7 @@ export default {
   },
   feature: {
     title: 'Local-first · six highlights',
-    subtitle: 'A Bruno-based localization: every capability is built around fast, stable and self-hostable.',
+    subtitle: 'A local-first API collaboration and testing client: every capability is built around fast, stable and self-hostable.',
     plainTitle: 'Plain-text storage',
     plainDesc: 'Requests live in plain-text YAML files; any editor can read, edit and diff them.',
     offlineTitle: 'Offline first',
