@@ -10,12 +10,12 @@
 
 ```bash
 # 构建机需：Go 1.26+ + Wails CLI + Node + libgtk-3-dev libwebkit2gtk-4.0-dev（或 4.1）
-#           + dpkg-deb + ImageMagick（magick 或 convert）
+#           + dpkg-deb + ImageMagick（magick 或 convert）+ binutils（readelf）
 # Go/Node 由 vfox 管理时，先激活：eval "$(vfox activate bash)"
 scripts/build-deb.sh                 # 默认 amd64，正式 + dev 各出一包
 scripts/build-deb.sh arm64           # 交叉打 arm64（需 aarch64 工具链，见 arm README）
 VERSION=1.2.3 scripts/build-deb.sh   # 覆盖版本号
-SKIP_BUILD=1 scripts/build-deb.sh    # 复用 build/bin 现有二进制，仅重新打包
+SKIP_BUILD=1 scripts/build-deb.sh    # 复用 build/bin 现有二进制（需 prod/dev 两份都在）
 ```
 
 产物：`build/bin/api-doc-client_<版本>_<arch>.deb` 与 `build/bin/api-doc-client-dev_<版本>_<arch>.deb`。
@@ -52,9 +52,14 @@ api-doc-client-dev_<version>_<arch>.deb        # 开发版（可与正式版并�
 - Go 1.26+、Wails CLI（`wails build`）、Node（前端构建）
 - GTK3 / WebKit2GTK 开发头文件（Wails Linux 前端为 cgo，必须有）：
   `libgtk-3-dev libwebkit2gtk-4.0-dev`（Deepin 25 实测为 4.0；若无 4.0 头文件可改 `-tags webkit2_41`
-  构建 4.1，deb 的 Depends 已同时兼容两种 soname）
-- 打包工具：`dpkg-deb`；图标缩放：ImageMagick（`magick` 或 `convert`）
+  构建 4.1；Depends 由脚本按实际 soname 生成）
+- 打包工具：`dpkg-deb`；图标缩放：ImageMagick（`magick` 或 `convert`）；
+  依赖探测：`binutils` 的 `readelf`（gcc 工具链通常已带）
 - x86_64 为**本机原生构建**，无需交叉编译环境
+
+> 脚本当前**未暴露 `webkit2_41` 标签**（默认按 4.0 构建）。若构建机只有 4.1 头文件，先手动：
+> `wails build -tags webkit2_41 -o api-doc-client` 与 `wails build -tags "devbuild webkit2_41" -o api-doc-client-dev`，
+> 再 `SKIP_BUILD=1 scripts/build-deb.sh` 打包。打包时脚本会用 `readelf` 按实际 soname 生成精确 `Depends`，无需改 control。
 
 ## 3. 打包流程
 
@@ -100,15 +105,16 @@ Architecture: amd64
 Maintainer: api-doc-go
 Section: utils
 Priority: optional
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37
+Depends: libgtk-3-0, libwebkit2gtk-4.0-37
 Installed-Size: <KiB>
 Description: AI-native, local-first API client
  Markdown 风格接口文档协作工具的桌面客户端。
 ```
 
-> Depends 必须与二进制**实际链接**的 so 对应（构建后用 `ldd build/bin/api-doc-client | grep -i webkit` 核对）。
-> 默认构建（无 webkit 标签）链 `libwebkit2gtk-4.0.so.37`；`-tags webkit2_41` 则链 4.1。脚本写的是
-> **交替依赖** `libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37`，两种发行版都能装。
+> Depends 由脚本用 `readelf -d` 读取二进制 DT_NEEDED **自动生成精确项**（prod/dev 必须一致，否则报错），
+> 不再固定写交替依赖。默认构建（无 webkit 标签）链 `libwebkit2gtk-4.0.so.37` →
+> `libwebkit2gtk-4.0-37`；`-tags webkit2_41` 则链 4.1 → `libwebkit2gtk-4.1-0`。
+> 也可构建后手动 `ldd build/bin/api-doc-client | grep -i webkit` 复核。
 
 ### 步骤 4：`.desktop`（关键，决定任务栏图标）
 
@@ -178,8 +184,12 @@ xprop -id $(xdotool search --class api-doc-client | head -1) WM_CLASS _NET_WM_IC
 ## 4. 与 `build/linux/` 现有文件的关系
 
 `build/linux/{api-doc-client,api-doc-client-dev}.desktop` 与 `install.sh` 是**本地免安装入口**
-（Exec/Icon 用项目绝对路径，装到 `~/.local/share/applications/`）。deb 版本改为系统路径
-（`/usr/bin` + 主题名图标），两者由 `scripts/build-deb.sh` 生成/维护。
+（Exec/Icon 用项目绝对路径，装到 `~/.local/share/applications/`），**独立维护，打包脚本不会修改它们**。
+`scripts/build-deb.sh` 只在 deb 内部生成系统级入口（`/usr/share/applications/*.desktop`，Exec 指 `/usr/bin`、
+Icon 用主题名），与本地的这两个文件互不影响。
+
+本地入口用法：`build/linux/install.sh`（装 prod+dev 两个入口；`--prod` / `--dev` 单独装），
+Exec/Icon 使用项目绝对路径，移动项目目录后重跑一次即可刷新。
 
 ## 5. 待实施清单
 
@@ -193,3 +203,4 @@ xprop -id $(xdotool search --class api-doc-client | head -1) WM_CLASS _NET_WM_IC
    非法修订段自动 `-`→`~`
 5. ⬜ CI 接入（`.github/workflows`）与发布流程
 6. ⬜ `nfpm` 配置替代手工 deb 树（便于后续多架构/多发行版）
+7. ✅ `Depends` 已按实际链接的 soname 自动生成（`readelf -d`，prod/dev 一致校验），不再写交替依赖

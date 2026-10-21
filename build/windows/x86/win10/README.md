@@ -1,8 +1,8 @@
 # 打包流程：Windows · x86(x86_64) · Win10+ —— NSIS 安装包
 
-> 状态：**脚本与手写 `installer.nsi` 已落地，并在 Windows 构建机跑通（含覆盖升级）**；
-> arm64 未实跑。安装包逻辑的权威来源是 `build/windows/installer/installer.nsi`（入库、wails 不感知），
-> 不是 `wails build -nsis` 生成的 `project.nsi`。
+> 状态：**脚本与手写 `installer.nsi` 已落地，并已在 Windows 实跑产出 v0.1.0 安装包（含覆盖升级）；
+> arm64 未实跑**。安装包逻辑的权威来源是
+> `build/windows/installer/installer.nsi`（入库、wails 不感知），不是 `wails build -nsis` 生成的 `project.nsi`。
 >
 > 目录层级约定：`build/<系统>/<cpu架构>/<os>/`。
 > 本目录对应 **windows + x86_64 + Win10 及以上**（安装器校验架构与系统）。
@@ -41,6 +41,7 @@ api-doc-client-dev_<version>_<arch>-setup.exe    # 开发版（-Dev 时产出，
     `Program Files\NSIS`），拿到绝对路径再调用。
   - ⚠️ 完全没装 NSIS 时脚本开头会直接报错（`wails build -nsis` 缺 makensis 时只打印 warning 就返回成功，
     会得到「构建通过但没有安装包」的假象）。
+  - ⚠️ `installer.nsi` 含中文注释，**必须保持 UTF-8 带 BOM**：缺 BOM 时 makensis 在中文 Windows 上可能报错/乱码。
 - WebView2 Runtime：**不需要预装**。Wails 把微软引导器内嵌在二进制里，首次 bootstrap 写到
   `build/windows/installer/tmp/MicrosoftEdgeWebview2Setup.exe`（离线可用），安装时检测目标机、缺了才装。
 
@@ -89,13 +90,13 @@ wails build -platform windows/amd64 -tags devbuild -o api-doc-client-dev.exe   #
 | 文件 | 作用 | 入库？ |
 |---|---|---|
 | `installer.nsi` | **安装包主工程（权威来源）**：页面、快捷方式、卸载、覆盖升级加固 | ✅ 入库，手写维护 |
-| `wails_tools.nsh` | 架构检查、WebView2 安装、写卸载注册表等宏（由 `wails build -nsis` 生成） | ✅ 入库（DO NOT EDIT，升级 Wails 后重新生成） |
+| `wails_tools.nsh` | 架构检查、WebView2 安装、写卸载注册表等宏（由 `wails build -nsis` 生成） | ❌ 不入库（`.gitignore`；wails 生成，勿手改） |
 | `tmp/MicrosoftEdgeWebview2Setup.exe` | WebView2 引导器（~2MB） | ❌ 已 gitignore，每次由 wails 重写 |
 | `project.nsi` | wails 生成的默认工程 | **不使用**（每次 bootstrap 会被重写，避免在该文件上做定制） |
 
 > 为什么不用 `project.nsi`：`wails build -nsis` 每次 bootstrap 都会重写 `project.nsi` / `wails_tools.nsh`，
 > 直接改会被覆盖。`installer.nsi` 只 `!include "wails_tools.nsh"` 复用宏，自身不受 wails 影响，
-> 因此可安全承载自定义升级逻辑。
+> 因此可安全承载自定义升级逻辑。升级 Wails 后若需重生成宏库：删掉 `wails_tools.nsh`（及 `tmp/`）再构建一次即可。
 >
 > 新克隆仓库后第一次必须**不带** `-SkipBuild` 跑，否则宏库/引导器不存在，makensis 会失败
 > （脚本已提前拦下并给出提示）。
@@ -147,11 +148,14 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 3. `uninstall.exe /S _?=<旧目录>` 原地静默卸载旧版；
 4. 按 `InstallLocation` 回填的目录全新安装（静默安装 `/S` 跳过第 1 步确认）。
 
+> 从**未写 `InstallLocation` 的旧安装包**（早期 wails 默认工程）升级时，首次不会被自动卸载；
+> 请先手动卸载旧版再安装，之后的新版本即可走自动覆盖升级。
+
 ## 5. 验证清单
 
-- [ ] 不带 `-SkipBuild` 跑一次，确认 `build/windows/installer/` 下存在 `installer.nsi`、`wails_tools.nsh`、
+- [ ] 不带 `-SkipBuild` 跑一次：`installer.nsi`（入库）存在，且 bootstrap 后生成了 `wails_tools.nsh`、
       `tmp/MicrosoftEdgeWebview2Setup.exe`
-- [ ] 产物名与 §1 一致，大小合理（正式版 exe ≈ 37MB，安装包应略大于它）
+- [ ] 产物名与 §1 一致，大小合理（正式版 exe ≈ 36–37MB；NSIS 压缩后安装包约 16MB，**不必大于 exe**）
 - [ ] 安装后 exe 名是 `api-doc-client.exe`（**不是** `api-doc-go-client.exe`）
 - [ ] 开始菜单 + 桌面快捷方式能启动，图标是 `build/windows/icon.ico`
 - [ ] 「程序和功能」里显示 `API Doc Client` + 正确版本号
@@ -162,13 +166,14 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 - [ ] `-InstallScope user` 时不弹 UAC，装到 `%LOCALAPPDATA%\Programs\API Doc Client`
 - [ ] 卸载后安装目录、快捷方式、注册表键都清干净
 - [ ] 目标机没有 WebView2 Runtime 时：交互模式给出安装指引；`/S` 返回 `16388`
-- [ ] 托盘：开启「驻留托盘」后关窗隐藏、**双击托盘图标**能唤出主窗口、右键菜单正常
+- [ ] 托盘：开启「任务栏驻留」并选择「放入托盘」后关窗隐藏、**双击托盘图标**能唤出主窗口、右键菜单正常
 
 ## 6. 从 Linux 交叉编译（可选，未验证）
 
 ```bash
 sudo apt install gcc-mingw-w64-x86-64 nsis     # 交叉编译器 + makensis
-wails build -platform windows/amd64 -o api-doc-client.exe
+# 首次带 -nsis：生成 wails_tools.nsh 与 WebView2 引导器（后续可去掉）
+wails build -platform windows/amd64 -nsis -o api-doc-client.exe
 # 之后照 §4 步骤 3 手动调 makensis（注意路径分隔符要换成反斜杠）
 ```
 
@@ -177,9 +182,9 @@ wails build -platform windows/amd64 -o api-doc-client.exe
 
 ## 7. 待实施清单
 
-1. ✅ 已实现（脚本）：`scripts/build-win.ps1` 一条命令完成 构建 → NSIS 打包 → 规范化命名（prod/dev 各一个）
-2. ✅ 已在 Windows 构建机跑通，并按实跑修正：`makensis` 默认目录探测、`-o` 显式 `.exe`、
-   手写 `installer.nsi` 承载覆盖升级（W-1〜W-4）
+1. ✅ 已实现（脚本）：`scripts/build-win.ps1` 一条命令完成 构建 → NSIS 打包 → 规范化命名（`-Dev` 时 prod/dev 各一个）
+2. ✅ 已在 Windows 实跑产出 v0.1.0 安装包，并修正：`makensis` 默认目录探测、`-o` 显式 `.exe`、
+   手写 `installer.nsi` 承载覆盖升级（W-1〜W-4）；换构建机请按 §5 复验
 3. ⬜ 代码签名：`installer.nsi` 里可加 `!finalize 'signtool --file "%1"'`，配好证书即可
    （不签名的话 SmartScreen 会拦一次）
 4. ⬜ CI 接入（`.github/workflows`，windows-latest + `choco install nsis`）
@@ -193,4 +198,4 @@ wails build -platform windows/amd64 -o api-doc-client.exe
 - 本地免安装入口（开发用）：`build/linux/install.sh`
 - 两个平台的可执行文件名统一为 `api-doc-client` / `api-doc-client-dev`，
   这是任务栏图标匹配的前提（Linux 靠 WM_CLASS，Windows 靠 AppUserModelID/进程名），
-  改名前请先读 Linux 那份 README 的 §4。
+  改名前请先读 Linux 那份 README 的 **§3 步骤 4（WM_CLASS 约定）**。
