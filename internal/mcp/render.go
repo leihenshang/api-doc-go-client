@@ -66,9 +66,15 @@ type SendOutcome struct {
 	Truncated     bool   `json:"truncated"`
 	OriginalBytes int    `json:"originalBytes"`
 	HeaderCount   int    `json:"headerCount"`
-	Saved         bool   `json:"saved"`                 // 是否已存为响应示例
-	ExampleUID    string `json:"exampleUid,omitempty"`  // 落盘的示例 uid
-	ExamplePath   string `json:"examplePath,omitempty"` // 落盘的示例路径
+	// 连接与性能计数（本次实时调用；不属示例/同步数据）
+	Redirects   int    `json:"redirects,omitempty"`
+	RemoteAddr  string `json:"remoteAddr,omitempty"`
+	TLSVersion  string `json:"tlsVersion,omitempty"`
+	TLSCipher   string `json:"tlsCipher,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+	Saved       bool   `json:"saved"`                 // 是否已存为响应示例
+	ExampleUID  string `json:"exampleUid,omitempty"`  // 落盘的示例 uid
+	ExamplePath string `json:"examplePath,omitempty"` // 落盘的示例路径
 }
 
 // outcomeOf 把 runner.Result 转成出参（响应体按 maxBodyBytes 裁剪）。
@@ -79,6 +85,8 @@ func outcomeOf(res *runner.Result, maxBodyBytes int) SendOutcome {
 		TimeMS: res.TimeMS, Size: res.Size, ContentType: res.ContentType,
 		Body: body, Truncated: truncated, OriginalBytes: total,
 		HeaderCount: len(res.Headers),
+		Redirects:   res.Redirects, RemoteAddr: res.RemoteAddr,
+		TLSVersion: res.TLSVersion, TLSCipher: res.TLSCipher, Reused: res.Reused,
 	}
 }
 
@@ -103,6 +111,27 @@ func renderSend(o *SendOutcome) string {
 		fmt.Fprintf(&sb, " · %s", o.ContentType)
 	}
 	fmt.Fprintf(&sb, "\nURL: %s\n", o.URL)
+	// 连接/性能行：仅在拿到时附，避免给 AI 灌空字段
+	if o.RemoteAddr != "" || o.TLSVersion != "" || o.Redirects > 0 || o.Reused {
+		ra := o.RemoteAddr
+		if ra == "" {
+			ra = "未知"
+		}
+		fmt.Fprintf(&sb, "连接：对端 %s", ra)
+		if o.TLSVersion != "" {
+			fmt.Fprintf(&sb, " · %s", o.TLSVersion)
+			if o.TLSCipher != "" {
+				fmt.Fprintf(&sb, " (%s)", o.TLSCipher)
+			}
+		}
+		if o.Redirects > 0 {
+			fmt.Fprintf(&sb, " · 重定向 %d 次", o.Redirects)
+		}
+		if o.Reused {
+			sb.WriteString(" · 连接复用")
+		}
+		sb.WriteString("\n")
+	}
 	if o.Truncated {
 		fmt.Fprintf(&sb, "%s\n", truncateNote(true, o.OriginalBytes, len(o.Body)))
 	}

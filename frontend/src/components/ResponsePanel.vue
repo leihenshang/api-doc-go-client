@@ -11,7 +11,7 @@ import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { buildRespDoc, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
+import { buildRespDoc, cancelPendingFor, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
 import { detectFileResponse } from '@/lib/responseFile'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
@@ -60,6 +60,11 @@ const display = computed<SendResult | null>(() => {
     script: r.script ?? null,
     truncated: !!r.truncated,
     fullSize: r.fullSize ?? 0,
+    redirects: r.redirects ?? 0,
+    remoteAddr: r.remoteAddr ?? '',
+    tlsVersion: r.tlsVersion ?? '',
+    tlsCipher: r.tlsCipher ?? '',
+    reused: !!r.reused,
   }
 })
 
@@ -136,7 +141,24 @@ const meta = computed(() => {
   const ms = display.value.timeMs < 1 ? '<1' : String(display.value.timeMs)
   const parts = [`${ms} ms`, formatBytes(display.value.size)]
   if (display.value.sentSize) parts.push(`↑ ${formatBytes(display.value.sentSize)}`)
+  if (display.value.proto) parts.push(display.value.proto)
   return parts.join(' · ')
+})
+
+// 连接信息 chips（仅实时响应才有）：对端地址 / TLS / 重定向 / 连接复用。
+// 回看示例时这些字段为空→自然不渲染（连接信息属一次性观测，不随快照保存）。
+const connChips = computed(() => {
+  const d = display.value
+  if (!d) return []
+  const chips: { k: string; v: string }[] = []
+  if (d.remoteAddr) chips.push({ k: t('resp.connRemote'), v: d.remoteAddr })
+  if (d.tlsVersion) {
+    const v = d.tlsCipher ? `${d.tlsVersion} · ${d.tlsCipher}` : d.tlsVersion
+    chips.push({ k: t('resp.connTls'), v })
+  }
+  if (d.redirects && d.redirects > 0) chips.push({ k: t('resp.connRedirect'), v: `${d.redirects}` })
+  if (d.reused) chips.push({ k: t('resp.connReused'), v: t('resp.connReusedYes') })
+  return chips
 })
 
 // gRPC 的码名与徽章语义统一走 lib/grpc.ts：此前这里把所有非零码一律显示成
@@ -195,6 +217,8 @@ async function confirmOverwrite(): Promise<void> {
 async function doUpdateFields(old: FieldRow[], inherit: boolean): Promise<void> {
   try {
     const { rows } = rebuildFields(old, body.value, inherit)
+    // 先丢掉请求编辑器里尚未触发的防抖写回：否则旧 doc（旧 body/含含义）会在 600ms 后回滚本次快照
+    cancelPendingFor(props.tab.uid)
     const ok = await persistRows(rows, true)
     if (!ok) return
     // 字段表已挂到请求模型：直接把编辑器切到「响应字段」分段（集合树不再挂 Resp 节点）
@@ -347,6 +371,13 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
           <span v-for="(msg, i) in display.warnings" :key="i" class="warn">{{ msg }}</span>
         </div>
 
+        <!-- 连接信息（对端/TLS/重定向/复用）：仅本次实时响应有，回看示例自然隐去 -->
+        <div v-if="connChips.length" class="conn" data-testid="resp.conn">
+          <span v-for="c in connChips" :key="c.k" class="conn-chip">
+            <span class="ck">{{ c.k }}</span><span class="cv mono" :title="c.v">{{ c.v }}</span>
+          </span>
+        </div>
+
         <div class="seg">
           <button class="seg-tab" :class="{ on: seg === 'body' }" type="button" data-testid="resp.tab" data-seg="body"
             @click="seg = 'body'">
@@ -454,7 +485,8 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       </div>
       <template #footer>
         <div class="modal-ft">
-          <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" data-testid="resp.exampleCancel" @click="showSave = false">{{ t('common.cancel')
+            }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
           </n-button>
@@ -470,7 +502,8 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
       </n-checkbox>
       <template #footer>
         <div class="modal-ft">
-          <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel') }}</n-button>
+          <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel')
+            }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
             {{ t('resp.fieldsOverwriteOk') }}
           </n-button>
@@ -520,6 +553,38 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 连接信息 chips：对端/TLS/重定向/复用，小字淡色，可横向滚动不拤高 */
+.conn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-2);
+  font-size: 11.5px;
+}
+
+.conn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.conn-chip .ck {
+  color: var(--app-muted);
+}
+
+.conn-chip .cv {
+  color: var(--app-text-2);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sp {

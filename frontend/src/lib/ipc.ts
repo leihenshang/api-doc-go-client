@@ -294,13 +294,14 @@ export const api = {
     call<null>('DeleteResponseExample', reqUid, exampleUid),
   // 响应字段 UI → 请求模型 RespDoc（落盘并随同步往返）
   updateResponseDoc: (uid: string, doc: ResponseDoc) =>
-    // 快照字段必须一并下发（item 18）：曾因只重建 type/params/sample 而丢 status/headers，
-    // 关标签重开磁盘上就没有响应头。
+    // 快照字段必须一并下发（item 18）：曾因只重建 type/params/sample 而丢 status/headers；
+    // contentType 同理（否则编辑字段/数据时会把「响应类型」重置回 json）。
     call<null>('UpdateResponseDoc', {
       uid,
       type: doc.type,
       params: doc.params,
       sample: doc.sample,
+      contentType: doc.contentType,
       status: doc.status,
       headers: doc.headers,
     }),

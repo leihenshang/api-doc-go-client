@@ -19,6 +19,8 @@ func TestUpdateResponseDoc(t *testing.T) {
 		UID:    r.UID,
 		Type:   "object",
 		Sample: `{"code":0}`,
+		// 响应内容类型也必须随更新回传落盘，否则编辑字段/数据时会被重置回 json
+		ContentType: "xml",
 		Params: []collection.ResponseParam{
 			{FieldName: "code", Type: "number", Description: "业务码", Example: "0"},
 			{FieldName: "data[].id", Type: "string", Description: "ID", Example: "x1"},
@@ -41,6 +43,9 @@ func TestUpdateResponseDoc(t *testing.T) {
 	if got.RespDoc.Type != "object" || got.RespDoc.Sample != `{"code":0}` {
 		t.Errorf("类型/样例落盘不符: %+v", got.RespDoc)
 	}
+	if got.RespDoc.ContentType != "xml" {
+		t.Errorf("内容类型未随 respdoc 落盘（编辑时会被重置）: %q", got.RespDoc.ContentType)
+	}
 	if len(got.RespDoc.Params) != 2 || got.RespDoc.Params[1].FieldName != "data[].id" {
 		t.Errorf("返回参数行不符: %+v", got.RespDoc.Params)
 	}
@@ -49,7 +54,7 @@ func TestUpdateResponseDoc(t *testing.T) {
 	}
 	// 同步 extra 应带响应侧字段（respdoc → retType/retParams/retSample）
 	extra := collection.SyncExtra(got)
-	for _, key := range []string{`"retType"`, `"retParams"`, `"retSample"`} {
+	for _, key := range []string{`"retType"`, `"retParams"`, `"retSample"`, `"retContentType"`} {
 		if !strings.Contains(extra, key) {
 			t.Errorf("SyncExtra 缺少 %s: %s", key, extra)
 		}

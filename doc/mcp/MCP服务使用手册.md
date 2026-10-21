@@ -211,10 +211,13 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.11 `get_doc_template`
 无入参（不需要项目上下文）。返回接口说明（`docs` 字段）的 **Markdown 分节结构契约**：
-固定小节顺序（简要描述 / 请求URI / 请求方式 / 请求头 / 请求参数表 / 请求示例 / 响应字段表 / 响应示例 / 备注）、
-表列（参数名 | 必选 | 类型 | 说明）与 `{{host}}` 掩码规则，与客户端一键「生成接口文档」（`lib/genDocs.ts#buildApiDoc`）逐节对齐。
+固定小节顺序（简要描述 / 请求URI / 请求方式 / 请求头 / 请求参数表 / 请求体 / 请求示例 / 响应字段表 / 响应示例 / 备注）。
+表列：请求参数 / 请求体字段为「参数名 | 必选 | 类型 | 说明」，**响应字段表为「参数名 | 必选 | 类型 | 示例值 | 说明」**
+（示例值取自 `respDoc.params[].example`）；「请求体」一节在无请求体时整节省略（json 列类型 + 字段表，form/multipart 同理）；
+「请求示例」一节在 curl 之后，JSON 请求体时另附一段缩进美化的请求数据示例。
+均与客户端一键「生成接口文档」（`lib/genDocs.ts#buildApiDoc`）逐节对齐，并有 `{{host}}` 掩码规则。
 `docs` 本身是自由文本不做强校验，但 AI 写 docs 前先取本模板可保证客户端展示与导出渲染一致；
-模板里「响应字段」一节与 `respDoc` 同源，两边都写时内容需一致。
+模板里「响应字段」一节与 `respDoc` 同源，两边都写时内容需一致（含示例值列）。
 
 ### 4.12 文档条目工具：`list_docs` / `get_doc` / `create_doc` / `update_doc` / `delete_doc`
 

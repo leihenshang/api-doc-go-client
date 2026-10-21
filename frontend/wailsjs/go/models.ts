@@ -215,6 +215,7 @@ export namespace app {
 	    type: string;
 	    params: collection.ResponseParam[];
 	    sample: string;
+	    contentType?: string;
 	    status?: number;
 	    headers?: collection.KV[];
 	
@@ -228,6 +229,7 @@ export namespace app {
 	        this.type = source["type"];
 	        this.params = this.convertValues(source["params"], collection.ResponseParam);
 	        this.sample = source["sample"];
+	        this.contentType = source["contentType"];
 	        this.status = source["status"];
 	        this.headers = this.convertValues(source["headers"], collection.KV);
 	    }
@@ -1640,6 +1642,11 @@ export namespace runner {
 	    fullSize?: number;
 	    warnings?: string[];
 	    trailers?: collection.KV[];
+	    redirects?: number;
+	    remoteAddr?: string;
+	    tlsVersion?: string;
+	    tlsCipher?: string;
+	    reused?: boolean;
 	    body: string;
 	    script?: any;
 	
@@ -1662,6 +1669,11 @@ export namespace runner {
 	        this.fullSize = source["fullSize"];
 	        this.warnings = source["warnings"];
 	        this.trailers = this.convertValues(source["trailers"], collection.KV);
+	        this.redirects = source["redirects"];
+	        this.remoteAddr = source["remoteAddr"];
+	        this.tlsVersion = source["tlsVersion"];
+	        this.tlsCipher = source["tlsCipher"];
+	        this.reused = source["reused"];
 	        this.body = source["body"];
 	        this.script = source["script"];
 	    }

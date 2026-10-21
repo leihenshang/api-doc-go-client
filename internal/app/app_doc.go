@@ -18,6 +18,7 @@ import (
 
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/syncengine"
+
 	runtime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -344,6 +345,9 @@ type ResponseDocInput struct {
 	Type   string                     `json:"type"`
 	Params []collection.ResponseParam `json:"params"`
 	Sample string                     `json:"sample"`
+	// ContentType 响应内容类型（json/text/xml/...）：编辑字段/数据时必须一并带回来，
+	// 否则接口重建 ResponseDoc 时会丢掉它（同步键 retContentType 也会跟着丢）。
+	ContentType string `json:"contentType,omitempty"`
 	// Status/Headers：更新字段时的响应快照（状态码/响应头），随 respdoc 一并落盘（item 8）。
 	Status  int             `json:"status,omitempty"`
 	Headers []collection.KV `json:"headers,omitempty"`
@@ -371,7 +375,7 @@ func (a *App) UpdateResponseDoc(in ResponseDocInput) error {
 	if strings.TrimSpace(in.Type) == "" && len(in.Params) == 0 && strings.TrimSpace(in.Sample) == "" {
 		r.RespDoc = nil
 	} else {
-		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample, Status: in.Status, Headers: in.Headers}
+		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample, ContentType: in.ContentType, Status: in.Status, Headers: in.Headers}
 	}
 	return c.SaveRequest(r)
 }

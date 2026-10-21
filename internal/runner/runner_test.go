@@ -2,12 +2,14 @@ package runner
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -225,6 +227,13 @@ func TestFollowRedirects(t *testing.T) {
 	if res.Status != 200 || !strings.Contains(res.Body, "final") {
 		t.Fatalf("应跟随重定向到最终响应: %+v", res)
 	}
+	// 连接/性能计数：/r1 → /r2 → /ok 共跟随 2 次重定向；对端地址已采集
+	if res.Redirects != 2 {
+		t.Errorf("Redirects = %d，期望 2", res.Redirects)
+	}
+	if res.RemoteAddr == "" {
+		t.Error("RemoteAddr 应非空（httptrace 已采集）")
+	}
 
 	stop := DefaultOptions()
 	stop.FollowRedirects = false
@@ -234,6 +243,31 @@ func TestFollowRedirects(t *testing.T) {
 	}
 	if res.Status != http.StatusFound {
 		t.Fatalf("关闭跟随后应返回 302，实际 %d", res.Status)
+	}
+}
+
+// tlsVersionName 映射 + connTrace 采集（不依赖真实网络，直接喂 GotConn 回调）。
+func TestTlsVersionNameAndConnTrace(t *testing.T) {
+	cases := map[uint16]string{
+		tls.VersionTLS13: "TLS 1.3",
+		tls.VersionTLS12: "TLS 1.2",
+		tls.VersionTLS11: "TLS 1.1",
+		tls.VersionTLS10: "TLS 1.0",
+		0:                "",
+	}
+	for v, want := range cases {
+		if got := tlsVersionName(v); got != want {
+			t.Errorf("tlsVersionName(%d)=%q want %q", v, got, want)
+		}
+	}
+	ct := &connTrace{}
+	trace := ct.clientTrace()
+	if trace.GotConn == nil {
+		t.Fatal("GotConn 钩子未装配")
+	}
+	trace.GotConn(httptrace.GotConnInfo{Reused: true})
+	if !ct.reused {
+		t.Error("reused 应为 true")
 	}
 }
 

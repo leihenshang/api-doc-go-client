@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -124,8 +126,16 @@ type Result struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Trailers gRPC 尾元数据（HTTP 请求为 nil）
 	Trailers []collection.KV `json:"trailers,omitempty"`
-	Body     string          `json:"body"`
-	Script   any             `json:"script,omitempty"`
+	// 连接与性能计数（仅本次实时响应；不落盘、不进示例与同步）：
+	// Redirects 实际跟随的重定向次数；RemoteAddr 实际连接的对端地址；
+	// TLSVersion/TLSCipher 协商出的 TLS 版本与套件（非 TLS 连接为空）；Reused 连接是否复用。
+	Redirects  int    `json:"redirects,omitempty"`
+	RemoteAddr string `json:"remoteAddr,omitempty"`
+	TLSVersion string `json:"tlsVersion,omitempty"`
+	TLSCipher  string `json:"tlsCipher,omitempty"`
+	Reused     bool   `json:"reused,omitempty"`
+	Body       string `json:"body"`
+	Script     any    `json:"script,omitempty"`
 }
 
 // Send 渲染并发送请求。vars 为已选环境的变量（已合并 secret 与内置变量）。
@@ -159,14 +169,62 @@ func Send(ctx context.Context, r collection.Request, vars map[string]string, opt
 	}
 	start := time.Now()
 	warn := &warningList{}
-	client := newClient(opts, warn)
+	var redirects int
+	ct := &connTrace{}
+	client := newClient(opts, warn, &redirects)
 	defer client.CloseIdleConnections() // 每次发送都是独立 Transport：用完即回收空闲连接
+	// 挂 httptrace 抓对端地址与连接复用（resp 本身拿不到实际拨通的地址）
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), ct.clientTrace()))
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, sendError(ctx, err)
 	}
 	defer resp.Body.Close()
-	return readResult(resp, target.String(), time.Since(start), warn)
+	res, err := readResult(resp, target.String(), time.Since(start), warn)
+	if err != nil {
+		return nil, err
+	}
+	res.Redirects = redirects
+	res.RemoteAddr = ct.remoteAddr
+	res.Reused = ct.reused
+	return res, nil
+}
+
+// connTrace httptrace 采集的连接信息：实际连上的对端地址、连接是否复用。
+type connTrace struct {
+	remoteAddr string
+	reused     bool
+}
+
+func (c *connTrace) clientTrace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			c.reused = info.Reused
+			if info.Conn != nil {
+				if ra, ok := info.Conn.RemoteAddr().(*net.TCPAddr); ok && ra != nil {
+					c.remoteAddr = ra.String()
+				} else if info.Conn.RemoteAddr() != nil {
+					c.remoteAddr = info.Conn.RemoteAddr().String()
+				}
+			}
+		},
+	}
+}
+
+// tlsVersionName 把 TLS 版本常量映射成人话（未知回空）。
+func tlsVersionName(v uint16) string {
+	switch v {
+	case tls.VersionTLS13:
+		return "TLS 1.3"
+	case tls.VersionTLS12:
+		return "TLS 1.2"
+	case tls.VersionTLS11:
+		return "TLS 1.1"
+	case tls.VersionTLS10:
+		return "TLS 1.0"
+	default:
+		return ""
+	}
 }
 
 // warningList 并发安全的告警收集器：重定向钩子在 transport 的 goroutine 里执行，
@@ -459,7 +517,7 @@ func applyAuth(req *http.Request, a *collection.Auth, vars map[string]string) er
 	return nil
 }
 
-func newClient(o Options, warn *warningList) *http.Client {
+func newClient(o Options, warn *warningList, redirects *int) *http.Client {
 	client := &http.Client{Timeout: o.Timeout, Jar: o.Jar}
 	tr := &http.Transport{}
 	if o.InsecureSSL {
@@ -482,6 +540,9 @@ func newClient(o Options, warn *warningList) *http.Client {
 			return fmt.Errorf("重定向超过 %d 次", o.MaxRedirects)
 		}
 		stripCrossHostCredentials(req, via, warn)
+		if redirects != nil {
+			*redirects = len(via) // 本次将跟随第 len(via) 次重定向
+		}
 		return nil
 	}
 	return client
@@ -566,7 +627,24 @@ func readResult(resp *http.Response, target string, elapsed time.Duration, warn 
 		TimeMS: elapsed.Milliseconds(), Size: len(body),
 		ContentType: ct, Binary: binary, Headers: headerList(resp.Header), Body: text,
 		Truncated: truncated, FullSize: fullSize, Warnings: warn.list(),
+		TLSVersion: tlsVersionOf(resp), TLSCipher: tlsCipherOf(resp),
 	}, nil
+}
+
+// tlsVersionOf TLS 连接时返回版本名（如 "TLS 1.3"），非 TLS 回空串。
+func tlsVersionOf(resp *http.Response) string {
+	if resp.TLS == nil {
+		return ""
+	}
+	return tlsVersionName(resp.TLS.Version)
+}
+
+// tlsCipherOf TLS 连接时返回套件名，非 TLS 回空串。
+func tlsCipherOf(resp *http.Response) string {
+	if resp.TLS == nil {
+		return ""
+	}
+	return tls.CipherSuiteName(resp.TLS.CipherSuite)
 }
 
 var binaryPrefixes = []string{
