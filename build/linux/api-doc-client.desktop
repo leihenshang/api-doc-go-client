@@ -2,7 +2,7 @@
 Type=Application
 Name=API Doc Client
 GenericName=API Client
-Comment=AI-native、local-first 的 API 客户端（Postman/Bruno 风格）
+Comment=AI-native、local-first 的 API 客户端
 Exec=/home/zq-deepin/my-project/api-doc-go/api-doc-go-client/build/bin/api-doc-client
 Icon=/home/zq-deepin/my-project/api-doc-go/api-doc-go-client/build/appicon.png
 Terminal=false

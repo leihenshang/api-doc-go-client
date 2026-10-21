@@ -101,7 +101,7 @@ Depends: libgtk-3-0, libwebkit2gtk-4.0-37
 > Depends 必须与二进制**实际链接**的 so 对应（构建后用 `ldd build/bin/api-doc-client | grep -i webkit` 核对）。
 > 默认构建（无 webkit 标签）链 `libwebkit2gtk-4.0.so.37` → `libwebkit2gtk-4.0-37`；若用 `-tags webkit2_41` 构建则写 `libwebkit2gtk-4.1-0`。
 Description: AI-native, local-first API client
- Markdown 风格接口文档协作工具的桌面客户端（Postman/Bruno 风格）。
+ Markdown 风格接口文档协作工具的桌面客户端。
 ```
 
 ### 步骤 4：`.desktop`（关键，决定任务栏图标）
@@ -111,7 +111,7 @@ Description: AI-native, local-first API client
 Type=Application
 Name=API Doc Client
 GenericName=API Client
-Comment=AI-native、local-first 的 API 客户端（Postman/Bruno 风格）
+Comment=AI-native、local-first 的 API 客户端
 Exec=/usr/bin/api-doc-client
 Icon=api-doc-client
 Terminal=false
