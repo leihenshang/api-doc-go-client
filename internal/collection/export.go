@@ -663,7 +663,7 @@ func buildExportTOC(name string, tree []*Node, res *scanResult) string {
 	// 集合名（对应正文第一个标题 toc-0）
 	toc.WriteString(`<li class="toc-root"><a href="#`)
 	toc.WriteString(s.nextID())
-	toc.WriteString(`">`)
+	toc.WriteString(`" title="` + html.EscapeString(name) + `">`)
 	toc.WriteString(html.EscapeString(name))
 	toc.WriteString(`</a></li>`)
 
@@ -716,7 +716,7 @@ func (t *tocBuilder) folder(n *Node, open bool, depth int) {
 	t.b.WriteString(`<span class="toc-toggle" role="button" tabindex="0" aria-label="折叠或展开"></span>`)
 	t.b.WriteString(`<a href="#`)
 	t.b.WriteString(id)
-	t.b.WriteString(`">`)
+	t.b.WriteString(`" title="` + html.EscapeString(n.Name) + `">`)
 	t.b.WriteString(html.EscapeString(n.Name))
 	t.b.WriteString(`</a>`)
 	if len(n.Children) > 0 {
@@ -736,7 +736,8 @@ func (t *tocBuilder) request(n *Node) {
 	t.b.WriteString(methodBadge(n.Method))
 	t.b.WriteString(`<a href="#`)
 	t.b.WriteString(id)
-	t.b.WriteString(`">`)
+	// 名称过长被 ellipsis 截断时，悬停展示全名（CSS 在 export_template.go 的 .toc-request > a）。
+	t.b.WriteString(`" title="` + html.EscapeString(n.Name) + `">`)
 	t.b.WriteString(html.EscapeString(n.Name))
 	t.b.WriteString(`</a></li>`)
 	if t.res != nil {
@@ -755,7 +756,7 @@ func (t *tocBuilder) doc(n *Node) {
 	t.b.WriteString(docBadge())
 	t.b.WriteString(`<a href="#`)
 	t.b.WriteString(id)
-	t.b.WriteString(`">`)
+	t.b.WriteString(`" title="` + html.EscapeString(n.Name) + `">`)
 	t.b.WriteString(html.EscapeString(n.Name))
 	t.b.WriteString(`</a></li>`)
 	if t.res != nil {

@@ -25,16 +25,20 @@ const htmlStyleBlock = `</title>
   /* 正文容器默认占视口的 90%（左右各留 5%），不再固定 1100px —— 宽屏下文档铺开更好读，
      过长的行由各区块自己控制（表格/代码块横向溢出滚动，不撑破页面）。 */
   .layout { display: flex; gap: 24px; max-width: 90%; margin: 0 auto; padding: 32px 24px; align-items: flex-start; }
-  /* 左侧 sticky 目录树（集合树）：窄栏、浅底卡片，滚动时固定 */
-  .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto;
+  /* 左侧 sticky 目录树（集合树）：窄栏、浅底卡片，滚动时固定；
+     标题与搜索框钉在栏顶部，只有下方树区内部滚动（overflow 从 nav 下沉到 .toc-list）。 */
+  .toc { flex: 0 0 240px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: hidden;
+         display: flex; flex-direction: column;
          border: 1px solid #e3e3e3; border-radius: 10px; background: #f5f6f8; padding: 12px 14px; font-size: 13px; }
-  .toc-title { font-weight: 600; color: #202124; margin-bottom: 8px; }
-  /* 目录搜索框 */
-  .toc-search { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 6px 8px;
+  .toc-title { font-weight: 600; color: #202124; margin-bottom: 8px; flex: 0 0 auto; }
+  /* 目录搜索框（固定在树上方，不随列表滚动） */
+  .toc-search { width: 100%; box-sizing: border-box; margin: 0 0 10px; padding: 6px 8px; flex: 0 0 auto;
     border: 1px solid #e3e3e3; border-radius: 6px; font-size: 13px; font-family: inherit;
     color: #202124; background: #fff; outline: none; }
   .toc-search:focus { border-color: #18a058; }
   .toc-list, .toc ul { list-style: none; margin: 0; padding: 0; }
+  /* 树区占满剩余高度并内部滚动（min-height:0 是 flex 子项收缩的前提）。 */
+  .toc-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
   /* 嵌套目录：保留左侧缩进，并加树形连接线（风格对齐 client 侧栏树） */
   .toc ul { padding-left: 14px; }
   .toc li { margin: 2px 0; }
