@@ -386,11 +386,46 @@ const { fields, sample, hasResp, initFields, onSampleInput, setMeaning } = useRe
   onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
 })
 
-/** 响应数据里是否可能是 JSON/XML（只看前缀，用于按钮显隐）。 */
+/** 响应数据格式化失败提示（常显按钮，点击时才判断内容）。 */
+const respFormatError = ref(false)
+
+/** 响应数据编辑器：本地 textarea 双向绑定到 sample（与请求体原文同一套 JsonBodyEditor）。 */
+const respSample = computed({
+  get: () => sample.value,
+  set: (v: string) => {
+    respFormatError.value = false
+    onSampleInput(v)
+  },
+})
+// 外部同步 / 切换请求改写 sample 时，清掉上一轮的格式化错误提示
+watch(sample, () => {
+  respFormatError.value = false
+})
+
+/** 一键复制原文/响应数据；按钮文案在「复制 / 已复制」间短暂切换。 */
+const copiedRaw = ref<'body' | 'resp' | ''>('')
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyRaw(kind: 'body' | 'resp'): Promise<void> {
+  const text = kind === 'body' ? props.tab.request.body.raw : sample.value
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(text)
+    copiedRaw.value = kind
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => {
+      if (copiedRaw.value === kind) copiedRaw.value = ''
+    }, 1200)
+  } catch {
+    message.error(t('resp.copyFailed'))
+  }
+}
+
+/** 响应数据内容类型（用于选择着色语言；格式化按钮常显，点击时才校验）。 */
 const respDataKind = computed(() => detectTextKind(sample.value))
-/** 一键格式化响应数据：写回 sample（合法 JSON/XML 才生效），字段表格随之重算。 */
+/** 一键格式化响应数据：写回 sample（合法 JSON/XML 才生效）；失败时与请求体一样给内联提示。 */
 function formatRespData(): void {
   const out = prettyText(sample.value)
+  respFormatError.value = !out
   if (!out) return
   onSampleInput(out.text)
 }
@@ -445,6 +480,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
     getSeg: () => seg.value,
     getDocsEditing: () => docsEditing.value,
     getBodyType: () => props.tab.request.body.type,
+    getRespView: () => respView.value,
     isGrpc: () => isGrpcReq.value,
   })
 </script>
@@ -532,6 +568,10 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               data-testid="body.format" @click="formatBody">
               {{ t('editor.formatJson') }}
             </button>
+            <button v-if="bodyType === 'json' || bodyType === 'text'" class="fmt" type="button" data-testid="body.copy"
+              :disabled="!tab.request.body.raw.trim()" @click="copyRaw('body')">
+              {{ copiedRaw === 'body' ? t('common.copied') : t('common.copy') }}
+            </button>
             <span v-if="bodyType === 'json' && jsonBroken" class="fmtbad" data-testid="body.jsonBroken">
               {{ t('editor.jsonBroken') }}
             </span>
@@ -545,7 +585,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
                 data-view="table" @click="bodyView = 'table'">
                 {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length
-                  }}</span>
+                }}</span>
               </button>
             </div>
             <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />
@@ -631,13 +671,21 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
         <div v-else-if="respView === 'body'" class="resp-data">
           <div class="resp-data-hd">
             <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
-            <button v-if="respDataKind" class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
+            <span v-if="respFormatError" class="fmtbad" data-testid="resp.formatBroken">
+              {{ t('editor.formatBroken') }}
+            </span>
+            <button v-if="sample.trim()" class="fmt" type="button" data-testid="resp.copyData" @click="copyRaw('resp')">
+              {{ copiedRaw === 'resp' ? t('common.copied') : t('common.copy') }}
+            </button>
+            <button class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
               @click="formatRespData">
               {{ t('editor.formatJson') }}
             </button>
           </div>
-          <n-input :value="sample" type="textarea" :rows="16" class="mono resp-data-ta" data-testid="resp.dataInput"
-            :disabled="readonly" :placeholder="t('editor.respDataPh')" @update:value="onSampleInput" />
+          <div class="resp-data-editor" data-testid="resp.dataInput">
+            <json-body-editor v-model="respSample" :rows="16" :readonly="readonly" :lang="respDataKind ?? 'text'"
+              :placeholder="t('editor.respDataPh')" testid="resp.dataRaw" />
+          </div>
         </div>
         <div v-else class="resp-heads" data-testid="resp.segHeaders">
           <div v-if="!respSnap?.headers?.length" class="resp-heads-empty">{{ t('editor.respSnapEmpty') }}</div>
@@ -864,6 +912,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 .resp-data-hd {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -876,8 +925,13 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   cursor: not-allowed;
 }
 
-.resp-data-ta :deep(textarea) {
-  font-size: 12.5px;
+.resp-data-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.resp-data-editor :deep(.jb) {
+  width: 100%;
 }
 
 /* 响应类型行：下拉 + 类型徽标（与子页签同排风格） */

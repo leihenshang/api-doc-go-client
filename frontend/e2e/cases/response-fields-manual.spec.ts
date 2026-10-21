@@ -93,8 +93,56 @@ test.describe('响应字段：响应数据可编辑、自动生成表格', () =>
         await page.getByTestId('resp.formatData').click()
         await expect(dataInput(page)).toHaveValue('{\n  "a": 1,\n  "b": [\n    2\n  ]\n}')
 
+        // 格式化按钮常显：空内容 / 非法内容点击后给内联提示；重新输入即清除
+        await dataInput(page).fill('')
+        await expect(page.getByTestId('resp.formatData')).toBeVisible()
+        await page.getByTestId('resp.formatData').click()
+        await expect(page.getByTestId('resp.formatBroken')).toBeVisible()
+        await dataInput(page).fill('not-json')
+        await page.getByTestId('resp.formatData').click()
+        await expect(page.getByTestId('resp.formatBroken')).toBeVisible()
+        await dataInput(page).fill('{"ok":true}')
+        await expect(page.getByTestId('resp.formatBroken')).toHaveCount(0)
+
         await dataInput(page).fill('<root><a>1</a></root>')
         await page.getByTestId('resp.formatData').click()
         await expect(dataInput(page)).toHaveValue('<root>\n  <a>1</a>\n</root>')
+    })
+
+    test('响应数据编辑器：JSON/XML 着色、Ctrl+Z、查找、复制', async ({ page, app }) => {
+        await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+        await tab(page, 'body').click()
+
+        const ta = dataInput(page)
+        await ta.fill('{"name":"alice","age":3}')
+        // 与请求体原文同一套高亮层：键名拿到 .k
+        await expect(page.locator('.resp-data-editor .jb .hl span.k').first()).toContainText('"name"')
+
+        // 页内查找
+        await page.getByTestId('req.find').click()
+        await page.getByTestId('find.input').fill('alice')
+        await expect(page.getByTestId('find.count')).toHaveText('1/1')
+        await page.getByTestId('find.close').click()
+
+        // 原生 textarea 撤销：输入 X 后 Ctrl+Z 回到输入前
+        await ta.click()
+        await page.keyboard.press('End')
+        await ta.pressSequentially('X')
+        await expect(ta).toHaveValue('{"name":"alice","age":3}X')
+        await page.keyboard.press('Control+z')
+        await expect(ta).toHaveValue('{"name":"alice","age":3}')
+
+        // 一键复制
+        await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+        await page.getByTestId('resp.copyData').click()
+        const copied = await page.evaluate(() => navigator.clipboard.readText())
+        expect(copied).toBe('{"name":"alice","age":3}')
+
+        // XML 也走着色层
+        await ta.fill('<root><item id="1">a</item></root>')
+        await expect(page.locator('.resp-data-editor .jb .hl span.k').first()).toContainText('root')
     })
 })

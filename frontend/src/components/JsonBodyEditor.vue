@@ -7,7 +7,8 @@
 //
 // 两层必须严格重叠：同一字体（--app-mono）、同字号/行高/内边距/换行规则，否则光标会落在
 // 字形上（VarInput 里踩过：两层字体不一致时同一串文本宽度差 48px，光标与文字错位）。
-import { highlightJson } from '@/lib/jsonHighlight';
+import { highlightJson, type JsonPart } from '@/lib/jsonHighlight';
+import { highlightXml } from '@/lib/xmlHighlight';
 import { computed, nextTick, ref } from 'vue';
 
 const props = defineProps<{
@@ -15,22 +16,68 @@ const props = defineProps<{
   placeholder?: string
   /** 行数（只影响高度：高度 = 行数 × 行高 + 上下内边距） */
   rows?: number
+  /** 着色语言：json（默认）/ xml / text（不着色） */
+  lang?: 'json' | 'xml' | 'text'
+  /** 只读（响应数据快照等） */
+  readonly?: boolean
+  /** textarea 的 data-testid；默认 req.bodyRaw（响应数据传 resp.dataRaw） */
+  testid?: string
 }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string]; input: [] }>()
 
 const hl = ref<HTMLElement | null>(null)
 const ta = ref<HTMLTextAreaElement | null>(null)
-const parts = computed(() => highlightJson(props.modelValue))
+/** 受控 textarea 的原生 undo 会被 value 回写打断，这里自己维护一份有界历史。 */
+const undoStack: string[] = []
+const redoStack: string[] = []
+const MAX_HISTORY = 200
+
+function pushUndo(value: string): void {
+  if (props.readonly) return
+  if (undoStack[undoStack.length - 1] === value) return
+  undoStack.push(value)
+  if (undoStack.length > MAX_HISTORY) undoStack.shift()
+  redoStack.length = 0
+}
+
+function emitValue(next: string): void {
+  emit('update:modelValue', next)
+  emit('input')
+}
+
+function undo(): boolean {
+  const prev = undoStack.pop()
+  if (prev === undefined) return false
+  redoStack.push(props.modelValue)
+  emitValue(prev)
+  void nextTick().then(() => ta.value?.setSelectionRange(prev.length, prev.length))
+  return true
+}
+
+function redo(): boolean {
+  const next = redoStack.pop()
+  if (next === undefined) return false
+  undoStack.push(props.modelValue)
+  emitValue(next)
+  void nextTick().then(() => ta.value?.setSelectionRange(next.length, next.length))
+  return true
+}
+const parts = computed<JsonPart[]>(() => {
+  if (props.lang === 'text') return props.modelValue ? [{ text: props.modelValue, cls: '' }] : []
+  return props.lang === 'xml' ? highlightXml(props.modelValue) : highlightJson(props.modelValue)
+})
 
 function onInput(ev: Event): void {
-  emit('update:modelValue', (ev.target as HTMLTextAreaElement).value)
-  emit('input')
+  if (props.readonly) return
+  const next = (ev.target as HTMLTextAreaElement).value
+  if (next !== props.modelValue) pushUndo(props.modelValue)
+  emitValue(next)
 }
 
 /** 回落一个新值并把光标放到指定位置（配合受控 v-model）。 */
 function commit(next: string, caret: number): void {
-  emit('update:modelValue', next)
-  emit('input')
+  pushUndo(props.modelValue)
+  emitValue(next)
   void nextTick().then(() => {
     const el2 = ta.value
     if (!el2) return
@@ -50,6 +97,17 @@ const PAIR: Record<string, [string, string]> = {
 }
 
 function onKeydown(e: KeyboardEvent): void {
+  if (props.readonly) return
+  // 显式撤销/重做：受控 textarea 的原生栈不可靠（value 每次回写会打断）
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z') {
+    const changed = e.shiftKey ? redo() : undo()
+    if (changed) e.preventDefault()
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'y') {
+    if (redo()) e.preventDefault()
+    return
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return
   const pair = PAIR[e.key]
   if (!pair) return
@@ -97,17 +155,9 @@ function sync(ev: Event): void {
       <span v-for="(p, i) in parts" :key="i" :class="p.cls">{{ p.text }}</span>
       <span v-if="!modelValue" class="ph">{{ props.placeholder }}</span>
     </div>
-    <textarea
-      ref="ta"
-      class="ta mono"
-      :value="props.modelValue"
-      spellcheck="false"
-      autocomplete="off"
-      data-testid="req.bodyRaw"
-      @input="onInput"
-      @keydown="onKeydown"
-      @scroll="sync"
-    />
+    <textarea ref="ta" class="ta mono" :value="props.modelValue" :readonly="props.readonly" spellcheck="false"
+      autocomplete="off" :data-testid="props.testid ?? 'req.bodyRaw'" @input="onInput" @keydown="onKeydown"
+      @scroll="sync" />
   </div>
 </template>
 

@@ -268,6 +268,7 @@ export default {
     bodyMultipart: 'multipart 表单',
     formatJson: '格式化',
     jsonBroken: 'JSON 语法有误',
+    formatBroken: '格式不正确：仅支持 JSON 或 XML',
     formatUrl: '格式化 URL',
     rawPlaceholder: '请求体内容（支持 {\'{变量}\'}）',
     bodyTabRaw: '原文',

@@ -47,7 +47,10 @@ export async function reopenApp(
   opts: { expandRoots?: boolean } = {},
 ): Promise<void> {
   const welcome = page.getByRole('button', { name: t('welcome.open') })
-  if (await welcome.isVisible().catch(() => false)) await welcome.click()
+  // 欢迎页可能在「自动恢复根」完成后瞬间消失：点击加短超时兜底，不让测试卡在一个已消失的按钮上
+  if (await welcome.isVisible().catch(() => false)) {
+    await welcome.click({ timeout: 3000 }).catch(() => undefined)
+  }
   await expect(page.getByTestId('toolbar.collection')).toBeVisible()
   if (opts.expandRoots !== false) await expandAllRoots(page)
 }
