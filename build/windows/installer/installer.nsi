@@ -16,7 +16,7 @@
 ## （wails_tools.nsh 里每个默认值都是 !ifndef 守护，命令行 -D 一定优先）。
 ##
 ## 本文件相比 project.nsi 新增/加固：
-##   W-1：升级前 taskkill 关闭运行中的客户端，避免 exe 占用导致覆盖失败
+##   W-1：升级前用 nsExec 静默结束运行中的客户端（不弹控制台黑框），避免 exe 占用导致覆盖失败
 ##   W-2：升级=「先静默卸载旧版再装」重装模型，杜绝旧文件残留 / 卸载器自覆盖竞争
 ##   W-3：InstallDirRegKey + 补写 InstallLocation，记住并复用上次安装目录，
 ##        不再回落默认目录产生两份安装
@@ -115,11 +115,15 @@ Function .onInit
      ${EndIf}
      p1_kill_old:
      DetailPrint "检测到旧版本，正在关闭进程并静默卸载…"
-     # 结束运行中的客户端（PRODUCT_EXECUTABLE 无空格，如 api-doc-client.exe）
-     ExecWait '$WINDIR\System32\taskkill.exe /IM "${PRODUCT_EXECUTABLE}" /F' $0
-     # _?=<dir> 让卸载器原地运行、不复制到临时目录，ExecWait 会等它彻底结束再返回；
+     # 结束运行中的客户端（PRODUCT_EXECUTABLE 无空格，如 api-doc-client.exe）。
+     # 用 nsExec 而不是 ExecWait：taskkill 是控制台程序，ExecWait 会闪一个黑色控制台窗口；
+     # nsExec 会隐藏子进程控制台并把输出写进安装日志。
+     nsExec::ExecToLog '"$WINDIR\System32\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /F'
+     Pop $0
+     # _?=<dir> 让卸载器原地运行、不复制到临时目录；nsExec 会等它彻底结束再返回；
      # 必须是命令行最后一个参数：卸载器把 _?= 之后的整段（含空格）当目录解析。
-     ExecWait '"$PrevLoc\uninstall.exe" /S _?=$PrevLoc' $0
+     nsExec::ExecToLog '"$PrevLoc\uninstall.exe" /S _?=$PrevLoc'
+     Pop $0
      # 给文件系统删除被占用句柄留一点时间
      Sleep 800
    ${EndIf}
