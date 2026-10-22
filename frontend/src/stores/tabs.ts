@@ -100,6 +100,20 @@ export interface DocTabDoc {
   icon: string
 }
 
+/** 把参数表补进裸 URL（MCP / 文件导入可能只写 params，url 不带 query）。
+ *  仅修改内存展示；启用且有名才拼，保持 URL 中原有 fragment。 */
+function fillUrlQuery(r: RequestDoc): void {
+  if (!r.url.trim() || r.url.includes('?') || r.grpc) return
+  const parts = r.params
+    .filter((p) => p.enabled && p.name.trim())
+    .map((p) => `${encodeURIComponent(p.name.trim())}=${encodeURIComponent(p.value ?? '')}`)
+  if (!parts.length) return
+  const hash = r.url.indexOf('#')
+  const base = hash >= 0 ? r.url.slice(0, hash) : r.url
+  const suffix = hash >= 0 ? r.url.slice(hash) : ''
+  r.url = `${base}?${parts.join('&')}${suffix}`
+}
+
 /** 新建草稿的空请求模板：与 Go 侧 CreateRequest 的默认值一致（URL 留空，不预填 {{host}}）。 */
 function blankRequest(): RequestDoc {
   return {
@@ -286,6 +300,7 @@ export const useTabsStore = defineStore('tabs', {
      */
     openDraft(doc: RequestDoc | null, folder = ''): string {
       const r = doc ?? blankRequest()
+      fillUrlQuery(r)
       const tab: Tab = {
         key: nextKey(), uid: nextDraftUid(), kind: 'request',
         title: r.name || i18n.global.t(r.grpc ? 'tab.newGrpcDraft' : 'tab.newDraft'), request: r,
@@ -345,6 +360,7 @@ export const useTabsStore = defineStore('tabs', {
       await this.close(key, { save: false })
     },
     pushTab(r: RequestDoc): void {
+      fillUrlQuery(r)
       const tab: Tab = {
         key: nextKey(), uid: r.uid, title: r.name, kind: 'request', request: r,
         dirty: false, sending: false, response: null, error: '', resolve: null,
@@ -623,6 +639,7 @@ export const useTabsStore = defineStore('tabs', {
         }
         try {
           const doc = await api.readRequest(tab.uid)
+          fillUrlQuery(doc)
           tab.request = doc
           tab.title = doc.name || tab.title
           tab.baseHash = this.hashes[tab.uid] ?? cur
