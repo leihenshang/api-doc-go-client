@@ -46,6 +46,9 @@ type BindInfo struct {
 	// 摘要本身不泄露明文（sha-256），密文只在传输层出现。
 	EnvHashes map[string]string `json:"envHashes,omitempty"`
 	VarHashes map[string]string `json:"varHashes,omitempty"`
+	// FieldMappingHashes 字段字典的已推送状态（UID → 单条内容摘要）。
+	// 字段字典是单文件多条目，用条目摘要而非文件 hash，避免改一条导致全量重推。
+	FieldMappingHashes map[string]string `json:"fieldMappingHashes,omitempty"`
 }
 
 // Client 同步 HTTP 客户端。

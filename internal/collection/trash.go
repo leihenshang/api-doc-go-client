@@ -166,6 +166,7 @@ func rollbackTrashMoves(moved []trashMove) {
 			continue
 		}
 		_ = os.MkdirAll(filepath.Dir(m.src), 0o755)
+		// 回滚是尽力而为：原始错误已由上层返回，单个文件恢复失败不再覆盖主错误。
 		_ = os.Rename(m.dst, m.src)
 	}
 }

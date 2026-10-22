@@ -11,6 +11,8 @@ import {
   CloudDownloadOutline,
   CloudUploadOutline,
   CopyOutline,
+  ListOutline,
+  OptionsOutline,
   PlayOutline,
 } from '@vicons/ionicons5'
 import type { CollectionInfo, TreeNode } from '@/types'
@@ -23,6 +25,8 @@ const emit = defineEmits<{
   import: []
   export: [format: 'markdown' | 'html' | 'apidocgo']
   mock: []
+  'collection-defaults': []
+  'field-mappings': []
 }>()
 const { t } = useI18n()
 
@@ -110,6 +114,20 @@ const shortcuts = computed(() => [
             <n-icon :component="ArchiveOutline" :size="14" />
           </template>
           {{ t('export.bundle') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary data-testid="overview.defaults"
+          @click="emit('collection-defaults')">
+          <template #icon>
+            <n-icon :component="OptionsOutline" :size="14" />
+          </template>
+          {{ t('overview.defaults') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary data-testid="overview.fieldMappings"
+          @click="emit('field-mappings')">
+          <template #icon>
+            <n-icon :component="ListOutline" :size="14" />
+          </template>
+          {{ t('overview.fieldMappings') }}
         </n-button>
         <n-button class="act" size="medium" secondary data-testid="overview.mock" @click="emit('mock')">
           <template #icon>

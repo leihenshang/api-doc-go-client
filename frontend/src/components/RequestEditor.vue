@@ -134,6 +134,7 @@ const authType = computed({
 })
 const authOptions = computed(() => [
   { label: t('auth.none'), value: 'none' },
+  { label: t('auth.inherit'), value: 'inherit' },
   { label: t('auth.basic'), value: 'basic' },
   { label: t('auth.bearer'), value: 'bearer' },
   { label: t('auth.apikey'), value: 'apikey' },

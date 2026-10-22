@@ -344,6 +344,8 @@ func typeRank(t string) int {
 		return 4 // 环境先于变量（变量按 env_uid 挂接）
 	case "variable":
 		return 5
+	case "field_mapping":
+		return 6 // 项目级字典，无父依赖，放最后
 	default:
 		return 9
 	}
@@ -357,6 +359,10 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 		return fmt.Errorf("解析 %s %s 的同步载荷失败: %w", it.Type, it.UID, err)
 	}
 
+	// 字段字典：单文件多条目，按 uid 就地 upsert，成功后记条目摘要基线。
+	if it.Type == "field_mapping" {
+		return e.applyFieldMapping(it.UID, p)
+	}
 	// 响应示例：写 examples/ 文件即可，不进索引/冲突副本体系。
 	if it.Type == "example" {
 		e.snapshotExampleIfDirty(rep, it.UID, p)
@@ -835,6 +841,39 @@ func (e *Engine) applyVariable(uid string, p Payload) error {
 	return nil
 }
 
+// applyFieldMapping 应用字段字典条目：单文件多条目，按 uid 就地 upsert。
+// 本地已有同名字段但 uid 不同时以服务端为准（服务端保证项目内 field 唯一）；
+// 旧 uid 的推送基线一并清掉，避免下轮把重复条目当「本地删除」反推给服务端。
+func (e *Engine) applyFieldMapping(uid string, p Payload) error {
+	if p.Field == "" {
+		return nil
+	}
+	items, err := e.Coll.ListFieldMappings()
+	if err != nil {
+		return err
+	}
+	fm := collection.FieldMapping{UID: uid, Field: p.Field, Type: p.FieldType, Description: p.Description}
+	// 手工编辑可能留下同 field 的重复条目：按 uid 或同名一并替换，只保留服务端这一条。
+	kept := make([]collection.FieldMapping, 0, len(items)+1)
+	for _, it := range items {
+		if it.UID == uid || it.Field == fm.Field {
+			if it.UID != uid {
+				delete(e.Bind.FieldMappingHashes, it.UID)
+			}
+			continue
+		}
+		kept = append(kept, it)
+	}
+	if err := e.Coll.SaveFieldMappings(append(kept, fm)); err != nil {
+		return err
+	}
+	if e.Bind.FieldMappingHashes == nil {
+		e.Bind.FieldMappingHashes = map[string]string{}
+	}
+	e.Bind.FieldMappingHashes[uid] = collection.FieldMappingHash(fm)
+	return nil
+}
+
 func (e *Engine) applyDelete(it Item, rep *Report) {
 	// 删除失败必须让用户看到：本地没删掉但服务端已删，下次同步会重新「复活」它，
 	// 表现为「删了又回来」。此前这里是 `_ =`，全都静默吞掉。
@@ -871,6 +910,13 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 		delete(e.Bind.VarHashes, it.UID)
 	case "variable_env":
 		e.removeEnvByUID(it.UID)
+	case "field_mapping":
+		// 与文档同理：仅在本地删除成功后清基线，避免残留文件被当新条目重推。
+		if err := e.Coll.DeleteFieldMapping(it.UID); err == nil {
+			delete(e.Bind.FieldMappingHashes, it.UID)
+		} else {
+			fail(err)
+		}
 	}
 }
 
@@ -1048,6 +1094,7 @@ func (e *Engine) pushDirty(rep *Report) error {
 	e.collectDocOps(b)
 	e.collectExampleOps(b)
 	e.collectVarOps(b)
+	e.collectFieldMappingOps(b)
 	if len(b.ops) == 0 {
 		return nil
 	}
@@ -1332,6 +1379,49 @@ func (e *Engine) collectExampleOps(b *pushBatch) {
 	}
 }
 
+// collectFieldMappingOps 字段字典：按条目摘要做脏检测推 upsert；
+// 「有推送记录但条目已不在」视为本地删除 → tombstone。
+// ListFieldMappings 读/解析失败时本轮不推（与文档/示例同口径：不确定时绝不批量删远端）。
+func (e *Engine) collectFieldMappingOps(b *pushBatch) {
+	items, err := e.Coll.ListFieldMappings()
+	if err != nil {
+		return
+	}
+	// 自愈式身份分配：手工编辑新增的条目缺 uid，补一个才能参与同步。
+	changed := false
+	for i := range items {
+		if items[i].UID == "" && strings.TrimSpace(items[i].Field) != "" {
+			items[i].UID = collection.NewUID()
+			changed = true
+		}
+	}
+	if changed {
+		if err := e.Coll.SaveFieldMappings(items); err != nil {
+			return
+		}
+	}
+	live := make(map[string]bool, len(items))
+	for _, fm := range items {
+		if fm.UID == "" {
+			continue
+		}
+		live[fm.UID] = true
+		h := collection.FieldMappingHash(fm)
+		if prev, seen := e.Bind.FieldMappingHashes[fm.UID]; seen && prev == h {
+			continue // 内容未变化
+		}
+		op := Op{OpID: newOpID(), Op: "upsert", Type: "field_mapping", UID: fm.UID}
+		op.Payload, _ = json.Marshal(Payload{Field: fm.Field, FieldType: fm.Type, Description: fm.Description})
+		b.add(op, dirtyMeta{uid: fm.UID, hash: h, typ: "field_mapping"})
+	}
+	for uid := range e.Bind.FieldMappingHashes {
+		if !live[uid] {
+			b.add(Op{OpID: newOpID(), Op: "delete", Type: "field_mapping", UID: uid},
+				dirtyMeta{uid: uid, typ: "field_mapping", isDelete: true})
+		}
+	}
+}
+
 // applyPushResults 处理推送回执；返回 allOk（删除类操作是否全部成功）。
 // 注意：allOk 只是诊断口径（P2-1 之后不再决定能否清 pendingDeletes，
 // 墓碑改由 pushDirty 按回执逐条 RemovePendingDeletes）。
@@ -1482,6 +1572,17 @@ func (e *Engine) applyPushed(m dirtyMeta, r OpResult) {
 				e.Bind.DocHashes = map[string]string{}
 			}
 			e.Bind.DocHashes[m.uid] = m.hash
+		}
+		return
+	}
+	if m.typ == "field_mapping" {
+		if m.isDelete {
+			delete(e.Bind.FieldMappingHashes, m.uid)
+		} else if m.hash != "" {
+			if e.Bind.FieldMappingHashes == nil {
+				e.Bind.FieldMappingHashes = map[string]string{}
+			}
+			e.Bind.FieldMappingHashes[m.uid] = m.hash
 		}
 		return
 	}

@@ -58,6 +58,8 @@ export function DeleteFolderTree(arg1:string):Promise<void>;
 
 export function DeleteFromTrash(arg1:string,arg2:string):Promise<void>;
 
+export function DeleteFieldMapping(arg1:string):Promise<void>;
+
 export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
@@ -71,6 +73,8 @@ export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 export function ExportMCPAudit(arg1:string):Promise<string>;
 
 export function GenerateCode(arg1:string,arg2:string,arg3:collection.Request):Promise<string>;
+
+export function GetCollectionDefaults():Promise<app.CollectionDefaults>;
 
 export function GetGrpcDefault():Promise<app.GrpcDefaultInfo>;
 
@@ -111,6 +115,8 @@ export function ListCookies():Promise<Array<cookiejar.Info>>;
 export function ListDocs():Promise<Array<collection.DocEntry>>;
 
 export function ListEnvs():Promise<Array<collection.Env>>;
+
+export function ListFieldMappings():Promise<Array<collection.FieldMapping>>;
 
 export function ListGrpcProtos():Promise<Array<collection.ProtoFileInfo>>;
 
@@ -206,6 +212,8 @@ export function SaveEnv(arg1:collection.Env):Promise<void>;
 
 export function SaveEnvChecked(arg1:collection.Env,arg2:string):Promise<void>;
 
+export function SaveFieldMapping(arg1:collection.FieldMapping):Promise<collection.FieldMapping>;
+
 export function SaveRequest(arg1:collection.Request):Promise<void>;
 
 export function SaveResponseBody(arg1:string,arg2:boolean,arg3:string):Promise<string>;
@@ -221,6 +229,8 @@ export function SearchIndexFor(arg1:string,arg2:string,arg3:number):Promise<Arra
 export function SendRequest(arg1:collection.Request,arg2:string):Promise<runner.Result>;
 
 export function SetActiveCollection(arg1:string):Promise<void>;
+
+export function SetCollectionDefaults(arg1:app.CollectionDefaults):Promise<void>;
 
 export function SetGrpcDefault(arg1:string,arg2:Array<string>):Promise<void>;
 

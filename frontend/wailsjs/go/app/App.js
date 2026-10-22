@@ -74,6 +74,10 @@ export function DeleteDoc(arg1) {
   return window['go']['app']['App']['DeleteDoc'](arg1);
 }
 
+export function DeleteFieldMapping(arg1) {
+  return window['go']['app']['App']['DeleteFieldMapping'](arg1);
+}
+
 export function DeleteEnv(arg1) {
   return window['go']['app']['App']['DeleteEnv'](arg1);
 }
@@ -116,6 +120,10 @@ export function ExportMCPAudit(arg1) {
 
 export function GenerateCode(arg1, arg2, arg3) {
   return window['go']['app']['App']['GenerateCode'](arg1, arg2, arg3);
+}
+
+export function GetCollectionDefaults() {
+  return window['go']['app']['App']['GetCollectionDefaults']();
 }
 
 export function GetGrpcDefault() {
@@ -196,6 +204,10 @@ export function ListDocs() {
 
 export function ListEnvs() {
   return window['go']['app']['App']['ListEnvs']();
+}
+
+export function ListFieldMappings() {
+  return window['go']['app']['App']['ListFieldMappings']();
 }
 
 export function ListGrpcProtos() {
@@ -386,6 +398,10 @@ export function SaveEnvChecked(arg1, arg2) {
   return window['go']['app']['App']['SaveEnvChecked'](arg1, arg2);
 }
 
+export function SaveFieldMapping(arg1) {
+  return window['go']['app']['App']['SaveFieldMapping'](arg1);
+}
+
 export function SaveRequest(arg1) {
   return window['go']['app']['App']['SaveRequest'](arg1);
 }
@@ -416,6 +432,10 @@ export function SendRequest(arg1, arg2) {
 
 export function SetActiveCollection(arg1) {
   return window['go']['app']['App']['SetActiveCollection'](arg1);
+}
+
+export function SetCollectionDefaults(arg1) {
+  return window['go']['app']['App']['SetCollectionDefaults'](arg1);
 }
 
 export function SetGrpcDefault(arg1, arg2) {

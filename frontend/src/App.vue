@@ -2,11 +2,13 @@
 // 根组件（AppShell，design-spec §2）：标题栏 → 工具栏 → 三栏主体（侧栏 / 标签+请求+响应）→ 状态栏。
 // 请求区与响应区的位置由全局设置 responseLayout 决定，占比由分隔条拖动调整（松手落盘）。
 import CodeGenDialog from '@/components/CodeGenDialog.vue'
+import CollectionDefaultsDialog from '@/components/CollectionDefaultsDialog.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import CookieDialog from '@/components/CookieDialog.vue'
 import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import DocEditor from '@/components/DocEditor.vue'
 import EnvManager from '@/components/EnvManager.vue'
+import FieldMappingsDialog from '@/components/FieldMappingsDialog.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
 import McpConsentDialog from '@/components/McpConsentDialog.vue'
@@ -83,6 +85,8 @@ const showPalette = ref(false)
 const showImport = ref(false)
 const showCodegen = ref(false)
 const showMock = ref(false)
+const showCollDefaults = ref(false)
+const showFieldMappings = ref(false)
 const showSync = ref(false)
 /** 同步设置/冲突弹窗当前针对的根（空串 = 活动根），支持非活动根的冲突展示 */
 const syncRoot = ref('')
@@ -1091,7 +1095,8 @@ watch(
                 </div>
 
                 <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
-                  @export="exportDoc($event)" @mock="showMock = true" />
+                  @export="exportDoc($event)" @mock="showMock = true" @collection-defaults="showCollDefaults = true"
+                  @field-mappings="showFieldMappings = true" />
               </transition>
             </main>
           </div>
@@ -1114,6 +1119,8 @@ watch(
       <import-dialog v-model:show="showImport" @imported="imported" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
+      <collection-defaults-dialog v-model:show="showCollDefaults" />
+      <field-mappings-dialog v-model:show="showFieldMappings" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
       <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
         :active-root="coll.activeRoot" @open-request="openRequestInRoot" @open-doc="openDocInRoot" @switch-env="pickEnv"
