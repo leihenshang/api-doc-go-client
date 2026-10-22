@@ -1,0 +1,30 @@
+/* HarmonyOS Sans SC（随包内置；Regular / Medium / Bold 三个字重）
+   已按 GB2312 + 常用标点 + 界面实际用字子集化（约 7800 字），生僻字回退系统字体。
+   字体文件由 @lobehub/webfont-harmony-sans-sc 经 subset-font 生成，见 public 下的许可证。 */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: local('HarmonyOS Sans SC'), local('HarmonyOS_Sans_SC'),
+    url('./harmonyos/HarmonyOS_Sans_SC_Regular.subset.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: local('HarmonyOS Sans SC Medium'), local('HarmonyOS_Sans_SC_Medium'),
+    url('./harmonyos/HarmonyOS_Sans_SC_Medium.subset.woff2') format('woff2');
+}
+
+/* 600（标题/强调）复用 Bold 文件；避免再打一份 Semibold 字体。 */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600 700;
+  src: local('HarmonyOS Sans SC Bold'), local('HarmonyOS_Sans_SC_Bold'),
+    url('./harmonyos/HarmonyOS_Sans_SC_Bold.subset.woff2') format('woff2');
+}
