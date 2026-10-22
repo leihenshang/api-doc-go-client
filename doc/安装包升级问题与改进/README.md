@@ -126,8 +126,8 @@
 
 | 问题 | 实现 |
 |---|---|
-| W-1 占用失败 | `.onInit` 卸载旧版前先 `taskkill /IM ${PRODUCT_EXECUTABLE} /F` 关闭运行中的客户端 |
-| W-2 残留/自覆盖竞争 | `.onInit` 检测旧版 `InstallLocation` 存在且有 `uninstall.exe` → `ExecWait '"<旧目录>\uninstall.exe" /S _?=<旧目录>'` 先静默卸载（重装模型），彻底清理旧文件后再全新安装 |
+| W-1 占用失败 | `.onInit` 卸载旧版前用 `nsExec::ExecToLog` 隐藏执行 `taskkill /IM ${PRODUCT_EXECUTABLE} /F` 关闭运行中的客户端（避免控制台黑框） |
+| W-2 残留/自覆盖竞争 | `.onInit` 检测旧版 `InstallLocation` 存在且有 `uninstall.exe` → 用 `nsExec::ExecToLog` 隐藏执行 `"<旧目录>\uninstall.exe" /S _?=<旧目录>` 先静默卸载（重装模型），彻底清理旧文件后再全新安装 |
 | W-3 目录记忆 | 加 `InstallDirRegKey HKLM/HKCU "${UNINST_KEY}" "InstallLocation"`（hive 随 scope）；主 Section 在 `wails.writeUninstaller` 后补写 `InstallLocation`；`.onInit` 读旧 `InstallLocation` 回填 `$INSTDIR` |
 | W-4 范围提示 | `build-win.ps1` 完成输出追加「machine/user 是两个独立安装，升级请固定同一 `-InstallScope`」提示 |
 | 引导/bootstrap 判据 | `build-win.ps1` 的 `-nsis` 触发条件从「project.nsi 缺失」改为「`wails_tools.nsh` 或 WebView2 引导器缺失」（我们不再依赖 project.nsi） |

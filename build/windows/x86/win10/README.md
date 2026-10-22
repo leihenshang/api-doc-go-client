@@ -105,7 +105,7 @@ wails build -platform windows/amd64 -tags devbuild -o api-doc-client-dev.exe   #
 
 | 编号 | 行为 |
 |---|---|
-| W-1 | 升级前 `taskkill` 关闭运行中的客户端，避免 exe 占用导致覆盖失败 |
+| W-1 | 升级前用 `nsExec` 静默执行 `taskkill` 关闭运行中的客户端（不闪控制台黑框），避免 exe 占用导致覆盖失败 |
 | W-2 | 升级 = 「先静默卸载旧版再装」重装模型（`uninstall.exe /S _?=<dir>`），杜绝旧文件残留 |
 | W-3 | `InstallDirRegKey` + 补写 `InstallLocation`，记住并复用上次安装目录 |
 | W-4 | WebView2 未就绪时给出明确指引；静默安装写 `errorlevel 16388` 不阻断脚本 |
@@ -144,8 +144,8 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 覆盖升级（检测到旧版卸载器时）：
 
 1. 交互模式先弹确认（提示未保存修改会丢失，取消即中止）；
-2. `taskkill /IM <PRODUCT_EXECUTABLE> /F` 关闭运行中的客户端；
-3. `uninstall.exe /S _?=<旧目录>` 原地静默卸载旧版；
+2. 以隐藏控制台方式执行 `taskkill /IM <PRODUCT_EXECUTABLE> /F` 关闭运行中的客户端（`nsExec`，不弹黑框）；
+3. 以隐藏控制台方式执行 `uninstall.exe /S _?=<旧目录>` 原地静默卸载旧版；
 4. 按 `InstallLocation` 回填的目录全新安装（静默安装 `/S` 跳过第 1 步确认）。
 
 > 从**未写 `InstallLocation` 的旧安装包**（早期 wails 默认工程）升级时，首次不会被自动卸载；
