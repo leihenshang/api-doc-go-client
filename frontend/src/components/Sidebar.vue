@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 集合树：根行（集合名 + 本地徽章）→ 分组 / 请求；底部为「本地存储」说明卡（design-spec §2）。
+// 集合树：根行（集合名 + 云端徽章，仅已关联服务端时显示）→ 分组 / 请求；底部为「本地存储」说明卡（design-spec §2）。
 // 操作方式对齐服务端 Web：顶部工具条（展开/收起 + 新建分组 + 新建请求）、独立搜索行；
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
@@ -998,10 +998,11 @@ watch(
               <n-icon :component="isRootCollapsed(row.root) ? ChevronForwardOutline : ChevronDownOutline" :size="13" />
             </button>
             <span class="rname coll-name" :title="rootDir(row.root)">{{ rootName(row.root) }}</span>
+            <!-- 本地集合不再显示徽章；只有已关联服务端的集合才标记「云端」 -->
+            <span v-if="rootLinked(row.root)" class="badge">{{ t('tree.cloudBadge') }}</span>
             <span v-if="rootReadOnly(row.root)" class="badge badge-ro">{{ t('tree.readOnly') }}</span>
-            <span v-else class="badge">{{ t('local.badge') }}</span>
             <span v-if="dragging" class="drop-tip">{{ dropHint?.root === row.root ? dropHint?.tip : t('tree.dropRoot')
-            }}</span>
+              }}</span>
             <span class="actions">
               <!-- 已关联服务端的集合：根行独立「刷新=立即同步」按钮，只同步该根、不切换集合 -->
               <button v-if="rootLinked(row.root)" class="act" type="button" data-testid="tree.root.sync"
@@ -1090,9 +1091,9 @@ watch(
               </span>
             </template>
 
-            <!-- B19：文档行（与请求行同构：图标 + 行内重命名 + 行内菜单） -->
+            <!-- B19：文档行（与请求行同构：MD 标记 + 行内重命名 + 行内菜单） -->
             <template v-else-if="row.node!.type === 'doc'">
-              <n-icon :component="DocumentTextOutline" :size="13" class="dicon" data-testid="tree.docRow" />
+              <span class="md-tree" data-testid="tree.docRow">MD</span>
               <n-input v-if="editing?.root === row.root && editing?.uid === row.node!.uid" v-model:value="editing.value"
                 size="tiny" class="rename" @keyup.enter="submitRename" @blur="submitRename"
                 @keyup.esc="editing = null" />
@@ -1401,17 +1402,24 @@ watch(
   font-size: 12.5px;
 }
 
-.row>.mt,
-.row>
-
-/* B19：文档行图标（与 method-tag 同列对齐） */
-.dicon {
+/* B19：文档行标记（与 method-tag 同列、同字号、同字形中心） */
+.md-tree {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  color: var(--app-muted);
+  height: 16px;
+  /* 与树上 MethodTag 的 34px 最小宽度一致：名称起点、视觉间距都对齐 */
+  min-width: 34px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
+  color: var(--app-md);
 }
 
-.row.on .dicon {
-  color: var(--app-accent);
+.row>.md-tree+.rname {
+  margin-left: -2px;
 }
 
 .rname {

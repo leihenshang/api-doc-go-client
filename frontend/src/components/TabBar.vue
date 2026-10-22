@@ -6,17 +6,16 @@
 import MethodTag from '@/components/MethodTag.vue'
 import type { Tab } from '@/stores/tabs'
 import {
-    AddOutline,
-    ChevronBackCircleOutline,
-    ChevronBackOutline,
-    ChevronForwardCircleOutline,
-    ChevronForwardOutline,
-    CloseCircleOutline,
-    CloseOutline,
-    CopyOutline,
-    DocumentTextOutline,
-    LayersOutline,
-    SaveOutline,
+  AddOutline,
+  ChevronBackCircleOutline,
+  ChevronBackOutline,
+  ChevronForwardCircleOutline,
+  ChevronForwardOutline,
+  CloseCircleOutline,
+  CloseOutline,
+  CopyOutline,
+  LayersOutline,
+  SaveOutline,
 } from '@vicons/ionicons5'
 import type { DropdownOption } from 'naive-ui'
 import { NDropdown, NIcon } from 'naive-ui'
@@ -187,10 +186,10 @@ onBeforeUnmount(() => {
         @keydown.enter="emit('select', tab.key)" @contextmenu.prevent="openMenu(i, $event)"
         @dragstart="onDragStart(i, $event)" @dragover.prevent="onDragOver($event)" @drop="onDrop(i, $event)"
         @dragend="dragFrom = -1">
-        <!-- 只有请求页签才有方法；文档页签此前被套了 blankRequest 的默认 GET，
-             显示成「GET 接入指南」，会被误读成一个 GET 接口。 -->
-        <method-tag v-if="tab.kind === 'request'" :method="tab.request.method" />
-        <n-icon v-else :component="DocumentTextOutline" :size="13" class="doc-ic" />
+        <!-- 请求页签显示按 HTTP 方法着色的前缀；文档页签用蓝色 MD 标记，排版与请求方法一致。
+             kind 缺省（旧会话数据 / 早期构造点）按 request 处理，避免把请求误画成文档。 -->
+        <method-tag v-if="tab.kind !== 'doc'" :method="tab.request.method" />
+        <span v-else class="md-tag">MD</span>
         <span v-if="tab.dirty || tab.draft" class="dot" :title="t('tab.unsaved')" />
         <span class="tt">{{ tab.title }}</span>
         <button class="x" type="button" data-testid="tab.close" :title="t('tab.closeHint')"
@@ -286,7 +285,7 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   max-width: 230px;
   padding: 8px 10px;
   border: none;
@@ -294,9 +293,39 @@ onBeforeUnmount(() => {
   background: transparent;
   font-family: inherit;
   font-size: 12.5px;
+  line-height: 16px;
   color: var(--app-muted);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* 页签前缀（方法文字 / 文档图标）与标题同字号、同行高（16px）；
+   仅调整方法文字的字体观感（与标题同一字体、常规偏中字重），不改页签卡片/底色。 */
+.tab :deep(.mt) {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+
+/* 文档页签用文字 MD 代替图标，排版与被着色的 HTTP 方法保持一致。 */
+.tab :deep(.md-tag) {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
+  color: var(--app-md);
+  flex: 0 0 auto;
 }
 
 .tab:hover {
@@ -326,6 +355,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   max-width: 140px;
   text-overflow: ellipsis;
+  line-height: 16px;
 }
 
 .dot {

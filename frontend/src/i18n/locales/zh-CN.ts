@@ -385,6 +385,7 @@ export default {
     externalChange: '检测到外部改动：{n} 个页签有未保存编辑，已保留编辑未覆盖；可手动 ⟳ 重载',
     dropRoot: '放到此处移回根目录',
     readOnly: '只读',
+    cloudBadge: '云端',
     reqCount: '{n} 个请求',
     reloadDir: '重新载入该工作目录',
     syncNow: '立即同步此集合（不切换集合）',

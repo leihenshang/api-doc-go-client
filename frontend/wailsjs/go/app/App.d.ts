@@ -192,6 +192,8 @@ export function RestoreTrash(arg1:string,arg2:string,arg3:string):Promise<string
 
 export function RevealInFolder(arg1:string):Promise<void>;
 
+export function RevealMainWindow():Promise<void>;
+
 export function RunSync(arg1:string):Promise<syncengine.Report>;
 
 export function RunSyncForRoot(arg1:string):Promise<syncengine.Report>;

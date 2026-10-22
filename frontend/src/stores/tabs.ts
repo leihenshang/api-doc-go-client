@@ -287,7 +287,7 @@ export const useTabsStore = defineStore('tabs', {
     openDraft(doc: RequestDoc | null, folder = ''): string {
       const r = doc ?? blankRequest()
       const tab: Tab = {
-        key: nextKey(), uid: nextDraftUid(),
+        key: nextKey(), uid: nextDraftUid(), kind: 'request',
         title: r.name || i18n.global.t(r.grpc ? 'tab.newGrpcDraft' : 'tab.newDraft'), request: r,
         dirty: true, sending: false, response: null, error: '', resolve: null,
         draft: true, draftFolder: folder, grpcSchema: null, grpcError: '',
@@ -346,7 +346,7 @@ export const useTabsStore = defineStore('tabs', {
     },
     pushTab(r: RequestDoc): void {
       const tab: Tab = {
-        key: nextKey(), uid: r.uid, title: r.name, request: r,
+        key: nextKey(), uid: r.uid, title: r.name, kind: 'request', request: r,
         dirty: false, sending: false, response: null, error: '', resolve: null,
         draft: false, draftFolder: '', grpcSchema: null, grpcError: '',
       }

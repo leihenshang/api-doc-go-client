@@ -54,6 +54,14 @@ func main() {
 		OnDomReady:       core.DomReady,
 		// Alt+F4 / 系统关闭先拦截：前端确认未保存改动后再放行（见 app.OnBeforeClose）
 		OnBeforeClose: core.OnBeforeClose,
+		// 单实例：从系统应用列表再次启动时不再开第二个窗口，而是唤醒当前进程并显示窗口。
+		// UniqueId 用 appTitle（正式版/开发版各自独立，避免开发时被已运行的正式版拦住）。
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: appTitle,
+			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+				core.RevealMainWindow()
+			},
+		},
 		// 退出前收尾：停内嵌 MCP 服务（释放端口）与集合监听。
 		// wails dev 的 Ctrl+C 打到应用时也走这里（见 internal/app 的 watchSignals 注释）。
 		OnShutdown: core.Shutdown,

@@ -108,6 +108,8 @@ body.dragging.row * {
   --app-info: #2080f0;
   --app-info-dark: #1060c0;
   --app-info-tint: #e8f0fe;
+  /* 文档页签的文字标记色（取自设计稿的蓝色） */
+  --app-md: #0078d4;
   --app-send: #18a058;
   --app-send-hover: #36ad6a;
   --app-row-hover: #ececec;
@@ -228,6 +230,7 @@ body.dragging.row * {
   --app-info: #4098fc;
   --app-info-dark: #7cb8ff;
   --app-info-tint: #16283d;
+  --app-md: #0078d4;
   --app-send: #18a058;
   --app-send-hover: #36ad6a;
   --app-row-hover: #26282c;

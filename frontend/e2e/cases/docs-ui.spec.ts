@@ -17,6 +17,30 @@ test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', a
   const dir = await app.newCollection('basic')
   await openCollection(page, app)
 
+  // 文档树叶子：先确认请求页签显示 HTTP 方法、不显示文档图标
+  await treeRow(page, 'ping').click()
+  const reqTab = page.getByTestId('tab.item').filter({ hasText: 'ping' })
+  await expect(reqTab.locator('.mt')).toHaveText('GET')
+  await expect(reqTab.locator('.md-tag')).toHaveCount(0)
+  const reqMethod = await reqTab.locator('.mt').boundingBox()
+  const reqTitle = await reqTab.locator('.tt').boundingBox()
+  expect(reqMethod && reqTitle).toBeTruthy()
+  // 方法与标题垂直居中对齐，间距收窄（4px）
+  expect(Math.abs(reqMethod!.y + reqMethod!.height / 2 - reqTitle!.y - reqTitle!.height / 2)).toBeLessThanOrEqual(2)
+  expect(reqTitle!.x - (reqMethod!.x + reqMethod!.width)).toBeLessThanOrEqual(6)
+  // 更严格：直接比较「GET」与中文标题的字形范围中心，而不是元素盒中心
+  const glyphCenters = await reqTab.evaluate((el) => {
+    const center = (node: Element | null): number => {
+      if (!node) return 0
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      const r = range.getBoundingClientRect()
+      return r.top + r.height / 2
+    }
+    return { method: center(el.querySelector('.mt')), title: center(el.querySelector('.tt')) }
+  })
+  expect(Math.abs(glyphCenters.method - glyphCenters.title)).toBeLessThanOrEqual(1)
+
   // ① 分组行「＋」菜单 → 新建文档（folder 由所选分组决定）
   const group = treeRow(page, 'api')
   await group.hover()
@@ -27,11 +51,41 @@ test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', a
   await page.getByRole('button', { name: t('common.confirm') }).click()
 
   // 树同层出现文档叶子
-  await expect(treeRow(page, '接口说明').getByTestId('tree.docRow')).toBeVisible()
+  const docLeaf = treeRow(page, '接口说明').getByTestId('tree.docRow')
+  await expect(docLeaf).toHaveText('MD')
+  await expect(docLeaf).toHaveCSS('color', 'rgb(0, 120, 212)')
+  await expect(docLeaf).toBeVisible()
+  // 树上 MD 与名称的视觉间距应与请求方法一致（按字形右边界到名称左边界计算）
+  const treeGaps = await page.evaluate(() => {
+    const gapFor = (row: Element | undefined): number => {
+      if (!row) return -1
+      const prefix = row.querySelector('.mt, .md-tree')
+      const name = row.querySelector('.rname')
+      if (!prefix || !name) return -1
+      const range = document.createRange()
+      range.selectNodeContents(prefix)
+      return name.getBoundingClientRect().left - range.getBoundingClientRect().right
+    }
+    const rows = [...document.querySelectorAll('[data-testid="tree.row"]')]
+    return {
+      req: gapFor(rows.find((r) => r.textContent?.includes('ping'))),
+      doc: gapFor(rows.find((r) => r.getAttribute('data-kind') === 'doc')),
+    }
+  })
+  expect(treeGaps.req).toBeGreaterThan(0)
+  expect(Math.abs(treeGaps.req - treeGaps.doc)).toBeLessThanOrEqual(2)
 
   // ② 点叶子 → 开文档页签（保存按钮可见即编辑器已挂载）
   await treeRow(page, '接口说明').click()
   await expect(page.getByTestId('doc.save')).toBeVisible()
+  const docTab = page.getByTestId('tab.item').filter({ hasText: '接口说明' })
+  await expect(docTab.locator('.md-tag')).toHaveText('MD')
+  await expect(docTab.locator('.md-tag')).toHaveCSS('color', 'rgb(0, 120, 212)')
+  await expect(docTab.locator('.mt')).toHaveCount(0)
+  const docIcon = await docTab.locator('.md-tag').boundingBox()
+  const docTitle = await docTab.locator('.tt').boundingBox()
+  expect(docIcon && docTitle).toBeTruthy()
+  expect(Math.abs(docIcon!.y + docIcon!.height / 2 - docTitle!.y - docTitle!.height / 2)).toBeLessThanOrEqual(2)
 
   // ③ 编辑正文 → 脏点出现 → Ctrl+S 落盘（poll 文件内容）
   await page.locator('.md-editor textarea, .md-editor .cm-content').first().click()
