@@ -358,6 +358,10 @@ export function RevealInFolder(arg1) {
   return window['go']['app']['App']['RevealInFolder'](arg1);
 }
 
+export function RevealMainWindow() {
+  return window['go']['app']['App']['RevealMainWindow']();
+}
+
 export function RunSync(arg1) {
   return window['go']['app']['App']['RunSync'](arg1);
 }

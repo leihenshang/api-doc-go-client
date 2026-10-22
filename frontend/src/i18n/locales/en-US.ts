@@ -385,6 +385,7 @@ export default {
     externalChange: 'External changes detected: {n} tab(s) have unsaved edits — kept, not overwritten; reload with ⟳ if needed',
     dropRoot: 'Drop here to move back to root',
     readOnly: 'Read-only',
+    cloudBadge: 'Cloud',
     reqCount: '{n} requests',
     reloadDir: 'Reload this workspace',
     syncNow: 'Sync this collection now (without switching collections)',

@@ -660,6 +660,17 @@ func (a *App) WindowIsMaximised() bool {
 	return runtime.WindowIsMaximised(ctx)
 }
 
+// RevealMainWindow 从最小化 / 托盘隐藏状态恢复并显示主窗口。
+// 单实例模式下，用户从系统应用列表再次启动时由第二实例回调当前进程执行。
+func (a *App) RevealMainWindow() {
+	ctx := a.appCtx()
+	if ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(ctx)
+	runtime.WindowShow(ctx)
+}
+
 // Quit 退出应用。
 func (a *App) Quit() {
 	ctx := a.appCtx()

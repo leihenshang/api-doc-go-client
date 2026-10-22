@@ -83,6 +83,9 @@ test('[M1] 多工作目录：工具条菜单可切换 / 根可折叠 / 可关闭
   const basic = roots.filter({ hasText: 'e2e-basic' })
   const bruno = roots.filter({ hasText: 'e2e-bruno' })
   await expect(roots).toHaveCount(2)
+  // 本地集合根行不再显示「本地」徽章；只有关联服务端才显示「云端」
+  await expect(roots.first()).not.toContainText(t('local.badge'))
+  await expect(roots.first()).not.toContainText(t('tree.cloudBadge'))
 
   // 工具条「集合」菜单里能直接切到另一个工作目录
   await page.getByTestId('toolbar.collection').click()
