@@ -133,6 +133,8 @@ func (a *App) SendRequest(r *collection.Request, envName string) (*runner.Result
 	if r == nil {
 		return nil, errors.New("请求为空")
 	}
+	// 集合级公共请求头/认证：请求未覆盖时生效（发送与 MCP 共用，历史记录到的就是实际发出的）。
+	r = a.withCollectionDefaults(r)
 	vars, err := a.envVars(envName)
 	if err != nil {
 		return nil, err
@@ -443,6 +445,8 @@ func (a *App) GenerateCode(lang, envName string, r *collection.Request) (string,
 	if r == nil {
 		return "", errors.New("请求为空")
 	}
+	// 集合级公共请求头/认证：代码片段与真实发送保持一致。
+	r = a.withCollectionDefaults(r)
 	if r.IsGRPC() {
 		return a.generateGrpcCode(lang, envName, r)
 	}

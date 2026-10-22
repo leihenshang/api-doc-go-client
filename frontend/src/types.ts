@@ -25,7 +25,7 @@ export interface ReqBody {
   descs?: Record<string, string>
 }
 
-export type AuthType = 'none' | 'basic' | 'bearer' | 'apikey'
+export type AuthType = 'none' | 'basic' | 'bearer' | 'apikey' | 'inherit'
 
 export interface Auth {
   type: AuthType | string
@@ -35,6 +35,20 @@ export interface Auth {
   key?: string
   value?: string
   in?: 'header' | 'query'
+}
+
+/** 集合级公共请求参数（清单 defaults 段）：集合内 HTTP 请求共享的请求头与认证。 */
+export interface CollectionDefaults {
+  headers: KV[]
+  auth?: Auth | null
+}
+
+/** 项目字段字典条目（与服务端 field_mapping 双向同步）。 */
+export interface FieldMapping {
+  uid: string
+  field: string
+  type: string
+  description?: string
 }
 
 // 请求级覆盖项：未设置时沿用全局设置

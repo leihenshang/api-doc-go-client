@@ -22,6 +22,10 @@ import (
 // embedStopTimeout 停服等待上限（ServeHTTP 收到 ctx 取消后做优雅关闭）。
 const embedStopTimeout = 3 * time.Second
 
+// embedReadyTimeout 等监听就绪的上限：端口预检是「先占再放开」，
+// ServeHTTP 在 goroutine 里重新 bind，返回 Running 前必须确认真的可连。
+const embedReadyTimeout = 2 * time.Second
+
 // embedBackend 是内嵌 MCP 服务的实现（app.MCPBackend）。
 //
 // 为什么实现放在 internal/mcp 而不是 internal/app：internal/mcp 需要 App 的集合运行时
@@ -209,6 +213,14 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 			b.logger.Printf("HTTP 服务退出: %v", err)
 		}
 	}()
+	// 监听在 goroutine 里建立：先确认可连再报 Running，否则调用方立刻探活会偶发 connection refused。
+	if !waitEmbedListener(addr) {
+		cancel()
+		<-done
+		st.Error = fmt.Sprintf("无法监听 %s：服务未就绪", addr)
+		b.record(fp, req, st, nil)
+		return st, nil
+	}
 
 	b.mu.Lock()
 	b.cancel, b.done, b.addr = cancel, done, addr
@@ -280,6 +292,20 @@ func (b *embedBackend) Stop() {
 	case <-done:
 	case <-time.After(embedStopTimeout):
 	}
+}
+
+// waitEmbedListener 轮询确认 addr 已可建立 TCP 连接（监听真正就绪）。
+func waitEmbedListener(addr string) bool {
+	deadline := time.Now().Add(embedReadyTimeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 // embedHint 按监听范围给连接提示。

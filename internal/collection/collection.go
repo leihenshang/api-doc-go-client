@@ -62,6 +62,9 @@ type Collection struct {
 	// grpcDefault 集合级默认 gRPC 定义（清单里的 grpc 段，P8）；nil = 未配置。
 	// 只有在内存里保留它，writeManifest 才不会把清单里的这一段写丢。
 	grpcDefault *share.GRPCDefault
+	// defaults 集合级公共请求参数（清单里的 defaults 段）；nil = 未配置。
+	// 同样需在内存保留，写清单时才能原样保留该段。
+	defaults *share.Defaults
 }
 
 // ---------- 集合清单（opencollection.yml） ----------
@@ -124,6 +127,7 @@ func Open(dir string) (*Collection, error) {
 		}
 		c.UID, c.Name = m.Meta.UID, m.Info.Name
 		c.grpcDefault = m.GRPC
+		c.defaults = m.Defaults
 	}
 	if c.UID == "" {
 		c.UID = uuid.NewString()
@@ -538,6 +542,14 @@ func (c *Collection) writeManifest() error {
 		return fmt.Errorf("序列化集合级 gRPC 定义: %w", err)
 	} else {
 		doc.setNode("grpc", node)
+	}
+	// 集合级公共参数同样要原样写回；未配置时删掉该段
+	if c.defaults == nil {
+		doc.remove("defaults")
+	} else if node, err := encodeYAMLValue(c.defaults); err != nil {
+		return fmt.Errorf("序列化集合级公共参数: %w", err)
+	} else {
+		doc.setNode("defaults", node)
 	}
 	data, err := yaml.Marshal(doc.root)
 	if err != nil {

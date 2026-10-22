@@ -28,7 +28,40 @@ export namespace app {
 	        this.offset = source["offset"];
 	    }
 	}
-	export class CollectionSummary {
+	export class CollectionDefaults {
+	    headers: collection.KV[];
+	    auth?: collection.Auth;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollectionDefaults(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.headers = this.convertValues(source["headers"], collection.KV);
+	        this.auth = this.convertValues(source["auth"], collection.Auth);
+	    }
+	
+	    convertValues(a: any, classs: any, asMap: boolean = false): any {
+	        if (!a) {
+	            return a;
+	        }
+	        if (a.slice && a.map) {
+	            return (a as any[]).map(elem => this.convertValues(elem, classs));
+	        } else if ("object" === typeof a) {
+	            if (asMap) {
+	                for (const key of Object.keys(a)) {
+	                    a[key] = new classs(a[key]);
+	                }
+	                return a;
+	            }
+	            return new classs(a);
+	        }
+	        return a;
+	    }
+	}
+
+ export class CollectionSummary {
 	    root: string;
 	    info?: collection.CollectionInfo;
 	    active: boolean;
@@ -472,6 +505,24 @@ export namespace collection {
 		    }
 		    return a;
 		}
+	}
+	export class FieldMapping {
+	    uid: string;
+	    field: string;
+	    type: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FieldMapping(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
+	        this.field = source["field"];
+	        this.type = source["type"];
+	        this.description = source["description"];
+	    }
 	}
 	export class Node {
 	    type: string;

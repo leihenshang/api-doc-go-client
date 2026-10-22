@@ -7,11 +7,13 @@ import type {
   AuthzDecision,
   CollectionInfo,
   CollectionSummary,
+  CollectionDefaults,
   ConflictDetail,
   ConflictItem,
   CookieInfo,
   DocEntry,
   Env,
+  FieldMapping,
   GrpcDefault,
   GrpcFieldInfo,
   GrpcProtoFile,
@@ -260,6 +262,16 @@ export const api = {
   getGrpcDefault: () => call<GrpcDefault | null>('GetGrpcDefault'),
   /** gRPC：写集合级默认定义（proto 为空 = 清除）。 */
   setGrpcDefault: (proto: string, imports: string[]) => call<null>('SetGrpcDefault', proto, imports),
+  /** 集合级公共请求头/认证（清单 defaults 段）；未配置时返回空结构。 */
+  getCollectionDefaults: () => call<CollectionDefaults>('GetCollectionDefaults'),
+  /** 保存集合级公共请求头/认证（全空 = 清除 defaults 段）。 */
+  setCollectionDefaults: (d: CollectionDefaults) => call<null>('SetCollectionDefaults', d),
+  /** 字段字典：当前集合的条目（项目级，随集合同步）。 */
+  listFieldMappings: () => call<FieldMapping[] | null>('ListFieldMappings').then((v) => v ?? []),
+  /** 字段字典：新增或更新一条（uid 为空 = 新建），返回落盘后的条目。 */
+  saveFieldMapping: (fm: FieldMapping) => call<FieldMapping | null>('SaveFieldMapping', fm),
+  /** 字段字典：删除一条。 */
+  deleteFieldMapping: (uid: string) => call<null>('DeleteFieldMapping', uid),
   createFolder: (parent: string, name: string) => call<null>('CreateFolder', parent, name),
   renameFolder: (uid: string, name: string) => call<null>('RenameFolder', uid, name),
   deleteFolder: (uid: string) => call<null>('DeleteFolder', uid),
