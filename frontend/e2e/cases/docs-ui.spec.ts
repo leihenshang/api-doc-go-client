@@ -16,6 +16,7 @@ function readMd(dir: string, rel: string): string {
 test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   await openCollection(page, app)
+  await expect(page.locator('body')).toHaveCSS('font-family', /HarmonyOS Sans SC/)
 
   // 文档树叶子：先确认请求页签显示 HTTP 方法、不显示文档图标
   await treeRow(page, 'ping').click()

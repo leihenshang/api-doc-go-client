@@ -155,7 +155,7 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 
 - [ ] 不带 `-SkipBuild` 跑一次：`installer.nsi`（入库）存在，且 bootstrap 后生成了 `wails_tools.nsh`、
       `tmp/MicrosoftEdgeWebview2Setup.exe`
-- [ ] 产物名与 §1 一致，大小合理（正式版 exe ≈ 36–37MB；NSIS 压缩后安装包约 16MB，**不必大于 exe**）
+- [ ] 产物名与 §1 一致，大小合理（正式版 exe 约 39–40MB；NSIS 压缩后安装包约 19–20MB。字体 HarmonyOS Sans SC 常用字子集约 2.9MB，**不必大于 exe**）
 - [ ] 安装后 exe 名是 `api-doc-client.exe`（**不是** `api-doc-go-client.exe`）
 - [ ] 开始菜单 + 桌面快捷方式能启动，图标是 `build/windows/icon.ico`
 - [ ] 「程序和功能」里显示 `API Doc Client` + 正确版本号

@@ -94,10 +94,10 @@ test.describe('外壳、布局与命令面板', () => {
 
     // 内置中文字体生效 + 不合成粗体
     const fontOk = await page.evaluate(() =>
-      document.fonts.ready.then(() => document.fonts.check('13px "Noto Sans SC Variable"', '用户管理')),
+      document.fonts.ready.then(() => document.fonts.check('13px "HarmonyOS Sans SC"', '用户管理')),
     )
     expect(fontOk).toBe(true)
-    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain('Noto Sans SC Variable')
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain('HarmonyOS Sans SC')
     expect(await page.evaluate(() => getComputedStyle(document.body).fontSynthesis)).toBe('none')
   })
 
