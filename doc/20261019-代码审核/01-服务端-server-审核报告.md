@@ -9,7 +9,9 @@
 > **修复进度（2026-10-21）**：✅ C-1（resolveTable includeSecret，/mock 排除明文 secret；回归入 TestMockResponse）、✅ C-2（12 端点权限位 + 表驱动 TestAuditC2）、✅ H-9 关联项已在 share v0.12.0 两端 bump。
 > ✅ **H-1〜H-10 已收口**（2026-10-21 本轮）：H-1 鉴权回源刷新（AuthOrPATWithRefresh + Service.LoadPrincipal）；H-2/H-3 同步 limit 入口收敛（clampChangeLimit/clampSnapshotLimit）；H-4 分组环检测（UpdateGroup 前置校验 + groupMoveCyclic visited/深度/错误区分）；H-5 导入递归深度上限 32 + DTO 数量/路径上限；H-6 导入/上传 MaxBytesReader；H-7 SetLeader 同事务清旧负责人（Repo.ClearLeaders）；H-8 三条导入路径补 ext_uid + 快照计数/分页按 ext_uid<>'' 同口径；H-9 更新变量沿用旧 ext_uid；H-10 变量/环境/响应示例改软删除（业务读 getActive、快照 tombstone、job/cleanup 到期物理清理）。回归测试：`internal/service/review_high_test.go`（含同步 round-trip 用例已改为墓碑断言）。
 > ✅ **H-12/H-13/H-11 已收口（2026-10-22〜23）**：H-12 四大 HTTP 超时 + `signal.NotifyContext` + 优雅关闭，备份/清理任务可等待收尾；H-13 备份改 `VACUUM INTO`（含 WAL 已提交事务的单文件一致快照）+ 临时文件原子改名 + 0600 权限 + `BACKUP_RETENTION`（默认 7）轮转，PostgreSQL 启动时明确提示改用 pg_dump/托管快照；H-11 按产品决策「秘文原样回传、只读用户只能使用不能看到明文」——`enc:v1:` 密文始终原样下发，明文 secret 仅对 `canRevealValues`（管理员/负责人/update）原样下发并写审计，其余调用方置 `Payload.Redacted=true`（客户端保留本地值）。回归：`TestSyncSecretPayloadRedaction`、`TestBackupOnceWritesConsistentSnapshot`、`TestBackupRetention`、客户端 `TestApplyRedactedSecretKeepsLocalValue`。
-> ⬜ **H-14〜H-22、M-1〜M-66、L-1〜L-12 未动**，下一轮从 H-14 推进。
+> ✅ **H-14〜H-22 已收口（2026-10-23）**：H-14 迁移执行器（versioned migrations + baseline + up/down + Postgres CI）；H-15 用户名单列局部唯一 + 同名登录拒绝；H-16 `AssignBug` 事务 + 通知 best-effort；H-17 导出不再 200 截断；H-18 `GetFileByHash` 改按扩展名固定 Content-Type + `nosniff` + basename（阻断 PNG+HTML 存储型 XSS），上传 MIME 同步归一；H-19 `SetTrustedProxies` + 空列表不信任 XFF/X-Real-IP + 登录限流两前缀共享；H-20 release 必须显式 `ADMIN_PASSWORD`、debug 随机生成且只在首次创建时提示、日志不再打印口令；H-21 `seed` 默认幂等（`-force` 才重置）并拆分 `ResetAdminPassword`；H-22 release 必须显式 `JWT_SECRET`，Docker 设 `GIN_MODE=release` 拒绝随机密钥启动。回归：`TestFileHashServesSafeContentType`、`TestClientIP`、`TestLoadReleaseRequiresSecrets`、`TestEnsureAdminDoesNotResetPassword` 等。
+> ⬜ **M-1〜M-66、L-1〜L-12 未动**，下一轮从 M 组与剩余产品项推进。
+> ℹ️ **H-18〜H-22 的残留增强**（不阻塞本轮）：H-19 按用户名失败退避、H-20 首登强制改密、H-22 JWT/TOKEN_PEPPER/TOKEN_CIPHER_KEY 三密钥分离。
 |---|
 | Go 文件总数 | 113（82 源文件 + 31 测试文件） |
 | 源码行数（非测试） | 11,045 |
