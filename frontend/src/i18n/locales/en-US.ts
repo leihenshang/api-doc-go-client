@@ -269,6 +269,7 @@ export default {
     bodyForm: 'Form',
     bodyMultipart: 'Multipart form',
     formatJson: 'Format',
+    formatNeedsSave: 'Formatted. Save (Ctrl+S) to apply.',
     jsonBroken: 'Invalid JSON syntax',
     formatBroken: 'Invalid format: JSON or XML only',
     formatUrl: 'Format URL',

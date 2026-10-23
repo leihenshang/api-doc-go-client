@@ -12,6 +12,7 @@ import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { buildRespDoc, cancelPendingFor, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
+import { respPanelSegByTab, respPanelViewByTab, respPanelWrapByTab } from '@/lib/tabViewState'
 import { detectFileResponse } from '@/lib/responseFile'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
 import type { Tab } from '@/stores/tabs'
@@ -27,9 +28,13 @@ const { t } = useI18n()
 const tabs = useTabsStore()
 
 // 默认不换行：长值横向滚动看全，需要时用工具条换行图标开关
-const view = ref<'pretty' | 'raw'>('pretty')
-const wrap = ref(false)
-const seg = ref<'body' | 'headers' | 'trailers'>('body')
+const view = ref<'pretty' | 'raw'>(respPanelViewByTab.get(props.tab.key) ?? 'pretty')
+const wrap = ref(respPanelWrapByTab.get(props.tab.key) ?? false)
+const savedPanelSeg = respPanelSegByTab.get(props.tab.key) as 'body' | 'headers' | 'trailers' | undefined
+const seg = ref<'body' | 'headers' | 'trailers'>(savedPanelSeg ?? 'body')
+watch(view, (v) => respPanelViewByTab.set(props.tab.key, v))
+watch(wrap, (v) => respPanelWrapByTab.set(props.tab.key, v))
+watch(seg, (v) => respPanelSegByTab.set(props.tab.key, v))
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
 
 /** 覆盖确认（仅当字段表已有内容时弹出） */
@@ -101,24 +106,30 @@ const exampleOptions = computed(() => [
   ...examples.value.map((e) => ({ value: e.uid, label: e.name })),
 ])
 
-// 切换请求：无响应时回到 body 页签。immediate：会话恢复直接打开的 tab 不会再触发 uid 变化，
-// 挂载时也要拉一次示例列表（否则「已保存的响应示例」下拉在无响应态是空的）
+// 切换请求：恢复该 tab 上次停留的响应页签/展示偏好；挂载时也要拉一次示例列表。
 watch(
-  () => props.tab.uid,
-  () => {
-    seg.value = 'body'
+  () => props.tab.key,
+  (key, prev) => {
+    if (prev) {
+      respPanelSegByTab.set(prev, seg.value)
+      respPanelViewByTab.set(prev, view.value)
+      respPanelWrapByTab.set(prev, wrap.value)
+    }
+    const saved = respPanelSegByTab.get(key) as 'body' | 'headers' | 'trailers' | undefined
+    seg.value = saved && ['body', 'headers', 'trailers'].includes(saved) ? saved : 'body'
+    view.value = respPanelViewByTab.get(key) ?? 'pretty'
+    wrap.value = respPanelWrapByTab.get(key) ?? false
     viewingUid.value = ''
     void reloadExamples()
   },
   { immediate: true },
 )
 
-// 重新发送后回到本次响应并复位页签，避免新响应还停在旧页签上
+// 重新发送后回到本次响应（但保留当前二级页签与展示偏好）
 watch(
   () => props.tab.response,
   () => {
     viewingUid.value = ''
-    seg.value = 'body'
   },
 )
 
