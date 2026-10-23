@@ -22,6 +22,7 @@ const props = defineProps<{ info: CollectionInfo | null }>()
 // （原先散落在集合切换下拉里，现统一收拢到这里，入口更聚焦）。
 const emit = defineEmits<{
   'new-request': []
+  run: []
   import: []
   export: [format: 'markdown' | 'html' | 'apidocgo']
   mock: []
@@ -89,6 +90,12 @@ const shortcuts = computed(() => [
       <div class="acts">
         <n-button class="act" size="medium" type="primary" data-testid="overview.newRequest" @click="emit('new-request')">
           {{ t('overview.newRequest') }}
+        </n-button>
+        <n-button class="act" size="medium" secondary data-testid="overview.run" @click="emit('run')">
+          <template #icon>
+            <n-icon :component="PlayOutline" :size="14" />
+          </template>
+          {{ t('run.title') }}
         </n-button>
         <n-button class="act" size="medium" secondary data-testid="overview.import" @click="emit('import')">
           <template #icon>

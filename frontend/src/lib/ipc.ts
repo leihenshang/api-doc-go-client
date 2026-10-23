@@ -30,6 +30,8 @@ import type {
   ResolveResult,
   ResponseDoc,
   ResponseExample,
+  RunCollectionOptions,
+  RunReport,
   SendResult,
   ServerProject,
   Settings,
@@ -367,6 +369,10 @@ export const api = {
     call<ImportSummary>('ImportCollection', parent, format, text),
   importBrunoDir: (srcDir: string) => call<ImportSummary>('ImportBrunoDir', srcDir),
   exportDoc: (format: string, defaultName: string) => call<string>('ExportDoc', format, defaultName),
+  /** RM-02：运行当前集合（读取磁盘文件），返回逐请求报告。 */
+  runCollection: (opts: RunCollectionOptions) => call<RunReport>('RunCollection', opts),
+  /** 导出最近一次运行报告（junit / json / text）。 */
+  exportRunReport: (format: string, defaultName: string) => call<string>('ExportRunReport', format, defaultName),
   startMock: (port: number) => call<MockStatus>('StartMock', port),
   stopMock: () => call<null>('StopMock'),
   mockStatus: () => call<MockStatus>('MockStatus'),

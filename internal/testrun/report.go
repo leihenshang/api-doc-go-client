@@ -14,8 +14,8 @@ import (
 	"api-doc-go-client/internal/script"
 )
 
-// Case 一条请求的执行结果。
-type Case struct {
+// RunCase 一条请求的执行结果。
+type RunCase struct {
 	Name        string                `json:"name"`
 	Path        string                `json:"path"`
 	UID         string                `json:"uid"`
@@ -41,7 +41,7 @@ type Report struct {
 	Total      int       `json:"total"`
 	Passed     int       `json:"passed"`
 	Failed     int       `json:"failed"`
-	Cases      []Case    `json:"cases"`
+	Cases      []RunCase `json:"cases"`
 }
 
 // finish 统计总数/通过/失败与总耗时。
@@ -135,7 +135,7 @@ func (r *Report) JUnit() ([]byte, error) {
 }
 
 // failureMessage 失败用例的一行摘要。
-func failureMessage(c Case) string {
+func failureMessage(c RunCase) string {
 	switch {
 	case c.Error != "":
 		return c.Error
@@ -152,7 +152,7 @@ func failureMessage(c Case) string {
 }
 
 // failureBody 失败用例的明细（断言名 + 表达式 + 错误）。
-func failureBody(c Case) string {
+func failureBody(c RunCase) string {
 	var b strings.Builder
 	if c.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", c.Error)

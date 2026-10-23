@@ -17,6 +17,7 @@ import (
 	"api-doc-go-client/internal/mcpaudit"
 	"api-doc-go-client/internal/mcpauth"
 	"api-doc-go-client/internal/mocksrv"
+	"api-doc-go-client/internal/testrun"
 	"api-doc-go-client/internal/tray"
 	"api-doc-go-client/internal/watch"
 
@@ -75,6 +76,8 @@ type App struct {
 	// trayWasMaximised 记录「隐藏到托盘」前窗口是否最大化；WindowHide 不保留最大化态，
 	// 恢复时需据此重新 WindowMaximise，否则全屏状态下最小化到托盘再点开会退回窗口模式。用 atomic 跨 goroutine 读写。
 	trayWasMaximised atomic.Bool
+	// lastRun 最近一次集合运行报告（RM-02 桌面端导出 JUnit/JSON 用）。
+	lastRun *testrun.Report
 }
 
 // inflightSend 一次在途发送的取消句柄（带工作目录归属，见 sendCancels 的键说明）。

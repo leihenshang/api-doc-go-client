@@ -20,8 +20,9 @@ bash scripts/check.sh --full     # 前端构建 + 全量 e2e（约 3 分钟；--
 bash scripts/check.sh --e2e-ui   # Playwright UI 交互调试
 # 前置：cd frontend && npm i && npx playwright install chromium；用例与夹具说明见 frontend/e2e/README.md
 
-# 集合运行器（RM-02，CI 用）：按树顺序执行脚本/断言，输出 text|json|junit
+# 集合运行器（RM-02）：CLI/CI 按树顺序执行脚本/断言，输出 text|json|junit
 go run ./cmd/clientctl run <collection-dir> --env dev --reporter junit --output report.xml
+# 桌面端同一执行层：概览「运行集合」或 Ctrl+K → Run collection；报告可导出 JUnit
 # 参数：-filter/-bail/-timeout/-output；示例见 ci/README.md
 # CI 示例 .github/workflows/collection-tests.yml 刻意只保留 workflow_dispatch，推送不会自动运行
 ```
