@@ -1340,12 +1340,15 @@ func (c *Collection) readEnv(name string) (*Env, error) {
 		return nil, fmt.Errorf("环境 %s 解析失败: %w", name, err)
 	}
 	sec := map[string]string{}
+	env := &Env{UID: f.UID, Name: name, extra: f.Extra}
 	if sd, err := os.ReadFile(secP); err == nil {
-		if got, serr := share.DecodeSecrets(sd); serr == nil && got != nil {
-			sec = got
+		if sf, serr := share.DecodeSecretsFile(sd); serr == nil && sf != nil {
+			env.secretsExtra = sf.Extra
+			if sf.Secrets != nil {
+				sec = sf.Secrets
+			}
 		}
 	}
-	env := &Env{UID: f.UID, Name: name}
 	for _, v := range f.Vars {
 		if v.Secret {
 			if val, ok := sec[v.Name]; ok {
@@ -1355,6 +1358,40 @@ func (c *Collection) readEnv(name string) (*Env, error) {
 		env.Vars = append(env.Vars, v)
 	}
 	return env, nil
+}
+
+// loadEnvExtras 读取现有主文件与 secrets 文件的未知顶层字段（磁盘为准，M-1）。
+func loadEnvExtras(mainP, secP string) (mainExtra, secExtra map[string]any) {
+	if data, err := os.ReadFile(mainP); err == nil {
+		if old, derr := share.DecodeEnv(data); derr == nil {
+			mainExtra = old.Extra
+		}
+	}
+	if data, err := os.ReadFile(secP); err == nil {
+		if old, derr := share.DecodeSecretsFile(data); derr == nil && old != nil {
+			secExtra = old.Extra
+		}
+	}
+	return mainExtra, secExtra
+}
+
+// mergeUnknownFields 合并未知顶层字段：base 为内存携带（改名时来自旧文件），
+// newer 为磁盘最新内容（同键以磁盘为准）；nil 安全。
+func mergeUnknownFields(base, newer map[string]any) map[string]any {
+	if len(base) == 0 {
+		return newer
+	}
+	if len(newer) == 0 {
+		return base
+	}
+	out := make(map[string]any, len(base)+len(newer))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range newer {
+		out[k] = v
+	}
+	return out
 }
 
 // SaveEnv 保存环境（不做并发校验；界面单写者场景够用）。
@@ -1400,10 +1437,11 @@ func (c *Collection) saveEnv(env Env) error {
 	if err := os.MkdirAll(filepath.Join(c.Dir, "environments"), 0o755); err != nil {
 		return err
 	}
-	f := envFile{}
-	f.Info.Name = env.Name
-	f.UID = env.UID
-	sec := secretsFile{Secrets: map[string]string{}}
+	mainP, secP := c.envPaths(env.Name)
+	diskMain, diskSec := loadEnvExtras(mainP, secP)
+	f := envFile{Extra: mergeUnknownFields(env.extra, diskMain)}
+	f.Info.Name, f.UID = env.Name, env.UID
+	sec := secretsFile{Secrets: map[string]string{}, Extra: mergeUnknownFields(env.secretsExtra, diskSec)}
 	for _, v := range env.Vars {
 		if v.Name == "" {
 			continue
@@ -1418,11 +1456,10 @@ func (c *Collection) saveEnv(env Env) error {
 	if err != nil {
 		return err
 	}
-	secData, err := share.EncodeSecrets(sec.Secrets)
+	secData, err := sec.Encode()
 	if err != nil {
 		return err
 	}
-	mainP, secP := c.envPaths(env.Name)
 	// 主文件也收权到 0600（P2-11）：非 secret 变量里同样常有 token/内网地址，
 	// 之前只有 secrets 文件是 0600，主文件 0644 等于把这一半敞着。
 	if err := writeFileAtomic(mainP, mainData, 0o600); err != nil {

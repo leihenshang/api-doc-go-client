@@ -133,6 +133,10 @@ type Env struct {
 	UID  string `json:"uid,omitempty"`
 	Name string `json:"name"`
 	Vars []Var  `json:"vars"`
+	// extra / secretsExtra 保留主文件与 *.secrets.yml 里的未知顶层字段（审核 M-1）：
+	// 整份重写时原样带回。不参与前端 JSON 契约，UI 保存时由 saveEnv 重新读盘补齐。
+	extra        map[string]any
+	secretsExtra map[string]any
 }
 
 // CollectionInfo 打开的集合概要（含树与环境）。
