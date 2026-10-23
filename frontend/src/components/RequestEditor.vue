@@ -643,27 +643,35 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
       <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与生成接口文档同源）；
            子页签切换字段表格 / 更新时的响应数据与响应头快照（item 8） -->
       <div v-else-if="seg === 'resp'" class="resp-pane">
-        <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化 -->
-        <div class="resp-ct">
-          <span class="lbl">{{ t('editor.respContentType') }}</span>
-          <n-select :value="respContentType" :options="contentTypeOptions" size="small" class="ctype"
-            data-testid="resp.contentType" :title="t('editor.respContentTypeHint')"
-            @update:value="(v: string) => setContentType(v)" />
-          <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
-        </div>
-        <div class="resp-sub" role="group">
-          <button class="sub-tab" :class="{ on: respView === 'body' }" type="button" data-testid="resp.segTab"
-            data-view="body" @click="respView = 'body'">
-            {{ t('editor.respTabBody') }}<span v-if="respSnap?.status" class="sub-badge">{{ respSnap.status }}</span>
-          </button>
-          <button class="sub-tab" :class="{ on: respView === 'headers' }" type="button" data-testid="resp.segTab"
-            data-view="headers" @click="respView = 'headers'">
-            {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
-              respSnap.headers.length }}</span>
-          </button>
-          <!-- 字段表格放到最后（由「响应数据」派生，先看数据再看字段表） -->
-          <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" data-testid="resp.segTab"
-            data-view="fields" @click="respView = 'fields'">{{ t('editor.respTabFields') }}</button>
+        <!-- 一行工具条：左侧子页签，右侧响应类型（避免三行控件堆叠） -->
+        <div class="resp-toolbar">
+          <div class="resp-sub" role="tablist">
+            <button class="sub-tab" :class="{ on: respView === 'body' }" type="button" role="tab"
+              :aria-selected="respView === 'body'" data-testid="resp.segTab" data-view="body"
+              @click="respView = 'body'">
+              {{ t('editor.respTabBody') }}<span v-if="respSnap?.status" class="sub-badge">{{ respSnap.status }}</span>
+            </button>
+            <button class="sub-tab" :class="{ on: respView === 'headers' }" type="button" role="tab"
+              :aria-selected="respView === 'headers'" data-testid="resp.segTab" data-view="headers"
+              @click="respView = 'headers'">
+              {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
+                respSnap.headers.length }}</span>
+            </button>
+            <!-- 字段表格放到最后（由「响应数据」派生，先看数据再看字段表） -->
+            <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" role="tab"
+              :aria-selected="respView === 'fields'" data-testid="resp.segTab" data-view="fields"
+              @click="respView = 'fields'">
+              {{ t('editor.respTabFields') }}<span v-if="fields.length" class="sub-badge">{{ fields.length }}</span>
+            </button>
+          </div>
+          <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化 -->
+          <div class="resp-ct">
+            <span class="lbl">{{ t('editor.respContentType') }}</span>
+            <n-select :value="respContentType" :options="contentTypeOptions" size="small" class="ctype"
+              data-testid="resp.contentType" :title="t('editor.respContentTypeHint')"
+              @update:value="(v: string) => setContentType(v)" />
+            <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
+          </div>
         </div>
         <!-- 字段表格：由「响应数据」子页签的合法 JSON 实时派生（表格只读，只能逐行写含义） -->
         <div v-if="respView === 'fields'" class="resp-fields">
@@ -676,13 +684,16 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             <span v-if="respFormatError" class="fmtbad" data-testid="resp.formatBroken">
               {{ t('editor.formatBroken') }}
             </span>
-            <button v-if="sample.trim()" class="fmt" type="button" data-testid="resp.copyData" @click="copyRaw('resp')">
-              {{ copiedRaw === 'resp' ? t('common.copied') : t('common.copy') }}
-            </button>
-            <button class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
-              @click="formatRespData">
-              {{ t('editor.formatJson') }}
-            </button>
+            <div class="resp-data-actions">
+              <button v-if="sample.trim()" class="fmt" type="button" data-testid="resp.copyData"
+                @click="copyRaw('resp')">
+                {{ copiedRaw === 'resp' ? t('common.copied') : t('common.copy') }}
+              </button>
+              <button class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
+                @click="formatRespData">
+                {{ t('editor.formatJson') }}
+              </button>
+            </div>
           </div>
           <div class="resp-data-editor" data-testid="resp.dataInput">
             <json-body-editor v-model="respSample" :rows="16" :readonly="readonly" :lang="respDataKind ?? 'text'"
@@ -890,19 +901,37 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   min-height: 340px;
 }
 
-/* Resp 分段子页签（item 8）：字段表格 / 响应数据 / 响应头 快照切换 */
+/* Resp 分段：一行工具条 + 内容区，避免响应类型/子页签/提示三行控件堆叠 */
+.resp-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  min-height: 0;
+}
+
+.resp-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 /* 字段表格：由「响应数据」派生，仅表格本身 */
 .resp-fields {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 /* 「响应数据」可编辑区：提示 + 文本域 */
 .resp-data {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  min-height: 0;
 }
 
 .resp-data-hint {
@@ -916,10 +945,18 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 28px;
 }
 
 .resp-data-hd .resp-data-hint {
   flex: 1 1 auto;
+}
+
+.resp-data-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .fmt:disabled {
@@ -930,6 +967,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 .resp-data-editor {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .resp-data-editor :deep(.jb) {
@@ -941,7 +979,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px 0;
+  margin-left: auto;
+  padding: 0;
 }
 
 .resp-ct .lbl {
@@ -963,17 +1002,19 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 }
 
 .resp-sub {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--app-bg);
 }
 
 .sub-tab {
   border: none;
   background: none;
-  border-radius: 5px;
-  padding: 4px 10px;
+  border-radius: 6px;
+  padding: 5px 10px;
   font-family: inherit;
   font-size: 12px;
   color: var(--app-muted);
@@ -984,14 +1025,14 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 }
 
 .sub-tab:hover {
-  background: var(--app-row-hover);
   color: var(--app-text);
 }
 
 .sub-tab.on {
-  background: var(--app-accent-tint);
+  background: var(--app-panel);
   color: var(--app-accent-dark);
   font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
 }
 
 .sub-badge {
