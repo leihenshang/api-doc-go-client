@@ -338,6 +338,7 @@ export default {
     colDesc: 'Description',
     colRequired: 'Required',
     requiredYes: 'Yes',
+    requiredNo: 'No',
     overwrite: 'Overwrite',
     append: 'Append below existing',
     copy: 'Copy',

@@ -490,7 +490,7 @@ func writeMDHTTPRequest(b *strings.Builder, r *Request, pad string, shiftDocs bo
 		fmt.Fprintf(b, "%s %s `%s`\n\n", pad, r.Name, strings.ToUpper(r.Method))
 	}
 	fmt.Fprintf(b, "```\n%s\n```\n\n", r.URL)
-	writeMDSection(b, "参数", r.Params)
+	writeMDParams(b, r.Params)
 	writeMDSection(b, "请求头", r.Headers)
 	writeMDBody(b, r.Body)
 	if r.Auth != nil && r.Auth.Type != "" && r.Auth.Type != "none" {
@@ -566,6 +566,32 @@ func appendMDDocs(b *strings.Builder, docs string, level int, shiftDocs bool) {
 	}
 	b.WriteString("\n---\n\n**文档**\n\n")
 	fmt.Fprintf(b, "%s\n\n", doc)
+}
+
+// writeMDParams 输出查询参数表。
+// 导出的是**文档**而非本次实际发送的请求：所有有名字的参数都要保留（勾选状态只影响
+// 「必选」列），否则用户取消勾选一个可选参数后，导出的 HTML/Markdown 会直接丢掉它。
+func writeMDParams(b *strings.Builder, rows []KV) {
+	var named []KV
+	for _, r := range rows {
+		if strings.TrimSpace(r.Name) == "" {
+			continue
+		}
+		named = append(named, r)
+	}
+	if len(named) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "**参数**\n\n")
+	fmt.Fprintf(b, "| 参数名 | 必选 | 值 | 说明 |\n|---|---|---|---|\n")
+	for _, r := range named {
+		required := "否"
+		if r.Enabled {
+			required = "是"
+		}
+		fmt.Fprintf(b, "| `%s` | %s | `%s` | %s |\n", escapePipe(r.Name), required, escapePipe(r.Value), escapePipe(r.Description))
+	}
+	fmt.Fprintf(b, "\n")
 }
 
 func writeMDSection(b *strings.Builder, title string, rows []KV) {

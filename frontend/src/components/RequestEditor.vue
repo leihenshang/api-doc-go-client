@@ -213,6 +213,7 @@ async function genDocs(): Promise<void> {
         colDesc: t('docs.colDesc'),
         colRequired: t('docs.colRequired'),
         requiredYes: t('docs.requiredYes'),
+        requiredNo: t('docs.requiredNo'),
       },
     })
     showGen.value = true

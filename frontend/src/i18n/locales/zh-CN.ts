@@ -338,6 +338,7 @@ export default {
     colDesc: '说明',
     colRequired: '必选',
     requiredYes: '是',
+    requiredNo: '否',
     overwrite: '完全覆盖',
     append: '放到已有文档下方',
     copy: '复制',

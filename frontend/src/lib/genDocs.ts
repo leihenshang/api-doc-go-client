@@ -28,7 +28,8 @@ export interface ApiDocLabels {
   colExample: string // 示例值（响应字段表体列）
   colDesc: string // 说明
   colRequired: string // 必选
-  requiredYes: string // 必选列默认值（是 / Yes）
+  requiredYes: string // 勾选参数（是 / Yes）
+  requiredNo: string // 未勾选参数（否 / No）
 }
 
 /** 类型列留空时的默认值（JSON 类型名，不随语言变化）。 */
@@ -100,13 +101,16 @@ export function buildApiDoc(input: ApiDocInput): string {
     out.push('')
   }
 
-  // 请求参数及说明（query 参数；只列启用且有名字的行）。必选默认「是」，类型默认 string。
-  const params = r.params.filter((p) => p.enabled && p.name.trim())
+  // 请求参数及说明（query 参数）：导出文档保留全部有名字的行；
+  // 勾选状态只表示「必选」，取消勾选不能让参数从文档里消失。类型默认 string。
+  const params = r.params.filter((p) => p.name.trim())
   if (params.length) {
     const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
     out.push(`## ${L.params}`, `| ${hdr} |`, '| --- | --- | --- | --- |')
     for (const p of params)
-      out.push(`| ${esc(p.name)} | ${L.requiredYes} | ${DEFAULT_TYPE} | ${esc(p.description ?? '')} |`)
+      out.push(
+        `| ${esc(p.name)} | ${p.enabled ? L.requiredYes : L.requiredNo} | ${DEFAULT_TYPE} | ${esc(p.description ?? '')} |`,
+      )
     out.push('')
   }
 
