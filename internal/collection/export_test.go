@@ -429,8 +429,8 @@ func TestExportMarkdownBodyFormTable(t *testing.T) {
 	if strings.Contains(md, "- `username`") {
 		t.Fatalf("请求体表单错误地以无序列表展示（应分开展示为表格）:\n%s", md)
 	}
-	// 3) URL 参数也在其表中
-	if !strings.Contains(md, "| `version` | `2` |") {
+	// 3) URL 参数也在其表中（必选列 = 勾选状态）
+	if !strings.Contains(md, "| `version` | 是 | `2` |") {
 		t.Fatalf("URL 参数未出现在参数表中:\n%s", md)
 	}
 
@@ -441,6 +441,49 @@ func TestExportMarkdownBodyFormTable(t *testing.T) {
 	}
 	if got := strings.Count(htmlOut, "<table>"); got < 2 {
 		t.Fatalf("HTML 中表格数 = %d，期望至少 2（参数表 + 请求体表）:\n%s", got, htmlOut)
+	}
+}
+
+// TestExportParamsIncludeUncheckedAsOptional 回归：导出文档应保留全部有名字的查询参数，
+// 勾选状态只决定「必选」列；取消勾选不能把参数从 Markdown/HTML 中删掉。
+func TestExportParamsIncludeUncheckedAsOptional(t *testing.T) {
+	c := newTestCollection(t)
+	r, err := c.CreateRequest("", "用户-列表", "GET")
+	if err != nil {
+		t.Fatalf("建请求: %v", err)
+	}
+	r.URL = "{{host}}/api/user/list"
+	r.Params = []KV{
+		{Name: "page", Value: "1", Enabled: true, Description: "页码"},
+		{Name: "size", Value: "20", Enabled: false, Description: "每页条数"},
+		{Name: "", Value: "ignored", Enabled: true},
+	}
+	if err := c.SaveRequest(r); err != nil {
+		t.Fatalf("保存: %v", err)
+	}
+
+	md, err := c.ExportMarkdown()
+	if err != nil {
+		t.Fatalf("ExportMarkdown: %v", err)
+	}
+	if !strings.Contains(md, "| `page` | 是 | `1` | 页码 |") {
+		t.Fatalf("勾选参数应标为必选:\n%s", md)
+	}
+	if !strings.Contains(md, "| `size` | 否 | `20` | 每页条数 |") {
+		t.Fatalf("未勾选参数仍应导出且标为非必选:\n%s", md)
+	}
+	if strings.Contains(md, "ignored") {
+		t.Fatalf("空名字参数不应导出:\n%s", md)
+	}
+
+	htmlOut, err := c.ExportHTML()
+	if err != nil {
+		t.Fatalf("ExportHTML: %v", err)
+	}
+	for _, want := range []string{"page", "size", "每页条数", "<td>否</td>"} {
+		if !strings.Contains(htmlOut, want) {
+			t.Fatalf("HTML 缺少 %q（未勾选参数也应导出）:\n%s", want, htmlOut)
+		}
 	}
 }
 
