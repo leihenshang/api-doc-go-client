@@ -21,6 +21,7 @@ import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { message } from '@/lib/notice'
 import { loadFields, rowsFromDoc } from '@/lib/responseFields'
+import { requestSegByTab, respSubViewByTab } from '@/lib/tabViewState'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
 import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
@@ -58,7 +59,10 @@ type Seg =
 
 const isGrpcReq = computed(() => isGrpc(props.tab.request))
 /** gRPC 请求没有 query / 请求头 / 请求体，分段换成「定义 + 协议无关的变量 / 脚本 / 断言 / 文档」。 */
-const seg = ref<Seg>(isGrpcReq.value ? 'schema' : 'params')
+const savedSeg = requestSegByTab.get(props.tab.key) as Seg | undefined
+const seg = ref<Seg>(savedSeg ?? (isGrpcReq.value ? 'schema' : 'params'))
+// 二级页签在本次运行内按 tab 记住：切换请求后再切回，仍停留在上次的分段。
+watch(seg, (v) => requestSegByTab.set(props.tab.key, v))
 
 // 脚本/断言/前置变量（E15–E17）
 const varsPre = computed({
@@ -315,14 +319,21 @@ function touch(): void {
   tabs.touch(props.tab.key)
 }
 
-// 一键格式化请求体：JSON 缩进 / XML 标签缩进；非 JSON/XML 或解析失败时保持原文
+/** 只标脏、不触发自动保存（格式化后由用户显式保存）。 */
+function touchManual(): void {
+  if (readonly.value) return
+  tabs.markDirty(props.tab.key)
+}
+
+// 一键格式化请求体：JSON 缩进 / XML 标签缩进；非 JSON/XML 或解析失败时保持 原文
 /** 文本体里是否可能是 JSON/XML（只看前缀，用于按钮显隐；真正格式化时再解析）。 */
 const bodyFormatKind = computed(() => detectTextKind(props.tab.request.body.raw))
 function formatBody(): void {
   const out = prettyText(props.tab.request.body.raw)
   if (!out) return
   props.tab.request.body.raw = out.text
-  touch()
+  touchManual()
+  message.info(t('editor.formatNeedsSave'))
 }
 
 /** JSON 模式下语法有误（只在内容非空、且不含 {{变量}} 时判断）。 */
@@ -367,13 +378,21 @@ function onBodyDesc(path: string, note: string): void {
   touch()
 }
 
-// 切换 tab 时刷新解析预览，并把分段复位到该协议的首页签（HTTP 是 Params，gRPC 是 Schema）；
-// 响应字段子页签也复位到「响应数据」（否则会沿用上一个请求停留的字段表格/响应头）。
+// 切换 tab 时刷新解析预览，并恢复该 tab 上次停留的分段与响应子页签；
+// 新 tab 默认 HTTP → 请求参数、gRPC → 定义、响应子页签 → 响应数据。
 watch(
   () => props.tab.key,
-  () => {
-    seg.value = isGrpcReq.value ? 'schema' : 'params'
-    respView.value = 'body'
+  (key, prev) => {
+    if (prev) {
+      requestSegByTab.set(prev, seg.value)
+      respSubViewByTab.set(prev, respView.value)
+    }
+    const saved = requestSegByTab.get(key) as Seg | undefined
+    seg.value = saved && segments.value.some((s) => s.key === saved)
+      ? saved
+      : (isGrpcReq.value ? 'schema' : 'params')
+    const savedResp = respSubViewByTab.get(key) as RespView | undefined
+    respView.value = savedResp && ['body', 'headers', 'fields'].includes(savedResp) ? savedResp : 'body'
     tabs.refreshResolve()
     initFields()
   },
@@ -382,7 +401,7 @@ watch(
 // ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
 // 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
 // 字段表状态与「防抖写回 respDoc」逻辑见 composables/useResponseFields。
-const { fields, sample, hasResp, initFields, onSampleInput, setMeaning } = useResponseFields({
+const { fields, sample, hasResp, initFields, onSampleInput, setMeaning, cancelPending } = useResponseFields({
   getTab: () => props.tab,
   isGrpc: () => isGrpcReq.value,
   onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
@@ -429,7 +448,11 @@ function formatRespData(): void {
   const out = prettyText(sample.value)
   respFormatError.value = !out
   if (!out) return
-  onSampleInput(out.text)
+  // 格式化只改内存并标脏：不写盘，也不触发自动保存，由用户按 Ctrl+S / 保存落盘。
+  cancelPending()
+  onSampleInput(out.text, { persist: false })
+  touchManual()
+  message.info(t('editor.formatNeedsSave'))
 }
 
 // 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
@@ -462,7 +485,9 @@ function setContentType(v: string): void {
 
 // ---- Resp 分段子页签（item 8）：响应数据 / 响应头 / 字段表格（默认先看响应数据） ----
 type RespView = 'fields' | 'body' | 'headers'
-const respView = ref<RespView>('body')
+const savedRespView = respSubViewByTab.get(props.tab.key) as RespView | undefined
+const respView = ref<RespView>(savedRespView ?? 'body')
+watch(respView, (v) => respSubViewByTab.set(props.tab.key, v))
 const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
 // 响应区「更新响应字段」成功后：切到 Resp 分段并直接看「字段表格」（其余情形默认停在响应数据）。

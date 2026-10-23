@@ -125,10 +125,26 @@ export function useResponseFields(ctx: ResponseFieldsCtx) {
         },
     )
 
-    /** 编辑「响应数据」：实时更新只读表格（合法 JSON 才换，非法时保留既有表）；随后防抖落盘。 */
-    function onSampleInput(value: string): void {
+    /** 只更新内存中的 sample / fields / respDoc，不写盘（格式化等需要用户确认保存的场景）。 */
+    function applyLocal(value: string): void {
         sample.value = value
         fields.value = deriveFields(value, fields.value)
+        const tab = ctx.getTab()
+        const doc = buildRespDoc(fields.value, tab.request.respDoc, {
+            sample: value,
+            type: rootJsonType(value),
+        })
+        tab.request.respDoc = doc
+        lastSig = docSig(doc)
+    }
+
+    /**
+     * 编辑「响应数据」：实时更新只读表格（合法 JSON 才换，非法时保留既有表）。
+     * persist=false 时只改内存并标脏（由调用方走手动保存），不触发防抖写盘。
+     */
+    function onSampleInput(value: string, opts?: { persist?: boolean }): void {
+        applyLocal(value)
+        if (opts?.persist === false) return
         void persistFields()
     }
 

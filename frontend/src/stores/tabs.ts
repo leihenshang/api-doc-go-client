@@ -424,6 +424,19 @@ export const useTabsStore = defineStore('tabs', {
     getScroll(key: string): { editor: number; resp: number } {
       return scrollPos.get(key) ?? { editor: 0, resp: 0 }
     },
+    /**
+     * 只标脏、不调度自动保存：用于「格式化」这类需要用户确认后再落盘的操作。
+     * 同时取消该页签已排队的自动保存，避免格式化后紧跟着又被定时器写盘。
+     */
+    markDirty(key: string): void {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab) return
+      tab.title = tab.request.name || tab.title
+      tab.dirty = true
+      clearTimeout(saveTimers.get(key))
+      // 草稿仍要进 localStorage（不写集合文件），否则切走/重启会丢草稿
+      if (tab.draft) this.scheduleDrafts()
+    },
     /** 任意编辑入口：标脏 + 调度自动保存、解析预览与撤销快照。 */
     touch(key: string): void {
       const tab = this.tabs.find((t) => t.key === key)

@@ -269,6 +269,7 @@ export default {
     bodyForm: '表单',
     bodyMultipart: 'multipart 表单',
     formatJson: '格式化',
+    formatNeedsSave: '已格式化，请保存（Ctrl+S）后生效',
     jsonBroken: 'JSON 语法有误',
     formatBroken: '格式不正确：仅支持 JSON 或 XML',
     formatUrl: '格式化 URL',
