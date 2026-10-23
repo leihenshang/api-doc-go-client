@@ -8,7 +8,8 @@
 ---
 
 > **修复进度（2026-10-20，发版 v0.12.0）**：✅ C-1、C-2、H-1〜H-8 全部收口（含回归测试；客户端 alias shim 同步删除）。
-> ⬜ M-1〜M-26、L 组未动，下一轮接 ③ 从 M-1 推进（H-7 syncapi 拆分归 M 组一并评估）。
+> ✅ **M-1/M-2 已收口（2026-10-23）**：`EnvFile`/`SecretsFile`/`Manifest` 补 `Extra` + 自定义 YAML codec；`unknownTopLevel`/`marshalWithExtra` 参数化已知键集，编码时跳过 Extra 里的已知键（防重复 YAML 键）；客户端 `saveEnv`/`RenameEnv` 读盘补齐并带回未知字段。回归：`collection/extra_test.go`、客户端 `env_extra_test.go`。
+> ⬜ M-3〜M-26、L 组未动，下一轮从 M-3 推进（H-7 syncapi 拆分归 M 组一并评估）。
 
 ## 一、Critical
 

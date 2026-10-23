@@ -801,6 +801,12 @@ func (e *Engine) applyVariable(uid string, p Payload) error {
 	if p.Name == "" || p.EnvUID == "" {
 		return nil
 	}
+	// H-11：Redacted 表示服务端未下发明文敏感值（调用方没有明文权限）。
+	// 本地已有值必须保留——绝不能用空值/掩码覆盖；本地没有该变量时直接跳过，
+	// 不能凭空造一个空 secret（否则用户下次有写权限时会把空值推回服务端）。
+	if p.Redacted {
+		return nil
+	}
 	env, _, err := e.envByUID(p.EnvUID)
 	if err != nil {
 		return err
