@@ -17,6 +17,7 @@ import Overview from '@/components/Overview.vue'
 import RequestBar from '@/components/RequestBar.vue'
 import RequestEditor from '@/components/RequestEditor.vue'
 import ResponsePanel from '@/components/ResponsePanel.vue'
+import RunCollectionDialog from '@/components/RunCollectionDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import StatusBar from '@/components/StatusBar.vue'
@@ -83,6 +84,7 @@ const showTrash = ref(false)
 const showCookies = ref(false)
 const showPalette = ref(false)
 const showImport = ref(false)
+const showRun = ref(false)
 const showCodegen = ref(false)
 const showMock = ref(false)
 const showCollDefaults = ref(false)
@@ -435,6 +437,7 @@ function pickEnv(name: string): void {
 function onCommand(key: string): void {
   if (key === 'open-dir') void openCollection('')
   else if (key === 'new-request') newDraft()
+  else if (key === 'run-collection') showRun.value = true
   else if (key === 'reload') void coll.reload()
   else if (key === 'toggle-layout') setLayout(settings.responseLayout === 'right' ? 'bottom' : 'right')
   else if (key === 'toggle-theme') void toggleTheme()
@@ -1094,9 +1097,9 @@ watch(
                   </template>
                 </div>
 
-                <overview v-else :info="coll.info" @new-request="newDraft()" @import="showImport = true"
-                  @export="exportDoc($event)" @mock="showMock = true" @collection-defaults="showCollDefaults = true"
-                  @field-mappings="showFieldMappings = true" />
+                <overview v-else :info="coll.info" @new-request="newDraft()" @run="showRun = true"
+                  @import="showImport = true" @export="exportDoc($event)" @mock="showMock = true"
+                  @collection-defaults="showCollDefaults = true" @field-mappings="showFieldMappings = true" />
               </transition>
             </main>
           </div>
@@ -1117,6 +1120,7 @@ watch(
       <trash-dialog v-model:show="showTrash" />
       <cookie-dialog v-model:show="showCookies" />
       <import-dialog v-model:show="showImport" @imported="imported" />
+      <run-collection-dialog v-model:show="showRun" :envs="coll.info?.envs ?? []" :collection-name="coll.info?.name ?? ''" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
       <collection-defaults-dialog v-model:show="showCollDefaults" />

@@ -328,6 +328,40 @@ export interface SendResult {
   reused?: boolean
 }
 
+/** 集合运行器（RM-02） */
+export interface RunCase {
+  name: string
+  path: string
+  uid: string
+  method: string
+  url: string
+  status: number
+  proto?: string
+  duration_ms: number
+  passed: boolean
+  error?: string
+  script_error?: string
+  asserts?: AssertResult[]
+}
+
+export interface RunReport {
+  collection: string
+  env: string
+  started_at: string
+  duration_ms: number
+  total: number
+  passed: number
+  failed: number
+  cases: RunCase[]
+}
+
+export interface RunCollectionOptions {
+  env_name: string
+  filter: string
+  bail: boolean
+  timeout_sec: number
+}
+
 /** 保存的响应示例里的请求快照（internal/collection.ExampleRequest）。 */
 export interface ExampleRequest {
   method: string

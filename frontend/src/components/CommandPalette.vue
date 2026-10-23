@@ -8,6 +8,7 @@ import {
     AddOutline,
     FolderOpenOutline,
     MoonOutline,
+    PlayOutline,
     RefreshOutline,
     SearchOutline,
     ServerOutline,
@@ -131,6 +132,7 @@ const crossRootAvailable = computed(() => props.roots.length > 1)
 const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'open-dir', labelKey: 'palette.openDir', icon: FolderOpenOutline },
   { key: 'new-request', labelKey: 'palette.newRequest', icon: AddOutline },
+  { key: 'run-collection', labelKey: 'palette.runCollection', icon: PlayOutline },
   { key: 'reload', labelKey: 'palette.reload', icon: RefreshOutline },
   { key: 'toggle-layout', labelKey: 'palette.toggleLayout', icon: SwapVerticalOutline },
   { key: 'toggle-theme', labelKey: 'palette.toggleTheme', icon: MoonOutline },

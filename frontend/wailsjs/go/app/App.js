@@ -74,12 +74,12 @@ export function DeleteDoc(arg1) {
   return window['go']['app']['App']['DeleteDoc'](arg1);
 }
 
-export function DeleteFieldMapping(arg1) {
-  return window['go']['app']['App']['DeleteFieldMapping'](arg1);
-}
-
 export function DeleteEnv(arg1) {
   return window['go']['app']['App']['DeleteEnv'](arg1);
+}
+
+export function DeleteFieldMapping(arg1) {
+  return window['go']['app']['App']['DeleteFieldMapping'](arg1);
 }
 
 export function DeleteFolder(arg1) {
@@ -116,6 +116,10 @@ export function ExportDoc(arg1, arg2) {
 
 export function ExportMCPAudit(arg1) {
   return window['go']['app']['App']['ExportMCPAudit'](arg1);
+}
+
+export function ExportRunReport(arg1, arg2) {
+  return window['go']['app']['App']['ExportRunReport'](arg1, arg2);
 }
 
 export function GenerateCode(arg1, arg2, arg3) {
@@ -372,6 +376,10 @@ export function RevealInFolder(arg1) {
 
 export function RevealMainWindow() {
   return window['go']['app']['App']['RevealMainWindow']();
+}
+
+export function RunCollection(arg1) {
+  return window['go']['app']['App']['RunCollection'](arg1);
 }
 
 export function RunSync(arg1) {

@@ -42,26 +42,25 @@ export namespace app {
 	        this.auth = this.convertValues(source["auth"], collection.Auth);
 	    }
 	
-	    convertValues(a: any, classs: any, asMap: boolean = false): any {
-	        if (!a) {
-	            return a;
-	        }
-	        if (a.slice && a.map) {
-	            return (a as any[]).map(elem => this.convertValues(elem, classs));
-	        } else if ("object" === typeof a) {
-	            if (asMap) {
-	                for (const key of Object.keys(a)) {
-	                    a[key] = new classs(a[key]);
-	                }
-	                return a;
-	            }
-	            return new classs(a);
-	        }
-	        return a;
-	    }
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
-
- export class CollectionSummary {
+	export class CollectionSummary {
 	    root: string;
 	    info?: collection.CollectionInfo;
 	    active: boolean;
@@ -285,6 +284,24 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class RunCollectionOptions {
+	    env_name: string;
+	    filter: string;
+	    bail: boolean;
+	    timeout_sec: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunCollectionOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.env_name = source["env_name"];
+	        this.filter = source["filter"];
+	        this.bail = source["bail"];
+	        this.timeout_sec = source["timeout_sec"];
+	    }
+	}
 	export class ServerProject {
 	    id: number;
 	    title: string;
@@ -505,24 +522,6 @@ export namespace collection {
 		    }
 		    return a;
 		}
-	}
-	export class FieldMapping {
-	    uid: string;
-	    field: string;
-	    type: string;
-	    description?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new FieldMapping(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.uid = source["uid"];
-	        this.field = source["field"];
-	        this.type = source["type"];
-	        this.description = source["description"];
-	    }
 	}
 	export class Node {
 	    type: string;
@@ -799,6 +798,24 @@ export namespace collection {
 		}
 	}
 	
+	export class FieldMapping {
+	    uid: string;
+	    field: string;
+	    type: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FieldMapping(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
+	        this.field = source["field"];
+	        this.type = source["type"];
+	        this.description = source["description"];
+	    }
+	}
 	export class GRPCTLS {
 	    mode?: string;
 	    ca?: string;
@@ -1750,6 +1767,29 @@ export namespace runner {
 
 }
 
+export namespace script {
+	
+	export class AssertResult {
+	    name: string;
+	    expr: string;
+	    passed: boolean;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AssertResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.expr = source["expr"];
+	        this.passed = source["passed"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
 export namespace syncengine {
 	
 	export class BindInfo {
@@ -1763,6 +1803,7 @@ export namespace syncengine {
 	    docHashes?: Record<string, string>;
 	    envHashes?: Record<string, string>;
 	    varHashes?: Record<string, string>;
+	    fieldMappingHashes?: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new BindInfo(source);
@@ -1780,6 +1821,7 @@ export namespace syncengine {
 	        this.docHashes = source["docHashes"];
 	        this.envHashes = source["envHashes"];
 	        this.varHashes = source["varHashes"];
+	        this.fieldMappingHashes = source["fieldMappingHashes"];
 	    }
 	}
 	export class Report {
@@ -1807,6 +1849,108 @@ export namespace syncengine {
 	        this.cursor = source["cursor"];
 	        this.gap = source["gap"];
 	    }
+	}
+
+}
+
+export namespace testrun {
+	
+	export class RunCase {
+	    name: string;
+	    path: string;
+	    uid: string;
+	    method: string;
+	    url: string;
+	    status: number;
+	    proto?: string;
+	    duration_ms: number;
+	    passed: boolean;
+	    error?: string;
+	    script_error?: string;
+	    asserts?: script.AssertResult[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RunCase(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.uid = source["uid"];
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.status = source["status"];
+	        this.proto = source["proto"];
+	        this.duration_ms = source["duration_ms"];
+	        this.passed = source["passed"];
+	        this.error = source["error"];
+	        this.script_error = source["script_error"];
+	        this.asserts = this.convertValues(source["asserts"], script.AssertResult);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Report {
+	    collection: string;
+	    env: string;
+	    // Go type: time
+	    started_at: any;
+	    duration_ms: number;
+	    total: number;
+	    passed: number;
+	    failed: number;
+	    cases: RunCase[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.collection = source["collection"];
+	        this.env = source["env"];
+	        this.started_at = this.convertValues(source["started_at"], null);
+	        this.duration_ms = source["duration_ms"];
+	        this.total = source["total"];
+	        this.passed = source["passed"];
+	        this.failed = source["failed"];
+	        this.cases = this.convertValues(source["cases"], RunCase);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

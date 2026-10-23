@@ -78,7 +78,7 @@ func Run(ctx context.Context, c *collection.Collection, opts Options) (*Report, 
 	for _, n := range nodes {
 		req, rerr := c.ReadRequest(n.UID)
 		if rerr != nil {
-			rep.Cases = append(rep.Cases, Case{
+			rep.Cases = append(rep.Cases, RunCase{
 				Name: n.Name, Path: n.Path, UID: n.UID, Method: n.Method,
 				Error: "读取请求失败：" + rerr.Error(),
 			})
@@ -153,10 +153,10 @@ func collectRequests(nodes []*collection.Node, filter string) []*collection.Node
 }
 
 // runCase 执行单条请求：默认值合并 → 前置 → 发送 → 后置/断言。
-func runCase(in caseInput) Case {
+func runCase(in caseInput) RunCase {
 	start := time.Now()
 	req := collection.MergeDefaults(in.req, in.coll.Defaults())
-	cs := Case{Name: req.Name, Path: req.Path, UID: req.UID, Method: req.Method, URL: req.URL}
+	cs := RunCase{Name: req.Name, Path: req.Path, UID: req.UID, Method: req.Method, URL: req.URL}
 
 	scr := script.Scripts{}
 	if req.Script != nil {

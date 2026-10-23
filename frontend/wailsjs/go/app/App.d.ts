@@ -11,6 +11,7 @@ import {cookiejar} from '../models';
 import {history} from '../models';
 import {mcpaudit} from '../models';
 import {mocksrv} from '../models';
+import {testrun} from '../models';
 import {runner} from '../models';
 import {index} from '../models';
 
@@ -52,13 +53,13 @@ export function DeleteDoc(arg1:string):Promise<void>;
 
 export function DeleteEnv(arg1:string):Promise<void>;
 
+export function DeleteFieldMapping(arg1:string):Promise<void>;
+
 export function DeleteFolder(arg1:string):Promise<void>;
 
 export function DeleteFolderTree(arg1:string):Promise<void>;
 
 export function DeleteFromTrash(arg1:string,arg2:string):Promise<void>;
-
-export function DeleteFieldMapping(arg1:string):Promise<void>;
 
 export function DeleteRequest(arg1:string):Promise<void>;
 
@@ -71,6 +72,8 @@ export function EnvFileHash(arg1:string):Promise<string>;
 export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 
 export function ExportMCPAudit(arg1:string):Promise<string>;
+
+export function ExportRunReport(arg1:string,arg2:string):Promise<string>;
 
 export function GenerateCode(arg1:string,arg2:string,arg3:collection.Request):Promise<string>;
 
@@ -199,6 +202,8 @@ export function RestoreTrash(arg1:string,arg2:string,arg3:string):Promise<string
 export function RevealInFolder(arg1:string):Promise<void>;
 
 export function RevealMainWindow():Promise<void>;
+
+export function RunCollection(arg1:app.RunCollectionOptions):Promise<testrun.Report>;
 
 export function RunSync(arg1:string):Promise<syncengine.Report>;
 
