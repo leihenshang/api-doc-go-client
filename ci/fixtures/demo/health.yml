@@ -1,0 +1,14 @@
+info:
+  name: health
+  type: http
+  seq: 1
+meta:
+  uid: ci-demo-health
+http:
+  method: GET
+  url: "{{host}}/health.json"
+docs: |-
+  CI fixture：由 `python3 -m http.server` 提供 `/health.json`。
+assert:
+  - { name: 状态码 200, expr: "res.status === 200" }
+  - { name: ok 为 true, expr: "res.body.ok === true" }

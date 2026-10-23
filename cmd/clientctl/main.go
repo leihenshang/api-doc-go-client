@@ -3,6 +3,7 @@
 //	clientctl init <dir>                    初始化集合 + 示例请求/环境
 //	clientctl list <dir>                    打印集合树
 //	clientctl send <dir> <uid> [-env name]  渲染并真实发送一条请求
+//	clientctl run  <dir> [flags]             按集合树顺序运行并输出报告（CI 用）
 package main
 
 import (
@@ -13,11 +14,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/cookiejar"
 	"api-doc-go-client/internal/runner"
+	"api-doc-go-client/internal/testrun"
 	"api-doc-go-client/internal/varx"
 )
 
@@ -69,6 +72,8 @@ func main() {
 			usage()
 		}
 		sendCmd(fs.Args()[0], fs.Args()[1], *env)
+	case "run":
+		runArgs(os.Args[2:])
 	default:
 		usage()
 	}
@@ -78,8 +83,101 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `用法:
   clientctl init  <dir>                     初始化集合并写入示例
   clientctl list  <dir>                     打印集合树
-  clientctl send  <dir> <uid> [-env name]   渲染并发送请求`)
+  clientctl send  <dir> <uid> [-env name]   渲染并发送请求
+  clientctl run   <dir> [flags]             按树顺序运行集合（CI）
+
+run flags:
+  -env name          环境名（空 = 仅内置变量）
+  -filter substr     按请求名称/路径过滤
+  -bail              首个失败即停止
+  -timeout seconds   单请求超时（0 = 全局/请求设置）
+  -reporter format   text | json | junit（默认 text）
+  -output file       报告输出文件（空 = stdout）`)
 	os.Exit(1)
+}
+
+// runFlags clientctl run 的参数。
+type runFlags struct {
+	dir, env, filter string
+	bail             bool
+	timeout          int
+	reporter, output string
+}
+
+// runArgs 解析 run 子命令：同时支持 `run <dir> --env dev` 与 `run --env dev <dir>`。
+func runArgs(args []string) {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	env := fs.String("env", "", "环境名（空 = 仅内置变量）")
+	filter := fs.String("filter", "", "按请求名称/路径过滤")
+	bail := fs.Bool("bail", false, "首个失败即停止")
+	timeout := fs.Int("timeout", 0, "单请求超时（秒）")
+	reporter := fs.String("reporter", "text", "text | json | junit")
+	output := fs.String("output", "", "报告输出文件")
+	dir, rest := splitDirArg(args)
+	_ = fs.Parse(rest)
+	if dir == "" && len(fs.Args()) > 0 {
+		dir = fs.Args()[0]
+	}
+	if dir == "" {
+		usage()
+	}
+	runCmd(runFlags{dir: dir, env: *env, filter: *filter, bail: *bail,
+		timeout: *timeout, reporter: *reporter, output: *output})
+}
+
+// splitDirArg 把第一个非 flag 参数当作目录，其余交给 flag 解析。
+func splitDirArg(args []string) (string, []string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[0], args[1:]
+	}
+	return "", args
+}
+
+// runCmd 打开集合并执行，输出报告；有失败时退出码 1。
+func runCmd(f runFlags) {
+	c, err := collection.Open(f.dir)
+	if err != nil {
+		fatal(err)
+	}
+	rep, runErr := testrun.Run(context.Background(), c, testrun.Options{
+		EnvName: f.env, Filter: f.filter, Bail: f.bail,
+		Timeout: time.Duration(f.timeout) * time.Second,
+		Runner:  sendOptions(),
+	})
+	if err := c.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "关闭集合:", err)
+	}
+	if runErr != nil {
+		fatal(runErr)
+	}
+	data, err := renderReport(rep, f.reporter)
+	if err != nil {
+		fatal(err)
+	}
+	if f.output != "" {
+		if err := os.WriteFile(f.output, data, 0o644); err != nil {
+			fatal(err)
+		}
+	} else {
+		_, _ = os.Stdout.Write(data)
+	}
+	if rep.Failed > 0 {
+		os.Exit(1)
+	}
+}
+
+// renderReport 按格式渲染报告。
+func renderReport(rep *testrun.Report, format string) ([]byte, error) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "text":
+		return []byte(rep.Text()), nil
+	case "json":
+		return rep.JSON()
+	case "junit":
+		return rep.JUnit()
+	default:
+		return nil, fmt.Errorf("未知报告格式 %q（text|json|junit）", format)
+	}
 }
 
 func initCmd(dir string) {

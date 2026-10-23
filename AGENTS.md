@@ -19,6 +19,11 @@ bash scripts/check.sh --smoke    # 前端构建 + @smoke 冒烟（约 1 分钟�
 bash scripts/check.sh --full     # 前端构建 + 全量 e2e（约 3 分钟；--skip-build 可跳过构建）
 bash scripts/check.sh --e2e-ui   # Playwright UI 交互调试
 # 前置：cd frontend && npm i && npx playwright install chromium；用例与夹具说明见 frontend/e2e/README.md
+
+# 集合运行器（RM-02，CI 用）：按树顺序执行脚本/断言，输出 text|json|junit
+go run ./cmd/clientctl run <collection-dir> --env dev --reporter junit --output report.xml
+# 参数：-filter/-bail/-timeout/-output；示例见 ci/README.md
+# CI 示例 .github/workflows/collection-tests.yml 刻意只保留 workflow_dispatch，推送不会自动运行
 ```
 
 ## 必须遵守（改动相关）

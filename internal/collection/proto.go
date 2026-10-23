@@ -27,6 +27,66 @@ type ProtoFileInfo struct {
 // ProtoDir 定义目录（绝对路径）：编译时默认加进 import 搜索路径。
 func (c *Collection) ProtoDir() string { return filepath.Join(c.Dir, protosDir) }
 
+// ProtoImportPaths import 搜索路径：集合内 protos/ 始终参与，再叠加用户额外指定（相对集合目录或绝对路径）。
+func (c *Collection) ProtoImportPaths(imports []string) []string {
+	paths := []string{c.ProtoDir()}
+	for _, rel := range imports {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			continue
+		}
+		if filepath.IsAbs(rel) {
+			paths = append(paths, filepath.Clean(rel))
+			continue
+		}
+		paths = append(paths, filepath.Join(c.Dir, filepath.FromSlash(rel)))
+	}
+	return paths
+}
+
+// ProtoFiles 把集合内相对定义路径展开成绝对路径。
+//
+// 路径来自请求文件 / 集合清单（不可信输入），因此**必须落在集合目录内**：
+// 否则一份 `grpc.proto: ../../../../etc/passwd` 就能让调用方把任意本地文件当定义读。
+func (c *Collection) ProtoFiles(rels []string) ([]string, error) {
+	if len(rels) == 0 {
+		return nil, fmt.Errorf("还没有导入 .proto 定义")
+	}
+	files := make([]string, 0, len(rels))
+	for _, rel := range rels {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			return nil, fmt.Errorf("定义路径为空（请先导入 .proto）")
+		}
+		full, err := c.resolveInCollection(rel)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(full); err != nil {
+			return nil, fmt.Errorf("找不到定义 %s（可能未导入或已被移除）", rel)
+		}
+		files = append(files, full)
+	}
+	return files, nil
+}
+
+// resolveInCollection 把集合内相对路径解析成绝对路径，越界（绝对路径 / ..）直接报错。
+func (c *Collection) resolveInCollection(rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("定义路径必须是集合内的相对路径: %s", rel)
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "." || clean == "" || strings.HasPrefix(clean, "..") {
+		return "", fmt.Errorf("非法的定义路径: %s", rel)
+	}
+	full := filepath.Join(c.Dir, clean)
+	base := filepath.Clean(c.Dir)
+	if full != base && !strings.HasPrefix(full, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("定义路径越出集合目录: %s", rel)
+	}
+	return full, nil
+}
+
 // ImportProtos 把外部 .proto 复制进集合 protos/ 目录（导入即落盘，设计文档 G2.1/D2）。
 //
 // 规则：

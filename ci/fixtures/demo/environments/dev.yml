@@ -1,0 +1,5 @@
+info:
+  name: dev
+uid: ci-demo-env
+vars:
+  - { name: host, value: "http://127.0.0.1:18080", enabled: true }
