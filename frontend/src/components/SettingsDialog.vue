@@ -855,14 +855,10 @@ function close(): void {
   margin: 0 0 2px;
 }
 
-/* 未保存改动提示：底部胶囊，琥珀色醒目，提醒「点击保存生效」 */
+/* 未保存改动提示：纯红色文字，无边框/背景，提醒「点击保存生效」 */
 .dirty {
   margin: 0;
-  padding: 6px 12px;
-  border: 1px solid var(--app-warn);
-  border-radius: 999px;
-  background: var(--app-warn-tint);
-  color: var(--app-warn);
+  color: var(--app-danger);
   font-size: 12.5px;
   font-weight: 600;
 }
