@@ -1,0 +1,43 @@
+name: Collection tests (manual)
+
+# 本仓库刻意只保留 workflow_dispatch：不随 push / pull_request 运行。
+# 接入真实 API 项目时，把本文件复制到目标仓库，再按需改为 push / pull_request；
+# 也可在 Actions 页面手动 Run workflow 验证 clientctl run。
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: collection-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - name: 构建 clientctl
+        run: |
+          mkdir -p .tmp
+          go build -o .tmp/clientctl ./cmd/clientctl
+
+      - name: 运行示例集合
+        run: |
+          python3 -m http.server 18080 --directory ci/fixtures/http > .tmp/ci-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid 2>/dev/null || true' EXIT
+          sleep 1
+          .tmp/clientctl run ci/fixtures/demo --env dev --reporter junit --output .tmp/collection-report.xml
+
+      - name: 上传 JUnit 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collection-report
+          path: .tmp/collection-report.xml
+          if-no-files-found: ignore

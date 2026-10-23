@@ -30,7 +30,7 @@ fi
 
 # -race 覆盖的包：历史上真正出过并发问题的地方（P1-10/P1-14/P1-15 与 watcher/syncengine）。
 if [[ "$RACE" == "1" ]]; then
-    RACE_PKGS="./internal/app/ ./internal/syncengine/ ./internal/collection/ ./internal/watch/ ./internal/index/ ./internal/mcpauth/ ./internal/mocksrv/"
+    RACE_PKGS="./internal/app/ ./internal/syncengine/ ./internal/collection/ ./internal/watch/ ./internal/index/ ./internal/mcpauth/ ./internal/mocksrv/ ./internal/testrun/"
     echo
     echo "== go test -race $RACE_PKGS =="
     # shellcheck disable=SC2086
@@ -60,6 +60,7 @@ internal/runner 75
 internal/script 75
 internal/secrets 75
 internal/syncengine 65
+internal/testrun 70
 internal/varx 75
 internal/watch 70
 cmd/testfixtures 55

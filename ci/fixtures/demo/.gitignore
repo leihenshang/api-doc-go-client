@@ -1,0 +1,8 @@
+# 客户端自动维护
+environments/*.secrets.yml
+*.local.yml
+.sync.json
+.sync-deletes.json
+.trash/
+.conflicts/
+node_modules/
