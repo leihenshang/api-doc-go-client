@@ -1,8 +1,7 @@
 <script setup lang="ts">
 // 响应面板：状态栏 / 页签（响应体 / 响应头 / 尾元数据）/ 工具条 / 内容区。
-// 响应字段表已移到请求编辑器的「响应字段（Resp）」分段（侧栏 Resp 节点入口）：
-// 本面板只保留「更新响应字段」动作 —— 已有字段时先弹覆盖确认（可勾选「值一致时继承说明」），
-// 更新成功后字段表写入请求模型并把编辑器切到 Resp 分段。
+// 响应字段表由请求编辑器的「响应字段（Resp）」分段维护（手工「生成数据表格」/「从本次响应生成」）；
+// 本面板不再提供「更新响应字段」动作，只负责展示与保存响应示例。
 import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
@@ -11,21 +10,18 @@ import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
-import { buildRespDoc, cancelPendingFor, loadFields, persistRespDoc, rebuildFields, rootJsonType, rowsFromDoc, type FieldRow, type PersistTimer } from '@/lib/responseFields'
 import { respPanelSegByTab, respPanelViewByTab, respPanelWrapByTab } from '@/lib/tabViewState'
 import { detectFileResponse } from '@/lib/responseFile'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
 import type { Tab } from '@/stores/tabs'
-import { useTabsStore } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
 import { BookmarkOutline, DownloadOutline, TrashOutline } from '@vicons/ionicons5'
-import { NAlert, NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
 const { t } = useI18n()
-const tabs = useTabsStore()
 
 // 默认不换行：长值横向滚动看全，需要时用工具条换行图标开关
 const view = ref<'pretty' | 'raw'>(respPanelViewByTab.get(props.tab.key) ?? 'pretty')
@@ -36,11 +32,6 @@ watch(view, (v) => respPanelViewByTab.set(props.tab.key, v))
 watch(wrap, (v) => respPanelWrapByTab.set(props.tab.key, v))
 watch(seg, (v) => respPanelSegByTab.set(props.tab.key, v))
 const jv = ref<InstanceType<typeof JsonTree> | null>(null)
-
-/** 覆盖确认（仅当字段表已有内容时弹出） */
-const showOverwrite = ref(false)
-const INHERIT_KEY = 'client.resp.inheritMeaning'
-const inheritMeaning = ref(localStorage.getItem(INHERIT_KEY) !== '0')
 
 // 正在回看的已保存示例（不依赖本次响应：刷新后没有实时响应也能回看快照）
 const example = computed(() => examples.value.find((e) => e.uid === viewingUid.value) ?? null)
@@ -187,85 +178,6 @@ const statusLabel = computed(() => {
 
 const copied = ref(false)
 
-// ---- 更新响应字段（覆盖确认 + 值一致继承说明）----
-
-const isGrpcReq = computed(() => !!props.tab.request?.grpc)
-
-/** 当前字段表：已落盘请求取请求模型 RespDoc；草稿 / gRPC 回退一次性本地存档。 */
-function currentRows(): FieldRow[] {
-  const doc = props.tab.request?.respDoc
-  const rows = rowsFromDoc(doc)
-  return rows.length ? rows : loadFields(props.tab.uid)
-}
-
-/**
- * 「更新响应字段」：解析当前展示的响应体并**覆盖**字段表。
- * 已有字段时先弹覆盖确认（可勾选「值一致时继承已有说明」）；首次更新或空表直接执行。
- */
-async function updateFields(): Promise<void> {
-  if (!display.value) return
-  if (!body.value.trim()) {
-    message.info(t('resp.fieldsNeedBody'))
-    return
-  }
-  const old = currentRows()
-  if (old.length > 0) {
-    showOverwrite.value = true
-    return
-  }
-  await doUpdateFields(old, inheritMeaning.value)
-}
-
-async function confirmOverwrite(): Promise<void> {
-  showOverwrite.value = false
-  localStorage.setItem(INHERIT_KEY, inheritMeaning.value ? '1' : '0')
-  await doUpdateFields(currentRows(), inheritMeaning.value)
-}
-
-async function doUpdateFields(old: FieldRow[], inherit: boolean): Promise<void> {
-  try {
-    const { rows } = rebuildFields(old, body.value, inherit)
-    // 先丢掉请求编辑器里尚未触发的防抖写回：否则旧 doc（旧 body/含含义）会在 600ms 后回滚本次快照
-    cancelPendingFor(props.tab.uid)
-    const ok = await persistRows(rows, true)
-    if (!ok) return
-    // 字段表已挂到请求模型：直接把编辑器切到「响应字段」分段（集合树不再挂 Resp 节点）
-    if (!isGrpcReq.value) {
-      tabs.focusRespFields(props.tab.key)
-    }
-    message.success(t('resp.fieldsUpdated', { n: rows.length }))
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-/** 含义输入去抖写盘。草稿 / gRPC 请求暂存 localStorage；HTTP 请求写回请求模型 RespDoc（immediate 用于「更新」按钮）。 */
-const persistTimer: PersistTimer = { current: null }
-async function persistRows(rows: FieldRow[], immediate = false): Promise<boolean> {
-  // 快照优先：有本次响应就用它的 type/sample/status/headers，缺省回退既有 respDoc（组装规则见 buildRespDoc）。
-  const doc = buildRespDoc(rows, props.tab.request?.respDoc, {
-    type: rootJsonType(body.value),
-    sample: body.value,
-    status: display.value?.status,
-    headers: display.value?.headers?.length ? display.value.headers : undefined,
-  })
-  return persistRespDoc({
-    uid: props.tab.uid,
-    draft: props.tab.draft,
-    grpc: isGrpcReq.value,
-    rows,
-    doc,
-    immediate,
-    timer: persistTimer,
-    attach: (d) => { if (props.tab.request) props.tab.request.respDoc = d },
-    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
-  })
-}
-
-onBeforeUnmount(() => {
-  if (persistTimer.current) clearTimeout(persistTimer.current)
-})
-
 async function copyBody(): Promise<void> {
   if (!(await writeClipboard(body.value))) {
     message.error(t('resp.copyFailed'))
@@ -404,9 +316,8 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
 
         <!-- 文件类响应不显示解析/美化/查找/保存示例等工具（改为下方下载卡片） -->
         <response-toolbar v-if="!fileInfo.isFile" v-model:view="view" v-model:wrap="wrap" v-model:find-on="findOn"
-          :is-json="isJson" :copied="copied" :can-save-example="!example" :findable="!!body"
-          @update-fields="updateFields" @copy-body="copyBody" @save-file="saveBody" @save-example="openSave"
-          @find="openFind" />
+          :copied="copied" :can-save-example="!example" :findable="!!body"
+          @copy-body="copyBody" @save-file="saveBody" @save-example="openSave" @find="openFind" />
 
         <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
           @next="findNext" @prev="findPrev" @close="findOn = false" />
@@ -497,23 +408,6 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
           }}</n-button>
           <n-button size="small" type="primary" data-testid="resp.exampleSave" @click="submitSave">
             {{ t('common.save') }}
-          </n-button>
-        </div>
-      </template>
-    </n-modal>
-
-    <!-- 覆盖字段表确认：已有字段时更新 = 覆盖重建；勾选后同路径同值的字段沿用旧说明 -->
-    <n-modal v-model:show="showOverwrite" preset="card" :title="t('resp.fieldsOverwriteTitle')" style="width: 440px">
-      <p class="ow-text">{{ t('resp.fieldsOverwriteContent') }}</p>
-      <n-checkbox v-model:checked="inheritMeaning" data-testid="resp.fieldsInherit">
-        {{ t('resp.inheritMeaning') }}
-      </n-checkbox>
-      <template #footer>
-        <div class="modal-ft">
-          <n-button size="small" data-testid="resp.fieldsCancel" @click="showOverwrite = false">{{ t('common.cancel')
-          }}</n-button>
-          <n-button size="small" type="primary" data-testid="resp.fieldsConfirm" @click="confirmOverwrite">
-            {{ t('resp.fieldsOverwriteOk') }}
           </n-button>
         </div>
       </template>

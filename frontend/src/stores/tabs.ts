@@ -193,11 +193,6 @@ export const useTabsStore = defineStore('tabs', {
     lastSavedAt: 0,
     /** 草稿写 localStorage 失败只提示一次的标记 */
     draftsWarned: false,
-    /**
-     * 「定位到响应字段表」信号：响应区点「更新响应字段」后，请求编辑器切到 Resp 分段。
-     * tick 每次自增（同一 tab 连续更新也要重新触发）；非持久 UI 状态。
-     */
-    respFocus: null as null | { key: string; tick: number },
   }),
   getters: {
     active: (s) => s.tabs.find((t) => t.key === s.activeKey) ?? null,
@@ -404,10 +399,6 @@ export const useTabsStore = defineStore('tabs', {
     setActive(key: string): void {
       this.activeKey = key
       this.saveSession()
-    },
-    /** 请求编辑器响应：切到「响应字段」分段（响应区「更新响应字段」成功后调用）。 */
-    focusRespFields(key: string): void {
-      this.respFocus = { key, tick: (this.respFocus?.tick ?? 0) + 1 }
     },
     /** G7：把 from 位置的 tab 挪到 to 位置。 */
     reorder(from: number, to: number): void {

@@ -20,7 +20,15 @@ import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { message } from '@/lib/notice'
-import { loadFields, rowsFromDoc } from '@/lib/responseFields'
+import {
+  deriveFields,
+  emptyFieldRow as emptyRespFieldRow,
+  mergeAppend,
+  mergeOverwrite,
+  rowsFromDoc,
+  type FieldRow,
+  type RespDocLive,
+} from '@/lib/responseFields'
 import { requestSegByTab, respSubViewByTab } from '@/lib/tabViewState'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
 import { isDark } from '@/lib/theme'
@@ -179,8 +187,8 @@ function toggleDocsEditing(): void {
 const hasDoc = computed(() => (docs.value ?? '').trim().length > 0)
 
 /**
- * 生成接口文档（不直接覆写 Docs）：请求示例取 curl 代码；响应字段取**请求模型 RespDoc**（侧栏 Resp 节点同一份，
- * 草稿 / gRPC 回退本地一次性存档）；响应示例从已保存示例里挑最新一个 JSON 体。
+ * 生成接口文档（不直接覆写 Docs）：请求示例取 curl 代码；响应字段取**请求模型 RespDoc.params**
+ * （侧栏 Resp 节点同一份；表格为空时不输出该章节）；响应示例从已保存示例里挑最新一个 JSON 体。
  * 结果先弹「生成文档」对话框（预览/编辑 + 覆盖/追加/下载），由用户显式选择落点。
  */
 const showGen = ref(false)
@@ -188,9 +196,12 @@ const genText = ref('')
 
 async function genDocs(): Promise<void> {
   try {
+    // 字段表格的单元格编辑是 600ms 防抖写盘：先把待写刷进 respDoc，
+    // 否则「改完最后一行立刻生成文档」会读到旧快照（写盘失败只提示，不阻断生成）。
+    if (!isGrpcReq.value && props.tab.request.respDoc) await flushFields()
     const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
-    const fromModel = rowsFromDoc(props.tab.request.respDoc)
-    const fields = fromModel.length ? fromModel : loadFields(props.tab.uid)
+    // 字段来源只用 respDoc.params（响应字段表的唯一真源）：空表不输出该章节
+    const fields = rowsFromDoc(props.tab.request.respDoc)
     const examples = await api.listResponseExamples(props.tab.uid)
     const ex = examples.find((e) => !e.response.binary && /^[{[]/.test((e.response.body ?? '').trim()))
     genText.value = buildApiDoc({
@@ -456,11 +467,111 @@ watch(
 // ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
 // 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
 // 字段表状态与「防抖写回 respDoc」逻辑见 composables/useResponseFields。
-const { fields, sample, hasResp, initFields, onSampleInput, setMeaning, cancelPending } = useResponseFields({
-  getTab: () => props.tab,
-  isGrpc: () => isGrpcReq.value,
-  onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
-})
+// 与请求体表格同构：表格只在点「生成数据表格」/「从本次响应生成」时派生，之后由用户编辑。
+const { fields, sample, hasResp, initFields, onSampleInput, applyRows, patchRow, addRow, removeRow, flushFields, cancelPending } =
+  useResponseFields({
+    getTab: () => props.tab,
+    isGrpc: () => isGrpcReq.value,
+    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+  })
+
+/** 「本次响应」（最近一次真实发送的响应体）：只读来源，不会被写回 respDoc.sample。 */
+const liveRespBody = computed(() => (props.tab.response?.body ?? ''))
+/** 「从本次响应生成」的按钮提示：没有本次响应时说明为什么不可用（禁用态靠外层 span 的 title 显示）。 */
+const genLiveTitle = computed(() =>
+  liveRespBody.value.trim() ? t('resp.genLiveHint') : t('resp.genNoLive'),
+)
+
+/** 生成确认弹窗（表格已有内容时二选一：新增 / 覆盖）与本次派生结果。 */
+const respGenDialog = ref(false)
+const respGenDerived = ref<FieldRow[]>([])
+/** 本次生成的来源：sample=手动填的响应数据；live=本次真实响应（决定是否顺带落 status/headers 快照）。 */
+const respGenSource = ref<'sample' | 'live'>('sample')
+
+/** 生成来源是「本次响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。 */
+function liveRespMeta(): RespDocLive | undefined {
+  const r = props.tab.response
+  if (!r) return undefined
+  return {
+    status: r.status,
+    headers: r.headers?.length ? r.headers : undefined,
+    contentType: r.contentType || undefined,
+  }
+}
+
+/**
+ * 解析生成来源：返回 null 表示「空 / 非法 JSON」，返回空数组表示「合法 JSON 但没有字段」。
+ */
+function parseGenSource(text: string): FieldRow[] | null {
+  if (text.trim() === '') return null
+  try {
+    JSON.parse(text)
+  } catch {
+    return null
+  }
+  return deriveFields(text)
+}
+
+/**
+ * 「生成数据表格」/「从本次响应生成」：派生 5 列 → 空表直接生成，非空表弹「新增 / 覆盖」。
+ * 生成只动表格（respDoc.params）；「响应数据」（respDoc.sample）始终不动。
+ * 「从本次响应生成」额外把本次 status/headers/contentType 记进 respDoc（响应头子页签与状态徽标的数据源）。
+ */
+function startRespGenerate(source: 'sample' | 'live'): void {
+  if (readonly.value || isGrpcReq.value) return
+  const text = source === 'sample' ? sample.value : liveRespBody.value
+  const derived = parseGenSource(text)
+  if (derived === null) {
+    message.warning(source === 'sample' ? t('resp.genInvalidSample') : t('resp.genInvalidLive'))
+    return
+  }
+  if (!derived.length) {
+    message.warning(t('resp.genEmpty'))
+    return
+  }
+  respGenSource.value = source
+  if (!fields.value.length) {
+    applyRespRows(derived, derived.length, source)
+    return
+  }
+  respGenDerived.value = derived
+  respGenDialog.value = true
+}
+
+/** 生成结果落到表格：立即写回 respDoc.params（含 required），并切到「字段表格」子页签。 */
+function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live'): void {
+  applyRows(rows, true, source === 'live' ? liveRespMeta() : undefined)
+  respView.value = 'fields'
+  message.success(t('resp.genDone', { n }))
+}
+
+/** 弹窗确认：新增=只追加缺失路径；覆盖=按本次派生重建、同路径只继承含义。 */
+function onConfirmRespGenerate(mode: 'append' | 'overwrite'): void {
+  const cur = fields.value
+  const derived = respGenDerived.value
+  const source = respGenSource.value
+  const merged = mode === 'append' ? mergeAppend(cur, derived) : mergeOverwrite(cur, derived)
+  respGenDialog.value = false
+  respGenDerived.value = []
+  applyRespRows(merged, mode === 'append' ? merged.length - cur.length : merged.length, source)
+}
+
+/** 取消生成：什么都不改（不写盘）。 */
+function onCancelRespGenerate(): void {
+  respGenDialog.value = false
+  respGenDerived.value = []
+}
+
+/** 表格 5 列改动 / 追加行 / 删除行：都写回 respDoc.params（required 如实保存）。 */
+function onRespFieldUpdate(index: number, patch: Partial<FieldRow>): void {
+  patchRow(index, patch)
+}
+function onRespFieldAdd(): void {
+  addRow(emptyRespFieldRow())
+}
+function onRespFieldRemove(index: number): void {
+  removeRow(index)
+}
 
 /** 响应数据格式化失败提示（常显按钮，点击时才判断内容）。 */
 const respFormatError = ref(false)
@@ -545,16 +656,8 @@ const respView = ref<RespView>(savedRespView ?? 'body')
 watch(respView, (v) => respSubViewByTab.set(props.tab.key, v))
 const respSnap = computed(() => props.tab.request.respDoc ?? null)
 
-// 响应区「更新响应字段」成功后：切到 Resp 分段并直接看「字段表格」（其余情形默认停在响应数据）。
-watch(
-  () => tabs.respFocus,
-  (f) => {
-    if (f?.key !== props.tab.key) return
-    seg.value = 'resp'
-    respView.value = 'fields'
-    initFields()
-  },
-)
+// 「生成数据表格」成功后由本组件自己把 respView 切到 'fields'（字段表格），
+// 不再需要响应面板的跨组件跳转信号（旧「更新响应字段」按钮已移除）。
 
 // ---- 编辑区页内查找（textarea 版；逻辑见 composables/useTextareaFind）----
 const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, openFind, applyFind, findNext, findPrev } =
@@ -744,7 +847,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
                 respSnap.headers.length }}</span>
             </button>
-            <!-- 字段表格放到最后（由「响应数据」派生，先看数据再看字段表） -->
+            <!-- 字段表格放到最后（先手工生成表格，再看字段表） -->
             <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" role="tab"
               :aria-selected="respView === 'fields'" data-testid="resp.segTab" data-view="fields"
               @click="respView = 'fields'">
@@ -759,12 +862,29 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               @update:value="(v: string) => setContentType(v)" />
             <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
           </div>
+          <!-- 字段表格的两个生成来源（gRPC 不支持 respDoc，故整段不渲染）：
+               ① 手动填的「响应数据」文本；② 本次真实响应（有响应才可点）。
+               生成只动表格，不改「响应数据」；已有表格时弹「新增 / 覆盖」。 -->
+          <div v-if="!isGrpcReq" class="resp-gen">
+            <button class="fmt" type="button" data-testid="resp.generate" :disabled="readonly"
+              :title="t('resp.genBtnHint')" @click="startRespGenerate('sample')">
+              {{ t('resp.genBtn') }}
+            </button>
+            <span class="fmt-tip" :title="genLiveTitle">
+              <button class="fmt" type="button" data-testid="resp.generateLive"
+                :disabled="readonly || !liveRespBody.trim()" :title="genLiveTitle"
+                @click="startRespGenerate('live')">
+                {{ t('resp.genLiveBtn') }}
+              </button>
+            </span>
+          </div>
         </div>
-        <!-- 字段表格：由「响应数据」子页签的合法 JSON 实时派生（表格只读，只能逐行写含义） -->
-        <div v-if="respView === 'fields'" class="resp-fields">
-          <response-fields :rows="fields" @meaning="setMeaning" />
+        <!-- 字段表格：5 列全可编辑（字段名 / 类型 / 必填 / 示例值 / 说明）+ 增行 / 删行 -->
+        <div v-if="respView === 'fields' && !isGrpcReq" class="resp-fields">
+          <response-fields :rows="fields" :readonly="readonly" @update="onRespFieldUpdate" @add="onRespFieldAdd"
+            @remove="onRespFieldRemove" />
         </div>
-        <!-- 响应数据：可编辑；合法 JSON 时自动生成「字段表格」（非法/空则不覆盖既有表） -->
+        <!-- 响应数据：可编辑的响应数据文本（字段表格只在点「生成数据表格」时派生，不看这里的变化） -->
         <div v-else-if="respView === 'body'" class="resp-data">
           <div class="resp-data-hd">
             <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
@@ -837,6 +957,24 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             {{ t('body.genOverwrite') }}
           </n-button>
           <n-button size="small" quaternary data-testid="body.genCancel" @click="onCancelGenerate">
+            {{ t('common.cancel') }}
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- 「生成数据表格」（响应字段）确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
+    <n-modal v-model:show="respGenDialog" preset="card" class="gen-modal" :title="t('resp.genTitle')">
+      <div data-testid="resp.genDialog">
+        <p class="gen-hint">{{ t('resp.genHint') }}</p>
+        <div class="gen-actions">
+          <n-button size="small" type="primary" data-testid="resp.genAppend" @click="onConfirmRespGenerate('append')">
+            {{ t('body.genAppend') }}
+          </n-button>
+          <n-button size="small" data-testid="resp.genOverwrite" @click="onConfirmRespGenerate('overwrite')">
+            {{ t('body.genOverwrite') }}
+          </n-button>
+          <n-button size="small" quaternary data-testid="resp.genCancel" @click="onCancelRespGenerate">
             {{ t('common.cancel') }}
           </n-button>
         </div>
@@ -1052,7 +1190,25 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   gap: 10px;
 }
 
-/* 字段表格：由「响应数据」派生，仅表格本身 */
+/* 字段表格的生成按钮组（响应数据 / 本次响应两个来源） */
+.resp-gen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.resp-gen .fmt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 外层 span 负责显示提示：原生 button 禁用后不触发鼠标事件，自身 title 不会弹出 */
+.resp-gen .fmt-tip {
+  display: inline-flex;
+}
+
+/* 字段表格：5 列可编辑，仅表格本身 */
 .resp-fields {
   display: flex;
   flex-direction: column;

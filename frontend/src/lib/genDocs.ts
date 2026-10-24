@@ -3,11 +3,13 @@
 // 结构对齐约定（参考采集文档）：
 //   简要描述 → 请求URI → 请求方式 → 请求头 → 请求参数 → 请求体 → 请求示例 → 响应字段 → 响应示例 → 备注。
 // 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数为「参数名|必选|类型|说明」，
-// 请求体字段表与响应字段表为 5 列「参数名|必选|类型|示例值|说明」，必选默认填「是」，
+// 请求体字段表与响应字段表为 5 列「参数名|必选|类型|示例值|说明」，
+// 必选分别按 body.fields[].required / respDoc.params[].required 输出「是/否」，
 // 类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
 // 且「请求URI」只保留路径（查询串交由「请求参数」表体现）。
 //
 // 请求体字段表的数据来自 body.fields（唯一真源，手工生成）；表格为空时只输出请求体原文，不出表。
+// 响应字段表的数据来自 respDoc.params（唯一真源，手工生成）；表格为空时不出表。
 // body.descs（旧备注）不再参与文档生成。
 import type { FieldRow } from '@/lib/responseFields'
 import type { RequestDoc } from '@/types'
@@ -158,13 +160,14 @@ export function buildApiDoc(input: ApiDocInput): string {
     if (reqBodyJson) out.push('```json', reqBodyJson, '```', '')
   }
 
-  // 响应字段（参数名=字段路径、类型=f.type（空则 string）、示例值=f.value、说明=f.meaning；必选默认「是」）
+  // 响应字段（参数名=字段路径、必选按 required 写「是」/「否」、类型=f.type（空则 string）、
+  // 示例值=f.value、说明=f.meaning；表格为空时不输出该章节，响应示例照常输出）
   if (fields.length) {
     const hdr = [L.colName, L.colRequired, L.colType, L.colExample, L.colDesc].join(' | ')
     out.push(`## ${L.resFields}`, `| ${hdr} |`, '| --- | --- | --- | --- | --- |')
     for (const f of fields)
       out.push(
-        `| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.value)} | ${esc(f.meaning)} |`,
+        `| ${esc(f.path)} | ${f.required ? L.requiredYes : L.requiredNo} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.value)} | ${esc(f.meaning)} |`,
       )
     out.push('')
   }

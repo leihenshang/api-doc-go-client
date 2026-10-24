@@ -17,7 +17,7 @@ async function sendUrl(page: import('@playwright/test').Page, app: import('../he
 }
 
 test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
-  test('更新字段后侧栏不出现 Resp 节点、编辑器自动切「响应字段」分段；生成文档的覆盖确认与字段进文档照旧', async ({ page, app }) => {
+  test('生成字段表后侧栏不出现 Resp 节点、编辑器切「响应字段」分段；生成文档的覆盖确认与字段进文档照旧', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
@@ -26,29 +26,42 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(page.getByTestId('tree.resp.name')).toHaveCount(0)
 
     await sendUrl(page, app, '{{host}}/json/flat')
-    await page.getByTestId('resp.updateFields').click()
+    await openReqTab(page, 'resp')
+    await page.getByTestId('resp.generateLive').click()
     // 集合树不再合成 Resp 子节点（响应字段只在编辑器分段维护）
     await expect(page.getByTestId('tree.resp.name')).toHaveCount(0)
-    // 替代行为：更新成功后编辑器切到「响应字段」分段并渲染字段表
+    // 生成后编辑器停在「响应字段」分段并渲染字段表
     await expect(page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') })).toHaveClass(/on/)
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
 
-    // item 8：子页签切换「响应数据 / 响应头」；响应数据现在是可编辑文本域（合法 JSON 自动生成字段表）
+    // item 8：子页签切换「响应数据 / 响应头」。
+    // 「从本次响应生成」会把本次响应的 status/headers 记进 respdoc（响应头快照 + 状态徽标的数据源），
+    // 但「响应数据」（sample）保持原样，不会被响应体填充。
     await page.locator('[data-testid="resp.segTab"][data-view="body"]').click()
-    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue(/flat/)
+    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue('')
+    await expect(page.locator('[data-testid="resp.segTab"][data-view="body"]')).toContainText('200')
     await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
     await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
 
-    // item 18 回归：关闭标签再打开（从磁盘重读），响应头快照仍在
+    // item 18 回归：关闭标签再打开（从磁盘重读），字段表（respdoc）与响应头快照仍在
     await page.getByTestId('tab.close').click()
     // 标签若因改过 URL 是脏态，会弹自绘的「未保存询问」框：选「放弃更改」
-    // （respdoc 已由更新字段直接落盘，不受影响）
+    // （respdoc 由生成时直接落盘，不受影响）
     const discard = page.getByTestId('closeask.discard')
     if (await discard.isVisible().catch(() => false)) await discard.click()
     await page.locator('[data-testid="tree.row"][data-kind="request"]').first().click()
     await page.getByTestId('req.tab').filter({ hasText: t('editor.respFields') }).click()
+    await page.locator('[data-testid="resp.segTab"][data-view="fields"]').click()
+    await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
     await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
     await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
+
+    // 必填列进文档：取消 flat 的必填 → 文档里该行必选写「否」
+    await page
+      .locator('[data-testid="resp.fields.row"][data-path="flat"]')
+      .getByTestId('resp.fields.required')
+      .click()
+    await page.waitForTimeout(700)
 
     // 切换请求编辑器到 Docs 分段：点「生成接口文档」→ 弹出结果对话框（预览态含生成内容）
     await openReqTab(page, 'docs')
@@ -56,8 +69,9 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     const dlg = page.locator('.n-modal').filter({ hasText: t('docs.gen') })
     await expect(dlg).toBeVisible()
     await expect(page.getByTestId('docs.genPreview')).toContainText(t('docs.resFields'))
-    // 响应字段进了「响应字段」章节（断言字段路径）
+    // 响应字段进了「响应字段」章节（断言字段路径 + 必选按 required 输出）
     await expect(page.getByTestId('docs.genPreview')).toContainText('value')
+    await expect(page.getByTestId('docs.genPreview')).toContainText(t('docs.requiredNo'))
     // 切到编辑态：可编辑（md-editor 容器 testid 存在）后回到预览
     await page.locator('[data-testid="docs.mode"][data-mode="edit"]').click()
     await expect(page.getByTestId('docs.genEditor')).toBeVisible()

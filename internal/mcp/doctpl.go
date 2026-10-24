@@ -66,7 +66,9 @@ curl -X POST '{{host}}/path/to/api' …（客户端按当前环境生成的 curl
 - 请求参数表固定 4 列：参数名 | 必选 | 类型 | 说明；必选列当前恒为「是」，类型缺省 string。
 - 请求体字段表固定 5 列：参数名 | 必选 | 类型 | 示例值 | 说明；数据来自请求的 body.fields（手工生成，可为空）。
   表格为空时不输出该表，只输出请求体原文；必选列按 body.fields[].required 写「是」/「否」，类型缺省 string。
-- 响应字段表固定 5 列：参数名 | 必选 | 类型 | 示例值 | 说明；示例值取自 respDoc.params[].example。
+- 响应字段表固定 5 列：参数名 | 必选 | 类型 | 示例值 | 说明；数据来自请求的 respDoc.params（手工生成，可为空）。
+  表格为空时不输出该表（响应示例照常输出）；必选列按 respDoc.params[].required 写「是」/「否」（默认「是」），
+  类型缺省 string，示例值取自 respDoc.params[].example，说明取自 respDoc.params[].description。
 - 单元格里的竖线要转义（\|），换行压成空格，否则会破坏表格。
 - 「响应字段」一节与请求的 respDoc（响应字段文档）同源：两边都写时内容必须一致，
   客户端「生成接口文档」会直接取 respDoc 覆盖本节（含示例值列）。
