@@ -14,7 +14,7 @@ import ResponseFields from '@/components/ResponseFields.vue'
 import { useResponseFields } from '@/composables/useResponseFields'
 import { useTextareaFind } from '@/composables/useTextareaFind'
 import { useUrlParamsSync } from '@/composables/useUrlParamsSync'
-import { toBodyRows, withBodyDesc } from '@/lib/bodyFields'
+import { deriveBodyFields, emptyFieldRow, mergeBodyFields, patchFieldRow, removeFieldRow } from '@/lib/bodyFields'
 import { buildApiDoc } from '@/lib/genDocs'
 import { isGrpc } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
@@ -27,11 +27,11 @@ import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { Auth, ResponseDoc } from '@/types'
+import type { Auth, BodyField, ResponseDoc } from '@/types'
 import { SearchOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NIcon, NInput, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -342,11 +342,71 @@ const jsonBroken = computed(
 )
 
 // ---- 请求体「原文 / 表格」视图（仅 JSON 体）----
-// 原文即 JSON 本体，表格按字段路径展平（复用响应字段的 extractFields 口径），
-// 值列只读、备注列写回 body.descs 随同步往返。有了原文就不再加独立的「示例」视图。
+// 原文即 JSON 本体；表格是 body.fields（唯一真源），只能手工「生成数据表格」派生，
+// 派生后完全由用户编辑（5 列 / 增行 / 删行）。不再从 JSON 自动派生，也不反向写回 JSON。
 type BodyView = 'raw' | 'table'
 const bodyView = ref<BodyView>('raw')
-const bodyRows = computed(() => toBodyRows(props.tab.request.body.raw, props.tab.request.body.descs))
+const fieldRows = computed<BodyField[]>(() => props.tab.request.body.fields ?? [])
+
+/** 生成确认弹窗（已有表格时二选一：新增 / 覆盖）。 */
+const genDialog = ref(false)
+/** 本次派生的结果（弹窗里选择模式后与之合并）。 */
+const genDerived = ref<BodyField[]>([])
+
+/** 写入表格并标脏（切换视图不标脏，只有表格内容变化才 dirty）。 */
+function setFieldRows(rows: BodyField[]): void {
+  props.tab.request.body.fields = rows
+  touch()
+}
+
+/**
+ * 「生成数据表格」：按 body.raw 派生 5 列（描述列取旧 body.descs 作种子）。
+ * 空表 → 直接生成（等价新增到空表）；非空 → 弹窗让用户选「新增 / 覆盖」。
+ */
+function onGenerateFields(): void {
+  if (readonly.value) return
+  const derived = deriveBodyFields(props.tab.request.body.raw, props.tab.request.body.descs)
+  if (!derived.length) {
+    message.warning(t('body.genInvalid'))
+    return
+  }
+  if (!fieldRows.value.length) {
+    setFieldRows(derived)
+    bodyView.value = 'table'
+    return
+  }
+  genDerived.value = derived
+  genDialog.value = true
+}
+
+/** 弹窗确认：按模式合并（新增=只追加缺失路径；覆盖=清空重建、同路径只继承描述）。 */
+function onConfirmGenerate(mode: 'append' | 'overwrite'): void {
+  setFieldRows(mergeBodyFields(mode, fieldRows.value, genDerived.value))
+  genDialog.value = false
+  genDerived.value = []
+  bodyView.value = 'table'
+}
+
+/** 取消生成：什么都不改（不标脏）。 */
+function onCancelGenerate(): void {
+  genDialog.value = false
+  genDerived.value = []
+}
+
+/** 表格某行某列改动。 */
+function onFieldUpdate(index: number, patch: Partial<BodyField>): void {
+  setFieldRows(patchFieldRow(fieldRows.value, index, patch))
+}
+
+/** 追加一行空行。 */
+function onFieldAdd(): void {
+  setFieldRows([...fieldRows.value, emptyFieldRow()])
+}
+
+/** 删除某行。 */
+function onFieldRemove(index: number): void {
+  setFieldRows(removeFieldRow(fieldRows.value, index))
+}
 /**
  * form / multipart 的请求数据示例：根据表格行（启用且有名字）拼出。
  * form = urlencoded 串；multipart = 带 boundary 的分段示意（文件值行以 <file> 占位）。
@@ -372,11 +432,6 @@ const formExample = computed(() => {
   }
   return ''
 })
-/** 编辑某字段备注：写回 body.descs（空则删项）并标脏；切换视图不标脏，只有备注改动才 dirty。 */
-function onBodyDesc(path: string, note: string): void {
-  props.tab.request.body.descs = withBodyDesc(props.tab.request.body.descs, path, note)
-  touch()
-}
 
 // 切换 tab 时刷新解析预览，并恢复该 tab 上次停留的分段与响应子页签；
 // 新 tab 默认 HTTP → 请求参数、gRPC → 定义、响应子页签 → 响应数据。
@@ -606,16 +661,23 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
           <!-- JSON 体：原文 / 表格 两视图（表格按字段路径编辑备注，写回 body.descs 随同步往返）；
                原文就是请求数据本身，不再单设示例视图。纯文本、表单沿用原编辑器。切换视图不标脏，只有备注改动才 dirty。 -->
           <template v-if="bodyType === 'json'">
-            <div class="resp-sub" role="group">
-              <button class="sub-tab" :class="{ on: bodyView === 'raw' }" type="button" data-testid="body.viewTab"
-                data-view="raw" @click="bodyView = 'raw'">{{ t('editor.bodyTabRaw') }}</button>
-              <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
-                data-view="table" @click="bodyView = 'table'">
-                {{ t('editor.bodyTabTable') }}<span v-if="bodyRows.length" class="sub-badge">{{ bodyRows.length
-                }}</span>
+            <div class="body-sub-bar">
+              <div class="resp-sub" role="group">
+                <button class="sub-tab" :class="{ on: bodyView === 'raw' }" type="button" data-testid="body.viewTab"
+                  data-view="raw" @click="bodyView = 'raw'">{{ t('editor.bodyTabRaw') }}</button>
+                <button class="sub-tab" :class="{ on: bodyView === 'table' }" type="button" data-testid="body.viewTab"
+                  data-view="table" @click="bodyView = 'table'">
+                  {{ t('editor.bodyTabTable') }}<span v-if="fieldRows.length" class="sub-badge">{{ fieldRows.length
+                  }}</span>
+                </button>
+              </div>
+              <!-- 表格只能手工生成：空表直接派生，非空表弹「新增 / 覆盖」 -->
+              <button class="fmt" type="button" data-testid="body.generate" @click="onGenerateFields">
+                {{ t('body.genBtn') }}
               </button>
             </div>
-            <body-fields-table v-if="bodyView === 'table'" :rows="bodyRows" @update-desc="onBodyDesc" />
+            <body-fields-table v-if="bodyView === 'table'" :rows="fieldRows" @update="onFieldUpdate" @add="onFieldAdd"
+              @remove="onFieldRemove" />
             <json-body-editor v-else v-model="tab.request.body.raw" :rows="12" :placeholder="t('editor.rawPlaceholder')"
               @input="touch" />
           </template>
@@ -762,6 +824,24 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 
     <!-- 生成接口文档结果弹窗（预览/编辑 + 覆盖/追加/下载） -->
     <gen-doc-dialog v-model:show="showGen" :text="genText" @apply="onGenApply" />
+
+    <!-- 「生成数据表格」确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
+    <n-modal v-model:show="genDialog" preset="card" class="gen-modal" :title="t('body.genTitle')">
+      <div data-testid="body.genDialog">
+        <p class="gen-hint">{{ t('body.genHint') }}</p>
+        <div class="gen-actions">
+          <n-button size="small" type="primary" data-testid="body.genAppend" @click="onConfirmGenerate('append')">
+            {{ t('body.genAppend') }}
+          </n-button>
+          <n-button size="small" data-testid="body.genOverwrite" @click="onConfirmGenerate('overwrite')">
+            {{ t('body.genOverwrite') }}
+          </n-button>
+          <n-button size="small" quaternary data-testid="body.genCancel" @click="onCancelGenerate">
+            {{ t('common.cancel') }}
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -772,6 +852,35 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
+}
+
+/* 请求体「原文 / 表格」子页签行：左侧页签 + 右侧「生成数据表格」 */
+.body-sub-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.body-sub-bar .resp-sub {
+  flex: 1 1 auto;
+}
+
+.body-sub-bar .fmt {
+  flex: 0 0 auto;
+}
+
+/* 生成数据表格弹窗 */
+.gen-hint {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--app-muted);
+}
+
+.gen-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* 段页签：与响应区统一风格，底部细线 */

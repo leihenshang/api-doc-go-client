@@ -12,6 +12,24 @@ export interface KV {
 
 export type BodyType = 'none' | 'json' | 'text' | 'form' | 'multipart'
 
+/**
+ * 请求体字段表格的一行（对齐 Go share.BodyField）。
+ * 表格是请求体字段说明的唯一真源：手工「生成数据表格」得到，可编辑、可增行、可删行，
+ * 随文件落盘（http.body.fields）与同步往返服务端/Web。
+ */
+export interface BodyField {
+  /** 字段名（路径）：a.b / a[].c，与派生规则一致 */
+  name: string
+  /** JSON 类型名：string / integer / number / boolean / array / object / null */
+  type: string
+  /** 必填（默认 false，由用户勾选） */
+  required: boolean
+  /** 示例值（叶子原始值文本；容器为空串） */
+  example: string
+  /** 字段说明 */
+  description: string
+}
+
 export interface ReqBody {
   type: BodyType
   raw: string
@@ -21,8 +39,13 @@ export interface ReqBody {
    */
   data?: string
   form: KV[]
-  /** JSON 体「字段路径 → 备注」，由请求体表格视图维护，随同步往返（share Body.Descs）。 */
+  /**
+   * JSON 体「字段路径 → 备注」（旧数据种子，保留 round-trip）。
+   * 新数据以 fields 为准；descs 只在「首次生成表格」时作为描述列的种子，不再参与文档生成。
+   */
   descs?: Record<string, string>
+  /** 请求体字段表格（唯一真源）；老数据缺省 → 前端归一化为 [] */
+  fields?: BodyField[]
 }
 
 export type AuthType = 'none' | 'basic' | 'bearer' | 'apikey' | 'inherit'
@@ -157,6 +180,8 @@ export interface RequestDoc {
   path: string
   method: string
   url: string
+  /** API 概述（纯文本一句话），落盘 http 外的顶层 summary、同步走 extra["summary"] */
+  summary: string
   params: KV[]
   headers: KV[]
   body: ReqBody

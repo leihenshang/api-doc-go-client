@@ -13,15 +13,15 @@
 | 查询 | `list_workspaces` / `use_workspace` | 看授权了哪些工作目录；选定**本会话**默认目标（之后 `project` 可省略） |
 | 查询 | `list_projects` | 有哪些项目（集合） |
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
-| 查询 | `get_request_detail` | 某接口的完整详情 + 响应字段文档（respDoc）+ 已保存的响应示例（返回 `hash` 供冲突保护） |
+| 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例（返回 `hash` 供冲突保护） |
 | 查询 | `search_requests` | 模糊搜索（「记得内容、记不清名字」时最该用） |
 | 查询 | `list_envs` | 有哪些环境与变量（**敏感值只回掩码**，每个环境带 `hash`） |
 | 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
 | 查询 | `list_docs` / `get_doc` | 集合里的**文档条目**（独立 .md）：列清单 / 读正文（带 `hash` 供冲突保护） |
-| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带完整 body/settings/respDoc） |
+| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest） |
-| 写 | `update_request` | 改请求（params/settings/respDoc 均可局部更新）/ 移动模块（支持 `ifMatch` 冲突保护） |
+| 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
@@ -132,7 +132,8 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.3 `get_request_detail`
 `project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）。
-返回 method/url/params/headers/body/auth/settings/grpc + 请求内 `docs` + **响应字段文档 `respDoc`**
+返回 method/url/params/headers/body/auth/settings/grpc + **概述 `summary`** + 请求内 `docs` + **请求体字段表 `body.fields`**
+（5 列：字段名/必填/类型/示例值/说明，空表不出）+ **响应字段文档 `respDoc`**
 （返回类型/字段表全量；样例不传 includeBody 时只回前 2048 字节）+ 关联的 `docs/*.md` + **已保存响应示例列表**
 + **`hash`**（演示为前 12 位）——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
 
@@ -152,6 +153,8 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
 `body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），传了就覆盖 `bodyType`/`bodyRaw`；
+**`bodyFields`** 是请求体字段表格 `[{"name","type","required","example","description"}]`，与 `body` **相互独立**——只传 `body` 不会清掉表格；
+**`summary`** 是 API 概述（纯文本一句话，与 `docs` 分列）；
 `settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（**按子项合并**，
 只给 `params` 字段表时样例/响应头/状态码不动；gRPC 拒绝）；
 `docs` 结构先取 `get_doc_template`；返回落盘后的 `uid` 与 `path`。
@@ -167,7 +170,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
 ### 4.8 `update_request`
-`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
+`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`summary`/`bodyFields`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
+`body` 整份覆盖时，**未传的 `body.fields` / `body.descs` 会保留原值**（显式传 `[]` / `{}` 才清空）；`bodyFields` 显式传了才覆盖表格（空数组 = 清空）；
+`summary` 传空串即清空概述。
 `params` 整表覆盖（传空数组 = 清空）；`respDoc` **按子项合并**——可只传 `params` 字段表补说明，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；
 `settings` 仅单请求级，不碰全局配置。
 `ifMatch` 传详情里的 `hash`（12 位前缀即可，服务端按 git 风格前缀比对，≥8 位有效）→ 磁盘文件在此期间被外部改动就

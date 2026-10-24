@@ -9,7 +9,7 @@ import (
 // 兼容口径见 sync_extra_fields.go 头注释：键存在且为字符串才覆盖，空串清空，缺键不动。
 
 var extendedKeys = []string{
-	extraKeyBodyType, extraKeyBody, extraKeyBodyForm, extraKeyBodyDescs,
+	extraKeyBodyType, extraKeyBody, extraKeyBodyForm, extraKeyBodyDescs, extraKeyBodyFields,
 	extraKeyAuth, extraKeySettings, extraKeyScript,
 	extraKeyVars, extraKeyAsserts, extraKeyRetContentType,
 }
@@ -28,9 +28,10 @@ func extraMap(t *testing.T, extraJSON string) map[string]any {
 func fullRequest() *Request {
 	follow, insecure, encode := false, true, true
 	return &Request{
-		Name:   "demo",
-		Method: "POST",
-		URL:    "/api/demo",
+		Name:    "demo",
+		Summary: "演示接口概述",
+		Method:  "POST",
+		URL:     "/api/demo",
 		Body: Body{
 			Type: "form",
 			Form: []KV{
@@ -38,6 +39,10 @@ func fullRequest() *Request {
 				{Name: "b", Value: "2", Enabled: false},
 			},
 			Descs: map[string]string{"data.list[].id": "列表项ID", "data.total": "总数"},
+			Fields: []BodyField{
+				{Name: "data.list[].id", Type: "integer", Required: true, Example: "1", Description: "列表项ID"},
+				{Name: "page", Type: "integer"},
+			},
 		},
 		Auth: &Auth{Type: "bearer", Token: "tok"},
 		Settings: &RequestSettings{
@@ -89,6 +94,17 @@ func TestSyncExtra_ExtendedRoundTrip(t *testing.T) {
 	}
 	if len(got.Body.Descs) != len(src.Body.Descs) || got.Body.Descs["data.total"] != "总数" {
 		t.Errorf("bodyDescs: got %+v want %+v", got.Body.Descs, src.Body.Descs)
+	}
+	if len(got.Body.Fields) != len(src.Body.Fields) {
+		t.Fatalf("bodyFields 行数: got %d want %d", len(got.Body.Fields), len(src.Body.Fields))
+	}
+	for i, want := range src.Body.Fields {
+		if got.Body.Fields[i] != want {
+			t.Errorf("bodyFields[%d]: got %+v want %+v", i, got.Body.Fields[i], want)
+		}
+	}
+	if got.Summary != src.Summary {
+		t.Errorf("summary: got %q want %q", got.Summary, src.Summary)
 	}
 	if got.Auth == nil || *got.Auth != *src.Auth {
 		t.Errorf("auth: got %+v want %+v", got.Auth, src.Auth)
@@ -165,6 +181,12 @@ func TestApplySyncExtra_OldKeySetKeepsExtendedFields(t *testing.T) {
 	if len(got.Body.Descs) != 2 || got.Body.Descs["data.total"] != "总数" {
 		t.Errorf("bodyDescs 被旧键集改动: %+v", got.Body.Descs)
 	}
+	if len(got.Body.Fields) != 2 || got.Body.Fields[0].Name != "data.list[].id" {
+		t.Errorf("bodyFields 被旧键集清空: %+v", got.Body.Fields)
+	}
+	if got.Summary != "演示接口概述" {
+		t.Errorf("summary 被旧键集清空: %q", got.Summary)
+	}
 }
 
 // TestApplySyncExtra_EmptyStringClearsExtendedFields 空串即清空：
@@ -198,6 +220,44 @@ func TestApplySyncExtra_EmptyStringClearsExtendedFields(t *testing.T) {
 	}
 	if got.RespDoc != nil && got.RespDoc.ContentType != "" {
 		t.Errorf("retContentType 应被清空，实际 %q", got.RespDoc.ContentType)
+	}
+	if len(got.Body.Fields) != 0 {
+		t.Errorf("bodyFields 应被清空，实际 %+v", got.Body.Fields)
+	}
+}
+
+// TestSyncExtra_GRPCSyncsSummary gRPC 请求也必须同步概述（C2）：
+// summary 的写入/应用都要在 SyncExtra / ApplySyncExtra 的 gRPC 早退之前，
+// 否则 gRPC 请求的概述本地有、Web 无。
+func TestSyncExtra_GRPCSyncsSummary(t *testing.T) {
+	src := &Request{
+		Name:    "grpc 请求",
+		Summary: "问候服务",
+		Docs:    "详细说明",
+		GRPC:    &GrpcBlock{Service: "demo.Greeter", Method: "SayHello"},
+	}
+	m := extraMap(t, SyncExtra(src))
+	if m[extraKeySummary] != "问候服务" {
+		t.Fatalf("gRPC 请求未下发 summary: %+v", m)
+	}
+	got := &Request{GRPC: &GrpcBlock{Service: "demo.Greeter", Method: "SayHello"}}
+	ApplySyncExtra(got, SyncExtra(src))
+	if got.Summary != "问候服务" {
+		t.Fatalf("gRPC 请求未应用 summary: %q", got.Summary)
+	}
+	if got.Docs != "详细说明" {
+		t.Fatalf("gRPC 请求未应用 desc: %q", got.Docs)
+	}
+	// 空串即清空同样适用于 gRPC。
+	ApplySyncExtra(got, `{"summary":""}`)
+	if got.Summary != "" {
+		t.Fatalf("gRPC 请求的 summary 未被空串清空: %q", got.Summary)
+	}
+	// 缺键不动。
+	got.Summary = "保留"
+	ApplySyncExtra(got, `{"desc":"只改说明"}`)
+	if got.Summary != "保留" {
+		t.Fatalf("缺键时 summary 不应被改动: %q", got.Summary)
 	}
 }
 

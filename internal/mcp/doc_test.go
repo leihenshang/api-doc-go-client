@@ -104,6 +104,8 @@ func TestDocTemplateAlignedWithGenDocs(t *testing.T) {
 	tpl := svc.DocTemplate()
 	for _, want := range []string{
 		"## 请求参数", "## 请求体", "## 请求示例", "## 响应字段", "示例值", "```json",
+		// 请求体字段表为 5 列，且明确来自 body.fields（可为空 → 只出原文）
+		"| 参数名 | 必选 | 类型 | 示例值 | 说明 |", "body.fields",
 	} {
 		if !strings.Contains(tpl, want) {
 			t.Errorf("模板缺少 %q（与 genDocs 输出漂移）:\n%s", want, tpl)

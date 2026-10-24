@@ -7,6 +7,7 @@ import share "github.com/leihenshang/api-doc-go-share/collection"
 type (
 	KV              = share.KV
 	Body            = share.Body
+	BodyField       = share.BodyField
 	Auth            = share.Auth
 	RequestSettings = share.RequestSettings
 	Var             = share.EnvVar
@@ -49,12 +50,14 @@ func GrpcURL(target, service, method string) string {
 
 // Request 一条接口的内存形态（带前端 JSON 契约；磁盘形态见共享包的 RequestFile）。
 type Request struct {
-	UID      string           `json:"uid"`
-	Name     string           `json:"name"`
-	Seq      int              `json:"seq"`
-	Path     string           `json:"path"`
-	Method   string           `json:"method"`
-	URL      string           `json:"url"`
+	UID    string `json:"uid"`
+	Name   string `json:"name"`
+	Seq    int    `json:"seq"`
+	Path   string `json:"path"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	// Summary API 概述（纯文本一句话），落盘走 RequestFile.summary、同步走 extra["summary"]。
+	Summary  string           `json:"summary"`
 	Params   []KV             `json:"params"`
 	Headers  []KV             `json:"headers"`
 	Body     Body             `json:"body"`

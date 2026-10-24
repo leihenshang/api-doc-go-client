@@ -35,20 +35,21 @@ type syncParamRow struct {
 }
 
 // SyncExtra 把请求的可同步字段聚合成服务端 extra JSON（SyncPayload.extra）。
-// 始终输出 desc/headers/params/retType/retParams/retSample 六个键（无内容时为空串），
+// 始终输出 desc/summary/headers/params/retType/retParams/retSample 等键（无内容时为空串），
 // 表示整份覆盖：服务端只在键存在且为字符串时覆盖对应列，空串即清空，删除能正常传播。
-// gRPC 请求没有 HTTP 参数/头/响应文档，只同步说明（扩展键同样不下发）。
+// gRPC 请求没有 HTTP 参数/头/响应文档，只同步说明与概述（扩展键同样不下发）。
 //
 // 扩展键（请求体 / 认证 / 请求设置 / 脚本 / 变量 / 断言 / 响应内容类型）见
 // sync_extra_fields.go；HTTP 请求一律整份下发，保证「本地删掉的东西服务端也删掉」。
 func SyncExtra(r *Request) string {
 	extra := map[string]any{
-		"desc":      r.Docs,
-		"headers":   "",
-		"params":    "",
-		"retType":   "",
-		"retParams": "",
-		"retSample": "",
+		"desc":          r.Docs,
+		extraKeySummary: r.Summary,
+		"headers":       "",
+		"params":        "",
+		"retType":       "",
+		"retParams":     "",
+		"retSample":     "",
 	}
 	if r.IsGRPC() {
 		b, _ := json.Marshal(extra)
@@ -73,6 +74,7 @@ func SyncExtra(r *Request) string {
 	extra[extraKeyBody] = bodyTextOf(r.Body)
 	extra[extraKeyBodyForm] = marshalFormRows(r.Body.Form)
 	extra[extraKeyBodyDescs] = marshalDescs(r.Body.Descs)
+	extra[extraKeyBodyFields] = marshalBodyFields(r.Body.Fields)
 	extra[extraKeyAuth] = marshalAuth(r.Auth)
 	extra[extraKeySettings] = marshalSettings(r.Settings)
 	extra[extraKeyScript] = marshalScript(r.Script)
@@ -85,6 +87,9 @@ func SyncExtra(r *Request) string {
 // ApplySyncExtra 应用服务端 extra JSON（拉取 / 冲突时「采用服务器版本」）。
 // 空串或非 JSON 对象（如旧版服务端误塞的裸文本）一律忽略；键不存在的字段保持不动，
 // 以兼容只下发部分字段的旧服务端。
+//
+// summary（API 概述）在 gRPC 早退之前应用：gRPC 请求没有 HTTP 参数/头/请求体，
+// 但概述两端都要有，放在早退之后就永远同步不过来。
 func ApplySyncExtra(r *Request, extraJSON string) {
 	raw := strings.TrimSpace(extraJSON)
 	if raw == "" {
@@ -96,6 +101,9 @@ func ApplySyncExtra(r *Request, extraJSON string) {
 	}
 	if v, ok := m["desc"].(string); ok {
 		r.Docs = v
+	}
+	if v, ok := m[extraKeySummary].(string); ok {
+		r.Summary = v
 	}
 	if r.IsGRPC() {
 		return

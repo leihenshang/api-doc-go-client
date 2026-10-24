@@ -794,7 +794,7 @@ func readRequestFile(path string) (*requestFile, error) {
 }
 
 func (r *Request) toFile() *requestFile {
-	f := &requestFile{Docs: r.Docs, Settings: r.Settings}
+	f := &requestFile{Docs: r.Docs, Settings: r.Settings, Summary: r.Summary}
 	f.Info.Name, f.Info.Seq = r.Name, r.Seq
 	f.Meta.UID, f.Meta.BaseRev = r.UID, r.BaseRev
 	if r.IsGRPC() {
@@ -860,7 +860,7 @@ func respDocExtra(doc *ResponseDoc) map[string]any {
 func fromFile(path string, f *requestFile) *Request {
 	r := &Request{
 		UID: f.Meta.UID, Name: f.Info.Name, Seq: f.Info.Seq, Path: path,
-		Settings: f.Settings, Docs: f.Docs, BaseRev: f.Meta.BaseRev,
+		Summary: f.Summary, Settings: f.Settings, Docs: f.Docs, BaseRev: f.Meta.BaseRev,
 	}
 	r.VarsPreRequest, r.Script, r.Asserts = parseScriptExtra(f.Extra)
 
@@ -1562,6 +1562,7 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 		return nil, fmt.Errorf("请求内容为空")
 	}
 	r := &Request{
+		Summary:        src.Summary,
 		Params:         src.Params,
 		Headers:        src.Headers,
 		Body:           src.Body,

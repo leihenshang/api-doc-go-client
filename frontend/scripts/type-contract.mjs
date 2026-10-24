@@ -39,6 +39,26 @@ const CONTRACTS = [
     file: 'internal/runner/runner.go',
     needles: [/src = b\.Data/],
   },
+  {
+    name: 'TS ReqBody 必须声明 fields（请求体字段表格，share Body.Fields 的前端映射）',
+    file: 'frontend/src/types.ts',
+    needles: [/export interface ReqBody \{[\s\S]*?fields\?: BodyField\[\]/],
+  },
+  {
+    name: 'IPC 归一化必须保留 body.fields（漏了重载后整张表格消失）',
+    file: 'frontend/src/lib/ipc.ts',
+    needles: [/fields:\s*r\.body\?\.fields/, /fields:\s*ex\.request\?\.body\?\.fields/],
+  },
+  {
+    name: 'Go share Body 必须有 fields 的 yaml/json 标签',
+    file: '../api-doc-go-share/collection/types.go',
+    needles: [/Fields\s+\[\]BodyField\s+`yaml:"fields,omitempty" json:"fields,omitempty"`/],
+  },
+  {
+    name: 'Go share RequestFile 必须有 summary 顶层字段',
+    file: '../api-doc-go-share/collection/request.go',
+    needles: [/Summary\s+string\s+`yaml:"summary,omitempty"/],
+  },
 ]
 
 let failed = 0

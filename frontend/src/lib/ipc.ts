@@ -166,6 +166,9 @@ function normalizeRequest(r: RequestDoc): RequestDoc {
       // descs（JSON 体字段备注，share Body.Descs）同样必须在边界保留：
       // 之前被重建剥掉，重载后表格视图备注与生成文档的请求体表丢备注。
       descs: r.body?.descs,
+      // fields（请求体字段表格，share Body.Fields）是表格的唯一真源：
+      // 边界重建漏掉它，重载后用户手写的整张表凭空消失。
+      fields: r.body?.fields ?? [],
     },
     // grpc 段的 imports/metadata 同样是可省略字段（Go 侧 omitempty）：归一成数组，界面免判空
     grpc: r.grpc
@@ -206,6 +209,8 @@ function normalizeExample(ex: ResponseExample): ResponseExample {
         raw: ex.request?.body?.raw ?? '',
         data: ex.request?.body?.data ?? '',
         form: ex.request?.body?.form ?? [],
+        // 历史快照的请求体也会被重建：这里同样必须保留 fields，否则回看历史时表格为空。
+        fields: ex.request?.body?.fields ?? [],
       },
     },
     response: { ...ex.response, headers: ex.response?.headers ?? [] },

@@ -550,6 +550,7 @@ type RequestDetail struct {
 	Method      string                      `json:"method"`
 	URL         string                      `json:"url"`
 	Path        string                      `json:"path"`
+	Summary     string                      `json:"summary,omitempty"` // API 概述（纯文本一句话）
 	Params      []collection.KV             `json:"params,omitempty"`
 	Headers     []collection.KV             `json:"headers,omitempty"`
 	Body        collection.Body             `json:"body"`
@@ -589,7 +590,7 @@ func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*Re
 	hash, _ := s.hashOf(a, r.UID)
 	d := &RequestDetail{
 		Project: e.Path, UID: r.UID, Hash: hash, Name: r.Name, Method: r.Method, URL: r.URL, Path: r.Path,
-		Params: r.Params, Headers: r.Headers, Body: r.Body, Auth: r.Auth,
+		Summary: r.Summary, Params: r.Params, Headers: r.Headers, Body: r.Body, Auth: r.Auth,
 		Settings: r.Settings, GRPC: r.GRPC, Docs: r.Docs,
 	}
 	// 响应字段文档：字段表全量返回（AI 要「读了再改整张表」）；样例原文按 includeBody 裁剪，避免大体撞爆上下文
@@ -667,6 +668,8 @@ type CreateRequestInput struct {
 	BodyType    string                      `json:"bodyType,omitempty"`
 	BodyRaw     string                      `json:"bodyRaw,omitempty"`
 	Body        *collection.Body            `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；传了就覆盖 bodyType/bodyRaw"`
+	BodyFields  []collection.BodyField      `json:"bodyFields,omitempty" jsonschema:"请求体字段表格（字段名/类型/必填/示例值/说明）；与 body 相互独立，传了只覆盖表格"`
+	Summary     string                      `json:"summary,omitempty" jsonschema:"API 概述（纯文本一句话）；与 body 相互独立"`
 	Settings    *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
 	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档：可只写 params 字段表（补说明）；type/sample/status/headers 缺省不动，传了才覆盖；gRPC 请求不支持"`
 	Auth        *collection.Auth            `json:"auth,omitempty"`
@@ -744,6 +747,13 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 	if in.Body != nil {
 		draft.Body = *in.Body
 	}
+	// 字段表格与概述：与 body 相互独立，各自只在显式传入时覆盖（body 覆盖不再连带清掉它们）
+	if in.BodyFields != nil {
+		draft.Body.Fields = in.BodyFields
+	}
+	if in.Summary != "" {
+		draft.Summary = in.Summary
+	}
 	if in.Settings != nil {
 		draft.Settings = in.Settings
 	}
@@ -810,19 +820,21 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
-	Project  string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID      string                      `json:"uid"`
-	Name     *string                     `json:"name,omitempty"`
-	Method   *string                     `json:"method,omitempty"`
-	URL      *string                     `json:"url,omitempty"`
-	Params   []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
-	Headers  []collection.KV             `json:"headers,omitempty"`
-	Body     *collection.Body            `json:"body,omitempty"`
-	Settings *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc  *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并——可只传 params 补字段说明，样例/响应头/状态码缺省保留原值；gRPC 请求拒绝"`
-	Auth     *collection.Auth            `json:"auth,omitempty"`
-	Docs     *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
-	Folder   *string                     `json:"folder,omitempty"` // 移动到别的模块
+	Project    string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID        string                      `json:"uid"`
+	Name       *string                     `json:"name,omitempty"`
+	Method     *string                     `json:"method,omitempty"`
+	URL        *string                     `json:"url,omitempty"`
+	Params     []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
+	Headers    []collection.KV             `json:"headers,omitempty"`
+	Body       *collection.Body            `json:"body,omitempty" jsonschema:"请求体整份覆盖；body.fields/body.descs 未传（null）时保留原值，显式传空数组/空对象才清空；form 字段非 omitempty，传 body 时请一并带上 form（无表单行传空数组），否则原有表单行会被清空"`
+	BodyFields *[]collection.BodyField     `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖"`
+	Summary    *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
+	Settings   *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
+	RespDoc    *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并——可只传 params 补字段说明，样例/响应头/状态码缺省保留原值；gRPC 请求拒绝"`
+	Auth       *collection.Auth            `json:"auth,omitempty"`
+	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
+	Folder     *string                     `json:"folder,omitempty"` // 移动到别的模块
 	// IfMatch 冲突检测：传 get_request_detail / search_requests 返回的 hash，
 	// 若磁盘文件在此期间被外部改动则拒绝写入（不传 = 不做保护，行为同客户端「最后写者赢」）。
 	IfMatch string `json:"ifMatch,omitempty"`
@@ -887,7 +899,23 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		r.Params = in.Params
 	}
 	if in.Body != nil {
+		// 整份覆盖 body 时保护表格与旧备注：nil = 保留原值，显式空（[] / {}）= 清空。
+		// 否则 AI 只是补一次请求体原文，就把用户手写的字段表格与备注一起清掉了。
+		prevFields, prevDescs := r.Body.Fields, r.Body.Descs
 		r.Body = *in.Body
+		if r.Body.Fields == nil {
+			r.Body.Fields = prevFields
+		}
+		if r.Body.Descs == nil {
+			r.Body.Descs = prevDescs
+		}
+	}
+	// 字段表格单独覆盖：显式传入（含空数组=清空）才动，优先级高于 body.fields
+	if in.BodyFields != nil {
+		r.Body.Fields = *in.BodyFields
+	}
+	if in.Summary != nil {
+		r.Summary = *in.Summary
 	}
 	if in.Settings != nil {
 		r.Settings = in.Settings
