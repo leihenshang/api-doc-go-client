@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **24 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **27 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -24,6 +24,7 @@
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
+| 写 | `save_response_example` / `update_response_example` / `delete_response_example` | 响应示例的手工新增（不发送请求）/ 局部更新（改名·状态码·响应体）/ 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
 | 写 | `set_env_var` / `delete_env_var` | 单个变量的 upsert / 删除（敏感值回填掩码 = 不改） |
@@ -31,7 +32,7 @@
 各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
 
 工具按风险分三级（服务端元数据表锁定）：**low = 10 个只读工具**（随便用，无副作用）；**medium = `send_request`**
-（真实网络外发）；**high = 13 个写工具**（落盘修改集合/环境）。客户端**内嵌服务**默认对 medium/high 的每次调用
+（真实网络外发）；**high = 16 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
 **弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
 `-require-consent` 约束。
 
@@ -152,7 +153,8 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | 复制现有 | `name` ✅ + `copyFromUid` | `{"project":"shop","name":"login-copy","copyFromUid":"<uid>"}` |
 
 同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
-`body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），传了就覆盖 `bodyType`/`bodyRaw`；
+`body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），
+**按子项合并**（只传 `raw` 不会动 `form`，只传 `form` 不会动 `raw`；`bodyType`/`bodyRaw` 只覆盖对应的两个子项）；
 **`bodyFields`** 是请求体字段表格 `[{"name","type","required","example","description"}]`，与 `body` **相互独立**——只传 `body` 不会清掉表格；
 **`summary`** 是 API 概述（纯文本一句话，与 `docs` 分列）；
 `settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（**按子项合并**，
@@ -171,10 +173,38 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.8 `update_request`
 `project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`summary`/`bodyFields`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
-`body` 整份覆盖时，**未传的 `body.fields` / `body.descs` 会保留原值**（显式传 `[]` / `{}` 才清空）；`bodyFields` 显式传了才覆盖表格（空数组 = 清空）；
-`summary` 传空串即清空概述。
-`params` 整表覆盖（传空数组 = 清空）；`respDoc` **按子项合并**——可只传 `params` 字段表补说明，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；
-`settings` 仅单请求级，不碰全局配置。
+**`body` / `respDoc` 都是「指针合并」语义（本版重点）**：入参里**为 `null`（不传）的子项 = 保留原值**，
+**显式空值 = 清空**。
+
+| 入参 | 不传（null） | 显式空值 | 说明 |
+|---|---|---|---|
+| `body.type` / `body.raw` / `body.data` | 保留 | `""` 清空 | 只传 `body.raw` 就只改原文，`form`/`fields`/`descs` 全都不动 |
+| `body.form` | 保留原表单行 | `[]` 清空 | 与 `raw` 互不影响（终于不用为了改 raw 编造 `form`） |
+| `body.descs` / `body.fields` | 保留 | `{}` / `[]` 清空 | 与 `bodyFields` 是同一份表格的两条入口 |
+| `respDoc.params` | 保留 | `[]` 清空 | 可只写字段表补说明 |
+| `respDoc.sample` | 保留 | `""` 清空 | 旧版传空串清不掉，本版可以 |
+| `respDoc.status` | 保留 | `0` 清零 | 同上 |
+| `respDoc.type` / `headers` / `contentType` | 保留 | `""` / `[]` 清空 | — |
+
+`bodyFields` 显式传了才覆盖表格（空数组 = 清空）；`summary` 传空串即清空概述。
+`params` 整表覆盖（传空数组 = 清空）；`settings` 仅单请求级，不碰全局配置。
+
+**`section` 节点守卫（可选）**：一次调用只想动一个节点时传 `section`，混用其它节点的字段会**直接报错**
+（报错里会点名越界的字段名 + 该 section 的允许清单，照着改就行）：
+
+| `section` | 允许的字段 | 典型用法 |
+|---|---|---|
+| `request` | `name`/`method`/`url`/`params`/`headers`/`body`/`bodyFields`/`summary`/`auth`/`settings`/`folder` | 只改请求本身，防止顺手写坏响应文档 |
+| `response` | 仅 `respDoc` | 只补响应字段表/样例 |
+| `docs` | 仅 `docs` | 只写接口说明 |
+| 省略 | 不限制（兼容旧调用） | — |
+
+```json
+// 只改请求体原文（form/字段表格/备注一律不动）
+{"project":"shop","uid":"<uid>","section":"request","body":{"raw":"{\"u\":\"a\"}"}}
+// 只清空响应样例与状态码
+{"project":"shop","uid":"<uid>","section":"response","respDoc":{"sample":"","status":0}}
+```
 `ifMatch` 传详情里的 `hash`（12 位前缀即可，服务端按 git 风格前缀比对，≥8 位有效）→ 磁盘文件在此期间被外部改动就
 **拒绝写入**；**不传 = 最后写者赢**（与桌面端一致）。改名会自动同步文件名。
 
@@ -248,6 +278,48 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 ```
 
 `get_request_detail` 返回的 `relatedDocs` 里能看到「与该接口相关的文档条目」，拿其中的 uid 直接 `get_doc` 即可。
+
+### 4.13 响应示例工具：`save_response_example` / `update_response_example` / `delete_response_example`
+
+响应示例 = 集合里的 `examples/<模块>/<请求名>/<示例名>.yml`（纯文本、可 git diff、不参与目录树扫描）。
+`send_request` 只能存「刚发出来的那个响应」；本节三个工具负责**手工补一条**、**改已存的**、**删掉不要的**。
+
+`get_request_detail` 的示例段形如
+`- 线上 504：504 · 132 ms · 12 字节（examples/order/查询/线上 504.yml，uid=3f2a…）`——
+**`uid=` 就是 `exampleUid`**（改/删都靠它），对 `send_request` 存的、界面存的、上次会话存的示例一视同仁。
+
+**改名规则与新建示例完全一致**：三层口径依次收紧，任一不过都直接报错并**保持原样**（示例不会消失）：
+
+| 关卡 | 规则 | 超限时 |
+|---|---|---|
+| 条目名校验 | 非空、不含 `\ / : * ? " < > |`、不以点开头/结尾、≤120 字符 | 报「名称含非法字符」/「示例名含非法字符或过长」 |
+| 规范化 | trim 首尾空格与点、非法字符换 `-`、截断到 100 字符 | 自动处理，不报错 |
+| **字节上限** | 基名 ≤**240 字节**（文件名按**字节**算：ASCII 240 字、**中文约 80 字**） | 报「示例名过长：…字节，超过 240 字节上限」 |
+
+**显示名与文件名永远是同一个值**（同一变量），不会出现「YAML 里叫 a/b、文件叫 a-b.yml」。
+换名写盘成功后才会删旧文件，所以中途失败（磁盘满、目录不可写）不会丢数据。
+
+**历史遗留的超长名示例仍可用**：只要文件名没变（比如只改 `status`/`body`），就地重写**不受上面的字节上限约束**；
+删除时 `.trash` 里的名字会自动截断成「时间戳 + 截断名 + ~短哈希 + 原扩展名」，不会因为名字太长删不掉。
+要换成合规的短名，直接 `update_response_example(name=…)` 即可。
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `save_response_example` | `project?`、`uid` ✅（请求 uid）、`name?`、`status?`、`headers?`、`body?`、`contentType?` | 不发送请求，手工存一条示例。`name` 默认「响应示例」，`status` 默认 200，`contentType` 省略时按 `body` 首字符推断（`{`/`[` → `application/json`，其余 `text/plain`）；`size` 按 `body` 字节数记录。重名自动加 `(1)(2)` |
+| `update_response_example` | `project?`、`uid` ✅、`exampleUid` ✅、`name?`、`status?`、`headers?`、`body?`、`contentType?` | **指针语义**：不传的字段不动，`status: 0` 可清零、`headers: []` 可清空。**改名会把磁盘文件名与 `path` 一起改**（同目录 `sanitize(新名).yml`，旧文件一并清掉）；`body` 变了 `size` 自动跟着变；重名自动加 `(1)` |
+| `delete_response_example` | `project?`、`uid` ✅、`exampleUid` ✅ | 只删这一条示例（请求本身不动），文件进 `.trash` 可人工找回 |
+
+```json
+// 把外部文档里的响应片段留成一条示例
+{"project":"shop","uid":"<请求 uid>","name":"第三方超时样例","status":504,"body":"{\"code\":504}","contentType":"application/json"}
+// 给已存示例改名（磁盘文件名同步变）并改状态码/响应体
+{"project":"shop","uid":"<请求 uid>","exampleUid":"<示例 uid>","name":"线上 504","status":504,"body":"{\"code\":504}"}
+// 删掉不要的示例
+{"project":"shop","uid":"<请求 uid>","exampleUid":"<示例 uid>"}
+```
+
+命名与落盘规则：示例名 → 文件名走同一套 `sanitize` 规则（与请求/文档一致），所以**改名 = 换文件**；
+同一个请求下的示例按保存序号 `seq` 排「新 → 旧」。示例挂在**请求**下，移动/改名请求会让示例目录跟着走。
 
 ## 五、典型工作流（可以直接对 AI 这么说）
 
@@ -456,6 +528,6 @@ printf '%s\n' \
 ```
 
 **默认约定回顾**：示例默认保存、响应体裁剪 8192 字节、列表 50/200 条、敏感值只回掩码（掩码回传 = 不改，`.`/`?` 不算掩码）、
-省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、授权目录（`-allow-writable`/`-allow`）下含
+省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、示例改名与新建同一套命名规则、授权目录（`-allow-writable`/`-allow`）下含
 `opencollection.yml` 的子目录 = 项目、`project` 三种写法（uid / 名称 / 路径）、
 内嵌服务风险工具默认弹窗确认（拒绝 / 允许 15 分钟 / 始终允许，60s 超时按拒绝）、每次调用都写审计。

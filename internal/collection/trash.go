@@ -8,12 +8,15 @@ package collection
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	share "github.com/leihenshang/api-doc-go-share/collection"
@@ -31,7 +34,49 @@ type TrashEntry struct {
 const (
 	trashDirName   = ".trash"
 	trashIndexName = ".index.jsonl"
+	// trashNameMaxBytes .trash 内文件名的字节上限。文件系统按字节限 255，
+	// 时间戳前缀（15 字节 + 点）占 16，这里留出余量，避免「条目名字本来就长 → 删不掉」。
+	trashNameMaxBytes = 240
 )
+
+// trashSafeBase 把待回收条目的基名压到不会超长。
+//
+// 为什么需要：.trash 里的名字是「时间戳.原名」，原名本身接近 255 字节时（历史上存下的超长示例、
+// 外部同步/导入来的长名）改名必然 ENAMETOOLONG —— 条目就永远删不掉。超长时压缩成
+// 「头部 + ~短哈希 + 原扩展名」：既能认出是哪条（哈希可回溯），又保证 rename 一定成功。
+// 按字节截断时不会切断 UTF-8 字符（中文名不会变成乱码）。
+func trashSafeBase(base string) string {
+	if len(base)+len(".20060102-150405") <= trashNameMaxBytes {
+		return base
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	suffix := fmt.Sprintf("~%08x", crc32.ChecksumIEEE([]byte(base)))
+	budget := trashNameMaxBytes - len(ext) - len(suffix) - len(".20060102-150405")
+	if budget < 8 {
+		budget = 8
+	}
+	head := truncateUTF8(stem, budget)
+	if head == "" {
+		head = "entry"
+	}
+	return head + suffix + ext
+}
+
+// truncateUTF8 按字节上限截断字符串，且不切断 UTF-8 字符（截断点回退到字符边界）。
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && s[cut]&0xC0 == 0x80 { // 0b10xxxxxx = UTF-8 续字节
+		cut--
+	}
+	return s[:cut]
+}
 
 // trashKind 按原相对路径与类型归类（展示用，恢复逻辑不依赖）。
 func trashKind(rel string, isDir bool) string {
@@ -76,9 +121,14 @@ func (c *Collection) moveToTrash(full string) error {
 	if r, e := filepath.Rel(c.Dir, full); e == nil {
 		rel = filepath.ToSlash(r)
 	}
-	name := share.TrashName(filepath.Base(full), time.Now())
+	name := share.TrashName(trashSafeBase(filepath.Base(full)), time.Now())
 	dest := filepath.Join(trash, name)
 	if err := renameWithRetry(full, dest); err != nil {
+		if isNameTooLong(err) || len(filepath.Base(dest)) > trashNameHardLimit {
+			// 名字超长不是「文件被占用」：单独说清楚，否则用户/AI 会去关编辑器，白费功夫
+			return fmt.Errorf("移入回收站失败：文件名过长（%d 字节，超过文件系统上限），请先改名再删除: %w",
+				len(filepath.Base(dest)), err)
+		}
 		if !st.IsDir() {
 			return fmt.Errorf("移入回收站失败（文件可能被其他程序占用）: %w", err)
 		}
@@ -101,6 +151,17 @@ func renameWithRetry(src, dst string) error {
 		time.Sleep(time.Duration(80*(i+1)) * time.Millisecond)
 	}
 	return err
+}
+
+// trashNameHardLimit 文件系统对单个文件名的硬上限（字节）。超过它一定会失败。
+const trashNameHardLimit = 255
+
+// isNameTooLong 判断错误是否为「文件名超过文件系统上限」。
+// 除了 ENAMETOOLONG，有些文件系统（如本机的 tmpfs / 部分网络盘）对超长名返回 EPERM，
+// 所以调用方还会用最终文件名的字节数再兜一次判断 —— 文案必须与「被其他程序占用」分开，
+// 否则会把人引到错误的排查方向（去关编辑器，白费功夫）。
+func isNameTooLong(err error) bool {
+	return errors.Is(err, syscall.ENAMETOOLONG)
 }
 
 type trashMove struct {

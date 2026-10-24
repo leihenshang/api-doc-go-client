@@ -9,6 +9,7 @@ import (
 	"fmt"
 	urlpkg "net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -95,6 +96,112 @@ func (a *App) DeleteResponseExample(reqUID, exampleUID string) error {
 		return err
 	}
 	return c.DeleteResponseExample(reqUID, exampleUID)
+}
+
+// errExampleNotFound 示例 uid 在该请求下查不到（提示调用方先列一遍再改/删）。
+var errExampleNotFound = errors.New("响应示例不存在：请先查看该请求的示例列表（MCP 的 get_request_detail）确认 exampleUid")
+
+// SaveResponseExampleRaw 用原始字段保存一条示例（不发送请求）：
+// 供「把外部文档/日志里的响应片段留成示例」这类场景使用（MCP 的 save_response_example）。
+// 请求快照取该请求当前落盘内容；contentType 为空时按 body 首字符推断。
+func (a *App) SaveResponseExampleRaw(reqUID, name string, status int, headers []collection.KV, body, contentType string) (*collection.ResponseExample, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	r, err := c.ReadRequest(strings.TrimSpace(reqUID))
+	if err != nil {
+		return nil, fmt.Errorf("定位请求: %w", err)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "响应示例"
+	}
+	ct := strings.TrimSpace(contentType)
+	if ct == "" {
+		ct = inferContentType(body)
+	}
+	req := collection.ExampleRequest{
+		Method: strings.ToUpper(r.Method), URL: r.URL, Headers: r.Headers, Body: r.Body,
+	}
+	res := collection.ExampleResponse{
+		Status: status, Size: len(body), ContentType: ct, Headers: headers, Body: body,
+	}
+	return c.SaveResponseExample(r.UID, name, req, res)
+}
+
+// inferContentType 按响应体首字符粗判媒体类型（只给 body 时的兜底，不做严格 JSON 校验）。
+func inferContentType(body string) string {
+	s := strings.TrimLeft(body, " \t\r\n")
+	if s == "" {
+		return "text/plain"
+	}
+	if s[0] == '{' || s[0] == '[' {
+		return "application/json"
+	}
+	return "text/plain"
+}
+
+// UpdateResponseExample 局部更新一条已保存的示例（指针为 nil 的字段不动）：
+// 改名会同步把文件名改成同目录下的规范化名 + .yml（旧文件在写成功后由 UpsertResponseExampleFile 清掉），
+// 改响应体时同步 Size，最后按 UID 覆盖写入（重名自动加 (1)）。
+//
+// 改名口径与「新建示例」完全一致（都走 collection.ValidEntryName / collection.SanitizeFileName）：
+// 名字即文件名，所以 Name 也归一化成同一个值 —— 否则会出现「YAML 里叫 a/b、文件叫 a-b.yml」
+// 这种名与文件不同源的状态，读回来像是别人的路径。
+func (a *App) UpdateResponseExample(reqUID, exampleUID string, name *string, status *int,
+	headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	// 名字先校验再动手：校验不通过时整个更新都不生效（不留半改状态）
+	if name != nil {
+		if n := strings.TrimSpace(*name); n != "" && !collection.ValidEntryName(n) {
+			return nil, fmt.Errorf("示例名含非法字符或过长（不能含 \\ / : * ? \" < > |，不能以点开头/结尾，≤120 字符）：%q", n)
+		}
+	}
+	examples, err := c.ListResponseExamples(strings.TrimSpace(reqUID))
+	if err != nil {
+		return nil, err
+	}
+	var ex *collection.ResponseExample
+	want := strings.TrimSpace(exampleUID)
+	for _, it := range examples {
+		if it.UID == want {
+			ex = it
+			break
+		}
+	}
+	if ex == nil {
+		return nil, errExampleNotFound
+	}
+	if name != nil {
+		if n := strings.TrimSpace(*name); n != "" {
+			base := collection.SanitizeFileName(n) // 与落盘命名同一套规则（trim/替换非法字符/截断 100 rune）
+			if base != ex.Name {
+				ex.Name = base
+				// 文件名与示例名同源：换名 = 换路径，落盘时 UID 相同会删掉旧文件
+				ex.Path = path.Join(path.Dir(ex.Path), base+".yml")
+			}
+		}
+	}
+	if status != nil {
+		ex.Response.Status = *status
+	}
+	if headers != nil {
+		ex.Response.Headers = *headers
+	}
+	if body != nil {
+		ex.Response.Body = *body
+		ex.Response.Size = len(*body) // Size 是「响应体字节数」，必须跟着改
+	}
+	if contentType != nil {
+		ex.Response.ContentType = strings.TrimSpace(*contentType)
+	}
+	if _, err := c.UpsertResponseExampleFile(ex); err != nil {
+		return nil, err
+	}
+	return ex, nil
 }
 
 // 环境变量读写与并发保护见同包 env.go（ListEnvs / SaveEnvChecked / RenameEnv / EnvFileHash / SaveEnv / DeleteEnv / envVars）。

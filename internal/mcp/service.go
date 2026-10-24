@@ -656,6 +656,86 @@ func matchDoc(name, path, reqName, query string) bool {
 	return strings.Contains(normalize(name), q) || strings.Contains(normalize(path), q) || isSubsequence(q, normalize(name))
 }
 
+// BodyInput 请求体的**局部更新**入参（create_request / update_request 专用）。
+//
+// 为什么不直接复用 collection.Body：Body.Form 的 json tag 没有 omitempty，一旦出现在
+// inputSchema 里就变成 required（type/raw/form 三件套）——AI 只想改 raw 也得编造 form，
+// 漏传就把整张表单清空了。这里全部改成指针：nil = 保留原值，显式空串 / 空数组 / 空对象 = 清空。
+// 该类型只活在入参侧，落盘格式（share 的 collection.Body）完全不变。
+type BodyInput struct {
+	Type   *string                 `json:"type,omitempty" jsonschema:"请求体类型：none/json/text/form/multipart；不传 = 保留原值，传空串 = 清空"`
+	Raw    *string                 `json:"raw,omitempty" jsonschema:"请求体原文（json/text）；不传 = 保留原值，传空串 = 清空"`
+	Data   *string                 `json:"data,omitempty" jsonschema:"Bruno 的 data 字段（第三方集合往返用）；不传 = 保留原值"`
+	Form   *[]collection.KV        `json:"form,omitempty" jsonschema:"form/multipart 表单行；不传 = 保留原行，传空数组 = 清空（与 raw 互不影响）"`
+	Descs  *map[string]string      `json:"descs,omitempty" jsonschema:"JSON 体「字段路径 → 备注」种子（老数据兼容）；不传 = 保留原值，传空对象 = 清空"`
+	Fields *[]collection.BodyField `json:"fields,omitempty" jsonschema:"请求体字段表格；不传 = 保留原值，传空数组 = 清空"`
+}
+
+// merge 把入参合并到既有请求体上：nil 字段一律保留 base 的原值（显式零值才覆盖）。
+func (in BodyInput) merge(base collection.Body) collection.Body {
+	out := base
+	if in.Type != nil {
+		out.Type = *in.Type
+	}
+	if in.Raw != nil {
+		out.Raw = *in.Raw
+	}
+	if in.Data != nil {
+		out.Data = *in.Data
+	}
+	if in.Form != nil {
+		out.Form = *in.Form
+	}
+	if in.Descs != nil {
+		out.Descs = *in.Descs
+	}
+	if in.Fields != nil {
+		out.Fields = *in.Fields
+	}
+	return out
+}
+
+// RespDocInput 响应字段文档的**局部更新**入参（create_request / update_request 专用）。
+//
+// 与 BodyInput 同口径：nil = 保留原值；显式空串 / 0 / 空数组 = 清空。
+// 相比旧的 mergeRespDoc（空串/0 一律视为「没传」，因此永远清不掉样例与状态码），
+// 指针让「清空」成为一种可表达的意图。
+type RespDocInput struct {
+	Type        *string                     `json:"type,omitempty" jsonschema:"返回类型徽标（object/array/...）；不传 = 保留，传空串 = 清空"`
+	Params      *[]collection.ResponseParam `json:"params,omitempty" jsonschema:"返回参数行；不传 = 保留，传空数组 = 清空"`
+	Sample      *string                     `json:"sample,omitempty" jsonschema:"响应样例原文；不传 = 保留，传空串 = 清空"`
+	Status      *int                        `json:"status,omitempty" jsonschema:"响应状态码快照；不传 = 保留，传 0 = 清零"`
+	Headers     *[]collection.KV            `json:"headers,omitempty" jsonschema:"响应头快照；不传 = 保留，传空数组 = 清空"`
+	ContentType *string                     `json:"contentType,omitempty" jsonschema:"响应媒体类型（json/text/xml/html/binary）；不传 = 保留，传空串 = 清空"`
+}
+
+// merge 把入参合并到既有响应文档上；base 为 nil 时按空文档起步（入参 nil 仍表示保留）。
+func (in RespDocInput) merge(base *collection.ResponseDoc) *collection.ResponseDoc {
+	out := collection.ResponseDoc{}
+	if base != nil {
+		out = *base
+	}
+	if in.Type != nil {
+		out.Type = *in.Type
+	}
+	if in.Params != nil {
+		out.Params = *in.Params
+	}
+	if in.Sample != nil {
+		out.Sample = *in.Sample
+	}
+	if in.Status != nil {
+		out.Status = *in.Status
+	}
+	if in.Headers != nil {
+		out.Headers = *in.Headers
+	}
+	if in.ContentType != nil {
+		out.ContentType = *in.ContentType
+	}
+	return &out
+}
+
 // CreateRequestInput create_request 的入参。
 type CreateRequestInput struct {
 	Project     string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
@@ -665,13 +745,13 @@ type CreateRequestInput struct {
 	URL         string                      `json:"url,omitempty"`
 	Headers     []collection.KV             `json:"headers,omitempty"`
 	Params      []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；行可带 description（说明列）与 type（multipart 文件行）"`
-	BodyType    string                      `json:"bodyType,omitempty"`
-	BodyRaw     string                      `json:"bodyRaw,omitempty"`
-	Body        *collection.Body            `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；传了就覆盖 bodyType/bodyRaw"`
+	BodyType    string                      `json:"bodyType,omitempty" jsonschema:"请求体类型的快捷写法（等价 body.type）；omitempty 保证只覆盖 type 不动 form/fields"`
+	BodyRaw     string                      `json:"bodyRaw,omitempty" jsonschema:"请求体原文的快捷写法（等价 body.raw）；omitempty 保证只覆盖 raw 不动 form/fields"`
+	Body        *BodyInput                  `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；按子项合并：不传的子项保留原值，显式空值才清空"`
 	BodyFields  []collection.BodyField      `json:"bodyFields,omitempty" jsonschema:"请求体字段表格（字段名/类型/必填/示例值/说明）；与 body 相互独立，传了只覆盖表格"`
 	Summary     string                      `json:"summary,omitempty" jsonschema:"API 概述（纯文本一句话）；与 body 相互独立"`
 	Settings    *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档：可只写 params 字段表（补说明）；type/sample/status/headers 缺省不动，传了才覆盖；gRPC 请求不支持"`
+	RespDoc     *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并：可只写 params 字段表（补说明），sample/status/headers/type 不传不动；gRPC 请求不支持"`
 	Auth        *collection.Auth            `json:"auth,omitempty"`
 	Docs        string                      `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	Curl        string                      `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
@@ -741,11 +821,17 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 		draft.Params = in.Params
 	}
 	if in.BodyType != "" || in.BodyRaw != "" {
-		draft.Body = collection.Body{Type: in.BodyType, Raw: in.BodyRaw}
+		// 快捷字段只改报文类型/原文：不再整份替换 Body，否则 form/fields/descs 会被顺手清掉。
+		if in.BodyType != "" {
+			draft.Body.Type = in.BodyType
+		}
+		if in.BodyRaw != "" {
+			draft.Body.Raw = in.BodyRaw
+		}
 	}
-	// 完整 body（含 form/multipart 行）：比 bodyType/bodyRaw 表达力强，传了就覆盖
+	// 完整 body（含 form/multipart 行）：按子项合并，表达力比 bodyType/bodyRaw 强
 	if in.Body != nil {
-		draft.Body = *in.Body
+		draft.Body = in.Body.merge(draft.Body)
 	}
 	// 字段表格与概述：与 body 相互独立，各自只在显式传入时覆盖（body 覆盖不再连带清掉它们）
 	if in.BodyFields != nil {
@@ -761,7 +847,7 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 		if draft.IsGRPC() {
 			return errRespDocGRPC
 		}
-		draft.RespDoc = mergeRespDoc(draft.RespDoc, in.RespDoc)
+		draft.RespDoc = in.RespDoc.merge(draft.RespDoc)
 	}
 	if in.Auth != nil {
 		draft.Auth = in.Auth
@@ -770,32 +856,6 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 		draft.Docs = in.Docs
 	}
 	return nil
-}
-
-// mergeRespDoc 把传入的 respDoc 合到已有文档上（item 13）：允许只写字段表——
-// 未传的字段（空类型/nil 参数表/空样例/零状态码/nil 响应头）保留原值，传了则覆盖；
-// params 传空数组即清空字段表。这样 AI 补「字段说明」不会误伤已有的响应数据/响应头快照。
-func mergeRespDoc(old, in *collection.ResponseDoc) *collection.ResponseDoc {
-	if old == nil {
-		return in
-	}
-	out := *old
-	if in.Type != "" {
-		out.Type = in.Type
-	}
-	if in.Params != nil {
-		out.Params = in.Params
-	}
-	if in.Sample != "" {
-		out.Sample = in.Sample
-	}
-	if in.Status != 0 {
-		out.Status = in.Status
-	}
-	if in.Headers != nil {
-		out.Headers = in.Headers
-	}
-	return &out
 }
 
 // CreateModule 创建模块（目录），parent 为空表示根目录下新建。
@@ -818,20 +878,29 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 	return child, nil
 }
 
+// update_request 的 section 取值：限定本次只改请求本身 / 响应文档 / 接口说明。
+const (
+	sectionRequest  = "request"
+	sectionResponse = "response"
+	sectionDocs     = "docs"
+)
+
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
-	Project    string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID        string                      `json:"uid"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID     string `json:"uid"`
+	// Section 节点守卫：限定本次调用只改某一个节点（见 validateSection）。
+	Section    string                      `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
 	Name       *string                     `json:"name,omitempty"`
 	Method     *string                     `json:"method,omitempty"`
 	URL        *string                     `json:"url,omitempty"`
 	Params     []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
 	Headers    []collection.KV             `json:"headers,omitempty"`
-	Body       *collection.Body            `json:"body,omitempty" jsonschema:"请求体整份覆盖；body.fields/body.descs 未传（null）时保留原值，显式传空数组/空对象才清空；form 字段非 omitempty，传 body 时请一并带上 form（无表单行传空数组），否则原有表单行会被清空"`
+	Body       *BodyInput                  `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
 	BodyFields *[]collection.BodyField     `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖"`
 	Summary    *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
 	Settings   *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc    *collection.ResponseDoc     `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并——可只传 params 补字段说明，样例/响应头/状态码缺省保留原值；gRPC 请求拒绝"`
+	RespDoc    *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
 	Auth       *collection.Auth            `json:"auth,omitempty"`
 	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	Folder     *string                     `json:"folder,omitempty"` // 移动到别的模块
@@ -840,8 +909,92 @@ type UpdateRequestInput struct {
 	IfMatch string `json:"ifMatch,omitempty"`
 }
 
+// validateSection 节点守卫：section 非空时，本次调用只允许传该节点的字段。
+//
+// 为什么要它：update_request 一次能做三件事（改请求本身 / 补响应文档 / 写接口说明），
+// AI 常常「只想补响应字段」却顺手带上 url 之类，把请求本身改坏。加上 section 后，
+// 越界会直接被拒，并在报错里列出**越界的字段名**与该 section 的允许清单，AI 能照着改。
+// section 为空 = 不限制（兼容所有旧调用）。
+func validateSection(section string, in UpdateRequestInput) error {
+	sec := strings.ToLower(strings.TrimSpace(section))
+	if sec == "" {
+		return nil
+	}
+	// 本次实际传了的字段（指针/切片 nil = 没传；ifMatch/uid/project 不算数据字段）
+	present := make([]string, 0, 12)
+	if in.Name != nil {
+		present = append(present, "name")
+	}
+	if in.Method != nil {
+		present = append(present, "method")
+	}
+	if in.URL != nil {
+		present = append(present, "url")
+	}
+	if in.Params != nil {
+		present = append(present, "params")
+	}
+	if in.Headers != nil {
+		present = append(present, "headers")
+	}
+	if in.Body != nil {
+		present = append(present, "body")
+	}
+	if in.BodyFields != nil {
+		present = append(present, "bodyFields")
+	}
+	if in.Summary != nil {
+		present = append(present, "summary")
+	}
+	if in.Auth != nil {
+		present = append(present, "auth")
+	}
+	if in.Settings != nil {
+		present = append(present, "settings")
+	}
+	if in.Folder != nil {
+		present = append(present, "folder")
+	}
+	if in.RespDoc != nil {
+		present = append(present, "respDoc")
+	}
+	if in.Docs != nil {
+		present = append(present, "docs")
+	}
+	var allowed []string
+	switch sec {
+	case sectionRequest:
+		allowed = []string{"name", "method", "url", "params", "headers", "body", "bodyFields", "summary", "auth", "settings", "folder"}
+	case sectionResponse:
+		allowed = []string{"respDoc"}
+	case sectionDocs:
+		allowed = []string{"docs"}
+	default:
+		return fmt.Errorf("不支持的 section %q：只支持 request（请求本身）/ response（响应字段文档 respDoc）/ docs（接口说明），省略 section 表示不限制", section)
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, f := range allowed {
+		allowedSet[f] = true
+	}
+	bad := make([]string, 0, len(present))
+	for _, f := range present {
+		if !allowedSet[f] {
+			bad = append(bad, f)
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（request / response / docs）",
+			sec, strings.Join(allowed, "/"), strings.Join(bad, "/"))
+	}
+	return nil
+}
+
 // UpdateRequest 局部更新；带冲突检测（磁盘被外部改过就拒写）。
 func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, error) {
+	// 节点守卫放在最前面：不值得为一次注定被拒的调用去读盘/建索引。
+	if err := validateSection(in.Section, in); err != nil {
+		return nil, err
+	}
 	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return nil, err
@@ -899,16 +1052,10 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		r.Params = in.Params
 	}
 	if in.Body != nil {
-		// 整份覆盖 body 时保护表格与旧备注：nil = 保留原值，显式空（[] / {}）= 清空。
-		// 否则 AI 只是补一次请求体原文，就把用户手写的字段表格与备注一起清掉了。
-		prevFields, prevDescs := r.Body.Fields, r.Body.Descs
-		r.Body = *in.Body
-		if r.Body.Fields == nil {
-			r.Body.Fields = prevFields
-		}
-		if r.Body.Descs == nil {
-			r.Body.Descs = prevDescs
-		}
+		// 按子项合并：nil = 保留原值，显式空（"" / [] / {}）= 清空。
+		// 以前是整份覆盖 + fields/descs 快照还原（只保住了这两个子项），
+		// 合并语义把 form 也一起保住了 —— 只改 raw 不会再清掉表单行。
+		r.Body = in.Body.merge(r.Body)
 	}
 	// 字段表格单独覆盖：显式传入（含空数组=清空）才动，优先级高于 body.fields
 	if in.BodyFields != nil {
@@ -924,7 +1071,7 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		if r.IsGRPC() {
 			return errRespDocGRPC
 		}
-		r.RespDoc = mergeRespDoc(r.RespDoc, in.RespDoc)
+		r.RespDoc = in.RespDoc.merge(r.RespDoc)
 	}
 	if in.Auth != nil {
 		r.Auth = in.Auth
@@ -1046,4 +1193,91 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 		}
 	}
 	return &out, nil
+}
+
+// ---- 响应示例（examples/*.yml）的增 / 改 / 删 ----
+//
+// send_request 只能「存刚发出来的那个响应」；AI 需要把外部文档、日志里的响应片段也留成示例，
+// 或者修正已存示例的名字/状态码/响应体，于是补这三个工具。
+// 示例是集合内的纯文本 YAML（可 git diff / 评审），删除一律走 .trash（可人工找回）。
+
+// SaveResponseExampleInput save_response_example 的入参。
+type SaveResponseExampleInput struct {
+	Project     string          `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID         string          `json:"uid" jsonschema:"请求 uid（示例挂在它名下；用 search_requests 或 get_project_modules 获取）"`
+	Name        string          `json:"name,omitempty" jsonschema:"示例名（同时用作文件名）；省略 = 「响应示例」；重名会自动加 (1)(2)"`
+	Status      int             `json:"status,omitempty" jsonschema:"响应状态码；省略 = 200"`
+	Headers     []collection.KV `json:"headers,omitempty" jsonschema:"响应头行（name/value/enabled）"`
+	Body        string          `json:"body,omitempty" jsonschema:"响应体原文；落盘的 size 按它的字节数记录"`
+	ContentType string          `json:"contentType,omitempty" jsonschema:"响应媒体类型；省略则按 body 首字符推断（{ 或 [ → application/json，其余 text/plain）"`
+}
+
+// SaveResponseExample 手动保存一条响应示例（不发送请求）。
+func (s *Service) SaveResponseExample(in SaveResponseExampleInput) (*collection.ResponseExample, error) {
+	a, _, err := s.resolveWrite(in.Project)
+	if err != nil {
+		return nil, err
+	}
+	uid := strings.TrimSpace(in.UID)
+	if uid == "" {
+		return nil, errNeedUID
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = defaultExampleName
+	}
+	status := in.Status
+	if status == 0 {
+		status = 200 // 省略 = 最常见的那一种，而不是「状态码 0」这种不存在的响应
+	}
+	return a.SaveResponseExampleRaw(uid, name, status, in.Headers, in.Body, in.ContentType)
+}
+
+// defaultExampleName 示例名的默认值（AI 不给 name 时用）。
+const defaultExampleName = "响应示例"
+
+// UpdateResponseExampleInput update_response_example 的入参（指针 = 只改传了的）。
+type UpdateResponseExampleInput struct {
+	Project     string           `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID         string           `json:"uid" jsonschema:"请求 uid（示例所属请求）"`
+	ExampleUID  string           `json:"exampleUid" jsonschema:"响应示例 uid（get_request_detail 返回的 examples[].uid）"`
+	Name        *string          `json:"name,omitempty" jsonschema:"示例名；不传不动。改名会同步重命名磁盘文件（同一套命名规则，显示名与文件名同值）；含非法字符或过长会报错且不改动任何文件"`
+	Status      *int             `json:"status,omitempty" jsonschema:"响应状态码；不传不动，传 0 = 清零"`
+	Headers     *[]collection.KV `json:"headers,omitempty" jsonschema:"响应头；不传不动，传空数组即清空"`
+	Body        *string          `json:"body,omitempty" jsonschema:"响应体原文；不传不动（改了会同步更新 size 字节数）"`
+	ContentType *string          `json:"contentType,omitempty" jsonschema:"响应媒体类型；不传不动"`
+}
+
+// UpdateResponseExample 局部更新一条已保存的响应示例。
+func (s *Service) UpdateResponseExample(in UpdateResponseExampleInput) (*collection.ResponseExample, error) {
+	a, _, err := s.resolveWrite(in.Project)
+	if err != nil {
+		return nil, err
+	}
+	uid := strings.TrimSpace(in.UID)
+	if uid == "" {
+		return nil, errNeedUID
+	}
+	exUID := strings.TrimSpace(in.ExampleUID)
+	if exUID == "" {
+		return nil, fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+	}
+	return a.UpdateResponseExample(uid, exUID, in.Name, in.Status, in.Headers, in.Body, in.ContentType)
+}
+
+// DeleteResponseExample 删除一条响应示例（文件移入 .trash，可人工找回）。
+func (s *Service) DeleteResponseExample(project, reqUID, exampleUID string) error {
+	a, _, err := s.resolveWrite(project)
+	if err != nil {
+		return err
+	}
+	uid := strings.TrimSpace(reqUID)
+	if uid == "" {
+		return errNeedUID
+	}
+	exUID := strings.TrimSpace(exampleUID)
+	if exUID == "" {
+		return fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+	}
+	return a.DeleteResponseExample(uid, exUID)
 }

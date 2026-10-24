@@ -67,7 +67,7 @@ func TestUpdateRequestBodyOverwriteKeepsFieldsAndSummary(t *testing.T) {
 		Name:       "keep-fields",
 		Method:     "POST",
 		URL:        "http://127.0.0.1/x",
-		Body:       &collection.Body{Type: "json", Raw: `{"uid":"u-42"}`, Descs: map[string]string{"uid": "用户ID"}},
+		Body:       &BodyInput{Type: strPtr("json"), Raw: strPtr(`{"uid":"u-42"}`), Descs: &map[string]string{"uid": "用户ID"}},
 		BodyFields: sampleBodyFields(),
 		Summary:    "原始概述",
 	})
@@ -82,9 +82,9 @@ func TestUpdateRequestBodyOverwriteKeepsFieldsAndSummary(t *testing.T) {
 	upd, err := svc.UpdateRequest(UpdateRequestInput{
 		Project: "demo",
 		UID:     r.UID,
-		Body: &collection.Body{
-			Type: "json",
-			Raw:  `{"uid":"u-99"}`,
+		Body: &BodyInput{
+			Type: strPtr("json"),
+			Raw:  strPtr(`{"uid":"u-99"}`),
 			// Fields / Descs 保持 nil：JSON 里即「缺键」
 		},
 	})

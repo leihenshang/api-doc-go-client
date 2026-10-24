@@ -88,9 +88,18 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
+    // 请求体字段表的唯一真源是 body.fields（body.descs 只作旧数据种子，不再参与文档生成）
     await patchRequest(app, PING_UID, {
       params: [{ name: 'page', value: '1', enabled: true }],
-      body: { type: 'json', raw: '{"uid": "u-42", "vip": true}', form: [], descs: { uid: '用户ID' } },
+      body: {
+        type: 'json',
+        raw: '{"uid": "u-42", "vip": true}',
+        form: [],
+        fields: [
+          { name: 'uid', type: 'string', required: true, example: 'u-42', description: '用户ID' },
+          { name: 'vip', type: 'boolean', required: false, example: 'true', description: '是否 VIP' },
+        ],
+      },
     })
     await page.reload()
     await reopenApp(page) // 每次重开树默认收起：用例需要请求行，先展开
@@ -105,7 +114,7 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(md).toContainText(t('docs.body')) // 修复点：请求体章节不再丢
     await expect(md).toContainText('u-42') // 原始体内容进代码块
     await expect(md).toContainText(t('docs.bodyParams')) // JSON 体附字段表（小标题）
-    await expect(md).toContainText('用户ID') // descs 备注进表「说明」列
-    await expect(md).toContainText('vip') // 摊平字段（路径）进表
+    await expect(md).toContainText('用户ID') // body.fields 的「说明」列进表
+    await expect(md).toContainText('vip') // 字段名进表
   })
 })

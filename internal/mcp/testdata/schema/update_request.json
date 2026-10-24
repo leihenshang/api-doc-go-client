@@ -32,10 +32,16 @@
     "body": {
       "properties": {
         "data": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         },
         "descs": {
-          "type": "object"
+          "type": [
+            "null",
+            "object"
+          ]
         },
         "fields": {
           "items": {
@@ -100,17 +106,18 @@
           ]
         },
         "raw": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         },
         "type": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         }
       },
-      "required": [
-        "type",
-        "raw",
-        "form"
-      ],
       "type": [
         "null",
         "object"
@@ -242,7 +249,10 @@
     "respDoc": {
       "properties": {
         "contentType": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         },
         "headers": {
           "items": {
@@ -309,24 +319,31 @@
           ]
         },
         "sample": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         },
         "status": {
-          "type": "integer"
+          "type": [
+            "null",
+            "integer"
+          ]
         },
         "type": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
         }
       },
-      "required": [
-        "type",
-        "params",
-        "sample"
-      ],
       "type": [
         "null",
         "object"
       ]
+    },
+    "section": {
+      "type": "string"
     },
     "settings": {
       "properties": {

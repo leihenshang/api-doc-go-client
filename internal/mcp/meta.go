@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// 本文件是 24 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
+// 本文件是 27 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
 // 注册描述。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
 // 不允许在别处再硬编码一份工具风险/读写分类。
 //
@@ -48,7 +48,7 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 24 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 27 个（ValidateMetas 锁定）。
 var toolMetas = []ToolMeta{
 	// ---- 10 个只读工具（只读模式也注册）----
 	{
@@ -92,7 +92,7 @@ var toolMetas = []ToolMeta{
 		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的 hash：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动。uid 来自 list_docs。",
 	},
 
-	// ---- 8 个集合写工具（只读模式不注册）----
+	// ---- 11 个集合写工具（只读模式不注册）：请求 5 + 文档 3 + 响应示例 3 ----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
 		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。概述用 summary（纯文本一句话），请求体字段表格用 bodyFields（与 body 相互独立，传了只覆盖表格）；三者互不影响。同名会在分组内自动加序号。",
@@ -124,6 +124,18 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
 		Description: "移除文档条目。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
+	},
+	{
+		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Description: "手工保存一条响应示例（不发送请求，适合把外部文档/日志里的响应片段留成示例）：落到该请求的 examples/ 目录（examples/<模块>/<请求名>/<示例名>.yml）。name 省略=「响应示例」，status 省略=200，contentType 省略时按 body 首字符推断（{ / [ → application/json，其余 text/plain）；size 按 body 字节数记录。重名自动加 (1)(2)。返回示例 uid/path/name —— 改它用 update_response_example，删它用 delete_response_example。",
+	},
+	{
+		Name: "update_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Description: "修改已保存的响应示例（只改传入的字段）：name 改名会同步把磁盘文件名改成「规范化名.yml」（与新建示例同一套命名规则，显示名与文件名同值；含非法字符/过长会报错且不动任何文件，写成功后才会删旧文件）；status/headers/body/contentType 不传则不动（传空数组可清空响应头，status 传 0 即清零），body 变化时 size 自动跟着改；重名自动加 (1)(2)。exampleUid 来自 get_request_detail 示例行里的 uid=…。",
+	},
+	{
+		Name: "delete_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Description: "删除一条已保存的响应示例。文件会移入集合的 .trash 目录（可人工找回），不会真正删除；只删示例，不动请求本身。",
 	},
 
 	// ---- 5 个环境/变量写工具（只读模式不注册）----
@@ -182,7 +194,7 @@ func ToolNames() []string {
 }
 
 // NamesForMode 返回指定模式下应注册的工具名集合：
-// readOnly=true 时仅 InReadOnly 的工具（10 读 + send_request = 11 个）。
+// readOnly=true 时仅 InReadOnly 的工具（10 读 + send_request = 11 个；全模式 27 个）。
 func NamesForMode(readOnly bool) []string {
 	out := make([]string, 0, len(toolMetas))
 	for _, m := range toolMetas {
@@ -197,7 +209,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 24
+	const expectTools = 27
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}

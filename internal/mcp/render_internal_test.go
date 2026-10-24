@@ -82,3 +82,23 @@ func TestRenderDetailShowsSummaryAndBodyFields(t *testing.T) {
 		t.Errorf("竖线未转义:\n%s", broken)
 	}
 }
+
+// TestRenderDetailExposesExampleUID 示例行必须带 uid：
+// update_response_example / delete_response_example 的 exampleUid 只能从 get_request_detail
+// 的文本里拿到（工具结果没有结构化字段），漏了就无法定位「已存在」的示例 ——
+// send_request / 界面 / 上次会话存下的示例全都改不了、删不掉。
+func TestRenderDetailExposesExampleUID(t *testing.T) {
+	out := renderDetail(&RequestDetail{
+		Project: "coll", UID: "req-1", Name: "带示例", Method: "GET",
+		Body: collection.Body{Type: "none"},
+		Examples: []ExampleItem{
+			{UID: "ex-aaa-111", Name: "线上 504", Path: "examples/带示例/线上 504.yml", Status: 504, BodyBytes: 12},
+			{UID: "ex-bbb-222", Name: "正常", Path: "examples/带示例/正常.yml", Status: 200},
+		},
+	})
+	for _, want := range []string{"uid=ex-aaa-111", "uid=ex-bbb-222", "线上 504", "504"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("示例段缺少 %q（AI 拿不到 exampleUid 就改不了已存在的示例）:\n%s", want, out)
+		}
+	}
+}
