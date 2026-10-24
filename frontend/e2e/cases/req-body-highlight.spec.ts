@@ -103,21 +103,25 @@ test.describe('请求体 JSON 着色', () => {
     await expect(page.locator('.body-pane textarea').first()).toBeVisible()
   })
 
-  test('[B5] JSON 体「表格」视图按字段编辑备注并落盘 descs', async ({ page, app }) => {
+  test('[B5] JSON 体「生成数据表格」后编辑说明并落盘 fields', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
     await useJsonBody(page)
     await page.getByTestId('req.bodyRaw').fill('{"name":"alice","age":3}')
 
-    // 切到表格视图：按字段路径展平，name / age 各一行
+    // 表格不再自动派生：切到表格视图是空态，点「生成数据表格」才按字段路径派生（name / age 各一行）
     await page.locator('[data-testid="body.viewTab"][data-view="table"]').click()
+    await expect(page.getByTestId('body.fieldsRow')).toHaveCount(0)
+    await page.getByTestId('body.generate').click()
     await expect(page.getByTestId('body.fieldsRow')).toHaveCount(2)
 
-    // 编辑首个字段备注并保存 → body.descs 落盘（备注列是 naive NInput，测试 id 在外层包装，聚焦内层 input）
+    // 编辑首个字段说明并保存 → body.fields 落盘（说明列是 naive NInput，测试 id 在外层包装，聚焦内层 input）
     await page.getByTestId('body.fieldDesc').first().locator('input').fill('用户名')
     await page.keyboard.press('Control+s')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('用户名')
+    // 表格真源是 fields（不再是 descs）
+    await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('fields:')
   })
 
   test('[B6] 请求体 JSON / XML 一键格式化（文本体 XML 同样生效）', async ({ page, app }) => {

@@ -158,6 +158,11 @@ func renderDetail(d *RequestDetail) string {
 		fmt.Fprintf(&sb, " · hash %s…", d.Hash[:min(12, len(d.Hash))])
 	}
 	sb.WriteString("\n")
+	// 概述（summary）：写得到就要读得回 —— 详情是 AI 唯一的结构化出口，
+	// 漏渲染会让 create/update 传的概述「写进文件但读不出来」，也让 get_request_detail 文案落空。
+	if d.Summary != "" {
+		fmt.Fprintf(&sb, "概述：%s\n", d.Summary)
+	}
 	// 新建请求默认带一行空参数（占位行），渲染时要跳过，否则输出里出现无意义的「 = 」
 	if params := nonEmpty(d.Params); len(params) > 0 {
 		sb.WriteString("\n参数：\n")
@@ -173,6 +178,25 @@ func renderDetail(d *RequestDetail) string {
 	}
 	if d.Body.Type != "" && d.Body.Type != "none" {
 		fmt.Fprintf(&sb, "\nBody（%s）：\n%s\n", d.Body.Type, d.Body.Raw)
+	}
+	// 请求体字段表格（body.fields，唯一真源）：5 列与 get_doc_template / 客户端「生成接口文档」同口径。
+	// 表格有行才输出 —— 空表格只给原文（与"表格为空只出请求体原文"的约定一致）。
+	if len(d.Body.Fields) > 0 {
+		fmt.Fprintf(&sb, "\n请求体字段（%d 行，body.fields）：\n", len(d.Body.Fields))
+		sb.WriteString("| 字段名 | 必选 | 类型 | 示例值 | 说明 |\n")
+		sb.WriteString("| --- | --- | --- | --- | --- |\n")
+		for _, f := range d.Body.Fields {
+			req := "否"
+			if f.Required {
+				req = "是"
+			}
+			typ := f.Type
+			if typ == "" {
+				typ = "string"
+			}
+			fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s |\n", cell(f.Name), req, cell(typ), cell(f.Example), cell(f.Description))
+		}
+		sb.WriteString("（整表回写用 update_request.bodyFields；只更新 body 原文不会清掉本表）\n")
 	}
 	if d.GRPC != nil {
 		fmt.Fprintf(&sb, "\ngRPC：%s（服务 %s / 方法 %s）", d.GRPC.Target, d.GRPC.Service, d.GRPC.Method)
@@ -223,6 +247,11 @@ func renderDetail(d *RequestDetail) string {
 		sb.WriteString("\n（还没有保存的响应示例：用 send_request 发送一次即可留存）")
 	}
 	return sb.String()
+}
+
+// cell 转义 Markdown 表格单元格：竖线与换行会破坏表格行（口径同客户端 genDocs 的 esc）。
+func cell(text string) string {
+	return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "|", "\\|"), "\n", " "))
 }
 
 // nonEmpty 过滤掉「名字与值都为空」的占位行（新建请求自带一行空参数）。

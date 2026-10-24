@@ -122,6 +122,12 @@ function touch(): void {
   tabs.touch(props.tab.key)
 }
 
+/** API 概述输入：写回 tab.request.summary 并标脏（纯文本，落盘在 http 段之外的顶层 summary）。 */
+function onSummaryInput(value: string): void {
+  props.tab.request.summary = value
+  touch()
+}
+
 function send(): void {
   void tabs.send(props.tab.key)
 }
@@ -249,6 +255,11 @@ async function copyExport(): Promise<void> {
 
 <template>
   <div class="bar-wrap">
+    <!-- API 概述：一行纯文本，位于地址栏上方（HTTP / gRPC 共用同一容器） -->
+    <div class="req-summary">
+      <n-input :value="tab.request.summary ?? ''" size="small" data-testid="req.summary"
+        :placeholder="t('editor.summaryPlaceholder')" :disabled="coll.isReadOnly" @update:value="onSummaryInput" />
+    </div>
     <div class="req-line" :style="controlStyle">
       <!-- gRPC（G1.3）：协议徽标 + 服务 / 方法选择器 + 服务地址（host:port，支持 {{变量}}） -->
       <template v-if="isGrpcReq">

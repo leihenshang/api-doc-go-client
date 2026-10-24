@@ -37,6 +37,37 @@
         "descs": {
           "type": "object"
         },
+        "fields": {
+          "items": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "example": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type",
+              "required"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "form": {
           "items": {
             "properties": {
@@ -83,6 +114,37 @@
       "type": [
         "null",
         "object"
+      ]
+    },
+    "bodyFields": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
       ]
     },
     "bodyRaw": {
@@ -294,6 +356,9 @@
         "null",
         "object"
       ]
+    },
+    "summary": {
+      "type": "string"
     },
     "url": {
       "type": "string"

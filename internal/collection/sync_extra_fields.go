@@ -7,7 +7,8 @@ package collection
 // 于是旧客户端推旧键集不会清空服务端新列，旧服务端下发缺新键的 extra 也不会清空本地字段。
 //
 // 未接入项：（无）。bodyDescs（请求体字段备注）依赖共享包 Body.Descs，随其发版后已接入，
-// 与服务端 http_request_body_descs 列双向往返。
+// 与服务端 http_request_body_descs 列双向往返；bodyFields（请求体字段表格）同法接入
+// http_request_body_fields，summary（API 概述）接入 http_request_summary。
 
 import (
 	"encoding/json"
@@ -19,6 +20,8 @@ const (
 	extraKeyBody           = "body"           // json/text 原文
 	extraKeyBodyForm       = "bodyForm"       // form/multipart 行 JSON
 	extraKeyBodyDescs      = "bodyDescs"      // {"a.b":"备注"}（JSON 体字段备注，随 Body.Descs 往返）
+	extraKeyBodyFields     = "bodyFields"     // [BodyField]（请求体字段表格，随 Body.Fields 往返）
+	extraKeySummary        = "summary"        // API 概述（纯文本）
 	extraKeyAuth           = "auth"           // {type,username,password,token,key,value,in}
 	extraKeySettings       = "settings"       // {timeout,followRedirects,maxRedirects,insecureSsl,encodeUrl}
 	extraKeyScript         = "script"         // {preRequest,postResponse}
@@ -229,6 +232,9 @@ func applyExtendedFields(r *Request, m map[string]any) {
 	if v, ok := m[extraKeyBodyDescs].(string); ok {
 		r.Body.Descs = parseDescs(v, r.Body.Descs)
 	}
+	if v, ok := m[extraKeyBodyFields].(string); ok {
+		r.Body.Fields = parseRows[BodyField](v, r.Body.Fields)
+	}
 	if v, ok := m[extraKeyAuth].(string); ok {
 		r.Auth = parseAuth(v, r.Auth)
 	}
@@ -304,4 +310,11 @@ func parseDescs(s string, keep map[string]string) map[string]string {
 		return keep
 	}
 	return m
+}
+
+// ---- 请求体字段表格（Body.Fields → BodyField 行 JSON）----
+
+// marshalBodyFields 字段表格 → 行 JSON；空表格返回空串（服务端据此清空该列）。
+func marshalBodyFields(fields []BodyField) string {
+	return marshalRows(fields)
 }

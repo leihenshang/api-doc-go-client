@@ -69,7 +69,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。返回的 hash 可传给 update_request.if_match 做冲突保护。",
+		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。返回的 hash 可传给 update_request.if_match 做冲突保护。",
 	},
 	{
 		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
@@ -95,7 +95,7 @@ var toolMetas = []ToolMeta{
 	// ---- 8 个集合写工具（只读模式不注册）----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。同名会在分组内自动加序号。",
+		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。概述用 summary（纯文本一句话），请求体字段表格用 bodyFields（与 body 相互独立，传了只覆盖表格）；三者互不影响。同名会在分组内自动加序号。",
 	},
 	{
 		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -107,7 +107,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
+		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。概述用 summary、请求体字段表格用 bodyFields，各自独立设置：body 整份覆盖不会清掉表格与概述（body.fields/body.descs 传 null 保留原值，显式传空数组/空对象才清空），bodyFields 不传=不动、传空数组=清空；summary 不传=不动、传空串=清空。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
 	},
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",

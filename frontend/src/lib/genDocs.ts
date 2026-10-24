@@ -2,10 +2,13 @@
 // 纯函数：章节标题 / 表头文案由调用方传入当前语言的实际文案（labels），本文件不依赖 i18n。
 // 结构对齐约定（参考采集文档）：
 //   简要描述 → 请求URI → 请求方式 → 请求头 → 请求参数 → 请求体 → 请求示例 → 响应字段 → 响应示例 → 备注。
-// 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数/响应字段均为「参数名|必选|类型|说明」，
-// 必选默认填「是」，类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
+// 无顶层 `#` 标题；章节以 `## 章名` 开头；请求参数为「参数名|必选|类型|说明」，
+// 请求体字段表与响应字段表为 5 列「参数名|必选|类型|示例值|说明」，必选默认填「是」，
+// 类型留空时默认 string。header 用 `- **名称**: 值` 列表。URL 主机地址统一替换为 {{host}}，
 // 且「请求URI」只保留路径（查询串交由「请求参数」表体现）。
-import { toBodyRows } from '@/lib/bodyFields'
+//
+// 请求体字段表的数据来自 body.fields（唯一真源，手工生成）；表格为空时只输出请求体原文，不出表。
+// body.descs（旧备注）不再参与文档生成。
 import type { FieldRow } from '@/lib/responseFields'
 import type { RequestDoc } from '@/types'
 
@@ -115,19 +118,22 @@ export function buildApiDoc(input: ApiDocInput): string {
   }
 
   // 请求体：与查询参数**并存互不影响**（同章节内参数表在前、请求体在后）。
-  // json 等原始体：先附「请求体字段」表（口径同编辑器表格视图：路径/类型/备注 descs），
-  // 再给原文代码块；form/multipart 字段另起一张表，与 B14 导出语义一致。
+  // json 等原始体：先附「请求体字段」表（数据取 body.fields，5 列），再给原文代码块；
+  // form/multipart 字段另起一张表，与 B14 导出语义一致。
+  // 表格为空（用户没点「生成数据表格」）时只输出原文，不出表。
   const body = r.body
   const bodyRaw = (body?.raw ?? '').trim()
   const bodyForm = (body?.form ?? []).filter((f) => f.enabled && f.name.trim())
-  if (body && body.type !== 'none' && (bodyRaw || bodyForm.length)) {
+  const bodyFields = body?.type === 'json' ? (body.fields ?? []) : []
+  if (body && body.type !== 'none' && (bodyRaw || bodyForm.length || bodyFields.length)) {
     out.push(`## ${L.body}`, `- ${body.type}`)
-    const bodyFields = body.type === 'json' ? toBodyRows(body.raw, body.descs) : []
     if (bodyFields.length) {
-      const hdr = [L.colName, L.colRequired, L.colType, L.colDesc].join(' | ')
-      out.push('', `**${L.bodyParams}**`, '', `| ${hdr} |`, '| --- | --- | --- | --- |')
+      const hdr = [L.colName, L.colRequired, L.colType, L.colExample, L.colDesc].join(' | ')
+      out.push('', `**${L.bodyParams}**`, '', `| ${hdr} |`, '| --- | --- | --- | --- | --- |')
       for (const f of bodyFields)
-        out.push(`| ${esc(f.path)} | ${L.requiredYes} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.desc)} |`)
+        out.push(
+          `| ${esc(f.name)} | ${f.required ? L.requiredYes : L.requiredNo} | ${esc(f.type) || DEFAULT_TYPE} | ${esc(f.example)} | ${esc(f.description)} |`,
+        )
     }
     if (bodyRaw) {
       const lang = body.type === 'json' ? 'json' : ''
