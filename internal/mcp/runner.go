@@ -71,6 +71,13 @@ type ProjectApp interface {
 	DeleteEnv(name string) error
 	ListResponseExamples(reqUID string) ([]*collection.ResponseExample, error)
 	SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error)
+	// SaveResponseExampleRaw 用原始字段保存一条示例（不发送请求）；contentType 为空时按 body 推断。
+	SaveResponseExampleRaw(reqUID, name string, status int, headers []collection.KV, body, contentType string) (*collection.ResponseExample, error)
+	// UpdateResponseExample 局部更新示例（指针为 nil 的字段不动）；改名会同步改文件名与 path。
+	UpdateResponseExample(reqUID, exampleUID string, name *string, status *int,
+		headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error)
+	// DeleteResponseExample 删除示例（文件移入 .trash）。
+	DeleteResponseExample(reqUID, exampleUID string) error
 	ListDocs() ([]*collection.DocEntry, error)
 	// ReadDoc 读单篇文档（含正文）；uid 不存在时返回错误。
 	ReadDoc(uid string) (*collection.DocEntry, error)

@@ -22,7 +22,32 @@ const (
 	examplesDirName = "examples"
 	exampleFileType = "response-example"
 	maxExampleSeq   = 999 // 重名去重的上限，避免病态目录下死循环
+	// exampleNameMaxBytes 示例**基名**（不含 .yml）的字节上限。
+	//
+	// 口径是字节而不是 rune：文件系统对单个文件名限 255 字节，中文一个字 3 字节。
+	// 留足余量：基名 240 → 文件名 244 → 去重后缀「 (999)」6 字节仍是 250，均未越界。
+	// 回收站文件名（时间戳前缀 + 16 字节）不靠这里兜，由 trashSafeBase 截断。
+	exampleNameMaxBytes = 240
 )
+
+// checkExampleName 校验示例基名（**不含扩展名**）不超过字节上限。
+//
+// 为什么需要单独兜一道：share 的 SanitizeFileName 按 **rune** 截断到 100，
+// 对中文来说是 300 字节 —— 依然超过 255 字节的文件名上限，直接落到 writeFileAtomic
+// 只会拿到 ENAMETOOLONG（AI / 用户读不懂）。这里提前给出可读报错。
+func checkExampleName(base string) error {
+	if len(base) > exampleNameMaxBytes {
+		return fmt.Errorf("示例名过长：名字 %d 字节，超过 %d 字节上限（按字节算，中文约 %d 字），请缩短",
+			len(base), exampleNameMaxBytes, exampleNameMaxBytes/3)
+	}
+	return nil
+}
+
+// exampleBaseOf 取示例相对路径的文件名（不含扩展名）。
+func exampleBaseOf(rel string) string {
+	b := path.Base(filepath.ToSlash(rel))
+	return strings.TrimSuffix(b, path.Ext(b))
+}
 
 // ExampleRequest 示例里的请求快照。
 type ExampleRequest struct {
@@ -107,6 +132,10 @@ func (c *Collection) SaveResponseExample(reqUID, name string, req ExampleRequest
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
+	base := sanitizeFileName(name)
+	if err := checkExampleName(base); err != nil {
+		return nil, err
+	}
 	r, err := c.ReadRequest(reqUID)
 	if err != nil {
 		return nil, fmt.Errorf("定位请求: %w", err)
@@ -116,7 +145,7 @@ func (c *Collection) SaveResponseExample(reqUID, name string, req ExampleRequest
 	if err := os.MkdirAll(fullDir, 0o755); err != nil {
 		return nil, err
 	}
-	unique, err := uniqueExampleName(fullDir, sanitizeFileName(name))
+	unique, err := uniqueExampleName(fullDir, base)
 	if err != nil {
 		return nil, err
 	}
@@ -271,26 +300,50 @@ func (c *Collection) ListAllResponseExamples() ([]*ResponseExample, error) {
 // UpsertResponseExampleFile 按 UID 写入/替换示例文件（同步拉取应用用）。
 // 示例的落点由其所属请求决定：调用方负责把 Path 设为 examples/<请求目录>/<名>.yml。
 // 目标文件名被其它 UID 占用时自动改成「名 (N)」，返回最终落盘的相对路径。
+//
+// 顺序很关键：**先写新文件成功，再删旧落点**。反过来（先删后写）一旦写入失败
+// （名字过长 / 目录不可写 / 磁盘满），示例就整条消失 —— 那是一次静默的数据丢失。
 func (c *Collection) UpsertResponseExampleFile(ex *ResponseExample) (string, error) {
 	exampleSaveMu.Lock()
 	defer exampleSaveMu.Unlock()
-	// 同 UID 换名/换目录时移除旧文件，避免一份示例两份落盘
 	existing, _ := c.ListAllResponseExamples()
+	// 同 UID 的现有落点：stale = 换了路径的旧文件（写成功后删）；
+	// inPlace = 「原地重写同一路径」—— 这种调用不该受长度上限约束，
+	// 否则历史遗留 / 外部同步来的超长名示例连「只改状态码」都做不到。
+	stale, inPlace := "", false
 	for _, old := range existing {
-		if old.UID == ex.UID && old.Path != ex.Path {
-			_ = os.Remove(filepath.Join(c.Dir, filepath.FromSlash(old.Path)))
+		if old.UID != ex.UID {
+			continue
 		}
+		if old.Path != ex.Path {
+			stale = old.Path
+		} else {
+			inPlace = true
+		}
+		break
 	}
 	// 文件名冲突：换名，并同步改显示名（文件名与示例名同源）
 	for _, old := range existing {
 		if old.UID != ex.UID && old.Path == ex.Path {
-			unique, uerr := uniqueExampleName(filepath.Dir(filepath.Join(c.Dir, filepath.FromSlash(ex.Path))), sanitizeFileName(ex.Name))
+			base := sanitizeFileName(ex.Name)
+			// 长度上限：先去重再写，超限时直接报错（不动旧文件，见下面的先写后删）
+			if err := checkExampleName(base); err != nil {
+				return "", err
+			}
+			unique, uerr := uniqueExampleName(filepath.Dir(filepath.Join(c.Dir, filepath.FromSlash(ex.Path))), base)
 			if uerr != nil {
 				return "", uerr
 			}
 			ex.Name = unique
 			ex.Path = path.Join(path.Dir(ex.Path), unique+".yml")
 			break
+		}
+	}
+	// 落点变了（新建 / 改名 / 换目录）才检查长度：超限时不动旧文件、直接报错。
+	// 原地重写不检查 —— 已存在的名字是什么就写什么，长度问题不该让用户改不动它。
+	if !inPlace {
+		if err := checkExampleName(exampleBaseOf(ex.Path)); err != nil {
+			return "", err
 		}
 	}
 	full := filepath.Join(c.Dir, filepath.FromSlash(ex.Path))
@@ -303,6 +356,9 @@ func (c *Collection) UpsertResponseExampleFile(ex *ResponseExample) (string, err
 	}
 	if err := writeFileAtomic(full, data, 0o644); err != nil {
 		return "", err
+	}
+	if stale != "" {
+		_ = os.Remove(filepath.Join(c.Dir, filepath.FromSlash(stale)))
 	}
 	return ex.Path, nil
 }

@@ -113,7 +113,11 @@ func (a *App) ExportRunReport(format, defaultName string) (string, error) {
 	return path, nil
 }
 
-// sanitizeFileName 把集合名转为安全文件名（空则回退 report）。
+// sanitizeFileName 把集合名转为**运行报告导出**的安全文件名（空则回退 report）。
+//
+// 注意作用域：它只用于「导出 HTML/JSON 报告」这类一次性文件名，不参与集合落盘。
+// 集合内的条目（请求 / 分组 / 文档 / 响应示例）一律走 collection.SanitizeFileName，
+// 免得两套规则漂移出「名字与文件名不同源」。
 func sanitizeFileName(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {

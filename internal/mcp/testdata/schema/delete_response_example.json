@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "exampleUid": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "uid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid",
+    "exampleUid"
+  ],
+  "type": "object"
+}

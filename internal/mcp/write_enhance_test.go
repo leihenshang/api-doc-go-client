@@ -16,14 +16,15 @@ import (
 // ③ get_request_detail 露出 respDoc；
 // ④ gRPC 请求拒绝 respDoc（与客户端 UpdateResponseDoc 的限制一致）。
 
-func sampleRespDoc() *collection.ResponseDoc {
-	return &collection.ResponseDoc{
-		Type: "object",
-		Params: []collection.ResponseParam{
-			{FieldName: "code", Type: "number", Required: true, Description: "业务码", Example: "0"},
-			{FieldName: "data[].id", Type: "string", Description: "列表项主键"},
-		},
-		Sample: `{"code":0,"data":[]}`,
+func sampleRespDoc() *RespDocInput {
+	params := []collection.ResponseParam{
+		{FieldName: "code", Type: "number", Required: true, Description: "业务码", Example: "0"},
+		{FieldName: "data[].id", Type: "string", Description: "列表项主键"},
+	}
+	return &RespDocInput{
+		Type:   strPtr("object"),
+		Params: &params,
+		Sample: strPtr(`{"code":0,"data":[]}`),
 	}
 }
 
@@ -31,7 +32,7 @@ func TestCreateRequestWithBodyFormSettingsRespDoc(t *testing.T) {
 	root, svc := setup(t)
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "upload", Method: "POST", URL: "http://127.0.0.1/up",
-		Body: &collection.Body{Type: "form", Form: []collection.KV{
+		Body: &BodyInput{Type: strPtr("form"), Form: &[]collection.KV{
 			{Name: "caption", Value: "hi", Enabled: true},
 			{Name: "file", Value: "/tmp/a.png", Enabled: true, Type: "file"},
 		}},
@@ -135,8 +136,9 @@ func TestUpdateRespDocMergesPartial(t *testing.T) {
 	}
 
 	// 只写字段表（无 sample/status/headers）
-	up, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, RespDoc: &collection.ResponseDoc{
-		Params: []collection.ResponseParam{{FieldName: "code", Type: "number", Description: "业务码（新说明）"}},
+	params := []collection.ResponseParam{{FieldName: "code", Type: "number", Description: "业务码（新说明）"}}
+	up, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, RespDoc: &RespDocInput{
+		Params: &params,
 	}})
 	if err != nil {
 		t.Fatal(err)

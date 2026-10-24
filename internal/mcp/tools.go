@@ -391,6 +391,10 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_doc", ts.createDoc)
 	addTool(ts, server, "update_doc", ts.updateDoc)
 	addTool(ts, server, "delete_doc", ts.deleteDoc)
+	// 响应示例的写操作：手工新增 / 局部更新（改名·状态码·响应体）/ 删除（进 .trash）
+	addTool(ts, server, "save_response_example", ts.saveResponseExample)
+	addTool(ts, server, "update_response_example", ts.updateResponseExample)
+	addTool(ts, server, "delete_response_example", ts.deleteResponseExample)
 	ts.registerEnvWriteTools(server)
 }
 
@@ -718,6 +722,55 @@ func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in del
 			return "", err
 		}
 		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", in.UID), nil
+	})
+}
+
+// ---- 响应示例工具的 handler ----
+
+// saveResponseExampleArg save_response_example 的入参（复用 service 结构）。
+type saveResponseExampleArg = SaveResponseExampleInput
+
+func (ts *toolSet) saveResponseExample(_ context.Context, req *mcp.CallToolRequest, in saveResponseExampleArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		ex, err := ts.svc.SaveResponseExample(in)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已保存响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节，项目 %s）",
+			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body), in.Project), nil
+	})
+}
+
+// updateResponseExampleArg update_response_example 的入参。
+type updateResponseExampleArg = UpdateResponseExampleInput
+
+func (ts *toolSet) updateResponseExample(_ context.Context, req *mcp.CallToolRequest, in updateResponseExampleArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		ex, err := ts.svc.UpdateResponseExample(in)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已更新响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节）",
+			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body)), nil
+	})
+}
+
+// deleteResponseExampleIn delete_response_example 的入参。
+type deleteResponseExampleIn struct {
+	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID        string `json:"uid" jsonschema:"请求 uid（示例所属请求）"`
+	ExampleUID string `json:"exampleUid" jsonschema:"要删除的响应示例 uid（get_request_detail 返回的 examples[].uid）"`
+}
+
+func (ts *toolSet) deleteResponseExample(_ context.Context, req *mcp.CallToolRequest, in deleteResponseExampleIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		if err := ts.svc.DeleteResponseExample(in.Project, in.UID, in.ExampleUID); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已删除响应示例 %s（文件已移入 .trash，可人工找回）", in.ExampleUID), nil
 	})
 }
 

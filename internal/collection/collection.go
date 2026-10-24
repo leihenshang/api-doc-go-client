@@ -1537,6 +1537,17 @@ var (
 	validEntryName   = share.ValidEntryName
 )
 
+// SanitizeFileName 把名称转成安全的文件名（不含扩展名），口径与集合落盘完全一致
+// （trim 首尾空格与点、非法字符换 `-`、按 rune 截断到 100）。
+//
+// 导出给 app / mcp 层用：任何「名字 → 文件名」的换算都必须走这里，
+// 否则会出现两套规则（名与文件名不同源）甚至超长名触发 ENAMETOOLONG。
+func SanitizeFileName(name string) string { return sanitizeFileName(name) }
+
+// ValidEntryName 名称是否可直接当文件名/目录名用（非空、≤120 rune、不含路径分隔符、
+// 不以点开头或结尾）。与集合层的建请求/建分组/存示例同一口径。
+func ValidEntryName(name string) bool { return validEntryName(name) }
+
 // CreateRequest 在 folder（相对路径，"" = 根目录）下新建请求并落盘。
 // URL 留空：新建时不再预填 {{host}} 占位，让用户（或「导入 cURL」）决定真实地址。
 func (c *Collection) CreateRequest(folder, name, method string) (*Request, error) {

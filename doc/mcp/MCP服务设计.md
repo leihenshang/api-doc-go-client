@@ -66,12 +66,12 @@ Claude Desktop 配置：
 - **懒加载**：首次访问某项目才 `OpenCollection` 并起该项目的 fsnotify 监听；`refresh=true` 重新扫描。
 - 读操作前 `ReloadCollection`（重扫 + 重建索引），因为扫描与索引是「打开时快照」。
 
-## 三、工具清单（24 个）
+## 三、工具清单（27 个）
 
 名称/描述/风险级别/读写标记的**单一事实源是 `meta.go`**（T1）：`Risk`（low/medium/high）、`Write`（落盘）、
 `NetEgress`（真实外发）、`EnvWrite`（触碰 `*.secrets.yml`）、`InReadOnly`（只读模式仍注册）。
-`ValidateMetas` 锁定「正式工具恒 24 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
-风险分级是 T2 授权与 T3 审计的判定依据：**low = 10 个只读工具；medium = `send_request`（网络外发）；high = 13 个落盘写工具**。
+`ValidateMetas` 锁定「正式工具恒 27 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
+风险分级是 T2 授权与 T3 审计的判定依据：**low = 10 个只读工具；medium = `send_request`（网络外发）；high = 16 个落盘写工具**（请求 5 + 文档 3 + 响应示例 3 + 环境 5）。
 
 | 工具 | 风险 | 作用 | 关键入参 |
 |---|---|---|---|
@@ -94,14 +94,53 @@ Claude Desktop 配置：
 | `create_doc` | high | 新建文档（可挂在任意分组目录，可带正文） | `project?`、`name`、`folder?`、`content?` |
 | `update_doc` | high | 改正文 / 改名 / 移动分组（局部更新） | `project?`、`uid`、`content?`、`name?`、`folder?`、`ifMatch?` |
 | `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
+| `save_response_example` | high | 手工存一条响应示例（不发送请求；contentType 空则按 body 推断） | `project?`、`uid`、`name?`、`status?`、`headers?`、`body?`、`contentType?` |
+| `update_response_example` | high | 局部更新示例（改名同步改文件名与 path；body 变则 size 跟着变） | `project?`、`uid`、`exampleUid`、`name?`、`status?`、`headers?`、`body?`、`contentType?` |
+| `delete_response_example` | high | 删除示例（进 `.trash`，不动请求本身） | `project?`、`uid`、`exampleUid` |
 | `create_env` | high | 新建环境（可带初始变量） | `project?`、`name`、`vars?` |
 | `rename_env` | high | 环境改名 | `project?`、`name`、`newName`、`ifMatch?` |
 | `delete_env` | high | 删除环境 | `project?`、`name` |
 | `set_env_var` | high | 单条变量 upsert | `project?`、`env`、`name`、`value`、`secret?`、`enabled?`、`ifMatch?` |
 | `delete_env_var` | high | 删一个变量 | `project?`、`env`、`name`、`ifMatch?` |
 
-`respDoc` 在 `create_request`/`update_request` 均为**按子项合并**（`mergeRespDoc`）：可只写 `params` 字段表补说明，
-样例/响应头/状态码缺省保留原值（对齐「partial update merge」约定；gRPC 请求一律拒绝 respDoc）。
+**局部更新的实现要点（`body` / `respDoc` 指针化）**：MCP 入参侧另立 `BodyInput` / `RespDocInput`
+（`internal/mcp/service.go`），字段全为指针 + `omitempty`：
+
+- `collection.Body.Form` 的 json tag 没有 `omitempty`，直接把它放进工具入参会让 `type`/`raw`/`form` 一起变成
+  schema 里的 `required` —— AI 想只改 `raw` 也得编造 `form`，漏了就清空表单行。指针化后 schema 里 `body` 无必填子项。
+- 合并语义：**nil = 保留原值；显式零值（`""`/`0`/`[]`/`{}`）= 清空**。旧的 `mergeRespDoc` 把空串/0 当「没传」，
+  所以样例与状态码永远清不掉；指针让「清空」成为可表达的意图。
+- 落盘/同步格式**完全不变**：`BodyInput` / `RespDocInput` 只活在入参侧，合并完仍是 share 的 `collection.Body` /
+  `collection.ResponseDoc`，因此 share 契约（磁盘格式、同步字段）零改动。
+- `create_request` 的 `bodyType`/`bodyRaw` 快捷字段改为只覆盖 `draft.Body.Type` / `.Raw`（不再整份替换 `Body`），
+  与 `body` 子项合并、`bodyFields` 三者互不影响。
+- `update_request` 的 `section` 节点守卫（`validateSection`）在**读请求之前**校验：`request`（请求本体 11 字段）/
+  `response`（仅 `respDoc`）/ `docs`（仅 `docs`）/ 省略 = 不限制。越界时中文报错，列出越界字段名与允许清单。
+
+`respDoc` 在 `create_request`/`update_request` 均为**按子项合并**：可只写 `params` 字段表补说明，
+样例/响应头/状态码缺省保留原值，显式空值可清空（gRPC 请求一律拒绝 respDoc）。
+
+**响应示例的增/改/删**（`internal/app/app_misc.go`）：`SaveResponseExampleRaw` 用请求落盘快照 + 传入的
+status/headers/body/contentType 直接落盘；`UpdateResponseExample` 按 UID 找到示例 → 改名时按**与新建完全相同的口径**
+（`collection.ValidEntryName` 先校验 → `collection.SanitizeFileName` 规范化，显示名与文件名同值）把 `Path` 换成同目录
+`<规范化名>.yml` → 改响应字段 → `collection.UpsertResponseExampleFile`（重名自动加 `(1)`）；
+删除走 `collection.DeleteResponseExample`（进 `.trash`）。
+
+三条一致性约束（评审后加固，均有回归测试）：
+
+1. **示例 uid 必须出现在 `get_request_detail` 的文本里**（`render.go` 的示例行带 `uid=`）：
+   update/delete 的 `exampleUid` 只能从这里拿，工具结果没有结构化字段可回引。
+2. **`UpsertResponseExampleFile` 一律「先写新文件成功、再删旧落点」**：反过来一旦写入失败
+   （名字过长 / 目录不可写 / 磁盘满），示例会整条消失 —— 静默数据丢失。
+3. **名字换算只有一个入口**：`collection.SanitizeFileName` / `collection.ValidEntryName`（app 层自带的
+   `sanitizeFileName` 仅用于运行报告导出）。另外按**字节**兜一道基名上限（`checkExampleName`，240 字节；
+   share 的 sanitize 按 rune 截断到 100，中文即 300 字节，仍会触发 ENAMETOOLONG，故提前报「示例名过长」）。
+4. **长度上限只管「落点变化」**：`UpsertResponseExampleFile` 只在新建/改名/换目录时校验；
+   同一 UID 同一路径的原地重写一律放行 —— 否则历史遗留（本版本之前、或外部同步来的）超长名示例
+   连「只改状态码」都做不到。
+5. **回收站不做长度赌博**：`moveToTrash` 用 `trashSafeBase` 把基名截成「头部 + ~短哈希 + 原扩展名」
+   （预算 240 字节，时间戳前缀 16 字节），保证超长条目也删得掉；`ENAMETOOLONG`（以及部分文件系统
+   对超长名返回的 EPERM）单独给「文件名过长，请先改名再删除」文案，不再混进「文件可能被其他程序占用」。
 
 ## 四、模糊匹配（`fuzzy.go`，纯标准库）
 
@@ -139,7 +178,7 @@ Claude Desktop 配置：
 
 ## 七、交互式授权与调用审计（T2 / T3）
 
-**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（24 个业务 handler 零改动）——
+**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（27 个业务 handler 零改动）——
 `recover（panic 转工具级错误）→ 风险授权（非 low 才走）→ 业务 → 收尾恰好一条审计`。
 拒绝/异常一律 `isError: true` 的工具级错误，AI 能读到并纠正，不是协议级 error。
 
@@ -203,8 +242,8 @@ Claude Desktop 配置：
 cmd/mcpserver/main.go       flag（-allow/-allow-writable/-root/-http/-readonly/-require-consent…）+ 传输选择（stdio / HTTP）；
                             stdio 形态也装配 mcpaudit（落配置目录）与 -require-consent 的 DenyAuthorizer（T2/T3）
 internal/mcp/server.go      装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层；透传 Authorizer/Auditor/Transport）
-internal/mcp/meta.go        24 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
-internal/mcp/tools.go       24 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
+internal/mcp/meta.go        27 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
+internal/mcp/tools.go       27 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
 internal/mcp/doctpl.go      get_doc_template 的 docs 结构契约文案（对齐前端 lib/genDocs.ts，变更需两侧同步）
 internal/mcp/authz_args.go  授权弹窗的入参脱敏 summarizeArgs（白名单键 + 敏感值掩码，T2）
 internal/mcp/service.go     语义实现（不 import SDK，可单测/复用）

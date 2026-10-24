@@ -1,0 +1,57 @@
+{
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "contentType": {
+      "type": "string"
+    },
+    "headers": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "status": {
+      "type": "integer"
+    },
+    "uid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "uid"
+  ],
+  "type": "object"
+}
