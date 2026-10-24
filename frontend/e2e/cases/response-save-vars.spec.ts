@@ -1,9 +1,9 @@
 // [E25] 响应面板「保存 ▾」：菜单只保留「保存响应示例」与「保存响应体为文件（.json）」。
-// 字段表的「值」列只读（由响应数据派生），变量仍不挂在字段表上（无变量书签）；
+// 字段表 5 列全可编辑（生成后由用户维护），变量仍不挂在字段表上（无变量书签）；
 // 响应数据/响应头在编辑器「响应字段」分段的子页签里看/编辑。
 import type { Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
-import { openCollection, openRequest, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -16,7 +16,7 @@ async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url
 }
 
 test.describe('响应区：保存▾与字段表（瘦身版）', () => {
-  test('[E25] 保存▾只剩响应示例与响应体文件；字段表有值列无书签，快照看子页签', async ({ page, app }) => {
+  test('[E25] 保存▾只剩响应示例与响应体文件；字段表有示例值列无书签，快照看子页签', async ({ page, app }) => {
     await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
@@ -31,16 +31,15 @@ test.describe('响应区：保存▾与字段表（瘦身版）', () => {
     await expect(page.getByTestId('resp.scope')).toHaveCount(0)
     await page.keyboard.press('Escape')
 
-    // 更新响应字段后：字段表在编辑器分段渲染，带可编辑的「示例值」列（写回 respDoc.example），但无变量书签
-    await page.getByTestId('resp.updateFields').click()
+    // 从本次响应生成后：字段表在编辑器分段渲染，带可编辑的「示例值」列，但无变量书签
+    await openReqTab(page, 'resp')
+    await page.getByTestId('resp.generateLive').click()
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
-    await expect(page.getByTestId('resp.fields.value').first()).toBeVisible()
+    await expect(page.getByTestId('resp.fields.example').first()).toBeVisible()
     await expect(page.getByTestId('resp.fields.bookmark')).toHaveCount(0)
 
-    // 响应数据子页签现在是可编辑的响应数据（合法 JSON 自动生成字段表格）；这里断言它载入了响应体
+    // 响应数据子页签仍是可编辑的响应数据（生成不改动它），这里断言它为空
     await page.locator('[data-testid="resp.segTab"][data-view="body"]').click()
-    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue(/flat/)
-    await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
-    await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
+    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue('')
   })
 })

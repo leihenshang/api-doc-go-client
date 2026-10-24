@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // 响应操作工具条（response-panel design-spec §3 第 3 排）：
 // 左「视图→显示」：美化/原始 分段控件、换行开关（图标态胶囊）；
-// 右「解析→输出」：更新响应字段、竖分隔线、复制响应体（幽灵）、保存▾（唯一主按钮）。
+// 右「输出」：复制响应体（幽灵）、保存▾（唯一主按钮）。
+// 「更新响应字段」已移除：字段表格改由编辑器的「生成数据表格」/「从本次响应生成」维护。
 import SaveDropdown from '@/components/SaveDropdown.vue';
-import { CopyOutline, RefreshOutline, ReturnUpBackOutline, SearchOutline } from '@vicons/ionicons5';
+import { CopyOutline, ReturnUpBackOutline, SearchOutline } from '@vicons/ionicons5';
 import { NIcon } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 
@@ -13,14 +14,12 @@ const wrap = defineModel<boolean>('wrap', { required: true })
 const findOn = defineModel<boolean>('findOn', { default: false })
 
 const props = defineProps<{
-  isJson: boolean
   copied: boolean
   canSaveExample: boolean
   /** 是否展示「在响应中查找」按钮（有响应内容时由面板开启） */
   findable?: boolean
 }>()
 const emit = defineEmits<{
-  'update-fields': []
   'copy-body': []
   'save-file': []
   'save-example': []
@@ -54,14 +53,8 @@ const { t } = useI18n()
         <n-icon :component="SearchOutline" :size="13" />
       </button>
     </div>
-    <!-- 输出组（design-spec §3 第 3 排右侧）：更新响应字段 / 竖分隔线 / 复制响应体 / 保存▾ -->
+    <!-- 输出组（design-spec §3 第 3 排右侧）：复制响应体 / 保存▾ -->
     <div class="grp acts">
-      <button v-if="isJson" class="outline-btn" type="button" data-testid="resp.updateFields"
-        :title="t('resp.updateFieldsHint')" @click="emit('update-fields')">
-        <n-icon :component="RefreshOutline" :size="13" />
-        {{ t('resp.updateFields') }}
-      </button>
-      <span class="div" />
       <button class="ghost-btn" type="button" data-testid="resp.copyBody" @click="emit('copy-body')">
         <n-icon :component="CopyOutline" :size="13" />
         {{ copied ? t('common.copied') : t('resp.copyBody') }}
@@ -158,37 +151,7 @@ const { t } = useI18n()
   font-weight: 600;
 }
 
-/* ④ 更新响应字段：白底描边 */
-.outline-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--app-border);
-  background: var(--app-panel);
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-family: inherit;
-  color: var(--app-text-2);
-  cursor: pointer;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
-.outline-btn:hover {
-  border-color: var(--app-accent);
-  color: var(--app-accent);
-}
-
-/* ⑤ 竖分隔线 1×16 */
-.div {
-  width: 1px;
-  height: 16px;
-  background: var(--app-border);
-  flex: 0 0 auto;
-}
-
-/* ⑥ 复制响应体：幽灵按钮 */
+/* ⑤ 复制响应体：幽灵按钮 */
 .ghost-btn {
   display: inline-flex;
   align-items: center;

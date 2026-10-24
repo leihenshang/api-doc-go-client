@@ -1,61 +1,76 @@
 <script setup lang="ts">
-// 「响应字段」分段的字段表：字段路径 / 类型 / 值（均只读）/ 含义（唯一可编辑列）。
-// 与请求体表格同构：字段由上方「响应数据」实时解析生成（表格只读，不加/删字段），
-// 只有「含义」可写回 RespDoc（description），随文件落盘、随同步往返 Web 端、并对 MCP 可见。
+// 「响应字段」分段的字段表：与请求体表格同构 —— 5 列全可编辑
+// （字段名 / 类型 / 必填 / 示例值 / 说明）+ 行尾删除 + 底部「新增行」。
+//
+// 表格真源是 respDoc.params（由「生成数据表格」/「从本次响应生成」派生，或用户手工增行）；
+// 不再从「响应数据」自动派生。本组件不持有状态，所有修改只往父级 emit 补丁，
+// 由父级写回 respDoc（含 required）。
 import type { FieldRow } from '@/lib/responseFields'
-import { NInput } from 'naive-ui'
+import { NButton, NCheckbox, NIcon, NInput, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
-defineProps<{ rows: FieldRow[] }>()
+withDefaults(defineProps<{ rows: FieldRow[]; readonly?: boolean }>(), { readonly: false })
 const emit = defineEmits<{
-  meaning: [path: string, value: string]
+  update: [index: number, patch: Partial<FieldRow>]
+  add: []
+  remove: [index: number]
 }>()
 const { t } = useI18n()
+
+/** 类型下拉选项：JSON 类型名（也允许手输，故 select 可过滤 + 可清空 + 可新增）。 */
+const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object', 'null']
 </script>
 
 <template>
-  <section v-if="rows.length" class="fields">
+  <section class="fields">
     <div class="fh">
       <span class="ft">{{ t('resp.fields') }}<span class="num">{{ rows.length }}</span></span>
       <span class="fd">{{ t('resp.fieldsHint') }}</span>
     </div>
-    <div class="fields-scroll">
-      <table class="ftable">
-        <colgroup>
-          <col class="col-path" />
-          <col class="col-type" />
-          <col class="col-value" />
-          <col class="col-meaning" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>{{ t('resp.field') }}</th>
-            <th>{{ t('resp.type') }}</th>
-            <th>{{ t('resp.example') }}</th>
-            <th>{{ t('resp.meaning') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="f in rows" :key="f.path" data-testid="resp.fields.row" :data-path="f.path">
-            <td class="fp" data-testid="resp.fields.path" :title="f.path">{{ f.path }}</td>
-            <td>
-              <span v-if="f.type" class="ftype">{{ f.type }}</span>
-              <span v-else class="empty-cell">—</span>
-            </td>
-            <td class="fval" data-testid="resp.fields.value" :title="f.value">
-              {{ f.value || '—' }}
-            </td>
-            <td class="fmeaning">
-              <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning"
-                :placeholder="t('common.optional')" @update:value="emit('meaning', f.path, $event)" />
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+    <template v-if="rows.length">
+      <div class="tr th">
+        <span>{{ t('body.colName') }}</span>
+        <span>{{ t('body.colType') }}</span>
+        <span class="c">{{ t('body.colRequired') }}</span>
+        <span>{{ t('body.colExample') }}</span>
+        <span>{{ t('body.colDesc') }}</span>
+        <span></span>
+      </div>
+
+      <div v-for="(f, i) in rows" :key="i" class="tr" data-testid="resp.fields.row" :data-path="f.path">
+        <n-input :value="f.path" size="small" data-testid="resp.fields.name" :disabled="readonly"
+          :placeholder="t('body.namePh')" @update:value="emit('update', i, { path: $event })" />
+        <n-select :value="f.type || null" size="small" filterable clearable tag :disabled="readonly"
+          :options="TYPE_OPTIONS.map((v) => ({ label: v, value: v }))" data-testid="resp.fields.type"
+          :placeholder="t('body.colType')" @update:value="emit('update', i, { type: $event ?? '' })" />
+        <span class="c">
+          <n-checkbox :checked="f.required" :disabled="readonly" data-testid="resp.fields.required"
+            @update:checked="emit('update', i, { required: $event })" />
+        </span>
+        <n-input :value="f.value" size="small" data-testid="resp.fields.example" :disabled="readonly"
+          :placeholder="t('body.colExample')" @update:value="emit('update', i, { value: $event })" />
+        <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning" :disabled="readonly"
+          :placeholder="t('common.optional')" @update:value="emit('update', i, { meaning: $event })" />
+        <n-button size="tiny" quaternary type="error" data-testid="resp.fields.remove" :disabled="readonly"
+          :title="t('body.removeRow')" @click="emit('remove', i)">
+          <template #icon>
+            <n-icon><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor"
+              d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Z" /></svg></n-icon>
+          </template>
+        </n-button>
+      </div>
+    </template>
+
+    <!-- 空态：表格不再从响应数据自动派生，只有点生成按钮或「新增行」才有内容 -->
+    <p v-else class="fields-empty" data-testid="resp.fields.empty">{{ t('resp.fieldsEmpty') }}</p>
+
+    <div class="tf">
+      <n-button size="tiny" data-testid="resp.fields.add" :disabled="readonly" @click="emit('add')">
+        + {{ t('body.addRow') }}
+      </n-button>
     </div>
   </section>
-
-  <p v-else class="fields-empty">{{ t('resp.fieldsEmpty') }}</p>
 </template>
 
 <style scoped>
@@ -98,98 +113,43 @@ const { t } = useI18n()
   color: var(--app-muted);
 }
 
-.fields-scroll {
-  overflow: auto;
-}
-
-.ftable {
-  width: 100%;
-  min-width: 680px;
-  table-layout: fixed;
-  border-collapse: collapse;
+.tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) 108px 44px minmax(0, 1fr) minmax(0, 1.4fr) 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--app-border);
   font-size: 12px;
 }
 
-.col-path {
-  width: 38%;
-}
-
-.col-type {
-  width: 104px;
-}
-
-.col-value {
-  width: 26%;
-}
-
-.col-meaning {
-  width: 28%;
-}
-
-.ftable th,
-.ftable td {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--app-border);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.ftable th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.tr.th {
   background: var(--app-surface-2);
   color: var(--app-muted);
   font-size: 11.5px;
-  font-weight: 500;
 }
 
-.ftable tbody tr:nth-child(even) {
-  background: var(--app-bg);
-}
-
-.ftable tbody tr:hover {
-  background: var(--app-row-hover);
-}
-
-.ftable tbody tr:last-child td {
+.tr:last-child {
   border-bottom: none;
 }
 
-.fp {
-  font-family: var(--app-mono);
-  color: var(--app-code-key);
-  word-break: break-all;
-}
-
-.ftype {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--app-chip);
-  color: var(--app-text-2);
-  font-family: var(--app-mono);
-  font-size: 10.5px;
-  line-height: 16px;
-}
-
-.fval {
-  color: var(--app-muted);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.empty-cell {
-  color: var(--app-placeholder);
-}
-
-.fmeaning :deep(.n-input) {
-  width: 100%;
+.c {
+  display: flex;
+  justify-content: center;
 }
 
 .fields-empty {
-  margin: 12px 0 0;
-  font-size: 12.5px;
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--app-border);
+  font-size: 12px;
   color: var(--app-placeholder);
+}
+
+.tf {
+  display: flex;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  border-top: 1px solid var(--app-border);
 }
 </style>

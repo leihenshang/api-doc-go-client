@@ -1,14 +1,18 @@
-// 响应字段映射：字段表的真相源是请求模型的 RespDoc（随文件落盘、随同步往返 Web 端）；
+// 响应字段表：字段表的真相源是请求模型的 RespDoc（随文件落盘、随同步往返 Web 端）；
 // localStorage 仅用于未落盘草稿与旧版本存档的一次性迁移。
-// 字段只在用户点「更新响应字段」时解析一次；重复更新**只追加新出现的字段**
-// 并保留既有顺序与「含义」标注 —— 响应里时有时无的字段（可选字段、分页尾部字段等）不会被抹掉。
+// 与请求体表格同构：表格**只在用户点「生成数据表格」/「从本次响应生成」时派生**，
+// 派生后完全由用户编辑（5 列：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行）；
+// 编辑「响应数据」（respDoc.sample）**不会**再联动重算表格。
 import { api } from '@/lib/ipc'
 import type { KV, ResponseDoc, ResponseParam } from '@/types'
 
+/** 字段表的一行（5 列与请求体表格同构）。 */
 export interface FieldRow {
   path: string
   type: string
-  /** 字段取值（叶子为原始值文本，容器为空串）；用于「值」列与保存为变量 */
+  /** 必填：派生行与手工新增行默认 true（「是」），可由用户取消勾选 */
+  required: boolean
+  /** 字段取值（叶子为原始值文本，容器为空串）；用于「示例值」列 */
   value: string
   /** 字段含义（写回 RespDoc.params[].description，随同步与 Web 端往返） */
   meaning: string
@@ -30,7 +34,7 @@ function typeName(v: unknown): string {
  * - 对象展开子字段
  * - 数组用 `[]` 占位，只展开**首个元素**的字段作为结构描述
  * - 叶子占一行
- * 非法 JSON 返回空数组。
+ * 非法 JSON 返回空数组。派生行的必填一律为「是」（required=true）。
  */
 export function extractFields(text: string): FieldRow[] {
   let data: unknown
@@ -45,7 +49,7 @@ export function extractFields(text: string): FieldRow[] {
   const push = (path: string, type: string, value = ''): void => {
     if (seen.has(path)) return
     seen.add(path)
-    out.push({ path, type, value, meaning: '' })
+    out.push({ path, type, required: true, value, meaning: '' })
   }
 
   const walk = (v: unknown, path: string, depth: number): void => {
@@ -88,28 +92,72 @@ export function extractFields(text: string): FieldRow[] {
 }
 
 /**
- * 覆盖式重建字段表（「更新响应字段」= 用本次响应体重新解析，响应里已消失的字段不再保留）。
- * inherit=true 时，仅当旧行「路径相同且取值一致」才继承已填含义 ——
- * 取值变了（同名字段新值不同）说明语义可能已变，不沿用旧说明；类型/取值一律以本次解析为准。
+ * 由 JSON 原文派生字段表行（仅在用户点「生成数据表格」/「从本次响应生成」时调用）。
+ * 空串 / 非法 JSON → 空数组（调用方据此提示「无法生成」）。
+ * 派生行的必填一律为「是」（required=true），含义留空（由用户在表格里填写）。
  */
-export function rebuildFields(old: FieldRow[], text: string, inherit: boolean): { rows: FieldRow[]; changed: boolean } {
-  const prev = new Map(old.map((r) => [r.path, r]))
-  const rows = extractFields(text).map((f) => {
-    if (!inherit) return f
-    const p = prev.get(f.path)
-    return p && p.value === f.value && p.meaning ? { ...f, meaning: p.meaning } : f
-  })
-  return { rows, changed: rows.length > 0 || old.length > 0 }
+export function deriveFields(text: string): FieldRow[] {
+  if (text.trim() === '') return []
+  try {
+    JSON.parse(text)
+  } catch {
+    return []
+  }
+  return extractFields(text).map((f) => ({ ...f, required: true, meaning: '' }))
 }
 
-/** 读取本地存档；兼容早期「路径 → 含义」的对象格式。 */
+/** 表格行匹配键：字段路径 trim 后逐字完全相等。 */
+function keyOf(path: string): string {
+  return path.trim()
+}
+
+/**
+ * 新增（append）：保留原表全部行与顺序，只把「本次派生出来、表里还没有的路径」追加到末尾。
+ * 已有行一律不动（含义、必填、类型、示例值都不改）；新增行 required=true。
+ */
+export function mergeAppend(cur: FieldRow[], derived: FieldRow[]): FieldRow[] {
+  const seen = new Set(cur.map((r) => keyOf(r.path)))
+  const next = cur.slice()
+  for (const d of derived) {
+    const k = keyOf(d.path)
+    if (seen.has(k)) continue
+    seen.add(k)
+    next.push({ ...d, required: true })
+  }
+  return next
+}
+
+/**
+ * 覆盖（overwrite）：行数与顺序 = 本次派生结果；路径相同的旧行**只继承含义**，
+ * 其余列（类型 / 示例值 / 必填）全部取自本次派生，必填回到「是」（required=true）。
+ */
+export function mergeOverwrite(cur: FieldRow[], derived: FieldRow[]): FieldRow[] {
+  const prev = new Map(cur.map((r) => [keyOf(r.path), r]))
+  return derived.map((d) => {
+    const old = prev.get(keyOf(d.path))
+    return {
+      path: d.path,
+      type: d.type,
+      required: true,
+      value: d.value,
+      meaning: old?.meaning ?? '',
+    }
+  })
+}
+
+/** 手工「新增行」：5 列空、必填默认「是」。 */
+export function emptyFieldRow(): FieldRow {
+  return { path: '', type: '', required: true, value: '', meaning: '' }
+}
+
+/** 读取本地存档；兼容早期「路径 → 含义」的对象格式（旧数据没有 required，按「是」处理）。 */
 export function loadFields(uid: string): FieldRow[] {
   if (!uid) return []
   let raw: unknown
   try {
     raw = JSON.parse(localStorage.getItem(storeKey(uid)) ?? '[]')
   } catch {
-    return [] // 存档损坏按空处理，下一次更新重建
+    return [] // 存档损坏按空处理，下一次生成重建
   }
   if (Array.isArray(raw)) {
     return raw
@@ -117,6 +165,7 @@ export function loadFields(uid: string): FieldRow[] {
       .map((x) => ({
         path: String(x.path ?? ''),
         type: String(x.type ?? ''),
+        required: x.required !== false,
         value: String(x.value ?? ''),
         meaning: String(x.meaning ?? ''),
       }))
@@ -126,6 +175,7 @@ export function loadFields(uid: string): FieldRow[] {
     return Object.entries(raw as Record<string, unknown>).map(([path, meaning]) => ({
       path,
       type: '',
+      required: true,
       value: '',
       meaning: String(meaning ?? ''),
     }))
@@ -144,7 +194,7 @@ export function removeFields(uid: string): void {
   localStorage.removeItem(storeKey(uid))
 }
 
-/** RespDoc 参数行 → 字段表行（fieldName→path、example→value、description→meaning）。 */
+/** RespDoc 参数行 → 字段表行（fieldName→path、example→value、description→meaning，required 如实读取）。 */
 export function rowsFromDoc(doc?: ResponseDoc | null): FieldRow[] {
   if (!doc?.params) return []
   return doc.params
@@ -152,12 +202,13 @@ export function rowsFromDoc(doc?: ResponseDoc | null): FieldRow[] {
     .map((p) => ({
       path: p.fieldName,
       type: p.type ?? '',
+      required: p.required === true,
       value: p.example ?? '',
       meaning: p.description ?? '',
     }))
 }
 
-/** 字段表行 → RespDoc 参数行（客户端无 required 概念，恒 false；含义即 description）。
+/** 字段表行 → RespDoc 参数行（required 如实写回；含义即 description）。
  * 手动录入但未填路径的空行不落盘（fieldName 为空无意义），避免给 respDoc 写入空字段名。 */
 export function paramsFromRows(rows: FieldRow[]): ResponseParam[] {
   return rows
@@ -165,7 +216,7 @@ export function paramsFromRows(rows: FieldRow[]): ResponseParam[] {
     .map((r) => ({
       fieldName: r.path,
       type: r.type,
-      required: false,
+      required: r.required === true,
       description: r.meaning,
       example: r.value,
     }))
@@ -224,7 +275,7 @@ export interface RespDocPersistCtx {
   grpc: boolean
   rows: FieldRow[]
   doc: ResponseDoc
-  /** true=立即写（删除/清空/「更新」按钮）；false=按 debounceMs 防抖（含义连续输入） */
+  /** true=立即写（生成/删除/清空）；false=按 debounceMs 防抖（单元格连续输入） */
   immediate: boolean
   timer: PersistTimer
   /** 写盘成功后把 doc 落回请求模型（调用方决定写到哪个 tab） */
@@ -237,8 +288,7 @@ export interface RespDocPersistCtx {
 /**
  * 把字段表写回请求模型的统一实现：草稿 / gRPC / 无 uid → 只存本地存档；
  * 否则 updateResponseDoc → attach → 清本地存档，按 immediate 决定立即执行还是防抖。
- * 返回是否「已发起/已成功落盘」（草稿路径返回 true）。两处调用点（请求编辑器、响应面板）共用，
- * 消除各自重复的防抖 + 落盘 + 错误处理逻辑。
+ * 返回是否「已发起/已成功落盘」（草稿路径返回 true）。
  */
 export async function persistRespDoc(ctx: RespDocPersistCtx): Promise<boolean> {
   if (ctx.draft || ctx.grpc || !ctx.uid) {
@@ -263,10 +313,8 @@ export async function persistRespDoc(ctx: RespDocPersistCtx): Promise<boolean> {
 }
 
 // ---- 待写防抖的跨组件取消（审查 M2）----
-// 编辑器（useResponseFields）与响应面板（ResponsePanel）各自持有防抖计时器，
-// 若两边同时有未落盘内容，「面板立即写」可能被「编辑器晚到的旧快照」回滚。
-// 这里按「请求 uid」登记编辑器的取消函数，面板在立即写前调用 cancelPendingFor(uid)，
-// 丢掉旧的待写（面板手上的快照更新）。
+// 编辑器（useResponseFields）持有防抖计时器；若请求编辑器还有未落盘的表格编辑，
+// 立即写（生成表格）前先 cancelPendingFor(uid) 丢掉旧的待写，避免旧快照回滚。
 const pendingCancelers = new Map<string, () => void>()
 
 /** 登记某请求的「取消待写」函数（编辑器初始化/切请求时调用）。 */
