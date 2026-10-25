@@ -950,7 +950,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
     <gen-doc-dialog v-model:show="showGen" :text="genText" @apply="onGenApply" />
 
     <!-- 「生成数据表格」确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
-    <n-modal v-model:show="genDialog" preset="card" class="gen-modal" :title="t('body.genTitle')">
+    <n-modal v-model:show="genDialog" preset="card" class="gen-modal"
+      style="width: 460px; max-width: calc(100vw - 32px)" :title="t('body.genTitle')">
       <div data-testid="body.genDialog">
         <p class="gen-hint">{{ t('body.genHint') }}</p>
         <div class="gen-actions">
@@ -968,7 +969,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
     </n-modal>
 
     <!-- 「生成数据表格」（响应字段）确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
-    <n-modal v-model:show="respGenDialog" preset="card" class="gen-modal" :title="t('resp.genTitle')">
+    <n-modal v-model:show="respGenDialog" preset="card" class="gen-modal"
+      style="width: 460px; max-width: calc(100vw - 32px)" :title="t('resp.genTitle')">
       <div data-testid="resp.genDialog">
         <p class="gen-hint">{{ t('resp.genHint') }}</p>
         <div class="gen-actions">
