@@ -234,6 +234,7 @@ export default {
     // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
     urlPlaceholder: 'https://api.example.com/users',
     summaryPlaceholder: 'API summary: one line about what this endpoint does (optional)',
+    summaryAdd: 'Add a summary…',
     send: 'Send',
     sending: 'Sending',
     cancelSend: 'Cancel',

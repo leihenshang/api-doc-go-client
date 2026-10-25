@@ -25,12 +25,13 @@ import {
   CloudDownloadOutline,
   CloudUploadOutline,
   CodeSlashOutline,
+  CreateOutline,
   SendOutline,
   SyncOutline
 } from '@vicons/ionicons5'
 import type { DropdownOption, SelectOption } from 'naive-ui'
 import { NButton, NDropdown, NIcon, NInput, NModal, NSelect } from 'naive-ui'
-import { computed, h, ref, type VNode } from 'vue'
+import { computed, h, nextTick, ref, watch, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -122,11 +123,58 @@ function touch(): void {
   tabs.touch(props.tab.key)
 }
 
-/** API 概述输入：写回 tab.request.summary 并标脏（纯文本，落盘在 http 段之外的顶层 summary）。 */
-function onSummaryInput(value: string): void {
-  props.tab.request.summary = value
-  touch()
+/** API 概述：默认只读展示，点文本或「编辑」切换成输入框；提交时写回并标脏。 */
+const summaryEditing = ref(false)
+const summaryDraft = ref('')
+const summaryInput = ref<InstanceType<typeof NInput> | null>(null)
+
+function startSummaryEdit(): void {
+  if (coll.isReadOnly || summaryEditing.value) return
+  summaryDraft.value = props.tab.request.summary ?? ''
+  summaryEditing.value = true
+  // 切到输入框后自动聚焦（v-if 新建的实例要等一拍）
+  nextTick(() => summaryInput.value?.focus())
 }
+
+/** 提交：只有内容真的变了才写回并标脏，避免「点开又取消」产生无意义脏点。 */
+function commitSummary(): void {
+  if (!summaryEditing.value) return
+  const next = summaryDraft.value.trim()
+  if (next !== (props.tab.request.summary ?? '')) {
+    props.tab.request.summary = next
+    touch()
+  }
+  summaryEditing.value = false
+}
+
+function cancelSummary(): void {
+  summaryEditing.value = false
+}
+
+function onSummaryKeydown(e: KeyboardEvent): void {
+  if (e.isComposing) return // 输入法组词中，Enter 属于选词
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitSummary()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelSummary()
+  }
+}
+
+// 切页签 / 只读态变化时退出编辑，避免把上一请求的草稿提交到新请求
+watch(
+  () => props.tab.key,
+  () => {
+    summaryEditing.value = false
+  },
+)
+watch(
+  () => coll.isReadOnly,
+  (v) => {
+    if (v) summaryEditing.value = false
+  },
+)
 
 function send(): void {
   void tabs.send(props.tab.key)
@@ -255,10 +303,22 @@ async function copyExport(): Promise<void> {
 
 <template>
   <div class="bar-wrap">
-    <!-- API 概述：一行纯文本，位于地址栏上方（HTTP / gRPC 共用同一容器） -->
+    <!-- API 概述：默认只读一行文本；点文本或「编辑」后原地变成输入框（HTTP / gRPC 共用） -->
     <div class="req-summary">
-      <n-input :value="tab.request.summary ?? ''" size="small" data-testid="req.summary"
-        :placeholder="t('editor.summaryPlaceholder')" :disabled="coll.isReadOnly" @update:value="onSummaryInput" />
+      <n-input v-if="summaryEditing" ref="summaryInput" v-model:value="summaryDraft" size="small" class="summary-input"
+        data-testid="req.summary" :placeholder="t('editor.summaryPlaceholder')"
+        @keydown="onSummaryKeydown" @blur="commitSummary" />
+      <template v-else>
+        <button class="summary-text" :class="{ ph: !tab.request.summary }" type="button" data-testid="req.summaryText"
+          :disabled="coll.isReadOnly" @click="startSummaryEdit">
+          {{ tab.request.summary || t('editor.summaryAdd') }}
+        </button>
+        <button v-if="!coll.isReadOnly" class="summary-edit" type="button" data-testid="req.summaryEdit"
+          :title="t('editor.edit')" @click="startSummaryEdit">
+          <n-icon :component="CreateOutline" :size="12" />
+          {{ t('editor.edit') }}
+        </button>
+      </template>
     </div>
     <div class="req-line" :style="controlStyle">
       <!-- gRPC（G1.3）：协议徽标 + 服务 / 方法选择器 + 服务地址（host:port，支持 {{变量}}） -->
@@ -347,6 +407,68 @@ async function copyExport(): Promise<void> {
   padding: 8px 12px;
   border-bottom: 1px solid var(--app-border);
   background: var(--app-panel);
+}
+
+/* 概述：只读态是一行小字（比输入框小一号 12px），编辑态才显示输入框 */
+.req-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  padding: 0 2px;
+}
+
+.summary-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--app-text);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+
+.summary-text.ph {
+  color: var(--app-placeholder);
+}
+
+.summary-text:disabled {
+  cursor: default;
+}
+
+.summary-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.summary-edit:hover {
+  color: var(--app-text);
+}
+
+.summary-input {
+  flex: 1;
+}
+
+.summary-input :deep(.n-input__input-el),
+.summary-input :deep(.n-input__placeholder) {
+  font-size: 12px;
 }
 
 .req-line {
