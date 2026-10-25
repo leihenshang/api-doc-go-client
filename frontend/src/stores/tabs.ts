@@ -172,6 +172,8 @@ const HISTORY_DEBOUNCE = 400
 const undoStacks = new Map<string, RequestDoc[]>()
 const redoStacks = new Map<string, RequestDoc[]>()
 const lastSnap = new Map<string, string>()
+/** 正在保存的草稿 key：挡住回车与点击/双击造成的并发保存（会重复建请求）。 */
+const draftSaving = new Set<string>()
 const historyTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function snap(r: RequestDoc): string {
@@ -335,22 +337,31 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
     async saveDraft(key: string, folder: string, name: string): Promise<RequestDoc> {
+      // 同一草稿并发保存会各建一个请求（回车与点击/双击时可能发生）：
+      // 用 in-flight 集合挡住第二次，保存完成后自动释放。
+      if (draftSaving.has(key)) throw new Error(i18n.global.t('prompt.savingDraft'))
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab) throw new Error(i18n.global.t('tab.notFound'))
-      const created = await api.createRequestFromDraft(folder, name, { ...tab.request, name })
-      tab.uid = created.uid
-      tab.request = created
-      tab.title = created.name
-      tab.draft = false
-      tab.draftFolder = ''
-      tab.dirty = false
-      lastSnap.set(key, snap(created))
-      undoStacks.delete(key)
-      redoStacks.delete(key)
-      await useCollectionStore().reload()
-      this.saveSession()
-      this.saveDrafts()
-      return created
+      if (!tab.draft) throw new Error(i18n.global.t('prompt.savingDraft'))
+      draftSaving.add(key)
+      try {
+        const created = await api.createRequestFromDraft(folder, name, { ...tab.request, name })
+        tab.uid = created.uid
+        tab.request = created
+        tab.title = created.name
+        tab.draft = false
+        tab.draftFolder = ''
+        tab.dirty = false
+        lastSnap.set(key, snap(created))
+        undoStacks.delete(key)
+        redoStacks.delete(key)
+        await useCollectionStore().reload()
+        this.saveSession()
+        this.saveDrafts()
+        return created
+      } finally {
+        draftSaving.delete(key)
+      }
     },
     /** 丢弃草稿（关闭 tab，不落盘）。 */
     async discardDraft(key: string): Promise<void> {
