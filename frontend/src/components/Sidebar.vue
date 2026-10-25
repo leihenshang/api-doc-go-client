@@ -170,7 +170,7 @@ async function onRootMenu(root: string, key: string | number): Promise<void> {
   if (key === 'folder') void startAdd(root, '')
   else if (key === 'req') emit('new-request', '')
   else if (key === 'grpc') emit('new-grpc-request', '')
-  else if (key === 'doc') emit('new-doc', '')
+  else if (key === 'doc') emit('new-doc', '.') // 根菜单新建文档落在集合根，而不是默认 docs/
   else if (key === 'curl') emit('import-curl', '')
   else if (key === 'sync') emit('sync')
   else if (key === 'reload') emit('reload-root', root)

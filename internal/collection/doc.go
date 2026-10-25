@@ -98,8 +98,14 @@ func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 		uid = uuid.NewString()
 	}
 	dir := strings.TrimSpace(folder)
-	if dir == "" {
+	switch dir {
+	case "":
+		// 未指定目录 = 旧的默认位 docs/（MCP create_doc 等沿用）
 		dir = docsDir
+	case ".", "/":
+		// 显式要求集合根（树根菜单「新建文档」走这条），不能留 "."：
+		// joinRel 是字符串拼接，会造出 "./x.md" 与扫描结果 "x.md" 不一致的路径。
+		dir = ""
 	}
 	// 子目录里的 README.md 扫不出来（scanExtAllowed 按规则排除）：
 	// 入口直接拒绝，避免造出「文件存在、树里看不见」的文档。根级 README 允许。
