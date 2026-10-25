@@ -263,6 +263,19 @@ const isDocTab = computed(() => (detailTab.value?.kind ?? 'request') === 'doc')
 function promptName(title: string, placeholder: string): Promise<string> {
   return new Promise((resolve) => {
     let value = ''
+    let done = false
+    const finish = (v: string): void => {
+      if (done) return
+      done = true
+      resolve(v)
+    }
+    // 单行输入 + Enter 确认 / Esc 取消；空名不提交（保持弹窗，让用户补名字）
+    const submit = (): void => {
+      const v = value.trim()
+      if (!v) return
+      finish(v)
+      d.destroy?.()
+    }
     const d = dialog.warning({
       title,
       content: () =>
@@ -270,14 +283,25 @@ function promptName(title: string, placeholder: string): Promise<string> {
           autofocus: true,
           placeholder,
           onUpdateValue: (v: string) => (value = v),
+          onKeydown: (e: KeyboardEvent) => {
+            if (e.isComposing) return // 输入法组词中
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              finish('')
+              d.destroy?.()
+            }
+          },
         }),
       positiveText: t('common.confirm'),
       negativeText: t('common.cancel'),
-      onPositiveClick: () => resolve(value.trim()),
-      onClose: () => resolve(''),
+      onPositiveClick: submit,
+      onClose: () => finish(''),
       onNegativeClick: () => {
+        finish('')
         d.destroy?.()
-        resolve('')
       },
     })
   })
@@ -953,6 +977,15 @@ function draftName(tab: Tab): string {
   return tab.title
 }
 
+/** 保存草稿弹窗内回车确认：输入法组词、多行输入、下拉选择中的回车都不算确认。 */
+function onDraftEnter(e: KeyboardEvent): void {
+  if (e.isComposing) return
+  const el = e.target as HTMLElement | null
+  if (el?.tagName === 'TEXTAREA') return
+  if (el?.closest?.('.n-base-selection, .n-tree-select')) return
+  if (draftForm.value.name.trim()) confirmSaveDraft()
+}
+
 /** 保存草稿（落盘到所选分组）：关闭流程顺带关页签，Ctrl+S 流程保存后留在原地继续编辑。 */
 async function confirmSaveDraft(): Promise<void> {
   const tab = draftTab.value
@@ -1135,16 +1168,19 @@ watch(
       <!-- 未保存的新建请求：关闭时（可丢弃）或 Ctrl+S 时（只保存）在这里问名称与分组 -->
       <n-modal :show="draftTab !== null" preset="card" :title="t('prompt.saveDraftTitle')" style="width: 460px"
         @update:show="(v: boolean) => (v ? undefined : closeDraftDialog())">
+        <div @keydown.enter="onDraftEnter">
         <p class="draft-hint">{{ t(draftSaveOnly ? 'prompt.saveOnlyHint' : 'prompt.saveDraftHint') }}</p>
         <n-form label-placement="left" label-width="86">
           <n-form-item :label="t('prompt.reqName')">
-            <n-input v-model:value="draftForm.name" data-testid="draft.name" @keyup.enter="confirmSaveDraft" />
+            <n-input v-model:value="draftForm.name" autofocus data-testid="draft.name"
+              @keyup.enter="confirmSaveDraft" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
             <component :is="TreeSelectComp" v-model:value="draftForm.folder" :options="folderTreeOptions" show-line
               filterable :placeholder="t('prompt.folderPlaceholder')" data-testid="draft.folder" />
           </n-form-item>
         </n-form>
+        </div>
         <template #footer>
           <div class="modal-ft">
             <n-button size="small" data-testid="draft.cancel" @click="closeDraftDialog">{{ t('common.cancel')
