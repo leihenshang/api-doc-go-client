@@ -6,11 +6,12 @@
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
+import { CreateOutline } from '@vicons/ionicons5'
 import { MdEditor } from 'md-editor-v3'
-import { NInput } from 'naive-ui'
+import { NIcon, NInput } from 'naive-ui'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
@@ -18,37 +19,79 @@ const emit = defineEmits<{
   'update:doc': [doc: DocTabDoc]
   save: []
 }>()
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 
 // 编辑 / 预览切换交给 Markdown 工具栏自带的按钮（不再在页签头部重复一份）
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
-/** 标题与正文都走 store：改一点就标脏，保存由页签统一调度（防抖/手动一致）。 */
-function onName(v: string): void {
-  emit('update:doc', { ...props.doc, name: v })
-}
+/** 正文走 store：改一点就标脏，保存由页签统一调度（手动/快捷键一致）。 */
 function onContent(v: string): void {
   emit('update:doc', { ...props.doc, content: v })
 }
 
-/** Markdown 工具栏自带的「保存」按钮 / 编辑器内 Ctrl+S 都走这里（与头部按钮、全局快捷键同一落点）。 */
+/** Markdown 工具栏自带的「保存」按钮 / 编辑器内 Ctrl+S 都走这里（与全局快捷键同一落点）。 */
 function onSave(): void {
   emit('save')
 }
+
+// 标题：默认只读文本，点右侧铅笔图标才切换成输入框（与请求栏概述同一交互）
+const titleEditing = ref(false)
+const titleDraft = ref('')
+const titleInput = ref<InstanceType<typeof NInput> | null>(null)
+
+function startTitleEdit(): void {
+  if (readonly.value || titleEditing.value) return
+  titleDraft.value = props.doc.name
+  titleEditing.value = true
+  nextTick(() => titleInput.value?.focus())
+}
+
+/** 提交：空名视为取消（文档名不允许为空），只有真的变了才回写并标脏。 */
+function commitTitle(): void {
+  if (!titleEditing.value) return
+  const next = titleDraft.value.trim()
+  if (next && next !== props.doc.name) emit('update:doc', { ...props.doc, name: next })
+  titleEditing.value = false
+}
+
+function cancelTitle(): void {
+  titleEditing.value = false
+}
+
+function onTitleKeydown(e: KeyboardEvent): void {
+  if (e.isComposing) return
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitTitle()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelTitle()
+  }
+}
+
+watch(
+  () => props.doc.uid,
+  () => {
+    titleEditing.value = false
+  },
+)
 </script>
 
 <template>
   <div class="doc-editor">
     <div class="hd">
-      <n-input
-        :value="doc.name"
-        size="small"
-        class="name"
-        :readonly="readonly"
-        data-testid="doc.name"
-        @update:value="onName"
-      />
+      <n-input v-if="titleEditing" ref="titleInput" v-model:value="titleDraft" size="small" class="name"
+        data-testid="doc.name" :placeholder="t('editor.edit')" @keydown="onTitleKeydown" @blur="commitTitle" />
+      <template v-else>
+        <span class="title" :class="{ ph: !doc.name }" data-testid="doc.title" :title="doc.name">
+          {{ doc.name || t('editor.noDoc') }}
+        </span>
+        <button v-if="!readonly" class="title-edit" type="button" data-testid="doc.titleEdit"
+          :title="t('editor.edit')" @click="startTitleEdit">
+          <n-icon :component="CreateOutline" :size="13" />
+        </button>
+      </template>
       <!-- 头部只留文档名：保存用 Markdown 工具栏自带按钮 / Ctrl+S，编辑预览用工具栏切换，关闭用页签 × -->
     </div>
     <div class="body edit">
@@ -90,10 +133,48 @@ function onSave(): void {
 }
 
 .name {
-  /* 头部只剩标题框：占满整行（窄窗口下也不留空白） */
+  /* 编辑态输入框占满整行（窄窗口下也不留空白） */
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
+}
+
+/* 只读态标题：一行文本 + 右侧铅笔图标 */
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title.ph {
+  color: var(--app-placeholder);
+  font-weight: 400;
+}
+
+.title-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.title-edit:hover {
+  color: var(--app-text);
+  background: var(--app-chip);
 }
 
 .sp {
