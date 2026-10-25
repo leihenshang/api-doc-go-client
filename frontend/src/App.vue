@@ -988,6 +988,8 @@ function onDraftEnter(e: KeyboardEvent): void {
 
 /** 保存草稿（落盘到所选分组）：关闭流程顺带关页签，Ctrl+S 流程保存后留在原地继续编辑。 */
 async function confirmSaveDraft(): Promise<void> {
+  // 回车（keydown）与按钮点击可能在同一帧内各来一次：保存中直接忽略，避免重复建请求
+  if (savingDraft.value) return
   const tab = draftTab.value
   const name = draftForm.value.name.trim()
   if (!tab || !name) return
@@ -1172,8 +1174,7 @@ watch(
         <p class="draft-hint">{{ t(draftSaveOnly ? 'prompt.saveOnlyHint' : 'prompt.saveDraftHint') }}</p>
         <n-form label-placement="left" label-width="86">
           <n-form-item :label="t('prompt.reqName')">
-            <n-input v-model:value="draftForm.name" autofocus data-testid="draft.name"
-              @keyup.enter="confirmSaveDraft" />
+            <n-input v-model:value="draftForm.name" autofocus data-testid="draft.name" />
           </n-form-item>
           <n-form-item :label="t('prompt.folder')">
             <component :is="TreeSelectComp" v-model:value="draftForm.folder" :options="folderTreeOptions" show-line

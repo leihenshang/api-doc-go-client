@@ -942,6 +942,7 @@ export default {
     saveDraftHint: 'This request is new and not saved yet: give it a name, pick a folder and save, or discard it.',
     saveOnlyHint: 'Name it, pick a folder and save (Ctrl+S): the tab stays open for further editing.',
     draftSaved: 'Saved request “{name}”',
+    savingDraft: 'Saving, please wait',
     discard: 'Discard',
     unsavedTitle: 'Unsaved changes',
     unsavedHint: '“{name}” has unsaved changes. Save before closing the tab?',

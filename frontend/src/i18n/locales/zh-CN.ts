@@ -944,6 +944,7 @@ export default {
     saveDraftHint: '这是新建但还没有保存的请求：填好名称、选好分组再保存，或者直接丢弃。',
     saveOnlyHint: '填好名称、选好分组即可保存（Ctrl+S）：保存后页签留在原地，可继续编辑。',
     draftSaved: '已保存请求「{name}」',
+    savingDraft: '正在保存，请稍候',
     discard: '不保存',
     unsavedTitle: '有未保存的修改',
     unsavedHint: '「{name}」有未保存的修改，关闭页签前要保存吗？',
