@@ -422,6 +422,10 @@ export function SaveResponseExample(arg1, arg2, arg3) {
   return window['go']['app']['App']['SaveResponseExample'](arg1, arg2, arg3);
 }
 
+export function SaveResponseExampleRaw(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['SaveResponseExampleRaw'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['app']['App']['SaveSettings'](arg1);
 }
@@ -508,6 +512,10 @@ export function UnbindSyncFor(arg1) {
 
 export function UpdateResponseDoc(arg1) {
   return window['go']['app']['App']['UpdateResponseDoc'](arg1);
+}
+
+export function UpdateResponseExample(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['UpdateResponseExample'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function WindowIsMaximised() {
