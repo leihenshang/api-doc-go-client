@@ -383,3 +383,64 @@ func TestRenameDocToReadmeInSubdirRejected(t *testing.T) {
 		t.Fatalf("拒绝后不应出现 docs/README.md")
 	}
 }
+
+// TestCreateDocAtCollectionRoot 根菜单「新建文档」必须落在集合根，而不是默认 docs/。
+// 用 "." 作为根标记：不能把 "." 拼进路径（会造出 "./x.md" 与扫描结果不一致）。
+func TestCreateDocAtCollectionRoot(t *testing.T) {
+	c := newTestCollection(t)
+	dir := c.Dir
+	d, err := c.CreateDoc("根文档", "", ".")
+	if err != nil {
+		t.Fatalf("根目录新建失败: %v", err)
+	}
+	if d.Path != "根文档.md" {
+		t.Fatalf("根目录文档路径 = %q，期望 根文档.md（不能带 ./）", d.Path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "根文档.md")); err != nil {
+		t.Fatalf("文件未落在集合根: %v", err)
+	}
+	docs, err := c.ListDocs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, it := range docs {
+		if it.UID == d.UID {
+			found = true
+			if it.Path != "根文档.md" {
+				t.Fatalf("ListDocs 路径 = %q", it.Path)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("根目录文档未出现在 ListDocs")
+	}
+	tree, err := c.Tree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootHasDoc := false
+	for _, n := range tree {
+		if n.Type == "doc" && n.UID == d.UID {
+			rootHasDoc = true
+		}
+	}
+	if !rootHasDoc {
+		t.Fatal("根目录文档未挂在树根")
+	}
+
+	// 根级 README 允许；子目录 README 仍拒绝；空目录仍默认 docs/
+	if _, err := c.CreateDoc("README", "", "."); err != nil {
+		t.Fatalf("根级 README 应允许: %v", err)
+	}
+	if _, err := c.CreateDoc("README", "", "docs"); err == nil {
+		t.Fatal("子目录 README 应拒绝")
+	}
+	d2, err := c.CreateDoc("默认位", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d2.Path != "docs/默认位.md" {
+		t.Fatalf("空 folder 应仍落 docs/，实际 %q", d2.Path)
+	}
+}

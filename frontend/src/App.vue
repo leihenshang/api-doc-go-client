@@ -730,7 +730,7 @@ function newDraft(folder = '', doc: RequestDoc | null = null): void {
   tabs.openDraft(doc, folder)
 }
 
-/** B19：在指定分组（folder 空 = docs/ 默认位）新建文档并直接开文档页签。 */
+/** B19：在指定分组（folder 空 = docs/ 默认位；`.` = 集合根）新建文档并直接开文档页签。 */
 async function newDocAt(folder = ''): Promise<void> {
   const name = await promptName(t('docs.new'), t('docs.namePh'))
   if (!name) return
