@@ -225,6 +225,8 @@ export function SaveResponseBody(arg1:string,arg2:boolean,arg3:string):Promise<s
 
 export function SaveResponseExample(arg1:collection.Request,arg2:string,arg3:runner.Result):Promise<collection.ResponseExample>;
 
+export function SaveResponseExampleRaw(arg1:string,arg2:string,arg3:number,arg4:Array<collection.KV>,arg5:string,arg6:string):Promise<collection.ResponseExample>;
+
 export function SaveSettings(arg1:config.Settings):Promise<void>;
 
 export function SearchIndex(arg1:string,arg2:number):Promise<Array<index.Node>>;
@@ -268,6 +270,8 @@ export function UnbindSync():Promise<void>;
 export function UnbindSyncFor(arg1:string):Promise<void>;
 
 export function UpdateResponseDoc(arg1:app.ResponseDocInput):Promise<void>;
+
+export function UpdateResponseExample(arg1:string,arg2:string,arg3:any,arg4:any,arg5:any,arg6:any,arg7:any):Promise<collection.ResponseExample>;
 
 export function WindowIsMaximised():Promise<boolean>;
 

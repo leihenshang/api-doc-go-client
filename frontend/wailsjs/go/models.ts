@@ -411,6 +411,26 @@ export namespace collection {
 	        this.in = source["in"];
 	    }
 	}
+	export class BodyField {
+	    name: string;
+	    type: string;
+	    required: boolean;
+	    example?: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BodyField(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.required = source["required"];
+	        this.example = source["example"];
+	        this.description = source["description"];
+	    }
+	}
 	export class KV {
 	    name: string;
 	    value: string;
@@ -437,6 +457,7 @@ export namespace collection {
 	    raw: string;
 	    form: KV[];
 	    descs?: Record<string, string>;
+	    fields?: BodyField[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Body(source);
@@ -449,6 +470,7 @@ export namespace collection {
 	        this.raw = source["raw"];
 	        this.form = this.convertValues(source["form"], KV);
 	        this.descs = source["descs"];
+	        this.fields = this.convertValues(source["fields"], BodyField);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -469,6 +491,7 @@ export namespace collection {
 		    return a;
 		}
 	}
+	
 	export class EnvVar {
 	    uid?: string;
 	    name: string;
@@ -1050,6 +1073,7 @@ export namespace collection {
 	    path: string;
 	    method: string;
 	    url: string;
+	    summary: string;
 	    params: KV[];
 	    headers: KV[];
 	    body: Body;
@@ -1076,6 +1100,7 @@ export namespace collection {
 	        this.path = source["path"];
 	        this.method = source["method"];
 	        this.url = source["url"];
+	        this.summary = source["summary"];
 	        this.params = this.convertValues(source["params"], KV);
 	        this.headers = this.convertValues(source["headers"], KV);
 	        this.body = this.convertValues(source["body"], Body);
