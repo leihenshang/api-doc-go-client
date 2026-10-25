@@ -7,6 +7,7 @@
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
 import { MdEditor } from 'md-editor-v3'
+import { NInput } from 'naive-ui'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
 import { computed } from 'vue'
