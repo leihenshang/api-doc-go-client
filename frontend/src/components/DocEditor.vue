@@ -90,9 +90,10 @@ function onSave(): void {
 }
 
 .name {
-  /* 可收缩：按钮变宽（长语言/窄窗口）时不要把输入框挤没 */
-  flex: 0 1 220px;
-  min-width: 120px;
+  /* 头部只剩标题框：占满整行（窄窗口下也不留空白） */
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .sp {
