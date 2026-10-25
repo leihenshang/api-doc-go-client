@@ -1075,8 +1075,7 @@ watch(
                   <!-- B19：文档页签 —— 隐藏请求栏与响应面板，编辑区满幅 -->
                   <template v-if="isDocTab && detailTab">
                     <doc-editor :doc="detailTab.doc!" :readonly="coll.isReadOnly"
-                      @update:doc="(d) => tabs.touchDoc(detailTab!.key, d)" @save="saveActiveNow"
-                      @close="requestClose(detailTab!.key)" />
+                      @update:doc="(d) => tabs.touchDoc(detailTab!.key, d)" @save="saveActiveNow" />
                   </template>
                   <template v-else>
                     <request-bar :tab="detailTab" @codegen="showCodegen = true" @save="saveActiveNow" />

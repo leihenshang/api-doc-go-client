@@ -6,22 +6,20 @@
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
-import { MdEditor, MdPreview } from 'md-editor-v3'
+import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
 const emit = defineEmits<{
   'update:doc': [doc: DocTabDoc]
   save: []
-  close: []
 }>()
 const { t, locale } = useI18n()
 
-// 文档页签只有「编辑 / 预览」两种单栏形态（不支持左右分栏）
-const mode = ref<'edit' | 'preview'>('edit')
+// 编辑 / 预览切换交给 Markdown 工具栏自带的按钮（不再在页签头部重复一份）
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
@@ -46,20 +44,13 @@ function onContent(v: string): void {
         @update:value="onName"
       />
       <span class="sp" />
-      <n-button size="tiny" :type="mode === 'edit' ? 'primary' : 'default'" data-testid="doc.modeEdit" @click="mode = 'edit'">
-        {{ t('editor.edit') }}
-      </n-button>
-      <n-button size="tiny" :type="mode === 'preview' ? 'primary' : 'default'" data-testid="doc.modePreview" @click="mode = 'preview'">
-        {{ t('editor.preview') }}
-      </n-button>
+      <!-- 只保留「保存」：编辑/预览用 Markdown 工具栏自带切换，关闭用页签上的 ×，Ctrl+S 同样可保存 -->
       <n-button v-if="!readonly" size="tiny" type="primary" data-testid="doc.save" @click="emit('save')">
         {{ t('common.save') }}
       </n-button>
-      <n-button size="tiny" quaternary data-testid="doc.close" @click="emit('close')">×</n-button>
     </div>
-    <div class="body" :class="mode">
+    <div class="body edit">
       <md-editor
-        v-if="mode !== 'preview'"
         :model-value="doc.content"
         :language="mdLanguage"
         :theme="isDark ? 'dark' : 'light'"
@@ -67,7 +58,6 @@ function onContent(v: string): void {
         :readonly="readonly"
         @update:model-value="onContent"
       />
-      <md-preview v-if="mode !== 'edit'" :model-value="doc.content" class="md-preview" />
     </div>
   </div>
 </template>
@@ -146,7 +136,7 @@ function onContent(v: string): void {
   min-height: 0;
 }
 
-.body.preview :deep(.md-preview) {
+.body.edit :deep(.md-preview) {
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
