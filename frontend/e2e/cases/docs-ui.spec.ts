@@ -76,9 +76,9 @@ test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', a
   expect(treeGaps.req).toBeGreaterThan(0)
   expect(Math.abs(treeGaps.req - treeGaps.doc)).toBeLessThanOrEqual(2)
 
-  // ② 点叶子 → 开文档页签（保存按钮可见即编辑器已挂载）
+  // ② 点叶子 → 开文档页签（Markdown 编辑器可见即已挂载；保存改由工具栏按钮 / Ctrl+S）
   await treeRow(page, '接口说明').click()
-  await expect(page.getByTestId('doc.save')).toBeVisible()
+  await expect(page.locator('.md-editor').first()).toBeVisible()
   const docTab = page.getByTestId('tab.item').filter({ hasText: '接口说明' })
   await expect(docTab.locator('.md-tag')).toHaveText('MD')
   await expect(docTab.locator('.md-tag')).toHaveCSS('color', 'rgb(0, 120, 212)')
