@@ -4,14 +4,13 @@
 // B19 起它不再是弹窗内容，而是**文档页签**的编辑区：数据由父组件（App.vue）以
 // tab.doc 传入，编辑经 update:doc 回写 store（标脏），保存由父组件走
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
+// 文档改名只在左侧树上进行（树的右键/悬停菜单），编辑器内不再放标题框。
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
-import { CreateOutline } from '@vicons/ionicons5'
 import { MdEditor } from 'md-editor-v3'
-import { NIcon, NInput } from 'naive-ui'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
@@ -19,7 +18,7 @@ const emit = defineEmits<{
   'update:doc': [doc: DocTabDoc]
   save: []
 }>()
-const { t, locale } = useI18n()
+const { locale } = useI18n()
 
 // 编辑 / 预览切换交给 Markdown 工具栏自带的按钮（不再在页签头部重复一份）
 const readonly = computed(() => props.readonly ?? false)
@@ -35,65 +34,10 @@ function onSave(): void {
   emit('save')
 }
 
-// 标题：默认只读文本，点右侧铅笔图标才切换成输入框（与请求栏概述同一交互）
-const titleEditing = ref(false)
-const titleDraft = ref('')
-const titleInput = ref<InstanceType<typeof NInput> | null>(null)
-
-function startTitleEdit(): void {
-  if (readonly.value || titleEditing.value) return
-  titleDraft.value = props.doc.name
-  titleEditing.value = true
-  nextTick(() => titleInput.value?.focus())
-}
-
-/** 提交：空名视为取消（文档名不允许为空），只有真的变了才回写并标脏。 */
-function commitTitle(): void {
-  if (!titleEditing.value) return
-  const next = titleDraft.value.trim()
-  if (next && next !== props.doc.name) emit('update:doc', { ...props.doc, name: next })
-  titleEditing.value = false
-}
-
-function cancelTitle(): void {
-  titleEditing.value = false
-}
-
-function onTitleKeydown(e: KeyboardEvent): void {
-  if (e.isComposing) return
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    commitTitle()
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    cancelTitle()
-  }
-}
-
-watch(
-  () => props.doc.uid,
-  () => {
-    titleEditing.value = false
-  },
-)
 </script>
 
 <template>
   <div class="doc-editor">
-    <div class="hd">
-      <n-input v-if="titleEditing" ref="titleInput" v-model:value="titleDraft" size="small" class="name"
-        data-testid="doc.name" :placeholder="t('editor.edit')" @keydown="onTitleKeydown" @blur="commitTitle" />
-      <template v-else>
-        <span class="title" :class="{ ph: !doc.name }" data-testid="doc.title" :title="doc.name">
-          {{ doc.name || t('editor.noDoc') }}
-        </span>
-        <button v-if="!readonly" class="title-edit" type="button" data-testid="doc.titleEdit"
-          :title="t('editor.edit')" @click="startTitleEdit">
-          <n-icon :component="CreateOutline" :size="13" />
-        </button>
-      </template>
-      <!-- 头部只留文档名：保存用 Markdown 工具栏自带按钮 / Ctrl+S，编辑预览用工具栏切换，关闭用页签 × -->
-    </div>
     <div class="body edit">
       <md-editor
         :model-value="doc.content"
@@ -118,67 +62,6 @@ watch(
   min-width: 0;
   min-height: 0;
   height: 100%;
-}
-
-.hd {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--app-border);
-  /* 头部不参与拉伸，也不被内容挤走 */
-  flex: 0 0 auto;
-  width: 100%;
-  min-width: 0;
-}
-
-.name {
-  /* 编辑态输入框占满整行（窄窗口下也不留空白） */
-  flex: 1 1 auto;
-  width: 100%;
-  min-width: 0;
-}
-
-/* 只读态标题：一行文本 + 右侧铅笔图标 */
-.title {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  color: var(--app-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.title.ph {
-  color: var(--app-placeholder);
-  font-weight: 400;
-}
-
-.title-edit {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--app-muted);
-  cursor: pointer;
-}
-
-.title-edit:hover {
-  color: var(--app-text);
-  background: var(--app-chip);
-}
-
-.sp {
-  flex: 1;
 }
 
 .body {
