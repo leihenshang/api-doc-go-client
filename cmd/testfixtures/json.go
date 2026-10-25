@@ -32,6 +32,17 @@ func registerJSONRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/json/fewer", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"total": 1})
 	})
+	// /json/live-headers：专供「live 生成过滤易变响应头」用例。
+	// 响应里同时给易变/敏感头（Date 由 net/http 自动补、Keep-Alive、Server、Set-Cookie）
+	// 与业务自定义头（X-Live-Proof）：落盘的 respdoc 应只保留后者与 Content-Type。
+	mux.HandleFunc("/json/live-headers", func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Keep-Alive", "timeout=5")
+		h.Set("Server", "testfixtures")
+		h.Set("X-Live-Proof", "kept")
+		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "fixture", Path: "/"})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("/json/big", func(w http.ResponseWriter, r *http.Request) {
 		n := queryInt(r, "rows", 500)
 		writeJSON(w, http.StatusOK, map[string]any{"count": n, "rows": bigRows(n)})

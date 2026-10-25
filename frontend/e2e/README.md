@@ -31,6 +31,10 @@ e2e 相关模式属耗时检查，仅在明确需要时执行：
 
 - 前置：`frontend/dist` 必须是最新构建（`--smoke` / `--full` 会先 `npm run build`；已构建过可加 `--skip-build`）。
   fixture 会自动 `go build` `cmd/devserver` 与 `cmd/testfixtures`。
+- **构建产物目录**：默认用 `frontend/dist`；设置 `E2E_DIST=/abs/path/to/build` 可指向别的产物目录（devserver 以 `-web $E2E_DIST` 启动）。
+- **过期检查**：fixture 启动前会比较 `dist/index.html` 与 `frontend/src/**`、`frontend/index.html`、`frontend/vite.config.ts` 的最新 mtime；
+  源码更新而产物更旧时直接失败并提示 `构建产物 <distDir> 已过期（源码有更新）：请先在 frontend 下 npm run build，或设置 E2E_DIST 指向新构建`
+  （避免对着旧代码跑出假绿/假红）。用 `E2E_DIST` 时同样受此检查约束，提示里会带上实际使用的目录。
 - 规模：**49 条回归 + 1 条 @demo**，全量约 2 分钟，`@smoke`（4 条）约 20 秒。
 - `@demo` 用例的环境变量：`E2E_DEMO_URL`（必填，如 `https://内网主机/xxx`，未设置则 skip）、`E2E_DEMO_STATUS`（选填，忽略证书后期望的状态码）。运行时：`E2E_DEMO_URL=… npm run test:e2e -- --grep @demo`。
 - **隔离**：每个 worker 一套独立环境 —— 随机端口 + `API_DOC_CONFIG_DIR` 指向 `.tmp/e2e/run-*/config`

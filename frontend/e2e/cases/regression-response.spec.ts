@@ -5,9 +5,7 @@ import path from 'node:path'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, openRespTab, reopenApp, send } from '../helpers/ui'
-
-const PING_UID = '33333333-3333-4333-8333-333333333333'
+import { openCollection, openReqTab, openRequest, openRespTab, reopenApp, saveNow, send } from '../helpers/ui'
 
 const exampleModal = (page: Page) =>
   page.locator('.n-modal').filter({ has: page.getByPlaceholder(t('resp.exampleNamePlaceholder')) })
@@ -26,9 +24,12 @@ async function openSaveExample(page: Page) {
   await page.getByTestId('resp.saveExample').click()
 }
 
+/**
+ * 只改 UI 里的 URL（不再用 IPC 直接改盘：手动保存模型下，未保存的编辑会让「外部写盘」变成冲突，
+ * Ctrl+S 会被拒写）。send 读的是内存模型，UI 填好即可。
+ */
 async function sendUrl(page: Page, app: import('../helpers/app').AppFixture, url: string) {
-  const { patchRequest } = await import('../helpers/api')
-  await patchRequest(app, PING_UID, { url })
+  void app
   await page.getByTestId('req.url').fill(url)
   await page.getByTestId('req.url').blur()
   await send(page)
@@ -59,7 +60,7 @@ test.describe('响应区：响应字段（新增/覆盖合并）与响应示例'
     // 给 value 字段填含义
     await meaningInput(page, 'value').fill('业务主体')
     await meaningInput(page, 'value').blur()
-    await page.waitForTimeout(700) // 含义去抖写盘（600ms）
+    await page.waitForTimeout(700) // 手动保存模型：含义只改内存，未落盘
 
     // 再打同结构的 flat：已有表格 → 弹「新增 / 覆盖」；选覆盖，同名字段说明保留、必填回「是」
     await sendUrl(page, app, '{{host}}/json/flat')
@@ -85,7 +86,8 @@ test.describe('响应区：响应字段（新增/覆盖合并）与响应示例'
     await genModal(page).getByRole('button', { name: t('common.cancel') }).click()
     await expect(rows).toHaveCount(arrayCount) // 取消后字段表不变
 
-    // 字段表仍停留在 withArray（覆盖未执行）：respdoc 段随 withArray 字段落盘
+    // 字段表仍停留在 withArray（覆盖未执行）：Ctrl+S 后 respdoc 段随 withArray 字段落盘
+    await saveNow(page)
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('respdoc')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).toContain('fieldName: total')
     await expect.poll(() => readCollectionFile(dir, 'api/ping.yml') ?? '', { timeout: 5000 }).not.toContain('业务主体')

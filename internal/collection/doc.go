@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -35,6 +36,31 @@ type docFront struct {
 
 // docsDir 文档条目目录（B13）。
 const docsDir = "docs"
+
+// docHiddenPath 该相对路径的 .md 是否会成为「看不见的文档条目」：子目录里的 README.md。
+// 扫描（scanExtAllowed）与所有写入口（CreateDoc / MoveDoc / RenameDoc）共用这一个判定，
+// 避免「写进去了却扫不出来」的两处规则漂移。根目录的 README.md 仍可见。
+func docHiddenPath(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if !strings.EqualFold(filepath.Ext(rel), ".md") {
+		return false
+	}
+	if !strings.EqualFold(path.Base(rel), "README.md") {
+		return false
+	}
+	return path.Dir(rel) != "."
+}
+
+// isReadmeDocName 名称是否可以落成 README.md（README / README.md，大小写不敏感）。
+func isReadmeDocName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	return n == "readme" || n == "readme.md"
+}
+
+// isRootRelDir 分组目录是否为集合根（"" 或 "."）。
+func isRootRelDir(dir string) bool {
+	return path.Clean(filepath.ToSlash(strings.TrimSpace(dir))) == "."
+}
 
 // ListDocs 列出全部文档条目。
 func (c *Collection) ListDocs() ([]*DocEntry, error) {
@@ -74,6 +100,11 @@ func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 	dir := strings.TrimSpace(folder)
 	if dir == "" {
 		dir = docsDir
+	}
+	// 子目录里的 README.md 扫不出来（scanExtAllowed 按规则排除）：
+	// 入口直接拒绝，避免造出「文件存在、树里看不见」的文档。根级 README 允许。
+	if isReadmeDocName(name) && !isRootRelDir(dir) {
+		return nil, fmt.Errorf("子目录里的 README.md 不作为文档条目显示，请先改名再创建")
 	}
 	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(dir)), 0o755); err != nil {
 		return nil, err
@@ -183,6 +214,11 @@ func (c *Collection) RenameDoc(uid, name string) error {
 	if err != nil {
 		return err
 	}
+	// 子目录里的文档改名为 README 会与「README.md 不显示」的规则混淆：
+	// 入口拒绝（文件本来就不叫 README.md，这里拦的是显示名，避免出现同名的隐形语义）。
+	if isReadmeDocName(name) && !isRootRelDir(path.Dir(filepath.ToSlash(d.Path))) {
+		return fmt.Errorf("子目录里的 README.md 不作为文档条目显示，请换一个名称")
+	}
 	d.Name = name
 	return c.SaveDoc(d)
 }
@@ -211,13 +247,26 @@ func (c *Collection) MoveDoc(uid, destFolder string) error {
 	if oldDir == dest {
 		return nil // 已在目标分组
 	}
+	newRel := joinRel(dest, filepath.Base(filepath.FromSlash(d.Path)))
+	// 移到子目录后的 README.md 不会出现在树里（扫描排除）：直接拒绝，且不改动文件。
+	if docHiddenPath(newRel) {
+		return fmt.Errorf("子目录里的 README.md 不作为文档条目显示，请先改名再移动")
+	}
 	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(dest)), 0o755); err != nil {
 		return err
 	}
-	newRel := joinRel(dest, filepath.Base(filepath.FromSlash(d.Path)))
 	newFull := filepath.Join(c.Dir, filepath.FromSlash(newRel))
 	if _, err := os.Stat(newFull); err == nil {
 		return fmt.Errorf("目标分组已存在同名文档")
+	}
+	// 无 frontmatter 的文档 uid 是由路径哈希出来的（md-xxx）：移动前先把当前 uid 写回文件，
+	// 否则 os.Rename 之后路径变了、重新扫描会算出新的 uid，已打开的页签/引用全部失效。
+	// 已有合法 frontmatter（含 uid）的文件不动内容。
+	if !hasDocFrontmatter(oldFull) {
+		c.ignoreWrite(d.Path)
+		if err := writeDocFile(oldFull, d); err != nil {
+			return fmt.Errorf("写回文档 frontmatter: %w", err)
+		}
 	}
 	c.ignoreWrite(newRel)
 	if err := os.Rename(oldFull, newFull); err != nil {
@@ -226,41 +275,65 @@ func (c *Collection) MoveDoc(uid, destFolder string) error {
 	return nil
 }
 
-// readDocFile 解析文档文件（frontmatter + 正文）。
-func readDocFile(path string) (*DocEntry, error) {
-	data, err := os.ReadFile(path)
+// hasDocFrontmatter 文件是否已有「可解析且带 uid」的 frontmatter。
+// 解析失败（README 里的 Markdown 分隔线等）按「没有 frontmatter」处理，与 parseDocFile 的回落一致。
+func hasDocFrontmatter(full string) bool {
+	data, err := os.ReadFile(full)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	return parseDocFile(path, data)
+	text := string(data)
+	if !strings.HasPrefix(text, "---\n") {
+		return false
+	}
+	end := strings.Index(text[4:], "\n---\n")
+	if end < 0 {
+		return false
+	}
+	var front docFront
+	if err := yaml.Unmarshal([]byte(text[4:4+end]), &front); err != nil {
+		return false
+	}
+	return front.UID != ""
 }
 
-// parseDocFile 解析文档字节。
+// parseDocFile 解析文档字节（frontmatter + 正文）。
+//
+// 无 frontmatter 或 frontmatter 里没有 uid 的 .md（例如集合根目录的 README.md、
+// 手工放进来的笔记）同样视为文档条目：uid 由相对路径哈希生成（"md-" + sha256 前 16 位），
+// 同一个文件每次扫描得到同一个 uid；首次保存（SaveDoc → writeDocFile）会把带该 uid 的
+// frontmatter 写回文件，此后即与手写 frontmatter 的文档完全一致。
+//
+// frontmatter 解析失败时**不丢弃整条文档**：README 里出现 Markdown 分隔线（---）时，
+// 首个 `---\n...\n---` 之间的内容往往不是合法 YAML mapping，若直接报错，文件会从树里
+// 静默消失。这里回落为「全文即正文、无 frontmatter」，继续走路径哈希 uid。
 func parseDocFile(rel string, data []byte) (*DocEntry, error) {
 	text := string(data)
 	var front docFront
 	body := text
 	// frontmatter: ---\n...\n---
 	if strings.HasPrefix(text, "---\n") {
-		end := strings.Index(text[4:], "\n---\n")
-		if end >= 0 {
-			fm := text[4 : 4+end]
-			if err := yaml.Unmarshal([]byte(fm), &front); err != nil {
-				return nil, err
+		if end := strings.Index(text[4:], "\n---\n"); end >= 0 {
+			var parsed docFront
+			if err := yaml.Unmarshal([]byte(text[4:4+end]), &parsed); err == nil {
+				front = parsed
+				body = text[4+end+5:]
 			}
-			body = text[4+end+5:]
 		}
 	}
-	if front.UID == "" {
-		// 无 uid 的文档文件不是同步条目，跳过
-		return nil, fmt.Errorf("缺少 uid")
+	relSlash := filepath.ToSlash(rel)
+	uid := front.UID
+	if uid == "" {
+		sum := sha256.Sum256([]byte(relSlash))
+		uid = "md-" + hex.EncodeToString(sum[:])[:16]
 	}
 	name := front.Name
 	if name == "" {
-		name = strings.TrimSuffix(filepath.Base(rel), ".md")
+		base := filepath.Base(relSlash)
+		name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 	return &DocEntry{
-		UID: front.UID, Name: name, Path: filepath.ToSlash(rel),
+		UID: uid, Name: name, Path: relSlash,
 		Content: body, Icon: front.Icon, Seq: front.Seq,
 	}, nil
 }

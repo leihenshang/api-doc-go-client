@@ -21,7 +21,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  timeout: 60_000,
+  // 单条上限 90s：resp-node 这类多段流程在负载抖动时实测会摸到 53s，
+  // 60s 上限会把正常但偏慢的一跑判红（用例本身有 expect 级别的细粒度超时兜底）。
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI
     ? [['list'], ['html', { open: 'never', outputFolder: `../.tmp/e2e-report/run-${stamp}` }]]

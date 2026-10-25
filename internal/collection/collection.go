@@ -1054,7 +1054,7 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 		return skipReservedDir(d.Name())
 	}
 	dir := relDir(rel)
-	if !scanExtAllowed(d.Name()) {
+	if !scanExtAllowed(rel) {
 		return nil
 	}
 	data, err := os.ReadFile(path)
@@ -1085,8 +1085,8 @@ func (c *Collection) scanFile(res *scanResult, path string, d os.DirEntry) error
 		scanFolderFile(res, dir, head)
 	default:
 		// 其它类型（含 .md 兜底，正常情况下已在函数开头处理）：不是请求也不是分组，忽略。
-		// 文档条目走 parseDocFile：任意目录下的 .md 都算（README.md 已被 scanExtAllowed 排除），
-		// 要求 frontmatter 带 uid，普通 markdown 笔记会被跳过。
+		// 文档条目走 parseDocFile：任意目录下的 .md 都算（子目录的 README.md 已被
+		// scanExtAllowed 排除）；无 frontmatter / 无 uid 时由 parseDocFile 生成稳定 uid。
 		if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			if doc, err := parseDocFile(rel, data); err == nil {
 				res.docs[doc.UID] = doc
@@ -1114,13 +1114,19 @@ func skipReservedDir(name string) error {
 }
 
 // scanExtAllowed 扩展名白名单：yml/yaml 是请求与环境文件；.md 是文档条目（B19）。
-// B19 起 .md 不再限制在 docs/ 下——文档与请求同目录混排；README.md 是说明文件，不视为条目。
-func scanExtAllowed(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
+// B19 起 .md 不再限制在 docs/ 下——文档与请求同目录混排。
+//
+// README.md 是说明文件的约定：只有**集合根目录**的 README.md 视为文档条目
+// （很多仓库根 README 就是集合说明），子目录里的 README 仍按说明文件排除，
+// 避免把依赖目录 / 示例目录里的说明书一股脑塞进集合树。
+//
+// rel 是相对集合根的斜杠路径（扫描时已 ToSlash），据此判断所在目录。
+func scanExtAllowed(rel string) bool {
+	switch strings.ToLower(filepath.Ext(rel)) {
 	case ".yml", ".yaml":
 		return true
 	case ".md":
-		return !strings.EqualFold(name, "README.md")
+		return !docHiddenPath(rel)
 	}
 	return false
 }
