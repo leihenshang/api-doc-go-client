@@ -3,7 +3,6 @@
 // 与请求体表格同构：表格**只在用户点「生成数据表格」/「从本次响应生成」时派生**，
 // 派生后完全由用户编辑（5 列：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行）；
 // 编辑「响应数据」（respDoc.sample）**不会**再联动重算表格。
-import { api } from '@/lib/ipc'
 import type { KV, ResponseDoc, ResponseParam } from '@/types'
 
 /** 字段表的一行（5 列与请求体表格同构）。 */
@@ -183,17 +182,6 @@ export function loadFields(uid: string): FieldRow[] {
   return []
 }
 
-export function saveFields(uid: string, rows: FieldRow[]): void {
-  if (!uid) return
-  localStorage.setItem(storeKey(uid), JSON.stringify(rows))
-}
-
-/** 删除本地存档（迁移进 RespDoc 后清理）。 */
-export function removeFields(uid: string): void {
-  if (!uid) return
-  localStorage.removeItem(storeKey(uid))
-}
-
 /** RespDoc 参数行 → 字段表行（fieldName→path、example→value、description→meaning，required 如实读取）。 */
 export function rowsFromDoc(doc?: ResponseDoc | null): FieldRow[] {
   if (!doc?.params) return []
@@ -263,71 +251,31 @@ export function buildRespDoc(rows: FieldRow[], base: ResponseDoc | null | undefi
   }
 }
 
-/** 防抖计时器句柄（调用方持有并可清理），用对象包一层以便 persistRespDoc 读写同一个引用。 */
-export interface PersistTimer {
-  current: ReturnType<typeof setTimeout> | null
-}
-
-/** persistRespDoc 入参：写回一条请求的 RespDoc 所需的全部上下文。 */
-export interface RespDocPersistCtx {
-  uid: string
-  draft: boolean
-  grpc: boolean
-  rows: FieldRow[]
-  doc: ResponseDoc
-  /** true=立即写（生成/删除/清空）；false=按 debounceMs 防抖（单元格连续输入） */
-  immediate: boolean
-  timer: PersistTimer
-  /** 写盘成功后把 doc 落回请求模型（调用方决定写到哪个 tab） */
-  attach: (doc: ResponseDoc) => void
-  /** 写盘失败的提示回调（保持调用方原有的 message.error 语义） */
-  onError: (e: unknown) => void
-  debounceMs?: number
-}
+/**
+ * 易变 / 敏感响应头黑名单（小写，按名字大小写不敏感剔除）。
+ * live 生成时只记录「能表达接口业务语义」的头；下面这些要么每次请求都不同
+ * （Date / Content-Length / Keep-Alive / 连接与分块相关），要么是凭据
+ * （Set-Cookie / Proxy-Authorization），写进集合 YAML 只会让文件每次抖动或泄密。
+ */
+const VOLATILE_RESP_HEADERS = new Set([
+  'date',
+  'connection',
+  'keep-alive',
+  'transfer-encoding',
+  'te',
+  'trailer',
+  'upgrade',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'server',
+  'content-length',
+  'set-cookie',
+])
 
 /**
- * 把字段表写回请求模型的统一实现：草稿 / gRPC / 无 uid → 只存本地存档；
- * 否则 updateResponseDoc → attach → 清本地存档，按 immediate 决定立即执行还是防抖。
- * 返回是否「已发起/已成功落盘」（草稿路径返回 true）。
+ * 过滤易变响应头（大小写不敏感），保留自定义头（如 X-Total-Count 常含业务语义）。
+ * 返回新数组，不修改入参。
  */
-export async function persistRespDoc(ctx: RespDocPersistCtx): Promise<boolean> {
-  if (ctx.draft || ctx.grpc || !ctx.uid) {
-    saveFields(ctx.uid, ctx.rows)
-    return true
-  }
-  const apply = async (): Promise<boolean> => {
-    try {
-      await api.updateResponseDoc(ctx.uid, ctx.doc)
-      ctx.attach(ctx.doc)
-      removeFields(ctx.uid)
-      return true
-    } catch (e) {
-      ctx.onError(e)
-      return false
-    }
-  }
-  if (ctx.timer.current) clearTimeout(ctx.timer.current)
-  if (ctx.immediate) return apply()
-  ctx.timer.current = setTimeout(() => void apply(), ctx.debounceMs ?? 600)
-  return true
-}
-
-// ---- 待写防抖的跨组件取消（审查 M2）----
-// 编辑器（useResponseFields）持有防抖计时器；若请求编辑器还有未落盘的表格编辑，
-// 立即写（生成表格）前先 cancelPendingFor(uid) 丢掉旧的待写，避免旧快照回滚。
-const pendingCancelers = new Map<string, () => void>()
-
-/** 登记某请求的「取消待写」函数（编辑器初始化/切请求时调用）。 */
-export function registerPendingCancel(uid: string, fn: () => void): void {
-  if (uid) pendingCancelers.set(uid, fn)
-}
-
-/** 注销某请求的取消函数（切走/卸载时调用）。 */
-export function unregisterPendingCancel(uid: string): void {
-  if (uid) pendingCancelers.delete(uid)
-}
-
-/** 取消该请求尚未触发的防抖写回（无登记时无操作）。 */
-export function cancelPendingFor(uid: string): void {
-  pendingCancelers.get(uid)?.()
+export function stableRespHeaders(headers: KV[]): KV[] {
+  return headers.filter((h) => !VOLATILE_RESP_HEADERS.has((h.name ?? '').trim().toLowerCase()))
 }

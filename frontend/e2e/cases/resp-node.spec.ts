@@ -4,13 +4,16 @@ import { patchRequest } from '../helpers/api'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, reopenApp, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, reopenApp, saveNow, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
+/**
+ * 只改 UI 里的 URL（不再用 IPC 直接改盘：手动保存模型下，未保存的编辑会让「外部写盘」变成冲突，
+ * Ctrl+S 会被拒写）。send 读的是内存模型，UI 填好即可。
+ */
 async function sendUrl(page: import('@playwright/test').Page, app: import('../helpers/app').AppFixture, url: string) {
-  const { patchRequest } = await import('../helpers/api')
-  await patchRequest(app, PING_UID, { url })
+  void app
   await page.getByTestId('req.url').fill(url)
   await page.getByTestId('req.url').blur()
   await send(page)
@@ -43,10 +46,13 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
     await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
 
+    // 手动保存：生成/编辑只改内存，先落盘再走「关闭标签 → 重开读盘」的验证
+    await saveNow(page)
+
     // item 18 回归：关闭标签再打开（从磁盘重读），字段表（respdoc）与响应头快照仍在
     await page.getByTestId('tab.close').click()
     // 标签若因改过 URL 是脏态，会弹自绘的「未保存询问」框：选「放弃更改」
-    // （respdoc 由生成时直接落盘，不受影响）
+    // （respdoc 已在上一步保存落盘，不受影响）
     const discard = page.getByTestId('closeask.discard')
     if (await discard.isVisible().catch(() => false)) await discard.click()
     await page.locator('[data-testid="tree.row"][data-kind="request"]').first().click()
@@ -57,6 +63,8 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
 
     // 必填列进文档：取消 flat 的必填 → 文档里该行必选写「否」
+    // （字段表只在「字段表格」子页签渲染，先切回来）
+    await page.locator('[data-testid="resp.segTab"][data-view="fields"]').click()
     await page
       .locator('[data-testid="resp.fields.row"][data-path="flat"]')
       .getByTestId('resp.fields.required')

@@ -26,6 +26,7 @@ import {
   mergeAppend,
   mergeOverwrite,
   rowsFromDoc,
+  stableRespHeaders,
   type FieldRow,
   type RespDocLive,
 } from '@/lib/responseFields'
@@ -196,9 +197,8 @@ const genText = ref('')
 
 async function genDocs(): Promise<void> {
   try {
-    // 字段表格的单元格编辑是 600ms 防抖写盘：先把待写刷进 respDoc，
-    // 否则「改完最后一行立刻生成文档」会读到旧快照（写盘失败只提示，不阻断生成）。
-    if (!isGrpcReq.value && props.tab.request.respDoc) await flushFields()
+    // 字段表格的编辑只改内存 respDoc（手动保存模型）：这里直接读当前内存快照即可，
+    // 不再需要先把 600ms 防抖待写刷进磁盘。
     const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
     // 字段来源只用 respDoc.params（响应字段表的唯一真源）：空表不输出该章节
     const fields = rowsFromDoc(props.tab.request.respDoc)
@@ -465,14 +465,14 @@ watch(
 )
 
 // ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
-// 真相源是请求模型 tab.request.respDoc；未落盘草稿 / gRPC 回退本地一次性存档。
-// 字段表状态与「防抖写回 respDoc」逻辑见 composables/useResponseFields。
+// 真相源是请求模型 tab.request.respDoc；手工生成/编辑都只改内存并标脏，
+// 落盘由 Ctrl+S（tabs.flush 整条请求含 respDoc）完成，与请求体表格同一套手动保存模型。
 // 与请求体表格同构：表格只在点「生成数据表格」/「从本次响应生成」时派生，之后由用户编辑。
-const { fields, sample, hasResp, initFields, onSampleInput, applyRows, patchRow, addRow, removeRow, flushFields, cancelPending } =
+const { fields, sample, hasResp, initFields, onSampleInput, applyRows, patchRow, addRow, removeRow } =
   useResponseFields({
     getTab: () => props.tab,
     isGrpc: () => isGrpcReq.value,
-    onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+    onDirty: () => tabs.touch(props.tab.key),
   })
 
 /** 「本次响应」（最近一次真实发送的响应体）：只读来源，不会被写回 respDoc.sample。 */
@@ -488,13 +488,16 @@ const respGenDerived = ref<FieldRow[]>([])
 /** 本次生成的来源：sample=手动填的响应数据；live=本次真实响应（决定是否顺带落 status/headers 快照）。 */
 const respGenSource = ref<'sample' | 'live'>('sample')
 
-/** 生成来源是「本次响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。 */
+/** 生成来源是「本次响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。
+ *  响应头先过 stableRespHeaders：Date / Keep-Alive / Content-Length / Set-Cookie 等易变或敏感头
+ *  不写进集合文件（否则每次 live 生成都会让 YAML 抖动）；自定义头（X-*）保留。 */
 function liveRespMeta(): RespDocLive | undefined {
   const r = props.tab.response
   if (!r) return undefined
+  const headers = stableRespHeaders(r.headers ?? [])
   return {
     status: r.status,
-    headers: r.headers?.length ? r.headers : undefined,
+    headers: headers.length ? headers : undefined,
     contentType: r.contentType || undefined,
   }
 }
@@ -538,9 +541,9 @@ function startRespGenerate(source: 'sample' | 'live'): void {
   respGenDialog.value = true
 }
 
-/** 生成结果落到表格：立即写回 respDoc.params（含 required），并切到「字段表格」子页签。 */
+/** 生成结果落到表格：写回内存 respDoc.params（含 required）并标脏，切到「字段表格」子页签。 */
 function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live'): void {
-  applyRows(rows, true, source === 'live' ? liveRespMeta() : undefined)
+  applyRows(rows, source === 'live' ? liveRespMeta() : undefined)
   respView.value = 'fields'
   message.success(t('resp.genDone', { n }))
 }
@@ -615,8 +618,9 @@ function formatRespData(): void {
   respFormatError.value = !out
   if (!out) return
   // 格式化只改内存并标脏：不写盘，也不触发自动保存，由用户按 Ctrl+S / 保存落盘。
-  cancelPending()
-  onSampleInput(out.text, { persist: false })
+  onSampleInput(out.text)
+  // onSampleInput 会走 tabs.touch（自动保存开启时会排一次防抖写盘）；
+  // 格式化是「需要用户确认」的场景，这里再转成纯标脏并撤掉那次排队。
   touchManual()
   message.info(t('editor.formatNeedsSave'))
 }

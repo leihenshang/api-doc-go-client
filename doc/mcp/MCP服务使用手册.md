@@ -271,6 +271,10 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `update_doc` | `project?`、`uid` ✅、`content?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`name` 改显示名（文件名不变）、`folder` 换分组（空串=根） |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
+> 集合**根目录**下的 `.md`（含 `README.md`）即使没有 frontmatter 也会作为文档条目出现在 `list_docs` 里：
+> uid 由相对路径哈希稳定生成（`md-<16 位 hex>`），首次 `update_doc` 保存时会把这些元信息（含 uid）写回文件顶部。
+> 子目录里的 `README.md` 仍视为普通说明文件，不算条目。
+
 ```json
 // 读一篇再改正文（带冲突保护）
 {"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae"}

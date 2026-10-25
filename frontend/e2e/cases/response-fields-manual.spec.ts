@@ -2,13 +2,11 @@
 // （5 列全可编辑：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行），编辑「响应数据」不再自动改表格，
 // 生成也只动表格、不改「响应数据」（respDoc.sample）。
 import type { Page } from '@playwright/test'
-import { patchRequest } from '../helpers/api'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, saveNow, send } from '../helpers/ui'
 
-const PING_UID = '33333333-3333-4333-8333-333333333333'
 const FILE = 'api/ping.yml'
 
 const dataInput = (page: Page) => page.getByTestId('resp.dataInput').locator('textarea')
@@ -30,7 +28,7 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(page.getByTestId('resp.fields.empty')).toBeVisible()
         await tab(page, 'body').click()
         await dataInput(page).fill('{"code": 0, "data": {"id": 7}}')
-        await page.waitForTimeout(900) // 等防抖写盘：数据变化不得带出表格
+        await page.waitForTimeout(900) // 旧实现在此窗口内有防抖写盘：数据变化不得带出表格
         await tab(page, 'fields').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(0)
 
@@ -50,6 +48,11 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(requiredOf(page, 'data.id')).toHaveAttribute('aria-checked', 'false')
 
         const file = () => readCollectionFile(dir, FILE) ?? ''
+        // 手动保存：生成/编辑都只改内存，等过旧的防抖窗口后磁盘仍无 respdoc
+        await page.waitForTimeout(900)
+        expect(file()).not.toContain('fieldName: data.id')
+        // Ctrl+S 才落盘（整条请求含 respDoc）
+        await saveNow(page)
         await expect.poll(file, { timeout: 5000 }).toContain('fieldName: data.id')
         await expect.poll(file, { timeout: 5000 }).toContain('主键')
         await expect.poll(file, { timeout: 5000 }).toContain('required: false')
@@ -99,11 +102,12 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(requiredOf(page, 'total')).toHaveAttribute('aria-checked', 'true')
         await expect(inputOf(page, 'total', 'resp.fields.example')).toHaveValue('43')
 
-        // 取消：表格不变
+        // 取消：表格不变（字段表只在「字段表格」子页签渲染，先切回去再数行）
         await tab(page, 'body').click()
         await dataInput(page).fill('{"only": true}')
         await page.getByTestId('resp.generate').click()
         await page.getByTestId('resp.genCancel').click()
+        await tab(page, 'fields').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(2)
         await expect(row(page, 'total')).toBeVisible()
     })
@@ -118,8 +122,9 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(page.getByTestId('resp.generateLive')).toBeDisabled()
         await expect(page.getByTestId('resp.generateLive')).toHaveAttribute('title', t('resp.genNoLive'))
 
+        // 只改 UI 里的 URL（不再用 IPC 直接改盘：手动保存模型下，外部写盘会让页签基准 hash
+        // 失效 → Ctrl+S 被当成冲突拒写）。send 读的是内存模型，UI 填好即可。
         const url = '{{host}}/json/flat'
-        await patchRequest(app, PING_UID, { url })
         await page.getByTestId('req.url').fill(url)
         await page.getByTestId('req.url').blur()
         await send(page)
@@ -132,8 +137,12 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(inputOf(page, 'value', 'resp.fields.example')).toHaveValue('1')
         await expect(requiredOf(page, 'value')).toHaveAttribute('aria-checked', 'true')
 
-        // 本次响应来源会顺带记下 status/headers（响应头子页签与状态徽标的数据源）
+        // 本次响应来源会顺带记下 status/headers（响应头子页签与状态徽标的数据源）；
+        // 但仍是内存编辑：Ctrl+S 之前文件不变
         const file = () => readCollectionFile(dir, FILE) ?? ''
+        await page.waitForTimeout(900)
+        expect(file()).not.toContain('status: 200')
+        await saveNow(page)
         await expect.poll(file, { timeout: 5000 }).toContain('status: 200')
 
         // 生成只动表格：响应数据（respDoc.sample）保持空
@@ -147,6 +156,7 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await page.getByTestId('resp.genOverwrite').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(1)
         await expect(row(page, 'other')).toBeVisible()
+        await saveNow(page)
         await expect.poll(file, { timeout: 5000 }).toContain('status: 200')
         await expect.poll(file, { timeout: 5000 }).toContain('Content-Type')
     })
@@ -168,6 +178,8 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(dataInput(page)).toHaveValue('')
         await tab(page, 'fields').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(1)
+        // 表格仍在内存里；保存后 respdoc.params 照旧落盘（清空 sample 不删字段）
+        await saveNow(page)
         await expect.poll(() => readCollectionFile(dir, FILE) ?? '', { timeout: 5000 }).toContain('fieldName: keep')
     })
 
@@ -182,13 +194,16 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await page.getByTestId('resp.generate').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(1)
 
-        // 新增行：必填默认「是」，填完字段名即落盘
+        // 新增行：必填默认「是」，填完字段名只改内存（Ctrl+S 才落盘）
         await page.getByTestId('resp.fields.add').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(2)
         await expect(page.getByTestId('resp.fields.row').last().getByTestId('resp.fields.required'))
             .toHaveAttribute('aria-checked', 'true')
         await page.getByTestId('resp.fields.row').last().getByTestId('resp.fields.name').locator('input')
             .fill('manual.field')
+        await page.waitForTimeout(900)
+        expect(readCollectionFile(dir, FILE) ?? '').not.toContain('fieldName: manual.field')
+        await saveNow(page)
         await expect.poll(() => readCollectionFile(dir, FILE) ?? '', { timeout: 5000 })
             .toContain('fieldName: manual.field')
 
@@ -196,6 +211,31 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await row(page, 'a').getByTestId('resp.fields.remove').click()
         await expect(page.getByTestId('resp.fields.row')).toHaveCount(1)
         await expect(row(page, 'a')).toHaveCount(0)
+    })
+
+    test('「从本次响应生成」落盘时过滤易变/敏感响应头，保留自定义头', async ({ page, app }) => {
+        const dir = await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+
+        // 夹具同时返回：Date（net/http 自动）/ Keep-Alive / Server / Set-Cookie + 自定义 X-Live-Proof
+        const url = '{{host}}/json/live-headers'
+        await page.getByTestId('req.url').fill(url)
+        await page.getByTestId('req.url').blur()
+        await send(page)
+
+        await page.getByTestId('resp.generateLive').click()
+        await expect(row(page, 'ok')).toBeVisible()
+        await saveNow(page)
+
+        const file = () => readCollectionFile(dir, FILE) ?? ''
+        await expect.poll(file, { timeout: 5000 }).toContain('name: X-Live-Proof')
+        await expect.poll(file, { timeout: 5000 }).toContain('name: Content-Type')
+        const text = file()
+        for (const volatile of ['name: Date', 'name: Keep-Alive', 'name: Server', 'name: Set-Cookie', 'name: Content-Length']) {
+            expect(text, `易变/敏感响应头 ${volatile} 不应落盘`).not.toContain(volatile)
+        }
     })
 
     test('响应数据支持 JSON / XML 一键格式化', async ({ page, app }) => {

@@ -12,6 +12,11 @@ import { expect as baseExpect, test as base } from '@playwright/test'
 const here = path.dirname(fileURLToPath(import.meta.url)) // frontend/e2e/helpers
 const frontendDir = path.resolve(here, '../..') // frontend
 const repoDir = path.resolve(frontendDir, '..') // 仓库根
+/**
+ * 前端构建产物目录：默认 frontend/dist，可用 E2E_DIST 指向别的构建产物
+ * （例如临时目录里的一份 build，不想覆盖 dist 时）。启动 devserver 时用 `-web distDir`。
+ */
+const distDir = process.env.E2E_DIST ? path.resolve(process.env.E2E_DIST) : path.join(frontendDir, 'dist')
 
 /** 可用的集合种子（frontend/e2e/fixtures/<name>） */
 export type SeedName = 'basic' | 'bruno-sample'
@@ -72,6 +77,45 @@ function binName(name: string): string {
   return process.platform === 'win32' ? `${name}.exe` : name
 }
 
+/** 取文件/目录（递归）里最新的 mtime（毫秒）；路径不存在返回 0。 */
+function latestMtime(target: string): number {
+  let st: ReturnType<typeof statSync>
+  try {
+    st = statSync(target)
+  } catch {
+    return 0
+  }
+  if (!st.isDirectory()) return st.mtimeMs
+  let newest = 0
+  for (const entry of readdirSync(target, { withFileTypes: true })) {
+    newest = Math.max(newest, latestMtime(path.join(target, entry.name)))
+  }
+  return newest
+}
+
+/**
+ * dist 新鲜度检查：源码比构建产物新时直接抛错，避免「源码已改、dist 未重建」
+ * 时 e2e 对着旧代码跑出假绿/假红（排查成本极高，因为界面上看不出构建是旧的）。
+ * 比较对象：dist/index.html 的 mtime vs frontend/src/**、index.html、vite.config.ts 的最新 mtime。
+ */
+function assertDistFresh(): void {
+  const entry = path.join(distDir, 'index.html')
+  if (!existsSync(entry)) {
+    throw new Error(`缺少 ${entry}，请先在 frontend 下执行 npm run build，或设置 E2E_DIST 指向构建产物目录`)
+  }
+  const distMtime = statSync(entry).mtimeMs
+  const srcMtime = Math.max(
+    latestMtime(path.join(frontendDir, 'src')),
+    latestMtime(path.join(frontendDir, 'index.html')),
+    latestMtime(path.join(frontendDir, 'vite.config.ts')),
+  )
+  if (srcMtime > distMtime) {
+    throw new Error(
+      `构建产物 ${distDir} 已过期（源码有更新）：请先在 frontend 下 npm run build，或设置 E2E_DIST 指向新构建`,
+    )
+  }
+}
+
 function spawnServer(bin: string, args: string[], env: NodeJS.ProcessEnv, tag: string): ChildProcess {
   const child = spawn(bin, args, { cwd: repoDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[${tag}] ${d}`))
@@ -97,9 +141,7 @@ function replaceTokens(dir: string, tokens: Record<string, string>): void {
 export const test = base.extend<{ app: AppFixture }>({
   app: [
     async ({}, use) => {
-      if (!existsSync(path.join(frontendDir, 'dist', 'index.html'))) {
-        throw new Error('缺少 frontend/dist/index.html，请先在 frontend 下执行 npm run build')
-      }
+      assertDistFresh()
       // 每次运行独立目录，不覆盖也不清理历史产物（便于回看）
       const runDir = path.join(repoDir, '.tmp', 'e2e', `run-${Date.now()}`)
       const configDir = path.join(runDir, 'config')
@@ -120,7 +162,7 @@ export const test = base.extend<{ app: AppFixture }>({
       const fixtures = spawnServer(binName(path.join(runDir, 'testfixtures')), ['-addr', `127.0.0.1:${fxPort}`], env, 'fixtures')
       const dev = spawnServer(
         binName(path.join(runDir, 'devserver')),
-        ['-dir', path.join(runDir, 'headless'), '-addr', `127.0.0.1:${apiPort}`, '-web', path.join(frontendDir, 'dist'), '-tls-echo', `127.0.0.1:${tlsPort}`],
+        ['-dir', path.join(runDir, 'headless'), '-addr', `127.0.0.1:${apiPort}`, '-web', distDir, '-tls-echo', `127.0.0.1:${tlsPort}`],
         env,
         'devserver',
       )
