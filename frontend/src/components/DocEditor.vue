@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'update:doc': [doc: DocTabDoc]
   save: []
 }>()
-const { t, locale } = useI18n()
+const { locale } = useI18n()
 
 // 编辑 / 预览切换交给 Markdown 工具栏自带的按钮（不再在页签头部重复一份）
 const readonly = computed(() => props.readonly ?? false)
@@ -29,6 +29,11 @@ function onName(v: string): void {
 }
 function onContent(v: string): void {
   emit('update:doc', { ...props.doc, content: v })
+}
+
+/** Markdown 工具栏自带的「保存」按钮 / 编辑器内 Ctrl+S 都走这里（与头部按钮、全局快捷键同一落点）。 */
+function onSave(): void {
+  emit('save')
 }
 </script>
 
@@ -43,11 +48,7 @@ function onContent(v: string): void {
         data-testid="doc.name"
         @update:value="onName"
       />
-      <span class="sp" />
-      <!-- 只保留「保存」：编辑/预览用 Markdown 工具栏自带切换，关闭用页签上的 ×，Ctrl+S 同样可保存 -->
-      <n-button v-if="!readonly" size="tiny" type="primary" data-testid="doc.save" @click="emit('save')">
-        {{ t('common.save') }}
-      </n-button>
+      <!-- 头部只留文档名：保存用 Markdown 工具栏自带按钮 / Ctrl+S，编辑预览用工具栏切换，关闭用页签 × -->
     </div>
     <div class="body edit">
       <md-editor
@@ -57,6 +58,7 @@ function onContent(v: string): void {
         class="md-edit"
         :readonly="readonly"
         @update:model-value="onContent"
+        @on-save="onSave"
       />
     </div>
   </div>
