@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=API Doc Client
+Name=api-doc-go
 GenericName=API Client
 Comment=AI-native、local-first 的 API 客户端
 Exec=/home/zq-deepin/my-project/api-doc-go/api-doc-go-client/build/bin/api-doc-client

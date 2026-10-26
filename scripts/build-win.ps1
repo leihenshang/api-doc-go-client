@@ -262,10 +262,12 @@ Write-Host "`n[2/3] makensis 打包" -ForegroundColor Cyan
 $produced = @()
 
 # 用 hashtable splatting 传参，避免反引号续行（行尾多个空格就会静默语法错误）
+# 显示名用 api-doc-go（与窗口标题/Linux 包显示名一致）；ProjectName（产物名）/ Exe 名 / 卸载键保持不动，
+# 旧版本升级时仍能按 UNINST_KEY 找到安装目录并先静默卸载再装到新目录。
 $prodParams = @{
   Binary      = $exeProd
   ProjectName = 'api-doc-client'
-  ProductName = 'API Doc Client'
+  ProductName = 'api-doc-go'
   Executable  = 'api-doc-client.exe'
   UninstKey   = 'api-doc-go.ApiDocClient'
   OutName     = "api-doc-client_${Version}_${Arch}-setup.exe"
@@ -276,7 +278,7 @@ if ($Dev) {
   $devParams = @{
     Binary      = $exeDev
     ProjectName = 'api-doc-client-dev'
-    ProductName = 'API Doc Client Dev'
+    ProductName = 'api-doc-go-dev'
     Executable  = 'api-doc-client-dev.exe'
     UninstKey   = 'api-doc-go.ApiDocClientDev'
     OutName     = "api-doc-client-dev_${Version}_${Arch}-setup.exe"

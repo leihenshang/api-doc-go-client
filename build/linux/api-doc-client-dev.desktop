@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=API Doc Client (Dev)
+Name=api-doc-go-dev
 GenericName=API Client Dev
-Comment=开发版：API Doc Client 的开发构建
+Comment=开发版：api-doc-go 的开发构建
 Exec=/home/zq-deepin/my-project/api-doc-go/api-doc-go-client/build/bin/api-doc-client-dev-linux-amd64
 Icon=/home/zq-deepin/my-project/api-doc-go/api-doc-go-client/build/windows/dev_api.png
 Terminal=false

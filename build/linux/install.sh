@@ -18,12 +18,12 @@ APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$APPS_DIR"
 
 install_entry() {
-  local name="$1" exec_path="$2" icon_path="$3" wm_class="$4"
+  local name="$1" disp="$2" exec_path="$3" icon_path="$4" wm_class="$5"
   local desktop="$APPS_DIR/$name.desktop"
   cat >"$desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=${name#api-doc-client}
+Name=$disp
 GenericName=API Client
 Comment=AI-native、local-first 的 API 客户端
 Exec=$exec_path
@@ -44,14 +44,14 @@ case "${1:-}" in
 esac
 
 if [ "$DO_PROD" = "1" ]; then
-  install_entry "api-doc-client" \
+  install_entry "api-doc-client" "api-doc-go" \
     "$ROOT/build/bin/api-doc-client" \
     "$ROOT/build/appicon.png" \
     "ApiDocClient"
 fi
 
 if [ "$DO_DEV" = "1" ]; then
-  install_entry "api-doc-client-dev" \
+  install_entry "api-doc-client-dev" "api-doc-go-dev" \
     "$ROOT/build/bin/api-doc-client-dev-linux-amd64" \
     "$ROOT/build/windows/dev_api.png" \
     "ApiDocClientDev"

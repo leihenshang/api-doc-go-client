@@ -121,7 +121,7 @@ Description: AI-native, local-first API client
 ```ini
 [Desktop Entry]
 Type=Application
-Name=API Doc Client
+Name=api-doc-go
 GenericName=API Client
 Comment=AI-native、local-first 的 API 客户端
 Exec=/usr/bin/api-doc-client
