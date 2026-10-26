@@ -198,11 +198,12 @@ make_pkg() { # $1=pkg 根  $2=包名  $3=显示名  $4=图标源  $5=可执行�
 }
 
 # ---- 4) 组树并打包（prod 与 dev 独立包名，可共存安装）----
+# 显示名用 api-doc-go（与窗口标题/仓库名一致）；包名与二进制名保持不动，升级不脱钩。
 deb_prod="$BIN/api-doc-client_${VERSION}_${DPKG_ARCH}.deb"
 deb_dev="$BIN/api-doc-client-dev_${VERSION}_${DPKG_ARCH}.deb"
 
-make_pkg "$BIN/pkg-prod" "api-doc-client" "API Doc Client" "$SRC_ICON" "api-doc-client"
-make_pkg "$BIN/pkg-dev" "api-doc-client-dev" "API Doc Client Dev" "$DEV_ICON" "api-doc-client-dev"
+make_pkg "$BIN/pkg-prod" "api-doc-client" "api-doc-go" "$SRC_ICON" "api-doc-client"
+make_pkg "$BIN/pkg-dev" "api-doc-client-dev" "api-doc-go-dev" "$DEV_ICON" "api-doc-client-dev"
 
 dpkg-deb --build --root-owner-group "$BIN/pkg-prod" "$deb_prod"
 dpkg-deb --build --root-owner-group "$BIN/pkg-dev" "$deb_dev"

@@ -19,15 +19,15 @@ api-doc-client-dev_<version>_<arch>-setup.exe    # 开发版（-Dev 时产出，
 
 | 路径 | 内容 |
 |---|---|
-| `C:\Program Files\api-doc-go\API Doc Client\api-doc-client.exe` | 正式版可执行文件 |
-| `…\API Doc Client\uninstall.exe` | 卸载器 |
-| 开始菜单 / 桌面 `API Doc Client.lnk` | 快捷方式 |
+| `C:\Program Files\api-doc-go\api-doc-go\api-doc-client.exe` | 正式版可执行文件 |
+| `…\api-doc-go\uninstall.exe` | 卸载器 |
+| 开始菜单 / 桌面 `api-doc-go.lnk` | 快捷方式 |
 | `HKLM\…\Uninstall\api-doc-go.ApiDocClient` | 卸载信息（「程序和功能」里那条），含 `InstallLocation` |
 
-开发版把 `API Doc Client` 换成 `API Doc Client Dev`、exe 换成 `api-doc-client-dev.exe`、
+开发版把 `api-doc-go` 换成 `api-doc-go-dev`、exe 换成 `api-doc-client-dev.exe`、
 注册表键换成 `api-doc-go.ApiDocClientDev` —— **三处都不同才能并存**，少一处就会互相覆盖。
 
-`user` 范围（`-InstallScope user`）装到 `%LOCALAPPDATA%\Programs\API Doc Client`，注册表落 `HKCU`，不弹 UAC。
+`user` 范围（`-InstallScope user`）装到 `%LOCALAPPDATA%\Programs\api-doc-go`，注册表落 `HKCU`，不弹 UAC。
 **machine 与 user 是两个独立安装**（不同目录 / 不同注册表 hive），升级时请固定同一 `-InstallScope`。
 
 > 安装器会从注册表 `InstallLocation` 回填上次安装目录（W-3）：装过非默认目录的机器，升级不会另起一份。
@@ -117,7 +117,7 @@ wails build -platform windows/amd64 -tags devbuild -o api-doc-client-dev.exe   #
 | 宏 | 正式版 | 开发版 | 决定什么 |
 |---|---|---|---|
 | `INFO_PROJECTNAME` | `api-doc-client` | `api-doc-client-dev` | `OutFile` 名（两者不撞） |
-| `INFO_PRODUCTNAME` | `API Doc Client` | `API Doc Client Dev` | 安装目录、快捷方式、卸载显示名 |
+| `INFO_PRODUCTNAME` | `api-doc-go` | `api-doc-go-dev` | 安装目录、快捷方式、卸载显示名 |
 | `PRODUCT_EXECUTABLE` | `api-doc-client.exe` | `api-doc-client-dev.exe` | 装完的 exe 名 |
 | `UNINST_KEY_NAME` | `api-doc-go.ApiDocClient` | `api-doc-go.ApiDocClientDev` | 卸载注册表键 |
 | `INFO_PRODUCTVERSION` / `INFO_COPYRIGHT` | `$Version` / `Copyright (C) 2026 api-doc-go` | 同左 | 版本信息 |
@@ -150,6 +150,9 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 
 > 从**未写 `InstallLocation` 的旧安装包**（早期 wails 默认工程）升级时，首次不会被自动卸载；
 > 请先手动卸载旧版再安装，之后的新版本即可走自动覆盖升级。
+>
+> 显示名由 `API Doc Client` 改为 `api-doc-go` 后默认目录随之变化；升级时 `UNINST_KEY` 不变，
+> `.onInit` 仍按旧 `InstallLocation` 沿用原目录安装，不会在磁盘上出现新旧两个副本。
 
 ## 5. 验证清单
 
@@ -158,12 +161,12 @@ makensis 必须在 `build/windows/installer/` 目录里执行 —— `installer.
 - [ ] 产物名与 §1 一致，大小合理（正式版 exe 约 39–40MB；NSIS 压缩后安装包约 19–20MB。字体 HarmonyOS Sans SC 常用字子集约 2.9MB，**不必大于 exe**）
 - [ ] 安装后 exe 名是 `api-doc-client.exe`（**不是** `api-doc-go-client.exe`）
 - [ ] 开始菜单 + 桌面快捷方式能启动，图标是 `build/windows/icon.ico`
-- [ ] 「程序和功能」里显示 `API Doc Client` + 正确版本号
+- [ ] 「程序和功能」里显示 `api-doc-go` + 正确版本号
 - [ ] **覆盖升级**：旧版运行中时安装新版 → 先确认 → 进程被关闭 → 旧版被静默卸载 → 新版装到同一目录，
       无旧文件残留、任务栏不出现两个图标
 - [ ] 自定义安装目录后再次升级 → 仍装到原目录（`InstallLocation` 生效）
 - [ ] `-Dev` 时：正式版与开发版能**同时装、同时跑、各自独立卸载**
-- [ ] `-InstallScope user` 时不弹 UAC，装到 `%LOCALAPPDATA%\Programs\API Doc Client`
+- [ ] `-InstallScope user` 时不弹 UAC，装到 `%LOCALAPPDATA%\Programs\api-doc-go`
 - [ ] 卸载后安装目录、快捷方式、注册表键都清干净
 - [ ] 目标机没有 WebView2 Runtime 时：交互模式给出安装指引；`/S` 返回 `16388`
 - [ ] 托盘：开启「任务栏驻留」并选择「放入托盘」后关窗隐藏、**双击托盘图标**能唤出主窗口、右键菜单正常
