@@ -3,43 +3,27 @@
 // 文档编辑器与服务端 Web 保持一致（md-editor-v3 的 MdEditor）。
 import BodyFieldsTable from '@/components/BodyFieldsTable.vue'
 import FindBar from '@/components/FindBar.vue'
-import GenDocDialog from '@/components/GenDocDialog.vue'
 import GrpcMessagePane from '@/components/GrpcMessagePane.vue'
 import GrpcMetadataPane from '@/components/GrpcMetadataPane.vue'
 import GrpcOptionsPane from '@/components/GrpcOptionsPane.vue'
 import GrpcSchemaPane from '@/components/GrpcSchemaPane.vue'
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import KeyValueTable from '@/components/KeyValueTable.vue'
-import ResponseFields from '@/components/ResponseFields.vue'
-import { useResponseFields } from '@/composables/useResponseFields'
+import RequestDocsPane from '@/components/RequestDocsPane.vue'
+import ResponsePane from '@/components/ResponsePane.vue'
 import { useTextareaFind } from '@/composables/useTextareaFind'
 import { useUrlParamsSync } from '@/composables/useUrlParamsSync'
 import { deriveBodyFields, emptyFieldRow, mergeBodyFields, patchFieldRow, removeFieldRow } from '@/lib/bodyFields'
-import { buildApiDoc } from '@/lib/genDocs'
 import { isGrpc } from '@/lib/grpc'
-import { api } from '@/lib/ipc'
 import { hasVarPlaceholder, isParsableJson } from '@/lib/jsonHighlight'
 import { message } from '@/lib/notice'
-import {
-  deriveFields,
-  emptyFieldRow as emptyRespFieldRow,
-  mergeAppend,
-  mergeOverwrite,
-  rowsFromDoc,
-  stableRespHeaders,
-  type FieldRow,
-  type RespDocLive,
-} from '@/lib/responseFields'
 import { requestSegByTab, respSubViewByTab } from '@/lib/tabViewState'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
-import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
-import type { Auth, BodyField, ResponseDoc } from '@/types'
+import type { Auth, BodyField } from '@/types'
 import { SearchOutline } from '@vicons/ionicons5'
-import { MdEditor, MdPreview } from 'md-editor-v3'
-import 'md-editor-v3/lib/style.css'
 import { NButton, NCheckbox, NIcon, NInput, NModal, NSelect } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -47,7 +31,7 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps<{ tab: Tab }>()
 const tabs = useTabsStore()
 const coll = useCollectionStore()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 // mirror 模式只读（mode 限制，T38）
 const readonly = computed(() => coll.isReadOnly)
@@ -166,109 +150,8 @@ const bodyType = computed({
   },
 })
 
-// 文档：写回草稿即标脏（自动保存）
-const docs = computed({
-  get: () => props.tab.request.docs,
-  set: (v: string) => {
-    props.tab.request.docs = v
-    touch()
-  },
-})
-
-// ---- Docs 区「生成接口文档」----
-const isHttpReq = computed(() => !isGrpcReq.value)
-
-/** Docs 默认只读预览；仅当用户主动点「编辑」才进入编辑态。 */
+/** Docs 默认只读预览；编辑态由父级持有（页内查找按它判断是否有可查找 textarea）。 */
 const docsEditing = ref(false)
-function toggleDocsEditing(): void {
-  docsEditing.value = !docsEditing.value
-}
-
-/** 预览态是否已有内容：为空时展示空态提示，避免整块空白。 */
-const hasDoc = computed(() => (docs.value ?? '').trim().length > 0)
-
-/**
- * 生成接口文档（不直接覆写 Docs）：请求示例取 curl 代码；响应字段取**请求模型 RespDoc.params**
- * （侧栏 Resp 节点同一份；表格为空时不输出该章节）；响应示例从已保存示例里挑最新一个 JSON 体。
- * 结果先弹「生成文档」对话框（预览/编辑 + 覆盖/追加/下载），由用户显式选择落点。
- */
-const showGen = ref(false)
-const genText = ref('')
-
-async function genDocs(): Promise<void> {
-  try {
-    // 字段表格的编辑只改内存 respDoc（手动保存模型）：这里直接读当前内存快照即可，
-    // 不再需要先把 600ms 防抖待写刷进磁盘。
-    const curl = await api.generateCode('curl', coll.currentEnv, props.tab.request)
-    // 字段来源只用 respDoc.params（响应字段表的唯一真源）：空表不输出该章节
-    const fields = rowsFromDoc(props.tab.request.respDoc)
-    const examples = await api.listResponseExamples(props.tab.uid)
-    const ex = examples.find((e) => !e.response.binary && /^[{[]/.test((e.response.body ?? '').trim()))
-    genText.value = buildApiDoc({
-      request: props.tab.request,
-      curl,
-      fields,
-      exampleBody: ex?.response.body ?? '',
-      labels: {
-        desc: t('docs.desc'),
-        uri: t('docs.uri'),
-        method: t('docs.method'),
-        headers: t('docs.headers'),
-        params: t('docs.params'),
-        body: t('docs.body'),
-        bodyParams: t('docs.bodyParams'),
-        reqExample: t('docs.reqExample'),
-        resFields: t('docs.resFields'),
-        resExample: t('docs.resExample'),
-        note: t('docs.note'),
-        colName: t('docs.colName'),
-        colValue: t('docs.colValue'),
-        colType: t('docs.colType'),
-        colExample: t('docs.colExample'),
-        colDesc: t('docs.colDesc'),
-        colRequired: t('docs.colRequired'),
-        requiredYes: t('docs.requiredYes'),
-        requiredNo: t('docs.requiredNo'),
-      },
-    })
-    showGen.value = true
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
-  }
-}
-
-/** 对话框回传的落点：覆盖/追加只改 Docs（随自动保存落盘 + 同步）；下载走原生保存对话框。 */
-function onGenApply(p: { mode: 'overwrite' | 'append' | 'download'; text: string }): void {
-  if (p.mode === 'overwrite') {
-    docs.value = p.text
-  } else if (p.mode === 'append') {
-    const cur = (docs.value ?? '').trim()
-    docs.value = cur ? `${cur}\n\n${p.text}` : p.text
-  } else {
-    void downloadText(p.text)
-  }
-}
-
-/** 把指定 Markdown 经原生保存对话框落盘为 .md（复用 SaveResponseBody 的写盘能力）。 */
-async function downloadText(content: string): Promise<void> {
-  try {
-    const safeName = (props.tab.request.name || 'request').replace(/[\\/:*?"<>|]/g, '_')
-    const path = await api.saveResponseBody(`${safeName}.md`, false, content)
-    if (path) message.success(t('docs.downloaded', { path }))
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
-  }
-}
-
-/** 工具栏「下载」：下载当前 Docs 内容。 */
-async function downloadDoc(): Promise<void> {
-  await downloadText(docs.value ?? '')
-}
-
-const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
-// md-editor 自带明暗两套配色；暗色下用 github 预览主题（默认主题在深底上对比度不足）
-const mdTheme = computed(() => (isDark.value ? 'dark' : 'light'))
-const mdPreviewTheme = computed(() => (isDark.value ? 'github' : 'default'))
 
 // 页签角标：该段有内容时显示小圆点
 const hasParams = computed(() => props.tab.request.params.some((p) => p.name.trim()))
@@ -351,6 +234,23 @@ function formatBody(): void {
 const jsonBroken = computed(
   () => props.tab.request.body.raw.trim() !== '' && !hasVarPlaceholder(props.tab.request.body.raw) && !isParsableJson(props.tab.request.body.raw),
 )
+
+/** 一键复制请求体原文；按钮文案在「复制 / 已复制」间短暂切换。 */
+const copiedBody = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyBody(): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(props.tab.request.body.raw)
+    copiedBody.value = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => {
+      copiedBody.value = false
+    }, 1200)
+  } catch {
+    message.error(t('resp.copyFailed'))
+  }
+}
 
 // ---- 请求体「原文 / 表格」视图（仅 JSON 体）----
 // 原文即 JSON 本体；表格是 body.fields（唯一真源），只能手工「生成数据表格」派生，
@@ -460,213 +360,17 @@ watch(
     const savedResp = respSubViewByTab.get(key) as RespView | undefined
     respView.value = savedResp && ['body', 'headers', 'fields'].includes(savedResp) ? savedResp : 'body'
     tabs.refreshResolve()
-    initFields()
   },
 )
 
-// ---- 响应字段（Resp 分段；侧栏 Resp 节点同源）----
-// 真相源是请求模型 tab.request.respDoc；手工生成/编辑都只改内存并标脏，
-// 落盘由 Ctrl+S（tabs.flush 整条请求含 respDoc）完成，与请求体表格同一套手动保存模型。
-// 与请求体表格同构：表格只在点「生成数据表格」/「从本次响应生成」时派生，之后由用户编辑。
-const { fields, sample, hasResp, initFields, onSampleInput, applyRows, patchRow, addRow, removeRow } =
-  useResponseFields({
-    getTab: () => props.tab,
-    isGrpc: () => isGrpcReq.value,
-    onDirty: () => tabs.touch(props.tab.key),
-  })
-
-/** 「本次响应」（最近一次真实发送的响应体）：一般只读；「从本次响应生成」选「覆盖」时
- *  会把这份响应体一并写入 respDoc.sample（与字段表同一次提交）。 */
-const liveRespBody = computed(() => (props.tab.response?.body ?? ''))
-/** 「从本次响应生成」的按钮提示：没有本次响应时说明为什么不可用（禁用态靠外层 span 的 title 显示）。 */
-const genLiveTitle = computed(() =>
-  liveRespBody.value.trim() ? t('resp.genLiveHint') : t('resp.genNoLive'),
-)
-
-/** 生成确认弹窗（表格已有内容时二选一：新增 / 覆盖）与本次派生结果。 */
-const respGenDialog = ref(false)
-const respGenDerived = ref<FieldRow[]>([])
-/** 本次生成的来源：sample=手动填的响应数据；live=本次真实响应（决定是否顺带落 status/headers 快照）。 */
-const respGenSource = ref<'sample' | 'live'>('sample')
-
-/** 生成来源是「本次响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。
- *  响应头先过 stableRespHeaders：Date / Keep-Alive / Content-Length / Set-Cookie 等易变或敏感头
- *  不写进集合文件（否则每次 live 生成都会让 YAML 抖动）；自定义头（X-*）保留。 */
-function liveRespMeta(): RespDocLive | undefined {
-  const r = props.tab.response
-  if (!r) return undefined
-  const headers = stableRespHeaders(r.headers ?? [])
-  return {
-    status: r.status,
-    headers: headers.length ? headers : undefined,
-    contentType: r.contentType || undefined,
-  }
-}
-
-/**
- * 解析生成来源：返回 null 表示「空 / 非法 JSON」，返回空数组表示「合法 JSON 但没有字段」。
- */
-function parseGenSource(text: string): FieldRow[] | null {
-  if (text.trim() === '') return null
-  try {
-    JSON.parse(text)
-  } catch {
-    return null
-  }
-  return deriveFields(text)
-}
-
-/**
- * 「生成数据表格」/「从本次响应生成」：派生 5 列 → 空表直接生成，非空表弹「新增 / 覆盖」。
- * 生成默认只动表格（respDoc.params）；唯一例外是「从本次响应生成」+「覆盖」——
- * 此时把本次响应体一并写入「响应数据」（respDoc.sample），避免表格更新后样例还是旧数据。
- * 「从本次响应生成」额外把本次 status/headers/contentType 记进 respDoc（响应头子页签与状态徽标的数据源）。
- */
-function startRespGenerate(source: 'sample' | 'live'): void {
-  if (readonly.value || isGrpcReq.value) return
-  const text = source === 'sample' ? sample.value : liveRespBody.value
-  const derived = parseGenSource(text)
-  if (derived === null) {
-    message.warning(source === 'sample' ? t('resp.genInvalidSample') : t('resp.genInvalidLive'))
-    return
-  }
-  if (!derived.length) {
-    message.warning(t('resp.genEmpty'))
-    return
-  }
-  respGenSource.value = source
-  if (!fields.value.length) {
-    applyRespRows(derived, derived.length, source)
-    return
-  }
-  respGenDerived.value = derived
-  respGenDialog.value = true
-}
-
-/** 生成结果落到表格：写回内存 respDoc.params（含 required）并标脏，切到「字段表格」子页签。
- *  nextSample 非 undefined 时同时覆盖「响应数据」（live + 覆盖：响应体一并更新）。 */
-function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live', nextSample?: string): void {
-  applyRows(rows, source === 'live' ? liveRespMeta() : undefined, nextSample)
-  respView.value = 'fields'
-  message.success(t('resp.genDone', { n }))
-}
-
-/** 弹窗确认：新增=只追加缺失路径；覆盖=按本次派生重建、同路径只继承含义。
- *  「从本次响应生成」选覆盖时，响应体也替换为本次响应（新增不动响应数据）。 */
-function onConfirmRespGenerate(mode: 'append' | 'overwrite'): void {
-  const cur = fields.value
-  const derived = respGenDerived.value
-  const source = respGenSource.value
-  const merged = mode === 'append' ? mergeAppend(cur, derived) : mergeOverwrite(cur, derived)
-  const nextSample = mode === 'overwrite' && source === 'live' ? liveRespBody.value : undefined
-  respGenDialog.value = false
-  respGenDerived.value = []
-  applyRespRows(merged, mode === 'append' ? merged.length - cur.length : merged.length, source, nextSample)
-}
-
-/** 取消生成：什么都不改（不写盘）。 */
-function onCancelRespGenerate(): void {
-  respGenDialog.value = false
-  respGenDerived.value = []
-}
-
-/** 表格 5 列改动 / 追加行 / 删除行：都写回 respDoc.params（required 如实保存）。 */
-function onRespFieldUpdate(index: number, patch: Partial<FieldRow>): void {
-  patchRow(index, patch)
-}
-function onRespFieldAdd(): void {
-  addRow(emptyRespFieldRow())
-}
-function onRespFieldRemove(index: number): void {
-  removeRow(index)
-}
-
-/** 响应数据格式化失败提示（常显按钮，点击时才判断内容）。 */
-const respFormatError = ref(false)
-
-/** 响应数据编辑器：本地 textarea 双向绑定到 sample（与请求体原文同一套 JsonBodyEditor）。 */
-const respSample = computed({
-  get: () => sample.value,
-  set: (v: string) => {
-    respFormatError.value = false
-    onSampleInput(v)
-  },
-})
-// 外部同步 / 切换请求改写 sample 时，清掉上一轮的格式化错误提示
-watch(sample, () => {
-  respFormatError.value = false
-})
-
-/** 一键复制原文/响应数据；按钮文案在「复制 / 已复制」间短暂切换。 */
-const copiedRaw = ref<'body' | 'resp' | ''>('')
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
-async function copyRaw(kind: 'body' | 'resp'): Promise<void> {
-  const text = kind === 'body' ? props.tab.request.body.raw : sample.value
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
-    await navigator.clipboard.writeText(text)
-    copiedRaw.value = kind
-    if (copiedTimer) clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => {
-      if (copiedRaw.value === kind) copiedRaw.value = ''
-    }, 1200)
-  } catch {
-    message.error(t('resp.copyFailed'))
-  }
-}
-
-/** 响应数据内容类型（用于选择着色语言；格式化按钮常显，点击时才校验）。 */
-const respDataKind = computed(() => detectTextKind(sample.value))
-/** 一键格式化响应数据：写回 sample（合法 JSON/XML 才生效）；失败时与请求体一样给内联提示。 */
-function formatRespData(): void {
-  const out = prettyText(sample.value)
-  respFormatError.value = !out
-  if (!out) return
-  // 格式化只改内存并标脏：不写盘，也不触发自动保存，由用户按 Ctrl+S / 保存落盘。
-  onSampleInput(out.text)
-  // onSampleInput 会走 tabs.touch（自动保存开启时会排一次防抖写盘）；
-  // 格式化是「需要用户确认」的场景，这里再转成纯标脏并撤掉那次排队。
-  touchManual()
-  message.info(t('editor.formatNeedsSave'))
-}
-
-// 变量书签已移除（item 24）：字段表不再直接写环境变量，当时的响应数据/头看子页签。
-
-// ---- 响应内容类型（对齐 Go respDoc.contentType 与同步键 retContentType）----
-// 默认 json；非 json（text/xml/html/binary）时样例原样展示，不做缩进格式化。
-const respContentType = computed(() => props.tab.request.respDoc?.contentType || 'json')
-
-const contentTypeOptions = computed(() => [
-  { label: t('editor.ctJson'), value: 'json' },
-  { label: t('editor.ctText'), value: 'text' },
-  { label: t('editor.ctXml'), value: 'xml' },
-  { label: t('editor.ctHtml'), value: 'html' },
-  { label: t('editor.ctBinary'), value: 'binary' },
-])
-
-/** 当前类型的展示名（下拉未命中时回退原始值，兼容旧数据）。 */
-const contentTypeLabel = computed(
-  () => contentTypeOptions.value.find((o) => o.value === respContentType.value)?.label ?? respContentType.value,
-)
-
-/** 与字段表共用 respDoc 真相源：只有类型真的变了才标脏（落盘与同步随 contentType 往返）。 */
-function setContentType(v: string): void {
-  const req = props.tab.request
-  const doc: ResponseDoc = req.respDoc ?? { type: '', params: [], sample: '' }
-  if (doc.contentType === v) return
-  req.respDoc = { ...doc, contentType: v }
-  touch()
-}
-
-// ---- Resp 分段子页签（item 8）：响应数据 / 响应头 / 字段表格（默认先看响应数据） ----
+// ---- 响应字段（Resp 分段）----
+// 表格 / 响应数据 / 响应头都由 ResponsePane 维护；父级只保留子页签状态供页内查找判断。
 type RespView = 'fields' | 'body' | 'headers'
 const savedRespView = respSubViewByTab.get(props.tab.key) as RespView | undefined
 const respView = ref<RespView>(savedRespView ?? 'body')
 watch(respView, (v) => respSubViewByTab.set(props.tab.key, v))
-const respSnap = computed(() => props.tab.request.respDoc ?? null)
-
-// 「生成数据表格」成功后由本组件自己把 respView 切到 'fields'（字段表格），
-// 不再需要响应面板的跨组件跳转信号（旧「更新响应字段」按钮已移除）。
+/** 页签角标：有已生成的响应字段时显示小圆点。 */
+const hasResp = computed(() => (props.tab.request.respDoc?.params ?? []).some((p) => p.fieldName))
 
 // ---- 编辑区页内查找（textarea 版；逻辑见 composables/useTextareaFind）----
 const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, openFind, applyFind, findNext, findPrev } =
@@ -763,8 +467,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
               {{ t('editor.formatJson') }}
             </button>
             <button v-if="bodyType === 'json' || bodyType === 'text'" class="fmt" type="button" data-testid="body.copy"
-              :disabled="!tab.request.body.raw.trim()" @click="copyRaw('body')">
-              {{ copiedRaw === 'body' ? t('common.copied') : t('common.copy') }}
+              :disabled="!tab.request.body.raw.trim()" @click="copyBody">
+              {{ copiedBody ? t('common.copied') : t('common.copy') }}
             </button>
             <span v-if="bodyType === 'json' && jsonBroken" class="fmtbad" data-testid="body.jsonBroken">
               {{ t('editor.jsonBroken') }}
@@ -839,121 +543,10 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
         </div>
         <button class="link" type="button" data-testid="assert.add" @click="addAssert">{{ t('editor.addRow') }}</button>
       </div>
-      <!-- 响应字段（Resp）：真相源是请求模型 respDoc（与生成接口文档同源）；
-           子页签切换字段表格 / 更新时的响应数据与响应头快照（item 8） -->
-      <div v-else-if="seg === 'resp'" class="resp-pane">
-        <!-- 一行工具条：左侧子页签，右侧响应类型（避免三行控件堆叠） -->
-        <div class="resp-toolbar">
-          <div class="resp-sub" role="tablist">
-            <button class="sub-tab" :class="{ on: respView === 'body' }" type="button" role="tab"
-              :aria-selected="respView === 'body'" data-testid="resp.segTab" data-view="body"
-              @click="respView = 'body'">
-              {{ t('editor.respTabBody') }}<span v-if="respSnap?.status" class="sub-badge">{{ respSnap.status }}</span>
-            </button>
-            <button class="sub-tab" :class="{ on: respView === 'headers' }" type="button" role="tab"
-              :aria-selected="respView === 'headers'" data-testid="resp.segTab" data-view="headers"
-              @click="respView = 'headers'">
-              {{ t('editor.respTabHeaders') }}<span v-if="respSnap?.headers?.length" class="sub-badge">{{
-                respSnap.headers.length }}</span>
-            </button>
-            <!-- 字段表格放到最后（先手工生成表格，再看字段表） -->
-            <button class="sub-tab" :class="{ on: respView === 'fields' }" type="button" role="tab"
-              :aria-selected="respView === 'fields'" data-testid="resp.segTab" data-view="fields"
-              @click="respView = 'fields'">
-              {{ t('editor.respTabFields') }}<span v-if="fields.length" class="sub-badge">{{ fields.length }}</span>
-            </button>
-          </div>
-          <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化 -->
-          <div class="resp-ct">
-            <span class="lbl">{{ t('editor.respContentType') }}</span>
-            <n-select :value="respContentType" :options="contentTypeOptions" size="small" class="ctype"
-              data-testid="resp.contentType" :title="t('editor.respContentTypeHint')"
-              @update:value="(v: string) => setContentType(v)" />
-            <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
-          </div>
-          <!-- 字段表格的两个生成来源（gRPC 不支持 respDoc，故整段不渲染）：
-               ① 手动填的「响应数据」文本；② 本次真实响应（有响应才可点）。
-               生成默认只动表格；「从本次响应生成」选「覆盖」时一并更新「响应数据」。
-               已有表格时弹「新增 / 覆盖」。 -->
-          <div v-if="!isGrpcReq" class="resp-gen">
-            <button class="fmt" type="button" data-testid="resp.generate" :disabled="readonly"
-              :title="t('resp.genBtnHint')" @click="startRespGenerate('sample')">
-              {{ t('resp.genBtn') }}
-            </button>
-            <span class="fmt-tip" :title="genLiveTitle">
-              <button class="fmt" type="button" data-testid="resp.generateLive"
-                :disabled="readonly || !liveRespBody.trim()" :title="genLiveTitle"
-                @click="startRespGenerate('live')">
-                {{ t('resp.genLiveBtn') }}
-              </button>
-            </span>
-          </div>
-        </div>
-        <!-- 字段表格：5 列全可编辑（字段名 / 类型 / 必填 / 示例值 / 说明）+ 增行 / 删行 -->
-        <div v-if="respView === 'fields' && !isGrpcReq" class="resp-fields">
-          <response-fields :rows="fields" :readonly="readonly" @update="onRespFieldUpdate" @add="onRespFieldAdd"
-            @remove="onRespFieldRemove" />
-        </div>
-        <!-- 响应数据：可编辑的响应数据文本（字段表格只在点「生成数据表格」时派生，不看这里的变化） -->
-        <div v-else-if="respView === 'body'" class="resp-data">
-          <div class="resp-data-hd">
-            <p class="resp-data-hint">{{ t('editor.respDataHint') }}</p>
-            <span v-if="respFormatError" class="fmtbad" data-testid="resp.formatBroken">
-              {{ t('editor.formatBroken') }}
-            </span>
-            <div class="resp-data-actions">
-              <button v-if="sample.trim()" class="fmt" type="button" data-testid="resp.copyData"
-                @click="copyRaw('resp')">
-                {{ copiedRaw === 'resp' ? t('common.copied') : t('common.copy') }}
-              </button>
-              <button class="fmt" type="button" data-testid="resp.formatData" :disabled="readonly"
-                @click="formatRespData">
-                {{ t('editor.formatJson') }}
-              </button>
-            </div>
-          </div>
-          <div class="resp-data-editor" data-testid="resp.dataInput">
-            <json-body-editor v-model="respSample" :rows="16" :readonly="readonly" :lang="respDataKind ?? 'text'"
-              :placeholder="t('editor.respDataPh')" testid="resp.dataRaw" />
-          </div>
-        </div>
-        <div v-else class="resp-heads" data-testid="resp.segHeaders">
-          <div v-if="!respSnap?.headers?.length" class="resp-heads-empty">{{ t('editor.respSnapEmpty') }}</div>
-          <div v-for="(h, i) in respSnap?.headers ?? []" :key="`${h.name}-${i}`" class="hrow"
-            data-testid="resp.segHeaderRow">
-            <span class="hn mono">{{ h.name }}</span>
-            <span class="hv">{{ h.value }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-else class="docs-pane">
-        <div class="docs-bar">
-          <button class="gin" type="button" data-testid="docs.edit" @click="toggleDocsEditing">
-            {{ docsEditing ? t('docs.view') : t('docs.edit') }}
-          </button>
-          <template v-if="isHttpReq">
-            <button class="gin" type="button" data-testid="docs.gen" :disabled="readonly" @click="genDocs">
-              {{ t('docs.gen') }}
-            </button>
-            <button class="gin" type="button" data-testid="docs.download" @click="downloadDoc">
-              {{ t('docs.download') }}
-            </button>
-          </template>
-        </div>
-        <md-editor v-if="docsEditing" v-model="docs" :language="mdLanguage" :theme="mdTheme"
-          :preview-theme="mdPreviewTheme" class="md-edit" />
-        <template v-else>
-          <md-preview v-if="hasDoc" :model-value="docs" :language="mdLanguage" :theme="mdTheme"
-            :preview-theme="mdPreviewTheme" class="md-preview" />
-          <div v-else class="docs-empty">
-            <p>{{ t('docs.noDoc') }}</p>
-          </div>
-        </template>
-      </div>
+      <!-- 响应字段（Resp）：字段表格 / 响应数据 / 响应头快照由 ResponsePane 维护 -->
+      <response-pane v-else-if="seg === 'resp'" v-model:view="respView" :tab="tab" />
+      <request-docs-pane v-else v-model:editing="docsEditing" :tab="tab" />
     </div>
-
-    <!-- 生成接口文档结果弹窗（预览/编辑 + 覆盖/追加/下载） -->
-    <gen-doc-dialog v-model:show="showGen" :text="genText" @apply="onGenApply" />
 
     <!-- 「生成数据表格」确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
     <n-modal v-model:show="genDialog" preset="card" class="gen-modal"
@@ -968,28 +561,6 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             {{ t('body.genOverwrite') }}
           </n-button>
           <n-button size="small" quaternary data-testid="body.genCancel" @click="onCancelGenerate">
-            {{ t('common.cancel') }}
-          </n-button>
-        </div>
-      </div>
-    </n-modal>
-
-    <!-- 「生成数据表格」（响应字段）确认弹窗：已有表格时二选一（新增 / 覆盖），空表不弹 -->
-    <n-modal v-model:show="respGenDialog" preset="card" class="gen-modal"
-      style="width: 460px; max-width: calc(100vw - 32px)" :title="t('resp.genTitle')">
-      <div data-testid="resp.genDialog">
-        <p class="gen-hint">{{ t('resp.genHint') }}</p>
-        <p v-if="respGenSource === 'live'" class="gen-hint" data-testid="resp.genHintLive">
-          {{ t('resp.genHintLive') }}
-        </p>
-        <div class="gen-actions">
-          <n-button size="small" type="primary" data-testid="resp.genAppend" @click="onConfirmRespGenerate('append')">
-            {{ t('body.genAppend') }}
-          </n-button>
-          <n-button size="small" data-testid="resp.genOverwrite" @click="onConfirmRespGenerate('overwrite')">
-            {{ t('body.genOverwrite') }}
-          </n-button>
-          <n-button size="small" quaternary data-testid="resp.genCancel" @click="onCancelRespGenerate">
             {{ t('common.cancel') }}
           </n-button>
         </div>
@@ -1186,127 +757,9 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   font-size: 12.5px;
 }
 
-.md-edit {
-  flex: 1 1 auto;
-  min-height: 340px;
-}
-
-/* Resp 分段：一行工具条 + 内容区，避免响应类型/子页签/提示三行控件堆叠 */
-.resp-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px 12px;
-  min-height: 0;
-}
-
-.resp-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-/* 字段表格的生成按钮组（响应数据 / 本次响应两个来源） */
-.resp-gen {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.resp-gen .fmt:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 外层 span 负责显示提示：原生 button 禁用后不触发鼠标事件，自身 title 不会弹出 */
-.resp-gen .fmt-tip {
-  display: inline-flex;
-}
-
-/* 字段表格：5 列可编辑，仅表格本身 */
-.resp-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-/* 「响应数据」可编辑区：提示 + 文本域 */
-.resp-data {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-.resp-data-hint {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--app-muted);
-}
-
-.resp-data-hd {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 28px;
-}
-
-.resp-data-hd .resp-data-hint {
-  flex: 1 1 auto;
-}
-
-.resp-data-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-
 .fmt:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.resp-data-editor {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.resp-data-editor :deep(.jb) {
-  width: 100%;
-}
-
-/* 响应类型行：下拉 + 类型徽标（与子页签同排风格） */
-.resp-ct {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  padding: 0;
-}
-
-.resp-ct .lbl {
-  font-size: 12px;
-  color: var(--app-muted);
-}
-
-.resp-ct .ctype {
-  width: 120px;
-}
-
-.ct-badge {
-  font-size: 10px;
-  line-height: 14px;
-  padding: 0 6px;
-  border-radius: 9px;
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
 }
 
 .resp-sub {
@@ -1353,20 +806,6 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   color: var(--app-text-2);
 }
 
-.resp-snap {
-  margin: 8px 12px 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  background: var(--app-code-bg, var(--app-surface-2, transparent));
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow: auto;
-  max-height: calc(100% - 52px);
-}
-
 /* 请求体 JSON 示例（只读）：与响应快照同款的代码块观感 */
 .body-example {
   margin: 4px 0 0;
@@ -1399,118 +838,6 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
 .bex .body-example {
   flex: 0 0 auto;
   max-height: 220px;
-}
-
-.resp-heads {
-  margin: 8px 12px 12px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  overflow: auto;
-  max-height: calc(100% - 52px);
-}
-
-.resp-heads .hrow {
-  display: flex;
-  gap: 10px;
-  padding: 5px 10px;
-  font-size: 12px;
-  border-bottom: 1px solid var(--app-border);
-}
-
-.resp-heads .hrow:last-child {
-  border-bottom: none;
-}
-
-.resp-heads .hn {
-  flex: 0 0 auto;
-  min-width: 140px;
-  color: var(--app-text-2);
-}
-
-.resp-heads .hv {
-  flex: 1 1 auto;
-  color: var(--app-text);
-  word-break: break-all;
-}
-
-.resp-heads-empty {
-  padding: 14px 10px;
-  font-size: 12px;
-  color: var(--app-placeholder);
-}
-
-/* Docs 区：顶部工具条（「生成接口文档」）+ 编辑器纵向撑满 */
-.docs-pane {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.docs-bar {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.docs-pane .md-edit {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* 只读预览：撑满并滚动在自身容器内；给最小高度兜底，避免 flex 高度塌陷时预览整体消失 */
-.docs-pane .md-preview {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-  overflow: auto;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  padding: 12px 16px;
-}
-
-/* 预览态没有内容时的空态提示 */
-.docs-pane .docs-empty {
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed var(--app-border);
-  border-radius: 6px;
-  min-height: 160px;
-}
-
-.docs-pane .docs-empty p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--app-muted);
-}
-
-/* Docs 区（尤其左右布局区间较窄时）顶部工具栏允许换行，避免右侧按钮被截断 */
-.docs-pane :deep(.md-editor-toolbar) {
-  flex-wrap: wrap;
-}
-
-.gin {
-  border: 1px solid var(--app-accent-tint);
-  background: var(--app-accent-tint);
-  color: var(--app-accent-dark);
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: inherit;
-  padding: 4px 10px;
-  cursor: pointer;
-}
-
-.gin:hover:not(:disabled) {
-  border-color: var(--app-accent);
-}
-
-.gin:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .script-pane {

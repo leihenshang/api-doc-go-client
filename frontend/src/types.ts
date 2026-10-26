@@ -694,15 +694,13 @@ export interface MockStatus {
   hits: number
 }
 
-/** 同步绑定（集合内 .sync.json，含持久化 PAT）。 */
+/** 同步绑定（集合内 .sync.json；PAT 本地加密存储，不回传前端）。 */
 export interface SyncBindInfo {
   linked: boolean
   serverUrl: string
   projectId: number
   mode: string
   cursor: number
-  /** 持久化在集合 .sync.json 里的 PAT（仅回显设置弹窗用） */
-  token?: string
 }
 
 /** 绑定/更新同步设置入参（root 为空 = 活动根）。 */

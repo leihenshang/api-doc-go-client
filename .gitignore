@@ -10,7 +10,7 @@ build/windows/installer/wails_tools.nsh
 
 # 本地数据
 *.local.yml
-# 同步绑定（含 PAT 明文，0600）与冲突副本：随集合目录出现，不入库/不外传
+# 同步绑定（PAT 本地加密后落盘的密文，0600）与冲突副本：随集合目录出现，不入库/不外传
 .sync.json
 .conflicts/
 

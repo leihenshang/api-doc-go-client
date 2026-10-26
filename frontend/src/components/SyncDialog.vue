@@ -109,8 +109,8 @@ watch(
       serverUrl.value = bind.value.serverUrl ?? ''
       projectId.value = bind.value.projectId ?? 0
       mode.value = bind.value.mode || 'auto'
-      // PAT 已随集合持久化：回显已保存令牌（留空保存 = 沿用），重启客户端无需重填
-      token.value = bind.value.token ?? ''
+      // PAT 已本地加密保存但不再回传前端：输入框留空，直接保存会沿用已保存令牌
+      token.value = ''
       void loadPass()
       await loadConflicts()
     } catch (e) {
@@ -154,7 +154,7 @@ async function doBind(): Promise<void> {
   error.value = ''
   try {
     bind.value = (await api.setSyncBindFor(bindReq())) ?? bind.value
-    token.value = bind.value.token ?? token.value
+    token.value = ''
     message.success(t('sync.bound'))
     emit('synced', rootId.value)
   } catch (e) {
@@ -169,7 +169,7 @@ async function doSave(): Promise<void> {
   error.value = ''
   try {
     bind.value = (await api.setSyncBindFor(bindReq())) ?? bind.value
-    token.value = bind.value.token ?? token.value
+    token.value = ''
     message.success(t('sync.saved'))
     emit('synced', rootId.value)
   } catch (e) {

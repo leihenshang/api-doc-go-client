@@ -1,0 +1,218 @@
+/* App.vue 的 scoped 样式（通过 <style scoped src> 引入，仍带组件作用域）。
+   内容与拆分前的内联样式逐字一致，仅搬文件以缩小 SFC。 */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+  /* 窗口外框圆角：外壳铺满窗口，靠 overflow 把子元素的直角裁掉；
+     圆角外透出桌面（窗口透明由 main.go 的 WindowIsTranslucent 开启），
+     描边让圆角在浅色桌面上也有清晰边界。 */
+  border-radius: var(--app-radius-window);
+  border: 1px solid var(--app-border);
+  /* 窗口外阴影：桌面态由 --app-shadow-window 提供（body 已让出 --app-frame-gap 的留白），
+     浏览器态为 none。最大化时两者都归零，不会在屏幕边缘露出一圈阴影。 */
+  box-shadow: var(--app-shadow-window);
+  overflow: hidden;
+}
+
+/* 标题栏常驻后，n-spin 的两层容器需吃掉剩余高度（而非按 100% 高度计算） */
+:deep(.n-spin-container),
+:deep(.n-spin-content) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.side {
+  width: var(--app-side-w);
+  flex: 0 0 auto;
+  border-right: 1px solid var(--app-border);
+  overflow: hidden;
+  background: var(--app-sidebar);
+}
+
+/* 侧栏拖宽手柄：负 margin 覆盖在侧栏右缘上（不占布局宽，主区起点仍在 --app-side-w，
+   标题栏槽位对齐不被破坏），悬停/拖动显出细线 */
+.side-splitter {
+  flex: 0 0 5px;
+  margin-left: -5px;
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.side-splitter:hover,
+body.side-resizing .side-splitter {
+  background: var(--app-accent-tint);
+}
+
+.main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--app-panel);
+}
+
+.detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 请求详情 / 概览页之间切换（含切工作区）的淡入淡出，避免硬切造成「闪一下」 */
+.rb-fade-enter-active,
+.rb-fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.rb-fade-enter-from,
+.rb-fade-leave-to {
+  opacity: 0;
+}
+
+.work {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.work.right {
+  flex-direction: row;
+}
+
+.work.bottom {
+  flex-direction: column;
+}
+
+/* 请求区自适应剩余空间；响应区尺寸由内联 flex-basis（拖动得到）决定 */
+.work .editor-col {
+  flex: 1 1 auto;
+}
+
+/* 保底尺寸要留小：界面缩放的 zoom 作用在 <html> 上，这里的 px 会随之放大
+   （zoom 1.5 时 320px 相当于屏幕上 480px），过大会顶掉拖动得到的比例。 */
+.work.right .editor-col {
+  min-width: 160px;
+}
+
+.work.bottom .editor-col {
+  min-height: 120px;
+}
+
+.work .resp-col {
+  flex-grow: 0;
+  flex-shrink: 0;
+}
+
+.work.right .resp-col {
+  min-width: 160px;
+}
+
+.work.bottom .resp-col {
+  min-height: 100px;
+}
+
+.editor-col,
+.resp-col {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background: var(--app-panel);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 分隔区：浅灰底 + 两侧细线；中央不再放布局切换（已移到标题栏）。
+   宽度取 8px（design-spec 的 w28 偏宽，视觉上把编辑器与响应区推得太开；两侧 1px 描边后实际 10px），
+   光标与悬停底色沿用，拖拽热区仍覆盖整条。 */
+.splitter {
+  flex: 0 0 8px;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg);
+  cursor: col-resize;
+}
+
+.work.right .splitter {
+  border-left: 1px solid var(--app-border);
+  border-right: 1px solid var(--app-border);
+}
+
+.work.bottom .splitter {
+  cursor: row-resize;
+  border-top: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.splitter:hover {
+  background: var(--app-row-hover);
+}
+
+.modal-ft {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 关闭未保存的新建请求时的说明行 */
+.draft-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--app-muted);
+  line-height: 1.6;
+}
+
+/* 冲突条：磁盘文件被外部改动且本页签有未保存编辑（写盘被拒后的两个出口） */
+.conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-warn);
+  border-radius: 6px;
+  background: var(--app-warn-tint);
+  color: var(--app-text-2);
+  font-size: 12px;
+}
+
+.conflict-bar .ct {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conflict-bar .cb {
+  border: 1px solid var(--app-border-strong);
+  border-radius: 6px;
+  background: var(--app-panel);
+  color: var(--app-text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.conflict-bar .cb.strong {
+  background: var(--app-warn);
+  border-color: var(--app-warn);
+  color: var(--app-on-accent);
+  font-weight: 600;
+}

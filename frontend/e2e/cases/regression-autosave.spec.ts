@@ -69,7 +69,6 @@ test.describe('保存模型与冲突检测', () => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
     await openRequest(page, 'ping')
-    const file = path.join(dir, 'api', 'ping.yml')
 
     await openSettings(page)
     await page.getByTestId('settings.autoSave').click()

@@ -1,7 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { listCollectionFiles } from '../helpers/fs'
-import { t } from '../helpers/i18n'
 import { openCollection, treeRow, treeRowByUid } from '../helpers/ui'
 
 /**

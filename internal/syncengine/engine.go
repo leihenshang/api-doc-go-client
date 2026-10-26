@@ -19,6 +19,7 @@ import (
 	"api-doc-go-client/internal/config"
 	"api-doc-go-client/internal/index"
 	"api-doc-go-client/internal/keychain"
+	"api-doc-go-client/internal/patvault"
 	"api-doc-go-client/internal/secrets"
 )
 
@@ -1662,20 +1663,56 @@ func newOpID() string {
 	return hex.EncodeToString(b)
 }
 
-// LoadBind 从 .sync.json 读绑定（含持久化的 PAT）。
+// LoadBind 从 .sync.json 读绑定，并把 PAT 密文解到内存 Token。
+//
+// 兼容旧版明文 token：检测到后立即迁成 tokenEnc 并写回（迁移失败不阻断本次使用）。
+// 密钥丢失/换机导致密文解不开时置 TokenLocked，Token 留空——调用方据此提示重新填 PAT。
 func LoadBind(dir string) (BindInfo, error) {
 	var b BindInfo
 	data, err := os.ReadFile(filepath.Join(dir, ".sync.json"))
 	if err != nil {
 		return b, err
 	}
-	err = json.Unmarshal(data, &b)
-	return b, err
+	if err := json.Unmarshal(data, &b); err != nil {
+		return b, err
+	}
+	if b.TokenEnc != "" {
+		tok, derr := patvault.Open(b.TokenEnc)
+		if derr != nil {
+			b.TokenLocked = true
+		} else {
+			b.Token = tok
+		}
+	} else if b.legacyPlain {
+		b.legacyPlain = false
+		_ = SaveBind(dir, b) // 旧明文迁移：写回 tokenEnc，失败则下次读取再试
+	}
+	return b, nil
 }
 
-// SaveBind 写绑定。
+// SaveBind 写绑定：PAT 只以密文（tokenEnc）落盘，内存 Token 绝不写入文件。
+//
+// 空 Token 的处理：
+//   - 未关联（解绑）→ 清空密文；
+//   - 已关联且 TokenLocked → 保留既有密文（否则「解不开」会被一次保存误删）。
 func SaveBind(dir string, b BindInfo) error {
-	data, _ := json.MarshalIndent(b, "", "  ")
+	out := b
+	out.Token = ""
+	out.legacyPlain = false
+	switch {
+	case strings.TrimSpace(b.Token) != "":
+		enc, err := patvault.Seal(b.Token)
+		if err != nil {
+			return fmt.Errorf("加密保存访问令牌: %w", err)
+		}
+		out.TokenEnc = enc
+	case !b.Linked:
+		out.TokenEnc = ""
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化同步绑定: %w", err)
+	}
 	return os.WriteFile(filepath.Join(dir, ".sync.json"), data, 0o600)
 }
 

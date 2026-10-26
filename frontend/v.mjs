@@ -4,7 +4,15 @@ import { chromium } from 'playwright'
 const BASE = 'http://127.0.0.1:8178'
 const DND_DIR = 'D:\\project\\zq\\api-doc-go\\api-doc-go-client\\.tmp\\dnd\\coll'
 let pass = 0, fail = 0
-const check = (ok, label) => { ok ? (pass++, console.log('  PASS', label)) : (fail++, console.log('  FAIL', label)) }
+const check = (ok, label) => {
+  if (ok) {
+    pass++
+    console.log('  PASS', label)
+  } else {
+    fail++
+    console.log('  FAIL', label)
+  }
+}
 
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })

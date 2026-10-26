@@ -24,7 +24,7 @@ doc/        功能规划与问题记录
 ### 依赖
 
 - Go 1.26+
-- Node 18+
+- Node 20.19+（ESLint 10 要求；CI 用 Node 20）
 - Wails v2 CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
 ### 开发（桌面窗口 + 前端热更新）

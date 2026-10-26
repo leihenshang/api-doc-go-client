@@ -85,6 +85,9 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "前端类型检查"
   (cd "$ROOT/frontend" && npm run --silent type-check)
 
+  step "前端 ESLint"
+  (cd "$ROOT/frontend" && npm run --silent lint)
+
   step "i18n key 一致性"
   (cd "$ROOT/frontend" && npm run --silent i18n:check)
 
