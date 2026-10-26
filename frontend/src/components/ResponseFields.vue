@@ -28,42 +28,45 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
       <span class="fd">{{ t('resp.fieldsHint') }}</span>
     </div>
 
-    <template v-if="rows.length">
-      <div class="tr th">
-        <span>{{ t('body.colName') }}</span>
-        <span>{{ t('body.colType') }}</span>
-        <span class="c">{{ t('body.colRequired') }}</span>
-        <span>{{ t('body.colExample') }}</span>
-        <span>{{ t('body.colDesc') }}</span>
-        <span></span>
-      </div>
+    <!-- 行区独立滚动：表格高度超过页签可视高度时只滚行区，表头（sticky）与底部新增按钮保持可见 -->
+    <div class="rows">
+      <template v-if="rows.length">
+        <div class="tr th">
+          <span>{{ t('body.colName') }}</span>
+          <span>{{ t('body.colType') }}</span>
+          <span class="c">{{ t('body.colRequired') }}</span>
+          <span>{{ t('body.colExample') }}</span>
+          <span>{{ t('body.colDesc') }}</span>
+          <span></span>
+        </div>
 
-      <div v-for="(f, i) in rows" :key="i" class="tr" data-testid="resp.fields.row" :data-path="f.path">
-        <n-input :value="f.path" size="small" data-testid="resp.fields.name" :disabled="readonly"
-          :placeholder="t('body.namePh')" @update:value="emit('update', i, { path: $event })" />
-        <n-select :value="f.type || null" size="small" filterable clearable tag :disabled="readonly"
-          :options="TYPE_OPTIONS.map((v) => ({ label: v, value: v }))" data-testid="resp.fields.type"
-          :placeholder="t('body.colType')" @update:value="emit('update', i, { type: $event ?? '' })" />
-        <span class="c">
-          <n-checkbox :checked="f.required" :disabled="readonly" data-testid="resp.fields.required"
-            @update:checked="emit('update', i, { required: $event })" />
-        </span>
-        <n-input :value="f.value" size="small" data-testid="resp.fields.example" :disabled="readonly"
-          :placeholder="t('body.colExample')" @update:value="emit('update', i, { value: $event })" />
-        <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning" :disabled="readonly"
-          :placeholder="t('common.optional')" @update:value="emit('update', i, { meaning: $event })" />
-        <n-button size="tiny" quaternary type="error" data-testid="resp.fields.remove" :disabled="readonly"
-          :title="t('body.removeRow')" @click="emit('remove', i)">
-          <template #icon>
-            <n-icon><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor"
-              d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Z" /></svg></n-icon>
-          </template>
-        </n-button>
-      </div>
-    </template>
+        <div v-for="(f, i) in rows" :key="i" class="tr" data-testid="resp.fields.row" :data-path="f.path">
+          <n-input :value="f.path" size="small" data-testid="resp.fields.name" :disabled="readonly"
+            :placeholder="t('body.namePh')" @update:value="emit('update', i, { path: $event })" />
+          <n-select :value="f.type || null" size="small" filterable clearable tag :disabled="readonly"
+            :options="TYPE_OPTIONS.map((v) => ({ label: v, value: v }))" data-testid="resp.fields.type"
+            :placeholder="t('body.colType')" @update:value="emit('update', i, { type: $event ?? '' })" />
+          <span class="c">
+            <n-checkbox :checked="f.required" :disabled="readonly" data-testid="resp.fields.required"
+              @update:checked="emit('update', i, { required: $event })" />
+          </span>
+          <n-input :value="f.value" size="small" data-testid="resp.fields.example" :disabled="readonly"
+            :placeholder="t('body.colExample')" @update:value="emit('update', i, { value: $event })" />
+          <n-input :value="f.meaning" size="small" data-testid="resp.fields.meaning" :disabled="readonly"
+            :placeholder="t('common.optional')" @update:value="emit('update', i, { meaning: $event })" />
+          <n-button size="tiny" quaternary type="error" data-testid="resp.fields.remove" :disabled="readonly"
+            :title="t('body.removeRow')" @click="emit('remove', i)">
+            <template #icon>
+              <n-icon><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor"
+                d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Z" /></svg></n-icon>
+            </template>
+          </n-button>
+        </div>
+      </template>
 
-    <!-- 空态：表格不再从响应数据自动派生，只有点生成按钮或「新增行」才有内容 -->
-    <p v-else class="fields-empty" data-testid="resp.fields.empty">{{ t('resp.fieldsEmpty') }}</p>
+      <!-- 空态：表格不再从响应数据自动派生，只有点生成按钮或「新增行」才有内容 -->
+      <p v-else class="fields-empty" data-testid="resp.fields.empty">{{ t('resp.fieldsEmpty') }}</p>
+    </div>
 
     <div class="tf">
       <n-button size="tiny" data-testid="resp.fields.add" :disabled="readonly" @click="emit('add')">
@@ -90,6 +93,13 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
   flex-wrap: wrap;
   padding: 8px 12px;
   border-bottom: 1px solid var(--app-border);
+}
+
+/* 行区：可用高度不足时在这里滚动（表头 sticky、底部新增按钮不滚走） */
+.rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .ft {
@@ -124,6 +134,9 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
 }
 
 .tr.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--app-surface-2);
   color: var(--app-muted);
   font-size: 11.5px;

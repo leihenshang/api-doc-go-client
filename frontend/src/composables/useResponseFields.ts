@@ -57,7 +57,8 @@ export function useResponseFields(ctx: ResponseFieldsCtx) {
      */
     function commit(liveMeta?: RespDocLive): void {
         const tab = ctx.getTab()
-        // sample/type 恒按当前「响应数据」：生成/编辑表格**不修改**「响应数据」
+        // sample/type 按当前「响应数据」；仅「从本次响应生成」选「覆盖」时由 applyRows
+        // 先写入 nextSample，于是这次提交会连同响应体一起更新。
         const doc = buildRespDoc(fields.value, tab.request.respDoc, {
             sample: sample.value,
             type: rootJsonType(sample.value),
@@ -87,8 +88,10 @@ export function useResponseFields(ctx: ResponseFieldsCtx) {
         commit()
     }
 
-    /** 写入整张表格（生成 / 覆盖 / 新增 / 删行）；liveMeta 仅在「从本次响应生成」时传入。 */
-    function applyRows(rows: FieldRow[], liveMeta?: RespDocLive): void {
+    /** 写入整张表格（生成 / 覆盖 / 新增 / 删行）；liveMeta 仅在「从本次响应生成」时传入。
+     *  nextSample 传入时一并替换「响应数据」（live 来源选「覆盖」：响应体随表格一起更新）。 */
+    function applyRows(rows: FieldRow[], liveMeta?: RespDocLive, nextSample?: string): void {
+        if (nextSample !== undefined) sample.value = nextSample
         fields.value = rows
         commit(liveMeta)
     }

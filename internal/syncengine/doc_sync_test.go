@@ -87,8 +87,11 @@ func TestCollectDocOpsTombstone(t *testing.T) {
 	}
 }
 
-// TestCollectDocOpsEmptyGuard 审核 C#1 防呆：磁盘上仍有 .md（但 frontmatter 解析失败被静默丢弃）
-// 而基线有货时，视为扫描异常拒绝批量删除——宁可不推，也决不把远端整仓文档删光。
+// TestCollectDocOpsEmptyGuard 审核 C#1 防呆：磁盘上仍有 .md 而 ListDocs 扫空、基线有货时，
+// 视为扫描异常拒绝批量删除——宁可不推，也决不把远端整仓文档删光。
+// 注意 B24 起「frontmatter 解析失败」不再丢弃文档（回落为全文正文 + 路径哈希 uid），
+// 故这里用**扫描白名单排除**的子目录 README.md 构造「文件在、清单空」：
+// scanExtAllowed 明确跳过子目录 README.md，但 hasAnyMarkdown 仍能看到它。
 // （磁盘真无 .md 的合法墓碑场景由 P1-10 的 TestP110ExternalDocRemovalStillEmitsDocDelete 把关）
 func TestCollectDocOpsEmptyGuard(t *testing.T) {
 	dir := t.TempDir()
@@ -96,11 +99,10 @@ func TestCollectDocOpsEmptyGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	// 一篇永远解析不了的坏 md：ListDocs 成功但清单为空（文件被静默丢弃）
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "docs", "broken.md"), []byte("---\nuid: [oops\n---\n正文\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "docs", "README.md"), []byte("# 子目录说明\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_ = c

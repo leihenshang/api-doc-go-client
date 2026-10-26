@@ -26,42 +26,45 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
       <span class="fd">{{ t('body.hint') }}</span>
     </div>
 
-    <template v-if="rows.length">
-      <div class="tr th">
-        <span>{{ t('body.colName') }}</span>
-        <span>{{ t('body.colType') }}</span>
-        <span class="c">{{ t('body.colRequired') }}</span>
-        <span>{{ t('body.colExample') }}</span>
-        <span>{{ t('body.colDesc') }}</span>
-        <span></span>
-      </div>
+    <!-- 行区独立滚动：表格高度超过页签可视高度时只滚行区，表头（sticky）与底部新增按钮保持可见 -->
+    <div class="rows">
+      <template v-if="rows.length">
+        <div class="tr th">
+          <span>{{ t('body.colName') }}</span>
+          <span>{{ t('body.colType') }}</span>
+          <span class="c">{{ t('body.colRequired') }}</span>
+          <span>{{ t('body.colExample') }}</span>
+          <span>{{ t('body.colDesc') }}</span>
+          <span></span>
+        </div>
 
-      <div v-for="(f, i) in rows" :key="i" class="tr" data-testid="body.fieldsRow" :data-path="f.name">
-        <n-input :value="f.name" size="small" data-testid="body.fieldName" :placeholder="t('body.namePh')"
-          @update:value="emit('update', i, { name: $event })" />
-        <n-select :value="f.type || null" size="small" filterable clearable tag
-          :options="TYPE_OPTIONS.map((v) => ({ label: v, value: v }))" data-testid="body.fieldType"
-          :placeholder="t('body.colType')" @update:value="emit('update', i, { type: $event ?? '' })" />
-        <span class="c">
-          <n-checkbox :checked="f.required" data-testid="body.fieldRequired"
-            @update:checked="emit('update', i, { required: $event })" />
-        </span>
-        <n-input :value="f.example" size="small" data-testid="body.fieldExample" :placeholder="t('body.colExample')"
-          @update:value="emit('update', i, { example: $event })" />
-        <n-input :value="f.description" size="small" data-testid="body.fieldDesc" :placeholder="t('common.optional')"
-          @update:value="emit('update', i, { description: $event })" />
-        <n-button size="tiny" quaternary type="error" data-testid="body.fieldRemove" :title="t('body.removeRow')"
-          @click="emit('remove', i)">
-          <template #icon>
-            <n-icon><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor"
-              d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Z" /></svg></n-icon>
-          </template>
-        </n-button>
-      </div>
-    </template>
+        <div v-for="(f, i) in rows" :key="i" class="tr" data-testid="body.fieldsRow" :data-path="f.name">
+          <n-input :value="f.name" size="small" data-testid="body.fieldName" :placeholder="t('body.namePh')"
+            @update:value="emit('update', i, { name: $event })" />
+          <n-select :value="f.type || null" size="small" filterable clearable tag
+            :options="TYPE_OPTIONS.map((v) => ({ label: v, value: v }))" data-testid="body.fieldType"
+            :placeholder="t('body.colType')" @update:value="emit('update', i, { type: $event ?? '' })" />
+          <span class="c">
+            <n-checkbox :checked="f.required" data-testid="body.fieldRequired"
+              @update:checked="emit('update', i, { required: $event })" />
+          </span>
+          <n-input :value="f.example" size="small" data-testid="body.fieldExample" :placeholder="t('body.colExample')"
+            @update:value="emit('update', i, { example: $event })" />
+          <n-input :value="f.description" size="small" data-testid="body.fieldDesc" :placeholder="t('common.optional')"
+            @update:value="emit('update', i, { description: $event })" />
+          <n-button size="tiny" quaternary type="error" data-testid="body.fieldRemove" :title="t('body.removeRow')"
+            @click="emit('remove', i)">
+            <template #icon>
+              <n-icon><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor"
+                d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Z" /></svg></n-icon>
+            </template>
+          </n-button>
+        </div>
+      </template>
 
-    <!-- 空态：表格不再从 JSON 自动派生，只有点「生成数据表格」或手工「新增行」才有内容 -->
-    <p v-else class="bfields-empty">{{ t('body.empty') }}</p>
+      <!-- 空态：表格不再从 JSON 自动派生，只有点「生成数据表格」或手工「新增行」才有内容 -->
+      <p v-else class="bfields-empty">{{ t('body.empty') }}</p>
+    </div>
 
     <div class="tf">
       <n-button size="tiny" data-testid="body.fieldAdd" @click="emit('add')">+ {{ t('body.addRow') }}</n-button>
@@ -71,6 +74,10 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
 
 <style scoped>
 .bfields {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--app-border);
   border-radius: 6px;
 }
@@ -80,6 +87,13 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
   align-items: center;
   gap: 8px;
   padding: 8px 10px 6px;
+}
+
+/* 行区：可用高度不足时在这里滚动（表头 sticky、底部新增按钮不滚走） */
+.rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .ft {
@@ -114,6 +128,9 @@ const TYPE_OPTIONS = ['string', 'integer', 'number', 'boolean', 'array', 'object
 }
 
 .tr.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--app-surface-2);
   color: var(--app-muted);
   font-size: 11.5px;
