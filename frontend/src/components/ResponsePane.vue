@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 响应字段（Resp 分段，从 RequestEditor 拆出）：字段表格 / 响应数据 / 响应头快照三个子页签，
-// 「生成数据表格」/「从本次响应生成」的派生与新增/覆盖确认都在这里。
+// 「生成数据表格」/「从当前响应生成」的派生与新增/覆盖确认都在这里。
 // 真相源是请求模型 tab.request.respDoc；所有编辑只改内存并标脏，落盘由 Ctrl+S 完成。
 import JsonBodyEditor from '@/components/JsonBodyEditor.vue'
 import ResponseFields from '@/components/ResponseFields.vue'
 import { useResponseFields } from '@/composables/useResponseFields'
+import { getCurrentResponse } from '@/lib/currentResponse'
 import { isGrpc } from '@/lib/grpc'
 import { message } from '@/lib/notice'
 import {
@@ -12,6 +13,7 @@ import {
   emptyFieldRow as emptyRespFieldRow,
   mergeAppend,
   mergeOverwrite,
+  normalizeRespContentType,
   stableRespHeaders,
   type FieldRow,
   type RespDocLive,
@@ -65,28 +67,33 @@ watch(
 )
 watch(view, (v) => respSubViewByTab.set(props.tab.key, v))
 
-/** 「本次响应」（最近一次真实发送的响应体）：一般只读；「从本次响应生成」选「覆盖」时
- *  会把这份响应体一并写入 respDoc.sample（与字段表同一次提交）。 */
-const liveRespBody = computed(() => (props.tab.response?.body ?? ''))
-/** 「从本次响应生成」的按钮提示：没有本次响应时说明为什么不可用（禁用态靠外层 span 的 title 显示）。 */
-const genLiveTitle = computed(() => (liveRespBody.value.trim() ? t('resp.genLiveHint') : t('resp.genNoLive')))
+/** 「当前响应」= 右侧响应面板此刻展示的内容（实时响应，或回看的已保存示例）。
+ *  面板未上报时（例如尚未渲染）回退到本页签最近一次发送结果。 */
+const currentResp = computed(() => getCurrentResponse(props.tab.key) ?? props.tab.response ?? null)
+const currentRespBody = computed(() => currentResp.value?.body ?? '')
+/** 「从当前响应生成」的按钮提示：没有可读响应时说明为什么不可用（禁用态靠外层 span 的 title 显示）。 */
+const genCurrentTitle = computed(() =>
+  currentRespBody.value.trim() ? t('resp.genLiveHint') : t('resp.genNoLive'),
+)
 
 const respGenDialog = ref(false)
 const respGenDerived = ref<FieldRow[]>([])
-/** 本次生成的来源：sample=手动填的响应数据；live=本次真实响应（决定是否顺带落 status/headers 快照）。 */
-const respGenSource = ref<'sample' | 'live'>('sample')
+/** 本次生成的来源：sample=手动填的响应数据；current=右侧当前展示的响应（决定是否顺带落 status/headers 快照）。 */
+type RespGenSource = 'sample' | 'current'
+const respGenSource = ref<RespGenSource>('sample')
 
-/** 生成来源是「本次响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。
+/** 生成来源是「当前响应」时带上的快照元信息（status/headers/contentType），手动来源返回 undefined。
  *  响应头先过 stableRespHeaders：Date / Keep-Alive / Content-Length / Set-Cookie 等易变或敏感头
- *  不写进集合文件（否则每次 live 生成都会让 YAML 抖动）；自定义头（X-*）保留。 */
-function liveRespMeta(): RespDocLive | undefined {
-  const r = props.tab.response
+ *  不写进集合文件（否则每次生成都会让 YAML 抖动）；自定义头（X-*）保留。
+ *  contentType 归一成界面 5 个取值，避免把原始 MIME（application/json）存进 respdoc。 */
+function currentRespMeta(): RespDocLive | undefined {
+  const r = currentResp.value
   if (!r) return undefined
   const headers = stableRespHeaders(r.headers ?? [])
   return {
     status: r.status,
     headers: headers.length ? headers : undefined,
-    contentType: r.contentType || undefined,
+    contentType: normalizeRespContentType(r.contentType) || undefined,
   }
 }
 
@@ -102,14 +109,15 @@ function parseGenSource(text: string): FieldRow[] | null {
 }
 
 /**
- * 「生成数据表格」/「从本次响应生成」：派生 5 列 → 空表直接生成，非空表弹「新增 / 覆盖」。
- * 生成默认只动表格（respDoc.params）；唯一例外是「从本次响应生成」+「覆盖」——
- * 此时把本次响应体一并写入「响应数据」（respDoc.sample），避免表格更新后样例还是旧数据。
- * 「从本次响应生成」额外把本次 status/headers/contentType 记进 respDoc（响应头子页签与状态徽标的数据源）。
+ * 「生成数据表格」/「从当前响应生成」：派生 5 列 → 空表直接生成，非空表弹「新增 / 覆盖」。
+ * 生成默认只动表格（respDoc.params）；「响应数据」的同步规则：
+ *  - 来源是当前响应时，**响应数据为空就一并填入**（避免生成了表格、样例还是空的）；
+ *  - 响应数据已有内容时，只有选「覆盖」才替换（「新增」不动样例）。
+ * 「从当前响应生成」额外把当前响应的 status/headers/contentType 记进 respDoc（响应头子页签与状态徽标的数据源）。
  */
-function startRespGenerate(source: 'sample' | 'live'): void {
+function startRespGenerate(source: RespGenSource): void {
   if (readonly.value || isGrpcReq.value) return
-  const text = source === 'sample' ? sample.value : liveRespBody.value
+  const text = source === 'sample' ? sample.value : currentRespBody.value
   const derived = parseGenSource(text)
   if (derived === null) {
     message.warning(source === 'sample' ? t('resp.genInvalidSample') : t('resp.genInvalidLive'))
@@ -121,29 +129,36 @@ function startRespGenerate(source: 'sample' | 'live'): void {
   }
   respGenSource.value = source
   if (!fields.value.length) {
-    applyRespRows(derived, derived.length, source)
+    applyRespRows(derived, derived.length, source, nextSampleFor(source, 'append'))
     return
   }
   respGenDerived.value = derived
   respGenDialog.value = true
 }
 
+/** 「从当前响应生成」时是否顺带写入「响应数据」：数据为空就补上；已有数据只有「覆盖」才替换。 */
+function nextSampleFor(source: RespGenSource, mode: 'append' | 'overwrite'): string | undefined {
+  if (source !== 'current') return undefined
+  if (mode === 'overwrite' || !sample.value.trim()) return currentRespBody.value
+  return undefined
+}
+
 /** 生成结果落到表格：写回内存 respDoc.params（含 required）并标脏，切到「字段表格」子页签。
- *  nextSample 非 undefined 时同时覆盖「响应数据」（live + 覆盖：响应体一并更新）。 */
-function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live', nextSample?: string): void {
-  applyRows(rows, source === 'live' ? liveRespMeta() : undefined, nextSample)
+ *  nextSample 非 undefined 时同时覆盖「响应数据」。 */
+function applyRespRows(rows: FieldRow[], n: number, source: RespGenSource, nextSample?: string): void {
+  applyRows(rows, source === 'current' ? currentRespMeta() : undefined, nextSample)
   view.value = 'fields'
   message.success(t('resp.genDone', { n }))
 }
 
-/** 弹窗确认：新增=只追加缺失路径；覆盖=按本次派生重建、同路径只继承含义。
- *  「从本次响应生成」选覆盖时，响应体也替换为本次响应（新增不动响应数据）。 */
+/** 弹窗确认：新增=只追加缺失路径；覆盖=按当前派生重建、同路径只继承含义。
+ *  「响应数据」按 nextSampleFor 的规则同步（为空必填；已有数据仅「覆盖」替换）。 */
 function onConfirmRespGenerate(mode: 'append' | 'overwrite'): void {
   const cur = fields.value
   const derived = respGenDerived.value
   const source = respGenSource.value
   const merged = mode === 'append' ? mergeAppend(cur, derived) : mergeOverwrite(cur, derived)
-  const nextSample = mode === 'overwrite' && source === 'live' ? liveRespBody.value : undefined
+  const nextSample = nextSampleFor(source, mode)
   respGenDialog.value = false
   respGenDerived.value = []
   applyRespRows(merged, mode === 'append' ? merged.length - cur.length : merged.length, source, nextSample)
@@ -209,7 +224,9 @@ function formatRespData(): void {
 }
 
 // ---- 响应内容类型（对齐 Go respDoc.contentType 与同步键 retContentType）----
-const respContentType = computed(() => props.tab.request.respDoc?.contentType || 'json')
+// 空 = 未设置：不再默默冒充 JSON（旧实现 `|| 'json'` 会把「没选过」显示成 application/json）。
+// 读到的可能是历史/外部写入的原始 MIME，统一归一成 5 个取值再展示。
+const respContentType = computed(() => normalizeRespContentType(props.tab.request.respDoc?.contentType))
 const contentTypeOptions = computed(() => [
   { label: t('editor.ctJson'), value: 'json' },
   { label: t('editor.ctText'), value: 'text' },
@@ -218,15 +235,16 @@ const contentTypeOptions = computed(() => [
   { label: t('editor.ctBinary'), value: 'binary' },
 ])
 const contentTypeLabel = computed(
-  () => contentTypeOptions.value.find((o) => o.value === respContentType.value)?.label ?? respContentType.value,
+  () => contentTypeOptions.value.find((o) => o.value === respContentType.value)?.label ?? '',
 )
 
 /** 与字段表共用 respDoc 真相源：只有类型真的变了才标脏（落盘与同步随 contentType 往返）。 */
 function setContentType(v: string): void {
   const req = props.tab.request
   const doc: ResponseDoc = req.respDoc ?? { type: '', params: [], sample: '' }
-  if (doc.contentType === v) return
-  req.respDoc = { ...doc, contentType: v }
+  const next = normalizeRespContentType(v)
+  if (normalizeRespContentType(doc.contentType) === next) return
+  req.respDoc = { ...doc, contentType: next }
   touch()
 }
 
@@ -256,27 +274,29 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
           {{ t('editor.respTabFields') }}<span v-if="fields.length" class="sub-badge">{{ fields.length }}</span>
         </button>
       </div>
-      <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化 -->
+      <!-- 响应类型：落 respDoc.contentType（同步键 retContentType），非 JSON 时样例不格式化；
+           未设置时下拉留空并显「未设置」占位，不再冒充 JSON -->
       <div class="resp-ct">
         <span class="lbl">{{ t('editor.respContentType') }}</span>
-        <n-select :value="respContentType" :options="contentTypeOptions" size="small" class="ctype"
+        <n-select :value="respContentType || null" :options="contentTypeOptions" size="small" class="ctype"
           data-testid="resp.contentType" :title="t('editor.respContentTypeHint')"
+          :placeholder="t('editor.respContentTypeUnset')"
           @update:value="(v: string) => setContentType(v)" />
-        <span class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
+        <span v-if="contentTypeLabel" class="ct-badge" data-testid="resp.contentTypeBadge">{{ contentTypeLabel }}</span>
       </div>
       <!-- 字段表格的两个生成来源（gRPC 不支持 respDoc，故整段不渲染）：
-           ① 手动填的「响应数据」文本；② 本次真实响应（有响应才可点）。
-           生成默认只动表格；「从本次响应生成」选「覆盖」时一并更新「响应数据」。
+           ① 手动填的「响应数据」文本；② 右侧当前展示的响应（实时响应或已保存示例，有内容才可点）。
+           生成默认只动表格；「从当前响应生成」时响应数据为空会一并填入，已有数据选「覆盖」才替换。
            已有表格时弹「新增 / 覆盖」。 -->
       <div v-if="!isGrpcReq" class="resp-gen">
         <button class="fmt" type="button" data-testid="resp.generate" :disabled="readonly"
           :title="t('resp.genBtnHint')" @click="startRespGenerate('sample')">
           {{ t('resp.genBtn') }}
         </button>
-        <span class="fmt-tip" :title="genLiveTitle">
+        <span class="fmt-tip" :title="genCurrentTitle">
           <button class="fmt" type="button" data-testid="resp.generateLive"
-            :disabled="readonly || !liveRespBody.trim()" :title="genLiveTitle"
-            @click="startRespGenerate('live')">
+            :disabled="readonly || !currentRespBody.trim()" :title="genCurrentTitle"
+            @click="startRespGenerate('current')">
             {{ t('resp.genLiveBtn') }}
           </button>
         </span>
@@ -322,7 +342,7 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
       style="width: 460px; max-width: calc(100vw - 32px)" :title="t('resp.genTitle')">
       <div data-testid="resp.genDialog">
         <p class="gen-hint">{{ t('resp.genHint') }}</p>
-        <p v-if="respGenSource === 'live'" class="gen-hint" data-testid="resp.genHintLive">
+        <p v-if="respGenSource === 'current'" class="gen-hint" data-testid="resp.genHintLive">
           {{ t('resp.genHintLive') }}
         </p>
         <div class="gen-actions">
@@ -361,7 +381,7 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
   gap: 10px;
 }
 
-/* 字段表格的生成按钮组（响应数据 / 本次响应两个来源） */
+/* 字段表格的生成按钮组（响应数据 / 当前响应两个来源） */
 .resp-gen {
   display: flex;
   align-items: center;

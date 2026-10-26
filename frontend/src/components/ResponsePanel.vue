@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // 响应面板：状态栏 / 页签（响应体 / 响应头 / 尾元数据）/ 工具条 / 内容区。
-// 响应字段表由请求编辑器的「响应字段（Resp）」分段维护（手工「生成数据表格」/「从本次响应生成」）；
-// 本面板不再提供「更新响应字段」动作，只负责展示与保存响应示例。
+// 响应字段表由请求编辑器的「响应字段（Resp）」分段维护（手工「生成数据表格」/「从当前响应生成」）；
+// 本面板不再提供「更新响应字段」动作，只负责展示与保存响应示例，
+// 并把「当前展示的响应」（实时或回看的示例）上报给编辑器作为生成来源。
 import FindBar from '@/components/FindBar.vue'
 import JsonTree from '@/components/JsonTree.vue'
 import ResponseToolbar from '@/components/ResponseToolbar.vue'
 import { useDomFind } from '@/composables/useDomFind'
+import { clearCurrentResponse, setCurrentResponse } from '@/lib/currentResponse'
 import { formatBytes, httpStatusText } from '@/lib/format'
 import { grpcCodeLabel, grpcStatusType } from '@/lib/grpc'
 import { api } from '@/lib/ipc'
@@ -17,7 +19,7 @@ import type { Tab } from '@/stores/tabs'
 import type { ResponseExample, SendResult } from '@/types'
 import { BookmarkOutline, DownloadOutline, TrashOutline } from '@vicons/ionicons5'
 import { NAlert, NButton, NIcon, NInput, NModal, NPopconfirm, NSelect, NTag } from 'naive-ui'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ tab: Tab }>()
@@ -92,6 +94,12 @@ const fileInfo = computed(() =>
 const examples = ref<ResponseExample[]>([])
 const viewingUid = ref('')
 
+// 把右侧当前展示的响应（实时响应或回看的已保存示例）同步给编辑器：
+// 「从当前响应生成」直接按它派生，不必重新发送。
+// 必须放在 examples/viewingUid 之后：immediate 会立即求值 display，提前会命中 TDZ。
+watch(display, (r) => setCurrentResponse(props.tab.key, r), { immediate: true })
+onBeforeUnmount(() => clearCurrentResponse(props.tab.key))
+
 const exampleOptions = computed(() => [
   { value: '', label: t('resp.liveResponse') },
   ...examples.value.map((e) => ({ value: e.uid, label: e.name })),
@@ -105,6 +113,7 @@ watch(
       respPanelSegByTab.set(prev, seg.value)
       respPanelViewByTab.set(prev, view.value)
       respPanelWrapByTab.set(prev, wrap.value)
+      clearCurrentResponse(prev)
     }
     const saved = respPanelSegByTab.get(key) as 'body' | 'headers' | 'trailers' | undefined
     seg.value = saved && ['body', 'headers', 'trailers'].includes(saved) ? saved : 'body'
@@ -210,7 +219,7 @@ async function submitSave(): Promise<void> {
     const saved = await api.saveResponseExample(props.tab.request, name, props.tab.response as SendResult)
     await reloadExamples()
     showSave.value = false
-    // 保存后自动切到该示例快照（与「回看只读」交互一致，可经「回到本次响应」返回）
+    // 保存后自动切到该示例快照（与「回看只读」交互一致，可经「回到当前响应」返回）
     viewingUid.value = saved.uid
     message.success(t('resp.exampleSaved', { name: saved.name }))
   } catch (e) {
@@ -265,7 +274,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
 
     <template v-if="!tab.error">
       <!-- 状态栏常驻：尚未发送 / 回看示例时都在同一位置；无内容时只隐藏状态码与耗时/体积。
-           示例下拉也留在这里 —— 没有本次响应时仍可直接切到已保存的示例快照。 -->
+           示例下拉也留在这里 —— 没有实时响应时仍可直接切到已保存的示例快照。 -->
       <div class="status-bar" data-testid="resp.statusbar">
         <span class="ttl">{{ t('resp.title') }}</span>
         <n-tag v-if="display?.status" :type="statusType" :bordered="false" class="badge" data-testid="resp.status">
@@ -378,7 +387,7 @@ const { findOn, findKw, findTotal, findIndex, paneRef, findBarRef, openFind, fin
           </div>
         </div>
       </template>
-      <!-- 无本次响应也未回看示例：空态（状态栏仍在上方常驻） -->
+      <!-- 无实时响应也未回看示例：空态（状态栏仍在上方常驻） -->
       <div v-else class="empty">
         <svg class="plane" data-testid="resp.emptyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="1.4">

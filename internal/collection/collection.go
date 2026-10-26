@@ -895,7 +895,10 @@ func parseRespDocExtra(extra map[string]any) *ResponseDoc {
 	if json.Unmarshal(b, &doc) != nil {
 		return nil
 	}
-	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" {
+	// 空段判定要算上 contentType 与响应快照：只选了响应类型（还没填字段/数据）的 doc
+	// 同样要留着，否则重读时被当作空段丢掉，界面响应类型会回退成默认 json。
+	if doc.Type == "" && len(doc.Params) == 0 && doc.Sample == "" &&
+		doc.ContentType == "" && doc.Status == 0 && len(doc.Headers) == 0 {
 		return nil
 	}
 	return &doc

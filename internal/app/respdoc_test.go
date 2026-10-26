@@ -73,6 +73,34 @@ func TestUpdateResponseDoc(t *testing.T) {
 	}
 }
 
+// 只选了响应类型（还没填字段/数据）时 respdoc 必须保留并随文件往返；
+// 回归：旧实现把它当空段丢掉，重读后界面响应类型回退成默认 json。
+func TestUpdateResponseDocKeepsContentTypeOnly(t *testing.T) {
+	core, _ := newTestApp(t)
+	r, err := core.CreateRequest("", "只看类型", "GET")
+	if err != nil {
+		t.Fatalf("建请求失败: %v", err)
+	}
+	if err := core.UpdateResponseDoc(ResponseDocInput{UID: r.UID, ContentType: "xml"}); err != nil {
+		t.Fatalf("写响应类型失败: %v", err)
+	}
+	got, err := core.ReadRequest(r.UID)
+	if err != nil {
+		t.Fatalf("重读失败: %v", err)
+	}
+	if got.RespDoc == nil || got.RespDoc.ContentType != "xml" {
+		t.Fatalf("只设响应类型时 respdoc 应保留并往返，实际: %+v", got.RespDoc)
+	}
+
+	// 连响应类型一起清空：整段移除（不留空壳）
+	if err := core.UpdateResponseDoc(ResponseDocInput{UID: r.UID}); err != nil {
+		t.Fatalf("清空失败: %v", err)
+	}
+	if got2, err := core.ReadRequest(r.UID); err != nil || got2.RespDoc != nil {
+		t.Fatalf("全空应移除 respdoc，实际: %+v err=%v", got2.RespDoc, err)
+	}
+}
+
 // gRPC 请求不承载响应文档：写入应被拒绝，避免静默丢失。
 func TestUpdateResponseDocRejectGRPC(t *testing.T) {
 	core, _ := newTestApp(t)

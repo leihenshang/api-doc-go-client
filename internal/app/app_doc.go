@@ -381,7 +381,11 @@ func (a *App) UpdateResponseDoc(in ResponseDocInput) error {
 	if r.IsGRPC() {
 		return errors.New("gRPC 请求暂不支持响应文档")
 	}
-	if strings.TrimSpace(in.Type) == "" && len(in.Params) == 0 && strings.TrimSpace(in.Sample) == "" {
+	// 只有 type/params/sample/contentType/快照全空才算「清空响应文档」；
+	// 仅选了响应类型（如 xml）而还没填字段/数据时也必须保留，否则重读时会被当空段丢弃、
+	// 界面回退成默认 json（响应类型显示错乱的根因）。
+	if strings.TrimSpace(in.Type) == "" && len(in.Params) == 0 && strings.TrimSpace(in.Sample) == "" &&
+		strings.TrimSpace(in.ContentType) == "" && in.Status == 0 && len(in.Headers) == 0 {
 		r.RespDoc = nil
 	} else {
 		r.RespDoc = &collection.ResponseDoc{Type: in.Type, Params: in.Params, Sample: in.Sample, ContentType: in.ContentType, Status: in.Status, Headers: in.Headers}

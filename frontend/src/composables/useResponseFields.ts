@@ -1,5 +1,5 @@
 // 响应字段表（Resp 分段）的本地状态：真相源是请求模型 tab.request.respDoc。
-// 与请求体表格同构：表格**只在用户点「生成数据表格」/「从本次响应生成」时派生**，
+// 与请求体表格同构：表格**只在用户点「生成数据表格」/「从当前响应生成」时派生**，
 // 派生后 5 列全可编辑并可增删行；编辑「响应数据」（sample）不再联动重算表格。
 //
 // 保存模型（统一手动保存）：本 composable 的所有编辑**只改内存里的 respDoc** 并标脏
@@ -52,12 +52,12 @@ export function useResponseFields(ctx: ResponseFieldsCtx) {
 
     /**
      * 把当前 sample + 表格组装成 respDoc 写回**内存模型**，并标脏（不写盘）。
-     * liveMeta 只在「从本次响应生成」时由调用方传入（status/headers/contentType 取本次响应快照）；
+     * liveMeta 只在「从当前响应生成」时由调用方传入（status/headers/contentType 取当前响应快照）；
      * 手动来源与日常编辑都不传，于是这些字段按 buildRespDoc 的规则回退既有 doc（不会被清掉）。
      */
     function commit(liveMeta?: RespDocLive): void {
         const tab = ctx.getTab()
-        // sample/type 按当前「响应数据」；仅「从本次响应生成」选「覆盖」时由 applyRows
+        // sample/type 按当前「响应数据」；仅「从当前响应生成」选「覆盖」时由 applyRows
         // 先写入 nextSample，于是这次提交会连同响应体一起更新。
         const doc = buildRespDoc(fields.value, tab.request.respDoc, {
             sample: sample.value,
@@ -88,7 +88,7 @@ export function useResponseFields(ctx: ResponseFieldsCtx) {
         commit()
     }
 
-    /** 写入整张表格（生成 / 覆盖 / 新增 / 删行）；liveMeta 仅在「从本次响应生成」时传入。
+    /** 写入整张表格（生成 / 覆盖 / 新增 / 删行）；liveMeta 仅在「从当前响应生成」时传入。
      *  nextSample 传入时一并替换「响应数据」（live 来源选「覆盖」：响应体随表格一起更新）。 */
     function applyRows(rows: FieldRow[], liveMeta?: RespDocLive, nextSample?: string): void {
         if (nextSample !== undefined) sample.value = nextSample

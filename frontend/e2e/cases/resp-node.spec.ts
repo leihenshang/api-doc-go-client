@@ -38,10 +38,10 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
 
     // item 8：子页签切换「响应数据 / 响应头」。
-    // 「从本次响应生成」会把本次响应的 status/headers 记进 respdoc（响应头快照 + 状态徽标的数据源），
-    // 但「响应数据」（sample）保持原样，不会被响应体填充。
+    // 「从当前响应生成」会把当前响应的 status/headers 记进 respdoc（响应头快照 + 状态徽标的数据源），
+    // 且「响应数据」（sample）原本为空，会一并填入当前响应体。
     await page.locator('[data-testid="resp.segTab"][data-view="body"]').click()
-    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue('')
+    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue(/"flat":\s*true/)
     await expect(page.locator('[data-testid="resp.segTab"][data-view="body"]')).toContainText('200')
     await page.locator('[data-testid="resp.segTab"][data-view="headers"]').click()
     await expect(page.getByTestId('resp.segHeaderRow').filter({ hasText: 'Content-Type' }).first()).toBeVisible()
