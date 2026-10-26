@@ -16,6 +16,8 @@ const props = defineProps<{
   placeholder?: string
   /** 行数（只影响高度：高度 = 行数 × 行高 + 上下内边距） */
   rows?: number
+  /** 高度占满父级剩余空间（父级必须是 flex 列容器；用于「下方没有其它元素」的编辑区） */
+  fill?: boolean
   /** 着色语言：json（默认）/ xml / text（不着色） */
   lang?: 'json' | 'xml' | 'text'
   /** 只读（响应数据快照等） */
@@ -148,7 +150,7 @@ function sync(ev: Event): void {
 </script>
 
 <template>
-  <div class="jb" :style="{ '--jb-rows': String(props.rows ?? 12) }">
+  <div class="jb" :class="{ fill: props.fill }" :style="{ '--jb-rows': String(props.rows ?? 12) }">
     <!-- 着色层：aria-hidden，不接收指针事件（编辑只发生在 textarea 上）。
          用 div 而不是 <pre>：Vue 对 <pre> 会强制保留模板换行，会在文本里混入空白。 -->
     <div ref="hl" class="hl mono" aria-hidden="true">
@@ -174,6 +176,13 @@ function sync(ev: Event): void {
 
 .jb:focus-within {
   border-color: var(--app-accent);
+}
+
+/* 占满剩余高度：父级为 flex 列时由 flex 决定实际高度；仍保留一个最小高度避免被压扁 */
+.jb.fill {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 120px;
 }
 
 .hl,

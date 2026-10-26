@@ -381,6 +381,11 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
     getRespView: () => respView.value,
     isGrpc: () => isGrpcReq.value,
   })
+
+/** 编辑区内容变化：查找条打开时只重算命中数，不重新选中/抢焦点（否则用户的光标会被拽走）。 */
+function onSegInput(): void {
+  if (findOn.value) applyFind({ select: false })
+}
 </script>
 
 <template>
@@ -400,7 +405,7 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
     <find-bar v-if="findOn" ref="findBarRef" v-model:keyword="findKw" :total="findTotal" :index="findIndex"
       @next="findNext" @prev="findPrev" @close="findOn = false" />
 
-    <div ref="segBodyEl" class="seg-body" @input="findOn ? applyFind() : undefined">
+    <div ref="segBodyEl" class="seg-body" @input="onSegInput">
       <!-- gRPC：定义分段（导入 / 更新 / 移除 .proto、服务方法列表） -->
       <grpc-schema-pane v-if="isGrpcReq && seg === 'schema'" :tab="tab" />
       <!-- gRPC：请求消息（生成样例 / 按定义校验 / 字段提示） -->
@@ -494,11 +499,13 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
             </div>
             <body-fields-table v-if="bodyView === 'table'" :rows="fieldRows" @update="onFieldUpdate" @add="onFieldAdd"
               @remove="onFieldRemove" />
-            <json-body-editor v-else v-model="tab.request.body.raw" :rows="12" :placeholder="t('editor.rawPlaceholder')"
-              @input="touch" />
+            <json-body-editor v-else v-model="tab.request.body.raw" :rows="12" fill
+              :placeholder="t('editor.rawPlaceholder')" @input="touch" />
           </template>
-          <n-input v-else-if="bodyType === 'text'" v-model:value="tab.request.body.raw" type="textarea" :rows="12"
-            class="mono raw" :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          <div v-else-if="bodyType === 'text'" class="body-text-editor">
+            <n-input v-model:value="tab.request.body.raw" type="textarea" :rows="12" class="mono raw"
+              :placeholder="t('editor.rawPlaceholder')" @input="touch" />
+          </div>
           <!-- form / multipart：键值表格直接编辑；下方根据表格字段给一份只读的请求数据示例（不新增字段）。 -->
           <template v-else-if="bodyType === 'form' || bodyType === 'multipart'">
             <key-value-table :rows="tab.request.body.form"
@@ -694,9 +701,27 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 让字段表格拿到有界高度：超长时由表格行区内部滚动，而不是把整个分段撑高 */
+  /* 让字段表格 / 文本编辑区拿到有界高度：超长时在各自容器内滚动，而不是把整个分段撑高 */
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* 纯文本请求体（含 XML 文本）：下方没有其它元素，输入框占满剩余高度 */
+.body-text-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+
+.body-text-editor :deep(.n-input),
+.body-text-editor :deep(.n-input__textarea) {
+  height: 100%;
+}
+
+.body-text-editor :deep(.n-input__textarea-el) {
+  height: 100%;
+  resize: none;
 }
 
 .auth-pane {
