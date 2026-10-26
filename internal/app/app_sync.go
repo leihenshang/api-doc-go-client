@@ -45,6 +45,8 @@ func (a *App) GetSyncBindFor(root string) (*syncengine.BindInfo, error) {
 		// 未绑定不是错误
 		return &syncengine.BindInfo{}, nil
 	}
+	// PAT（明文与密文）都不回传前端：界面只需 linked/mode/cursor，令牌由后端保管
+	b.Token, b.TokenEnc, b.TokenLocked = "", "", false
 	return &b, nil
 }
 
@@ -104,6 +106,12 @@ func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 		}
 		if tok == "" && prev.ServerURL == base {
 			b.Token = prev.Token
+			// 旧密文本机解不开时保留密文：不因一次「只改模式」的保存把它删掉，
+			// 用户重新填写 PAT 后自然覆盖。
+			if b.Token == "" && prev.TokenLocked {
+				b.TokenEnc = prev.TokenEnc
+				b.TokenLocked = true
+			}
 		}
 	}
 	if err := syncengine.SaveBind(c.Dir, b); err != nil {
@@ -111,6 +119,8 @@ func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 	}
 	a.setSyncToken(c, b.Token)
 	a.invalidateSyncDiskCache(c) // linked/mode/cursor 变了：状态栏下一次轮询立即反映
+	// 令牌不返回前端（明文与密文都不需要给界面）
+	b.Token, b.TokenEnc, b.TokenLocked = "", "", false
 	return &b, nil
 }
 
@@ -281,6 +291,9 @@ func (a *App) runSyncFor(c *collection.Collection, token string, wait bool) (*sy
 		tok = b.Token
 	}
 	if tok == "" {
+		if b.TokenLocked {
+			return nil, errors.New("已保存的访问令牌无法解密（本机密钥可能已丢失），请在同步设置中重新填写 PAT")
+		}
 		return nil, errors.New("缺少访问令牌（PAT），请在同步设置中填写")
 	}
 	a.setSyncToken(c, tok)

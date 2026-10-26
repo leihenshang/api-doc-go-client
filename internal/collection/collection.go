@@ -76,7 +76,7 @@ const gitignoreContent = gitignoreBanner + "\n" +
 	"environments/*.secrets.yml\n*.local.yml\n.sync.json\n.sync-deletes.json\n.trash/\n.conflicts/\nnode_modules/\n"
 
 // gitignoreEntries 需要忽略的条目（由 gitignoreContent 派生，避免同一份清单在两处维护而漂移）：
-// secret 环境文件、本地覆盖、明文存 PAT 的 .sync.json、纯本地的待推送删除状态
+// secret 环境文件、本地覆盖、保存 PAT 密文的 .sync.json、纯本地的待推送删除状态
 // （.sync-deletes.json，P1-10：它和 .sync.json 同类——只对本机有意义，提交进仓库只会产生噪音
 // 并把「删了还没推」这种临时状态共享给别人），以及本地目录。
 var gitignoreEntries = func() []string {
@@ -140,7 +140,7 @@ func Open(dir string) (*Collection, error) {
 	}
 	// 集合级 .gitignore（幂等）：secret 文件与本地目录不进版本控制。
 	// 必须能补齐已存在的文件——clone 来的仓库或用户自己 git init 时已有 .gitignore，
-	// 里面没有 .sync.json，明文存 PAT 的它就会被 commit 进版本库（P0-5）。
+	// 里面没有 .sync.json，含 PAT 密文的它就会被 commit 进版本库（P0-5）。
 	_ = ensureGitignore(abs)
 	// 首次打开：给一个默认环境，便于立刻体验变量替换
 	if _, err := os.Stat(filepath.Join(abs, "environments")); os.IsNotExist(err) {

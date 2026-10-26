@@ -32,9 +32,16 @@ type BindInfo struct {
 	Mode      string `json:"mode"` // auto | manual | mirror
 	// Cursor 本地已应用的 change_log 游标
 	Cursor int64 `json:"cursor"`
-	// Token 访问令牌（PAT）。按产品要求随集合持久化，重启客户端免重填；
-	// .sync.json 已加入 .gitignore，令牌不得进版本库，分享/拷贝集合前需先解绑。
-	Token string `json:"token,omitempty"`
+	// Token 访问令牌（PAT），只存在于内存（json:"-"）：落盘一律写 TokenEnc 密文。
+	// .sync.json 已加入集合 .gitignore，但用户仍可能拷贝/打包集合，明文令牌太容易外泄。
+	Token string `json:"-"`
+	// TokenEnc 由 internal/patvault 生成的 PAT 密文（pat:v1:…），密钥在本机配置目录。
+	TokenEnc string `json:"tokenEnc,omitempty"`
+	// TokenLocked 表示密文存在但本机密钥无法解密（换机/删了配置目录）：
+	// 仅内存标记，供 App 提示「重新填写 PAT」，绝不落盘。
+	TokenLocked bool `json:"-"`
+	// legacyPlain 仅用于读取旧版 .sync.json 的明文 token 字段（读后立即迁移成 TokenEnc）。
+	legacyPlain bool
 	// ExampleHashes 响应示例的已推送状态（示例 UID → 文件 hash）。
 	// 推送时做脏检测；「有记录但文件已不在」视为本地删除，推送 tombstone。
 	ExampleHashes map[string]string `json:"exampleHashes,omitempty"`
@@ -49,6 +56,23 @@ type BindInfo struct {
 	// FieldMappingHashes 字段字典的已推送状态（UID → 单条内容摘要）。
 	// 字段字典是单文件多条目，用条目摘要而非文件 hash，避免改一条导致全量重推。
 	FieldMappingHashes map[string]string `json:"fieldMappingHashes,omitempty"`
+}
+
+// UnmarshalJSON 兼容旧版明文 token：读到后暂存内存，由 LoadBind 负责迁成 TokenEnc。
+func (b *BindInfo) UnmarshalJSON(data []byte) error {
+	type plain BindInfo // 去掉本方法，避免递归
+	aux := struct {
+		*plain
+		LegacyToken string `json:"token,omitempty"`
+	}{plain: (*plain)(b)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if b.TokenEnc == "" && aux.LegacyToken != "" {
+		b.Token = aux.LegacyToken
+		b.legacyPlain = true
+	}
+	return nil
 }
 
 // Client 同步 HTTP 客户端。

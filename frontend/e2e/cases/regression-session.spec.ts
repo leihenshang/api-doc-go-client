@@ -3,9 +3,6 @@ import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
 import { openCollection, openRequest, reopenApp, treeRow } from '../helpers/ui'
 
-const PING_UID = '33333333-3333-4333-8333-333333333333'
-const PONG_UID = '88888888-8888-4888-8888-888888888888'
-
 test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
   test('[G6] 重启后恢复 tab 现场', async ({ page, app }) => {
     await app.newCollection('basic')

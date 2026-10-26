@@ -1,7 +1,7 @@
 package collection
 
 // .gitignore 补齐逻辑（P0-5 回归）：已有 .gitignore 的用户目录，客户端以前完全不管，
-// 于是明文存 PAT 的 .sync.json 会被 commit 进版本库。这里锁住「只追加、不重写、幂等、
+// 于是含 PAT 密文的 .sync.json 会被 commit 进版本库。这里锁住「只追加、不重写、幂等、
 // 保持换行风格」四条性质。
 
 import (
@@ -197,7 +197,7 @@ func TestEnsureGitignoreKeepsSymlink(t *testing.T) {
 }
 
 // TestOpenAppendsToExistingGitignore Open 是真实入口：已有 .gitignore（git init / clone 来的
-// 仓库）时也必须补上 .sync.json，否则明文 PAT 会被提交。
+// 仓库）时也必须补上 .sync.json，否则含 PAT 密文的绑定文件会被提交。
 func TestOpenAppendsToExistingGitignore(t *testing.T) {
 	dir := t.TempDir()
 	user := "node_modules/\ndist/\n"

@@ -201,8 +201,12 @@ func TestSetSyncBindRejectsWhenBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解锁后保存绑定应成功，got %v", err)
 	}
-	if !b.Linked || b.Token != "pat-test" || b.ProjectID != 1 {
-		t.Fatalf("绑定内容不符，got %+v", b)
+	// 返回给前端的绑定不含 PAT（明文/密文都不外传），但落盘的密文必须能还原
+	if !b.Linked || b.Token != "" || b.TokenEnc != "" || b.ProjectID != 1 {
+		t.Fatalf("绑定内容不符（应不含 PAT），got %+v", b)
+	}
+	if loaded, lerr := syncengine.LoadBind(c.Dir); lerr != nil || loaded.Token != "pat-test" {
+		t.Fatalf("落盘的后端应能还原 PAT，got token=%q err=%v", loaded.Token, lerr)
 	}
 	if !core.syncMuFor(c).TryLock() {
 		t.Fatal("SetSyncBindFor 返回后锁未释放")
