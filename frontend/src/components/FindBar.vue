@@ -3,22 +3,15 @@
 // Enter=下一个、Shift+Enter=上一个、Esc=关闭；具体的命中/滚动由调用方驱动（见 lib/find）。
 import { ChevronDownOutline, ChevronUpOutline, CloseOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{ total: number; index: number }>()
+defineProps<{ total: number; index: number }>()
 const keyword = defineModel<string>('keyword', { required: true })
 const emit = defineEmits<{ next: []; prev: []; close: [] }>()
 const { t } = useI18n()
 
 const inputEl = ref<HTMLInputElement | null>(null)
-watch(
-  () => props.total,
-  async () => {
-    await nextTick()
-    inputEl.value?.focus()
-  },
-)
 
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Enter') {

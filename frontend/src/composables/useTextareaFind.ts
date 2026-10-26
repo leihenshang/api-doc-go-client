@@ -54,15 +54,21 @@ export function useTextareaFind(ctx: TextareaFindCtx) {
         if (!findable()) return
         findOn.value = true
         await nextTick()
-        findBarRef.value?.focus()
+        // 先选中/滚动到第一处，再把焦点交回搜索框：打开即可直接输入关键字
         applyFind()
+        findBarRef.value?.focus()
     }
 
-    function applyFind(): void {
+    /**
+     * 重算命中并（默认）选中第一处。
+     * select=false 用于「编辑区内容变化」：只更新计数，不重新选区/抢焦点，避免光标被拽回第一处。
+     */
+    function applyFind(options: { select?: boolean; focus?: boolean } = {}): void {
+        const { select = true, focus = true } = options
         findMatches = findInTextareas(findTargets(), findKw.value)
         findTotal.value = findMatches.length
         findIndex.value = findMatches.length ? 0 : -1
-        if (findMatches.length) selectTextareaMatch(findMatches[0])
+        if (select && findMatches.length) selectTextareaMatch(findMatches[0], focus)
     }
 
     function findNext(): void {
@@ -94,6 +100,8 @@ export function useTextareaFind(ctx: TextareaFindCtx) {
             }
             await nextTick()
             applyFind()
+            // 关键字/分段变化后把焦点留在搜索框：否则选区聚焦到 textarea，下一字符会输进正文
+            findBarRef.value?.focus()
         },
     )
 

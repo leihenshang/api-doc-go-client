@@ -304,7 +304,7 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
         </div>
       </div>
       <div class="resp-data-editor" data-testid="resp.dataInput">
-        <json-body-editor v-model="respSample" :rows="16" :readonly="readonly" :lang="respDataKind ?? 'text'"
+        <json-body-editor v-model="respSample" :rows="16" fill :readonly="readonly" :lang="respDataKind ?? 'text'"
           :placeholder="t('editor.respDataPh')" testid="resp.dataRaw" />
       </div>
     </div>
@@ -349,6 +349,8 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
   gap: 10px;
   padding: 10px 12px 12px;
   min-height: 0;
+  /* 占满分段高度：响应数据编辑区（下方无元素）才能靠 flex 撑到最底部 */
+  flex: 1 1 auto;
 }
 
 .resp-toolbar {
@@ -385,12 +387,13 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
   min-height: 0;
 }
 
-/* 「响应数据」可编辑区：提示 + 文本域 */
+/* 「响应数据」可编辑区：提示 + 文本域；下方没有其它元素，编辑区占满剩余高度 */
 .resp-data {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .resp-data-hint {
@@ -422,6 +425,7 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .resp-data-editor :deep(.jb) {

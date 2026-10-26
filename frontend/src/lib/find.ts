@@ -31,9 +31,9 @@ export function findInTextareas(els: HTMLTextAreaElement[], query: string): Text
   return out
 }
 
-/** 选中某个 textarea 命中（聚焦 + 原生选区自动滚动；JsonBodyEditor 的 @scroll 会同步高亮层）。 */
-export function selectTextareaMatch(m: TextareaMatch): void {
-  m.el.focus()
+/** 选中某个 textarea 命中（可只设选区不抢焦点；JsonBodyEditor 的 @scroll 会同步高亮层）。 */
+export function selectTextareaMatch(m: TextareaMatch, focus = true): void {
+  if (focus) m.el.focus()
   m.el.setSelectionRange(m.start, m.end)
 }
 
