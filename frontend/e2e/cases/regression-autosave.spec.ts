@@ -85,6 +85,45 @@ test.describe('保存模型与冲突检测', () => {
     expect(readCollectionFile(dir, 'api/ping.yml')).toContain('/json/flat') // 又回到手动：不写盘
   })
 
+  test('[E26] 自动保存：慢写盘期间的后续编辑会触发尾次保存', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    await openRequest(page, 'ping')
+    await openSettings(page)
+    await page.getByTestId('settings.autoSave').click()
+    await saveSettings(page)
+
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+    let markStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => { markStarted = resolve })
+    let saves = 0
+    await page.route('**/api/App/SaveRequest', async (route) => {
+      saves++
+      if (saves === 1) {
+        markStarted()
+        await firstGate
+      }
+      await route.continue()
+    })
+
+    try {
+      await editUrl(page, '{{host}}/json/flat')
+      await firstStarted
+      await editUrl(page, '{{host}}/json/nested')
+      // 让后续编辑的防抖定时器在第一次保存仍在途时触发，覆盖 single-flight 提前返回的边界。
+      await page.waitForTimeout(1000)
+      releaseFirst()
+
+      await expect.poll(() => readCollectionFile(dir, 'api/ping.yml')).toContain('/json/nested')
+      await expect(page.getByTestId('tab.item').filter({ hasText: 'ping' }).locator('.dot')).toHaveCount(0)
+      expect(saves).toBeGreaterThanOrEqual(2)
+    } finally {
+      releaseFirst()
+      await page.unroute('**/api/App/SaveRequest')
+    }
+  })
+
   test('[E26] 关闭脏页签先问保存：保存并关闭 / 不保存 / 取消', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)

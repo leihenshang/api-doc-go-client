@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
-import { openCollection, treeRow, treeRowByUid } from '../helpers/ui'
+import { openCollection, openSettings, saveSettings, treeRow, treeRowByUid } from '../helpers/ui'
 
 /** 读集合里某个 .md 的正文（断言保存真的落盘了）。 */
 function readMd(dir: string, rel: string): string {
@@ -102,6 +102,54 @@ test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', a
       }
     })
     .toBe(true)
+})
+
+test('文档自动保存：保存期间的后续编辑不会误标为已保存', async ({ page, app }) => {
+  const dir = await app.newCollection('basic')
+  await openCollection(page, app)
+  await openSettings(page)
+  await page.getByTestId('settings.autoSave').click()
+  await saveSettings(page)
+
+  const group = treeRow(page, 'api')
+  await group.hover()
+  await group.getByTestId('tree.row.menu').click()
+  await page.getByTestId('tree.row.newDoc').click()
+  await page.locator('.n-modal input').first().fill('慢保存')
+  await page.getByRole('button', { name: t('common.confirm') }).click()
+  await treeRow(page, '慢保存').click()
+  await expect(page.locator('.md-editor').first()).toBeVisible()
+
+  let releaseFirst!: () => void
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+  let markStarted!: () => void
+  const firstStarted = new Promise<void>((resolve) => { markStarted = resolve })
+  let saves = 0
+  await page.route('**/api/App/SaveDocExpectHash', async (route) => {
+    saves++
+    if (saves === 1) {
+      markStarted()
+      await firstGate
+    }
+    await route.continue()
+  })
+
+  try {
+    const editor = page.locator('.md-editor textarea, .md-editor .cm-content').first()
+    await editor.click()
+    await page.keyboard.type('第一版')
+    await firstStarted
+    await page.keyboard.type('第二版')
+    await page.waitForTimeout(1000)
+    releaseFirst()
+
+    await expect.poll(() => readMd(dir, 'api/慢保存.md')).toContain('第一版第二版')
+    await expect(page.getByTestId('tab.item').filter({ hasText: '慢保存' }).locator('.dot')).toHaveCount(0)
+    expect(saves).toBeGreaterThanOrEqual(2)
+  } finally {
+    releaseFirst()
+    await page.unroute('**/api/App/SaveDocExpectHash')
+  }
 })
 
 test('文档树叶子：拖动改目录后 uid 不变', async ({ page, app }) => {

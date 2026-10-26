@@ -94,6 +94,8 @@ export async function settleDetail(page: Page): Promise<void> {
  */
 export async function openRequest(page: Page, name: string): Promise<void> {
   await page.getByTestId('tree.row').filter({ hasText: name }).getByTestId('tree.row.name').click()
+  // 首个详情已经可见时，仅等 req.url 会在新请求仍在读盘时提前返回，后续 fill 落到旧页签。
+  await expect(page.getByTestId('tab.item').filter({ hasText: name })).toHaveClass(/active/)
   await expect(page.getByTestId('req.url')).toBeVisible()
   await settleDetail(page)
 }

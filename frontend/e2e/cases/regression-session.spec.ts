@@ -1,7 +1,7 @@
 // 批次1 功能点：G6 会话恢复 / G11 快捷键 / G5 取消发送 / H3 Cookie 面板 / G9 撤销重做 / G14 页签与集合树联动。
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, reopenApp, treeRow } from '../helpers/ui'
+import { openCollection, openRequest, reopenApp, settleDetail, treeRow } from '../helpers/ui'
 
 test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
   test('[G6] 重启后恢复 tab 现场', async ({ page, app }) => {
@@ -45,6 +45,32 @@ test.describe('批次1：会话 / 快捷键 / 取消 / Cookie / 撤销', () => {
     // 取消后错误区出现「已取消」或等价文案，发送按钮恢复可点
     await expect(page.getByTestId('req.send')).toBeEnabled({ timeout: 15_000 })
     await expect(page.locator('.resp .n-alert')).toBeVisible()
+  })
+
+  test('[G5] 同集合两个草稿同时发送时只取消目标草稿', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await openCollection(page, app)
+    const tabs = page.getByTestId('tab.item')
+
+    for (let i = 0; i < 2; i++) {
+      await page.keyboard.press('Control+n')
+      await expect(page.getByTestId('req.url')).toBeVisible()
+      await settleDetail(page)
+      await page.getByTestId('req.url').fill('{{host}}/delay?ms=3000')
+      await page.getByTestId('req.send').click()
+      await expect(page.getByTestId('req.cancel')).toBeVisible()
+    }
+    await expect(tabs).toHaveCount(2)
+
+    // 取消第二个后，第一个必须仍在发送；旧实现会用空 uid 把同根草稿全部取消。
+    await page.getByTestId('req.cancel').click()
+    await expect(page.getByTestId('req.send')).toBeEnabled({ timeout: 15_000 })
+    await tabs.nth(0).click()
+    await settleDetail(page)
+    await expect(page.getByTestId('req.cancel')).toBeVisible()
+
+    await page.getByTestId('req.cancel').click()
+    await expect(page.getByTestId('req.send')).toBeEnabled({ timeout: 15_000 })
   })
 
   test('[H3] Cookie 管理：列表 + 单条删除', async ({ page, app }) => {

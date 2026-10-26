@@ -62,6 +62,8 @@ const menuOptions = computed<DropdownOption[]>(() => {
 })
 
 function openMenu(i: number, e: MouseEvent): void {
+  // 模板同时阻止 contextmenu 冒泡：第二次打开时，旧下拉的 document clickoutside
+  // 也会收到这次右键；不挡住就会在选项点击前把新菜单关掉。
   const tab = props.tabs[i]
   if (!tab) return
   emit('select', tab.key) // 右键先激活，和主流编辑器一致
@@ -183,7 +185,7 @@ onBeforeUnmount(() => {
         :class="{ active: tab.key === activeKey, dragging: i === dragFrom }" role="button" :tabindex="0"
         data-testid="tab.item" :data-tab-key="tab.key" :data-tab-title="tab.title" :draggable="true"
         :title="tab.draft ? t('prompt.saveDraftHint') : tab.request.path" @click="emit('select', tab.key)"
-        @keydown.enter="emit('select', tab.key)" @contextmenu.prevent="openMenu(i, $event)"
+        @keydown.enter="emit('select', tab.key)" @contextmenu.prevent.stop="openMenu(i, $event)"
         @dragstart="onDragStart(i, $event)" @dragover.prevent="onDragOver($event)" @drop="onDrop(i, $event)"
         @dragend="dragFrom = -1">
         <!-- 请求页签显示按 HTTP 方法着色的前缀；文档页签用蓝色 MD 标记，排版与请求方法一致。
