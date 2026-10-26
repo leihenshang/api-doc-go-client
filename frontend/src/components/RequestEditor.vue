@@ -475,7 +475,8 @@ const { fields, sample, hasResp, initFields, onSampleInput, applyRows, patchRow,
     onDirty: () => tabs.touch(props.tab.key),
   })
 
-/** 「本次响应」（最近一次真实发送的响应体）：只读来源，不会被写回 respDoc.sample。 */
+/** 「本次响应」（最近一次真实发送的响应体）：一般只读；「从本次响应生成」选「覆盖」时
+ *  会把这份响应体一并写入 respDoc.sample（与字段表同一次提交）。 */
 const liveRespBody = computed(() => (props.tab.response?.body ?? ''))
 /** 「从本次响应生成」的按钮提示：没有本次响应时说明为什么不可用（禁用态靠外层 span 的 title 显示）。 */
 const genLiveTitle = computed(() =>
@@ -517,7 +518,8 @@ function parseGenSource(text: string): FieldRow[] | null {
 
 /**
  * 「生成数据表格」/「从本次响应生成」：派生 5 列 → 空表直接生成，非空表弹「新增 / 覆盖」。
- * 生成只动表格（respDoc.params）；「响应数据」（respDoc.sample）始终不动。
+ * 生成默认只动表格（respDoc.params）；唯一例外是「从本次响应生成」+「覆盖」——
+ * 此时把本次响应体一并写入「响应数据」（respDoc.sample），避免表格更新后样例还是旧数据。
  * 「从本次响应生成」额外把本次 status/headers/contentType 记进 respDoc（响应头子页签与状态徽标的数据源）。
  */
 function startRespGenerate(source: 'sample' | 'live'): void {
@@ -541,22 +543,25 @@ function startRespGenerate(source: 'sample' | 'live'): void {
   respGenDialog.value = true
 }
 
-/** 生成结果落到表格：写回内存 respDoc.params（含 required）并标脏，切到「字段表格」子页签。 */
-function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live'): void {
-  applyRows(rows, source === 'live' ? liveRespMeta() : undefined)
+/** 生成结果落到表格：写回内存 respDoc.params（含 required）并标脏，切到「字段表格」子页签。
+ *  nextSample 非 undefined 时同时覆盖「响应数据」（live + 覆盖：响应体一并更新）。 */
+function applyRespRows(rows: FieldRow[], n: number, source: 'sample' | 'live', nextSample?: string): void {
+  applyRows(rows, source === 'live' ? liveRespMeta() : undefined, nextSample)
   respView.value = 'fields'
   message.success(t('resp.genDone', { n }))
 }
 
-/** 弹窗确认：新增=只追加缺失路径；覆盖=按本次派生重建、同路径只继承含义。 */
+/** 弹窗确认：新增=只追加缺失路径；覆盖=按本次派生重建、同路径只继承含义。
+ *  「从本次响应生成」选覆盖时，响应体也替换为本次响应（新增不动响应数据）。 */
 function onConfirmRespGenerate(mode: 'append' | 'overwrite'): void {
   const cur = fields.value
   const derived = respGenDerived.value
   const source = respGenSource.value
   const merged = mode === 'append' ? mergeAppend(cur, derived) : mergeOverwrite(cur, derived)
+  const nextSample = mode === 'overwrite' && source === 'live' ? liveRespBody.value : undefined
   respGenDialog.value = false
   respGenDerived.value = []
-  applyRespRows(merged, mode === 'append' ? merged.length - cur.length : merged.length, source)
+  applyRespRows(merged, mode === 'append' ? merged.length - cur.length : merged.length, source, nextSample)
 }
 
 /** 取消生成：什么都不改（不写盘）。 */
@@ -868,7 +873,8 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
           </div>
           <!-- 字段表格的两个生成来源（gRPC 不支持 respDoc，故整段不渲染）：
                ① 手动填的「响应数据」文本；② 本次真实响应（有响应才可点）。
-               生成只动表格，不改「响应数据」；已有表格时弹「新增 / 覆盖」。 -->
+               生成默认只动表格；「从本次响应生成」选「覆盖」时一并更新「响应数据」。
+               已有表格时弹「新增 / 覆盖」。 -->
           <div v-if="!isGrpcReq" class="resp-gen">
             <button class="fmt" type="button" data-testid="resp.generate" :disabled="readonly"
               :title="t('resp.genBtnHint')" @click="startRespGenerate('sample')">
@@ -973,6 +979,9 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
       style="width: 460px; max-width: calc(100vw - 32px)" :title="t('resp.genTitle')">
       <div data-testid="resp.genDialog">
         <p class="gen-hint">{{ t('resp.genHint') }}</p>
+        <p v-if="respGenSource === 'live'" class="gen-hint" data-testid="resp.genHintLive">
+          {{ t('resp.genHintLive') }}
+        </p>
         <div class="gen-actions">
           <n-button size="small" type="primary" data-testid="resp.genAppend" @click="onConfirmRespGenerate('append')">
             {{ t('body.genAppend') }}
@@ -1114,6 +1123,9 @@ const { segBodyEl, findOn, findKw, findTotal, findIndex, findBarRef, findable, o
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* 让字段表格拿到有界高度：超长时由表格行区内部滚动，而不是把整个分段撑高 */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .auth-pane {

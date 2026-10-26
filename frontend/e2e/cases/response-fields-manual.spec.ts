@@ -1,7 +1,7 @@
 // 响应字段：与请求体表格同构 —— 表格只在点「生成数据表格」/「从本次响应生成」时派生
-// （5 列全可编辑：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行），编辑「响应数据」不再自动改表格，
-// 生成也只动表格、不改「响应数据」（respDoc.sample）。
-import type { Page } from '@playwright/test'
+// （5 列全可编辑：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行），编辑「响应数据」不再自动改表格。
+// 生成默认只动表格；唯一例外：「从本次响应生成」+「覆盖」会把本次响应体一并写入「响应数据」。
+import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
@@ -15,6 +15,16 @@ const row = (page: Page, path: string) => page.locator(`[data-testid="resp.field
 const inputOf = (page: Page, path: string, testid: string) =>
     row(page, path).getByTestId(testid).locator('input')
 const requiredOf = (page: Page, path: string) => row(page, path).getByTestId('resp.fields.required')
+
+/** 断言某个行区容器可纵向滚动（scrollHeight > clientHeight，且 scrollTop 能改变）。 */
+async function expectScrollable(locator: Locator): Promise<void> {
+    await expect.poll(() => locator.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    const before = await locator.evaluate((el) => el.scrollTop)
+    await locator.evaluate((el) => {
+        el.scrollTop = 120
+    })
+    await expect.poll(() => locator.evaluate((el) => el.scrollTop)).toBeGreaterThan(before)
+}
 
 test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () => {
     test('响应数据不再自动出表；点「生成数据表格」出 5 列、必填默认「是」并可落盘', async ({ page, app }) => {
@@ -159,6 +169,69 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await saveNow(page)
         await expect.poll(file, { timeout: 5000 }).toContain('status: 200')
         await expect.poll(file, { timeout: 5000 }).toContain('Content-Type')
+    })
+
+    test('「从本次响应生成」选「覆盖」：响应体一并写入「响应数据」', async ({ page, app }) => {
+        const dir = await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+
+        // 先用手动来源造一张非空表（生成时才弹「新增 / 覆盖」）
+        await tab(page, 'body').click()
+        await dataInput(page).fill('{"old": 1}')
+        await page.getByTestId('resp.generate').click()
+        await expect(page.getByTestId('resp.fields.row')).toHaveCount(1)
+
+        // 发送真实请求，再从本次响应生成 → 覆盖
+        const url = '{{host}}/json/flat'
+        await page.getByTestId('req.url').fill(url)
+        await page.getByTestId('req.url').blur()
+        await send(page)
+        await page.getByTestId('resp.generateLive').click()
+        await expect(page.getByTestId('resp.genDialog')).toBeVisible()
+        await expect(page.getByTestId('resp.genHintLive')).toBeVisible()
+        await page.getByTestId('resp.genOverwrite').click()
+
+        // 字段表按本次响应重建：旧字段消失，本次响应的字段出现
+        await expect(row(page, 'old')).toHaveCount(0)
+        await expect(row(page, 'flat')).toBeVisible()
+        await expect(row(page, 'value')).toBeVisible()
+
+        // 关键修复：覆盖时「响应数据」也替换为本次响应体（不再是旧样例）
+        await tab(page, 'body').click()
+        await expect(dataInput(page)).toHaveValue(/"flat":\s*true/)
+
+        // 仍是内存编辑：Ctrl+S 才把 sample 落进 respdoc
+        await saveNow(page)
+        const file = () => readCollectionFile(dir, FILE) ?? ''
+        await expect.poll(file, { timeout: 5000 }).toContain('sample:')
+    })
+
+    test('字段表格超出可视高度时行区可纵向滚动（请求体 + 响应字段）', async ({ page, app }) => {
+        await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+
+        // 40 个字段足以超过请求编辑器的可视高度
+        const many = JSON.stringify(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}`, i])))
+
+        // 请求体：切 JSON → 填原文 → 生成表格
+        await openReqTab(page, 'body')
+        await page.getByTestId('body.type').click()
+        await page.locator('.n-base-select-option').filter({ hasText: t('editor.bodyJson') }).click()
+        await page.getByTestId('req.bodyRaw').fill(many)
+        await page.getByTestId('body.generate').click()
+        await expect(page.getByTestId('body.fieldsRow')).toHaveCount(40)
+        await expectScrollable(page.locator('.bfields .rows'))
+
+        // 响应字段：同一份 JSON 填「响应数据」→ 生成表格
+        await openReqTab(page, 'resp')
+        await tab(page, 'body').click()
+        await dataInput(page).fill(many)
+        await page.getByTestId('resp.generate').click()
+        await expect(page.getByTestId('resp.fields.row')).toHaveCount(40)
+        await expectScrollable(page.locator('.fields .rows'))
     })
 
     test('清空响应数据不影响已有表格（生成只动表格）', async ({ page, app }) => {
