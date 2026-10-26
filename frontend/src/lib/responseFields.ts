@@ -252,6 +252,23 @@ export function buildRespDoc(rows: FieldRow[], base: ResponseDoc | null | undefi
 }
 
 /**
+ * 归一响应内容类型：界面只认 json/text/xml/html/binary 五个取值。
+ * 历史数据或「从当前响应生成」带进来的可能是原始 MIME（如 `application/json; charset=utf-8`），
+ * 不归一就会在徽标里原样显示成「application/json」、下拉也匹配不到选项。
+ * 无法识别时返回空串（界面显示「未设置」，而不是冒充 json）。
+ */
+export function normalizeRespContentType(raw?: string | null): string {
+  const s = (raw ?? '').trim().toLowerCase()
+  if (!s) return ''
+  if (s === 'json' || s === 'text' || s === 'xml' || s === 'html' || s === 'binary') return s
+  if (s.includes('json')) return 'json'
+  if (s.includes('xml')) return 'xml'
+  if (s.includes('html')) return 'html'
+  if (s.startsWith('text/')) return 'text'
+  return ''
+}
+
+/**
  * 易变 / 敏感响应头黑名单（小写，按名字大小写不敏感剔除）。
  * live 生成时只记录「能表达接口业务语义」的头；下面这些要么每次请求都不同
  * （Date / Content-Length / Keep-Alive / 连接与分块相关），要么是凭据

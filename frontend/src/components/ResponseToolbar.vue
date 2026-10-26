@@ -2,7 +2,7 @@
 // 响应操作工具条（response-panel design-spec §3 第 3 排）：
 // 左「视图→显示」：美化/原始 分段控件、换行开关（图标态胶囊）；
 // 右「输出」：复制响应体（幽灵）、保存▾（唯一主按钮）。
-// 「更新响应字段」已移除：字段表格改由编辑器的「生成数据表格」/「从本次响应生成」维护。
+// 「更新响应字段」已移除：字段表格改由编辑器的「生成数据表格」/「从当前响应生成」维护。
 import SaveDropdown from '@/components/SaveDropdown.vue';
 import { CopyOutline, ReturnUpBackOutline, SearchOutline } from '@vicons/ionicons5';
 import { NIcon } from 'naive-ui';

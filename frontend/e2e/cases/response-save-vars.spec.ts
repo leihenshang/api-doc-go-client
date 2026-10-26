@@ -31,15 +31,15 @@ test.describe('响应区：保存▾与字段表（瘦身版）', () => {
     await expect(page.getByTestId('resp.scope')).toHaveCount(0)
     await page.keyboard.press('Escape')
 
-    // 从本次响应生成后：字段表在编辑器分段渲染，带可编辑的「示例值」列，但无变量书签
+    // 从当前响应生成后：字段表在编辑器分段渲染，带可编辑的「示例值」列，但无变量书签
     await openReqTab(page, 'resp')
     await page.getByTestId('resp.generateLive').click()
     await expect(page.getByTestId('resp.fields.row').first()).toBeVisible()
     await expect(page.getByTestId('resp.fields.example').first()).toBeVisible()
     await expect(page.getByTestId('resp.fields.bookmark')).toHaveCount(0)
 
-    // 响应数据子页签仍是可编辑的响应数据（生成不改动它），这里断言它为空
+    // 响应数据子页签仍可编辑；「从当前响应生成」时它为空，因此会一并填入当前响应体
     await page.locator('[data-testid="resp.segTab"][data-view="body"]').click()
-    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue('')
+    await expect(page.getByTestId('resp.dataInput').locator('textarea')).toHaveValue(/"flat":\s*true/)
   })
 })

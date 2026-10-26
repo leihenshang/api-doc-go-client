@@ -1,11 +1,11 @@
-// 响应字段：与请求体表格同构 —— 表格只在点「生成数据表格」/「从本次响应生成」时派生
+// 响应字段：与请求体表格同构 —— 表格只在点「生成数据表格」/「从当前响应生成」时派生
 // （5 列全可编辑：字段名 / 类型 / 必填 / 示例值 / 说明 + 增行 / 删行），编辑「响应数据」不再自动改表格。
-// 生成默认只动表格；唯一例外：「从本次响应生成」+「覆盖」会把本次响应体一并写入「响应数据」。
+// 生成默认只动表格；「从当前响应生成」时响应数据为空会一并填入，已有数据选「覆盖」才替换。
 import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, saveNow, send } from '../helpers/ui'
+import { openCollection, openReqTab, openRequest, reopenApp, saveNow, send } from '../helpers/ui'
 
 const FILE = 'api/ping.yml'
 
@@ -122,7 +122,7 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(row(page, 'total')).toBeVisible()
     })
 
-    test('「从本次响应生成」：无响应时禁用，有响应可生成（含状态/响应头快照）且不改「响应数据」', async ({ page, app }) => {
+    test('「从当前响应生成」：无响应时禁用；有响应可生成（含快照）且自动填入空的「响应数据」', async ({ page, app }) => {
         const dir = await app.newCollection('basic')
         await openCollection(page, app)
         await openRequest(page, 'ping')
@@ -155,11 +155,11 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await saveNow(page)
         await expect.poll(file, { timeout: 5000 }).toContain('status: 200')
 
-        // 生成只动表格：响应数据（respDoc.sample）保持空
+        // 新行为：响应数据为空时也一并填入当前响应体（不再生成了表格、样例还空着）
         await tab(page, 'body').click()
-        await expect(dataInput(page)).toHaveValue('')
+        await expect(dataInput(page)).toHaveValue(/"flat":\s*true/)
 
-        // 手动来源（响应数据）生成只改表格：本次响应已记下的 status/headers 不被清
+        // 手动来源（响应数据）生成只改表格：当前响应已记下的 status/headers 不被清
         await dataInput(page).fill('{"other": 1}')
         await page.getByTestId('resp.generate').click()
         await expect(page.getByTestId('resp.genDialog')).toBeVisible()
@@ -171,7 +171,7 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect.poll(file, { timeout: 5000 }).toContain('Content-Type')
     })
 
-    test('「从本次响应生成」选「覆盖」：响应体一并写入「响应数据」', async ({ page, app }) => {
+    test('「从当前响应生成」选「覆盖」：响应体一并写入「响应数据」', async ({ page, app }) => {
         const dir = await app.newCollection('basic')
         await openCollection(page, app)
         await openRequest(page, 'ping')
@@ -206,6 +206,72 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await saveNow(page)
         const file = () => readCollectionFile(dir, FILE) ?? ''
         await expect.poll(file, { timeout: 5000 }).toContain('sample:')
+    })
+
+    test('「从当前响应生成」按右侧当前展示的示例派生，而不是最后一次实时响应', async ({ page, app }) => {
+        await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+
+        // 1) /json/flat 发送并存成示例（flat / value），保存后面板自动切到该示例快照
+        await page.getByTestId('req.url').fill('{{host}}/json/flat')
+        await page.getByTestId('req.url').blur()
+        await send(page)
+        await page.getByTestId('resp.save').click()
+        await page.getByTestId('resp.saveExample').click()
+        const modal = page.locator('.n-modal').filter({ has: page.getByPlaceholder(t('resp.exampleNamePlaceholder')) })
+        await modal.locator('input').first().fill('快照示例')
+        await modal.getByRole('button', { name: t('common.save'), exact: true }).click()
+        await expect(page.getByTestId('resp.exnote')).toBeVisible()
+
+        // 2) 再发一次 /json/withArray：实时响应变成 total/items，面板回到实时响应
+        await page.getByTestId('req.url').fill('{{host}}/json/withArray')
+        await page.getByTestId('req.url').blur()
+        await send(page)
+        await expect(page.getByTestId('resp.exnote')).toHaveCount(0)
+
+        // 3) 在下拉里切回示例：右侧展示的是 flat/value 快照
+        await page.getByTestId('resp.examples').click()
+        await page.locator('.n-base-select-option').filter({ hasText: '快照示例' }).click()
+        await expect(page.getByTestId('resp.exnote')).toBeVisible()
+
+        // 4) 生成读的是示例（flat/value），不是实时响应的 total/items
+        await openReqTab(page, 'resp')
+        await page.getByTestId('resp.generateLive').click()
+        await expect(page.getByTestId('resp.fields.row')).toHaveCount(2)
+        await expect(row(page, 'flat')).toBeVisible()
+        await expect(row(page, 'total')).toHaveCount(0)
+
+        // 5) 响应数据为空 → 生成时一并填入当前展示的响应体
+        await tab(page, 'body').click()
+        await expect(dataInput(page)).toHaveValue(/"flat":\s*true/)
+    })
+
+    test('响应类型：未设置时不冒充 JSON；选择后落盘并在刷新后保留', async ({ page, app }) => {
+        const dir = await app.newCollection('basic')
+        await openCollection(page, app)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+
+        // 未设置：不出现类型徽标（旧实现默认 json，且会把原始 MIME 直接显示成 application/json）
+        await expect(page.getByTestId('resp.contentTypeBadge')).toHaveCount(0)
+
+        // 选 XML → 徽标即时显示 XML
+        await page.getByTestId('resp.contentType').click()
+        await page.locator('.n-base-select-option').filter({ hasText: t('editor.ctXml') }).click()
+        await expect(page.getByTestId('resp.contentTypeBadge')).toHaveText(t('editor.ctXml'))
+
+        // 手动保存：落盘的是五个取值之一（不是原始 MIME）
+        await saveNow(page)
+        await expect.poll(() => readCollectionFile(dir, FILE) ?? '', { timeout: 5000 }).toContain('contentType: xml')
+
+        // 刷新重开（真读盘）：响应类型仍是 XML，不回退成 json
+        await page.reload()
+        await reopenApp(page)
+        await openRequest(page, 'ping')
+        await openReqTab(page, 'resp')
+        await expect(page.getByTestId('resp.contentTypeBadge')).toHaveText(t('editor.ctXml'))
     })
 
     test('字段表格超出可视高度时行区可纵向滚动（请求体 + 响应字段）', async ({ page, app }) => {
@@ -286,7 +352,7 @@ test.describe('响应字段：手工生成 + 5 列可编辑 + 必填贯通', () 
         await expect(row(page, 'a')).toHaveCount(0)
     })
 
-    test('「从本次响应生成」落盘时过滤易变/敏感响应头，保留自定义头', async ({ page, app }) => {
+    test('「从当前响应生成」落盘时过滤易变/敏感响应头，保留自定义头', async ({ page, app }) => {
         const dir = await app.newCollection('basic')
         await openCollection(page, app)
         await openRequest(page, 'ping')
