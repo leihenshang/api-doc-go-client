@@ -27,6 +27,8 @@ export interface Tab {
   doc?: DocTabDoc
   dirty: boolean
   sending: boolean
+  /** 本次发送实际用于 Go 侧登记的标识；草稿使用页签临时 uid，与落盘实体 uid 解耦。 */
+  sendUid?: string
   response: SendResult | null
   error: string
   resolve: ResolveResult | null
@@ -180,6 +182,11 @@ function snap(r: RequestDoc): string {
   return JSON.stringify(r)
 }
 
+/** 文档保存与同值编辑判断使用固定字段顺序，避免对象构造顺序不同造成假变化。 */
+function snapDoc(d: DocTabDoc): string {
+  return JSON.stringify({ uid: d.uid, path: d.path, name: d.name, content: d.content, icon: d.icon })
+}
+
 // ---- 滚动位置记忆（G8）：按 tab 记录请求区/响应区 scrollTop ----
 const scrollPos = new Map<string, { editor: number; resp: number }>()
 
@@ -248,13 +255,18 @@ export const useTabsStore = defineStore('tabs', {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.kind !== 'doc' || !tab.doc || !tab.dirty) return
       if (tab.saving || tab.conflict) return
+      const doc = {
+        uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
+        content: tab.doc.content, icon: tab.doc.icon,
+      }
+      const snapshot = snapDoc(tab.doc)
+      let saved = false
       tab.saving = true
       try {
-        await api.saveDocExpectHash({
-          uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
-          content: tab.doc.content, icon: tab.doc.icon,
-        }, tab.baseHash ?? '')
-        tab.dirty = false
+        await api.saveDocExpectHash(doc, tab.baseHash ?? '')
+        saved = true
+        // 保存期间可能又有编辑：本次只写入了快照，不能把后续内容也标成已保存。
+        tab.dirty = snapDoc(tab.doc) !== snapshot
         await this.refreshDocHash(tab)
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -266,6 +278,9 @@ export const useTabsStore = defineStore('tabs', {
         }
       } finally {
         tab.saving = false
+        if (saved && tab.dirty && !tab.conflict && useSettingsStore().autoSave && this.tabs.includes(tab)) {
+          this.scheduleAfterEdit(tab)
+        }
       }
     },
     /** 文档页签的磁盘 hash 刷新（文档不进 SQLite 索引，单独读一次 hash）。 */
@@ -280,14 +295,14 @@ export const useTabsStore = defineStore('tabs', {
     touchDoc(key: string, patch: Partial<DocTabDoc>): void {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab || tab.kind !== 'doc' || !tab.doc) return
-      tab.doc = { ...tab.doc, ...patch }
-      if (!tab.dirty) {
-        tab.dirty = true
-        // 与请求一致：仅开启自动保存时才防抖写盘；手动模式下只标脏，等 Ctrl+S / 关闭询问
-        if (useSettingsStore().autoSave) {
-          saveTimers.set(tab.key, setTimeout(() => void this.saveDoc(tab.key), SAVE_DEBOUNCE))
-        }
-      }
+      const next = { ...tab.doc, ...patch }
+      // md-editor 在 prop 回写/保存后可能再次发出相同正文；无实际变化不能重新标脏，
+      // 否则自动保存会在「保存 → 同值回写 → 标脏」之间循环。
+      if (snapDoc(next) === snapDoc(tab.doc)) return
+      tab.doc = next
+      tab.dirty = true
+      // 与请求一致：每次编辑都重新防抖；手动模式下只标脏，等 Ctrl+S / 关闭询问。
+      this.scheduleAfterEdit(tab)
     },
     /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
     openDoc(r: RequestDoc): void {
@@ -554,8 +569,10 @@ export const useTabsStore = defineStore('tabs', {
       // 快照本次落盘内容：保存期间用户又改动了的话，落盘的是旧内容，下面对比后保持脏并让
       // 后续的防抖保存接手，避免「写进了旧内容却把脏标记清掉」悄悄丢编辑。
       const snapshot = JSON.stringify(tab.request)
+      let saved = false
       try {
         await api.saveRequest({ ...tab.request, expectHash: tab.baseHash || undefined })
+        saved = true
         const editedAgain = JSON.stringify(tab.request) !== snapshot
         tab.dirty = editedAgain
         tab.grpcError = ''
@@ -581,6 +598,11 @@ export const useTabsStore = defineStore('tabs', {
       } finally {
         tab.saving = false
         this.savingCount = Math.max(0, this.savingCount - 1)
+        // 保存期间的编辑所安排的定时器可能已在 single-flight 检查处返回；
+        // 当前写盘结束后再补一次尾次调度，保证停止输入后也会自动落盘。
+        if (saved && tab.dirty && !tab.conflict && useSettingsStore().autoSave && this.tabs.includes(tab)) {
+          this.scheduleAfterEdit(tab)
+        }
       }
     },
     async flushAll(): Promise<void> {
@@ -741,24 +763,26 @@ export const useTabsStore = defineStore('tabs', {
       // 手动保存模式下发送前不落盘：改动只在 Ctrl+S / 显式保存时写入文件，
       // 避免「改完就点发送」把未保存内容偷偷写盘（与 autoSave 关闭的预期一致）。
       if (useSettingsStore().autoSave) await this.flush(key)
+      // 草稿不把临时标识写回实体，只在发送副本上使用；两个草稿因此能分别登记和取消。
+      const request = tab.draft ? { ...tab.request, uid: tab.uid } : tab.request
+      tab.sendUid = request.uid
       tab.sending = true
       tab.error = ''
       try {
-        tab.response = await api.send(tab.request, coll.currentEnv)
+        tab.response = await api.send(request, coll.currentEnv)
       } catch (e) {
         tab.response = null
         tab.error = e instanceof Error ? e.message : String(e)
       } finally {
         tab.sending = false
+        tab.sendUid = undefined
       }
     },
-    /** 取消当前 tab 的在途发送。
-     *  必须用「真正发出去的 uid」：草稿 tab 的 tab.uid 是本地临时标识（draft-…），
-     * 而 Go 侧按请求自身的 uid 登记在途发送（草稿为空串），传 draft-… 永远匹配不上。 */
+    /** 取消当前 tab 的在途发送：必须使用本次实际发送的标识，不能按空 uid 批量取消草稿。 */
     cancelSend(key: string): void {
       const tab = this.tabs.find((t) => t.key === key)
-      if (!tab || !tab.sending) return
-      void api.cancelSend(tab.request.uid ?? '')
+      if (!tab || !tab.sending || tab.sendUid === undefined) return
+      void api.cancelSend(tab.sendUid)
     },
     /**
      * 关闭页签。

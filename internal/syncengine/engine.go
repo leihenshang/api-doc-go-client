@@ -30,6 +30,9 @@ type Engine struct {
 	CLI  *Client
 	// Cipher secret 变量值的口令加解密器；nil/空口令时 secret 不出本机（不同步该条）。
 	Cipher *secrets.Cipher
+	// 删除路径的测试故障注入点；生产保持 nil，直接调用 Collection。
+	saveEnvForDelete   func(collection.Env) error
+	deleteEnvForDelete func(string) error
 	// snapped 本轮已留底的冲突副本（kind+路径）：同一环境文件被多个变量的更新
 	// 连续覆盖时只留一份，避免刷出一堆内容相同的副本。
 	snapped map[string]bool
@@ -118,7 +121,7 @@ func envHashOf(name string) string {
 }
 
 func varHashOf(v collection.Var) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%v\x00%v\x00%s", v.Name, v.Enabled, v.Secret, v.Value)))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%v\x00%v\x00%s", v.Name, v.Enabled, v.Secret, v.Value))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -913,10 +916,13 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 			fail(err)
 		}
 	case "variable":
-		e.removeVarByUID(it.UID)
-		delete(e.Bind.VarHashes, it.UID)
+		if err := e.removeVarByUID(it.UID); err == nil {
+			delete(e.Bind.VarHashes, it.UID)
+		} else {
+			fail(err)
+		}
 	case "variable_env":
-		e.removeEnvByUID(it.UID)
+		fail(e.removeEnvByUID(it.UID))
 	case "field_mapping":
 		// 与文档同理：仅在本地删除成功后清基线，避免残留文件被当新条目重推。
 		if err := e.Coll.DeleteFieldMapping(it.UID); err == nil {
@@ -928,10 +934,14 @@ func (e *Engine) applyDelete(it Item, rep *Report) {
 }
 
 // removeVarByUID 从所属环境文件里删掉该 uid 的变量（保存走 SaveEnv，secret 旁路随之收口）。
-func (e *Engine) removeVarByUID(uid string) {
+// 本地不存在该变量时按幂等成功处理；读取或保存失败则交由调用方上报并保留推送基线。
+func (e *Engine) removeVarByUID(uid string) error {
 	env, _, err := e.envByUIDVar(uid)
-	if err != nil || env.Name == "" {
-		return
+	if err != nil {
+		return err
+	}
+	if env.Name == "" {
+		return nil
 	}
 	kept := env.Vars[:0:0]
 	for _, v := range env.Vars {
@@ -940,9 +950,10 @@ func (e *Engine) removeVarByUID(uid string) {
 		}
 	}
 	env.Vars = kept
-	// 服务端已删该变量：本地写回失败只影响这一份环境文件（下次同步会重试），
-	// 但它不该让整轮 apply 失败，否则后面的条目都被卡住。
-	_ = e.Coll.SaveEnv(env)
+	if e.saveEnvForDelete != nil {
+		return e.saveEnvForDelete(env)
+	}
+	return e.Coll.SaveEnv(env)
 }
 
 // envByUIDVar 按变量 uid 反查其所在环境。
@@ -961,21 +972,32 @@ func (e *Engine) envByUIDVar(uid string) (collection.Env, int, error) {
 	return collection.Env{}, -1, nil
 }
 
-// removeEnvByUID 删除环境（两文件移入 .trash），并清理其变量与自身的同步摘要记录。
-func (e *Engine) removeEnvByUID(uid string) {
+// removeEnvByUID 删除环境（两文件移入 .trash）。
+// 只有本地删除成功或环境本就不存在时，才清理其变量与自身的同步摘要记录。
+func (e *Engine) removeEnvByUID(uid string) error {
 	env, _, err := e.envByUID(uid)
-	if err != nil || env.Name == "" {
+	if err != nil {
+		return err
+	}
+	if env.Name == "" {
 		delete(e.Bind.EnvHashes, uid)
-		return
+		return nil
+	}
+	if e.deleteEnvForDelete != nil {
+		err = e.deleteEnvForDelete(env.Name)
+	} else {
+		err = e.Coll.DeleteEnv(env.Name)
+	}
+	if err != nil {
+		return err
 	}
 	for _, v := range env.Vars {
 		if v.UID != "" {
 			delete(e.Bind.VarHashes, v.UID)
 		}
 	}
-	// 环境文件移入 .trash 失败也要清摘要：留着旧摘要只会让下一轮重复推同一个删除。
-	_ = e.Coll.DeleteEnv(env.Name)
 	delete(e.Bind.EnvHashes, uid)
+	return nil
 }
 
 // applyExample 应用服务端下发的响应示例：落到所属请求的 examples/ 目录。

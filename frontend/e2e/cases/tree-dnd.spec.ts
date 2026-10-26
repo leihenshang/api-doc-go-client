@@ -109,16 +109,23 @@ test.describe('集合树拖动', () => {
     // api 挂到 empty 下
     await mouseDrag(page, treeRowByUid(page, API_UID), treeRowByUid(page, EMPTY_UID))
     await expect.poll(() => listCollectionFiles(dir)).toContain('empty/api/ping.yml')
+    // 磁盘先变、树后刷新：必须等新路径上行，否则下一次按下可能落在已经换位的旧坐标上。
+    await expect(treeRowByUid(page, API_UID)).toHaveAttribute('data-path', 'empty/api')
 
     // 再拖回根（api 现在在 empty 里，empty 若是折叠态就得先展开才能拖到子行）
     await ensureExpanded(page, EMPTY_UID, API_UID)
-    await mouseDrag(page, treeRowByUid(page, API_UID), page.getByTestId('tree.root'))
+    const root = page.getByTestId('tree.root')
+    await mouseDrag(page, treeRowByUid(page, API_UID), root, { release: false })
+    await expect(root).toHaveClass(/drop-ok/)
+    await page.mouse.up()
     await expect.poll(() => listCollectionFiles(dir)).toContain('api/ping.yml')
     await expect.poll(() => listCollectionFiles(dir)).not.toContain('empty/api/ping.yml')
+    await expect(treeRowByUid(page, API_UID)).toHaveAttribute('data-path', 'api')
 
     // 非法：api 拖到自己的子分组（先造一个子分组：把 empty 拖进 api）
     await mouseDrag(page, treeRowByUid(page, EMPTY_UID), treeRowByUid(page, API_UID))
     await expect.poll(() => listCollectionFiles(dir)).toContain('api/empty/folder.yml')
+    await expect(treeRowByUid(page, EMPTY_UID)).toHaveAttribute('data-path', 'api/empty')
     await ensureExpanded(page, API_UID, EMPTY_UID)
     await mouseDrag(page, treeRowByUid(page, API_UID), treeRowByUid(page, EMPTY_UID), { release: false })
     await expect(treeRowByUid(page, EMPTY_UID)).toHaveClass(/drop-bad/) // 非法目标给「禁止」样式
