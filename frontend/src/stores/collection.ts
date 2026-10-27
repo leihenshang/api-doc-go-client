@@ -267,6 +267,17 @@ export const useCollectionStore = defineStore('collection', {
       await api.moveFolder(uid, destParent)
       await this.reload()
     },
+    /** 拖动排序：把节点放到目标分组的指定位置（beforeUID 空 = 同类型末尾）。 */
+    async arrangeNode(uid: string, destFolder: string, beforeUID: string): Promise<void> {
+      await api.arrangeNode(uid, destFolder, beforeUID)
+      await this.reload()
+    },
+    /** 拖动集合调整根行顺序：后端会话顺序 + 本地「下次启动恢复」顺序一起更新。 */
+    async reorderRoots(roots: string[]): Promise<void> {
+      await api.reorderCollections(roots)
+      await this.loadRoots()
+      this.saveDirs()
+    },
     /**
      * 跨工作目录移动请求（拖到另一个根）：目标侧重建 + 源文件进源集合 .trash。
      * 返回目标集合里新请求的 uid。两个根的树都要刷新（源少一个、目标多一个）。

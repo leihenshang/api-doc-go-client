@@ -323,6 +323,16 @@ func (a *App) MoveFolder(uid, destParent string) error {
 	return c.MoveFolder(uid, destParent)
 }
 
+// ArrangeNode 拖动排序：把节点放到目标分组的指定位置（beforeUID 空 = 同类型末尾）。
+// 与 MoveRequest / MoveDoc / MoveFolder 的区别：后者只改上级，本方法还会按拖放位置重排同层 seq。
+func (a *App) ArrangeNode(uid, destFolder, beforeUID string) error {
+	c, err := a.requireCollection()
+	if err != nil {
+		return err
+	}
+	return c.ArrangeNode(uid, destFolder, beforeUID)
+}
+
 func (a *App) ReadRequest(uid string) (*collection.Request, error) {
 	c, err := a.requireCollection()
 	if err != nil {

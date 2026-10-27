@@ -232,6 +232,8 @@ export const api = {
   setActiveCollection: (root: string) => call<null>('SetActiveCollection', root),
   /** 关闭一个工作目录（其它根不受影响）。 */
   closeCollection: (root: string) => call<null>('CloseCollection', root),
+  /** 拖动集合调整侧栏根行顺序（roots 传 ListCollections 的 root，按目标顺序）。 */
+  reorderCollections: (roots: string[]) => call<null>('ReorderCollections', roots),
   /** 在系统文件管理器中打开该工作目录。 */
   revealInFolder: (root: string) => call<null>('RevealInFolder', root),
   /** 重载指定工作目录（外部改动 / git 操作后）；不传 = 活动根。 */
@@ -289,6 +291,12 @@ export const api = {
   renameRequest: (uid: string, name: string) => call<null>('RenameRequest', uid, name),
   moveRequest: (uid: string, destFolder: string) => call<null>('MoveRequest', uid, destFolder),
   moveFolder: (uid: string, destParent: string) => call<null>('MoveFolder', uid, destParent),
+  /**
+   * 拖动排序：把节点放到目标分组的指定位置（beforeUID 空 = 同类型末尾）。
+   * 与 moveRequest/moveDoc/moveFolder 的区别：同时改上级并按落点重排同层 seq。
+   */
+  arrangeNode: (uid: string, destFolder: string, beforeUID: string) =>
+    call<null>('ArrangeNode', uid, destFolder, beforeUID),
   /** 跨工作目录移动请求：目标侧重建（新 uid/路径），源文件进源集合 .trash；返回新 uid。 */
   moveRequestToCollection: (srcRoot: string, uid: string, destRoot: string, destFolder: string) =>
     call<string>('MoveRequestToCollection', srcRoot, uid, destRoot, destFolder),

@@ -1016,6 +1016,7 @@ type scanResult struct {
 	reqByPath map[string]*Request
 	uidByDir  map[string]string    // 目录相对路径 → folder.yml 的 uid
 	nameByDir map[string]string    // 目录相对路径 → folder.yml 的显示名（重命名后与目录名不同）
+	seqByDir  map[string]int       // 目录相对路径 → folder.yml 的 info.seq（同层排序用）
 	docs      map[string]*DocEntry // uid → doc
 }
 
@@ -1038,7 +1039,8 @@ func newScanResult() *scanResult {
 	return &scanResult{
 		reqs: map[string]*Request{}, reqByPath: map[string]*Request{},
 		uidByDir: map[string]string{}, nameByDir: map[string]string{},
-		docs: map[string]*DocEntry{},
+		seqByDir: map[string]int{},
+		docs:     map[string]*DocEntry{},
 	}
 }
 
@@ -1167,7 +1169,7 @@ func (c *Collection) scanRequestFile(res *scanResult, rel string, data []byte) {
 	res.reqByPath[rel] = r
 }
 
-// scanFolderFile 记录目录的 uid 与显示名（重命名后显示名与目录名不同）。
+// scanFolderFile 记录目录的 uid、显示名与排序权重（重命名后显示名与目录名不同）。
 func scanFolderFile(res *scanResult, dir string, head scanHead) {
 	if head.Meta.UID != "" {
 		res.uidByDir[dir] = head.Meta.UID
@@ -1175,6 +1177,7 @@ func scanFolderFile(res *scanResult, dir string, head scanHead) {
 	if head.Info.Name != "" {
 		res.nameByDir[dir] = head.Info.Name
 	}
+	res.seqByDir[dir] = head.Info.Seq
 }
 
 // Tree 扫描集合并构建树（分组在前，组内按 seq / 名称排序；含文档条目 B13）。
@@ -1211,7 +1214,7 @@ func (c *Collection) treeFromScan(res *scanResult) []*Node {
 		}
 		n := &dirNode{name: name, path: dir}
 		dirs[dir] = n
-		p.children = append(p.children, &Node{Type: "folder", UID: folderUIDOrFallback(res.uidByDir[dir], dir), Name: name, Path: dir, Children: nil})
+		p.children = append(p.children, &Node{Type: "folder", UID: folderUIDOrFallback(res.uidByDir[dir], dir), Name: name, Path: dir, Seq: res.seqByDir[dir], Children: nil})
 		return n
 	}
 	// 挂请求
@@ -1802,6 +1805,9 @@ func (c *Collection) MoveRequest(uid, destFolder string) error {
 	}
 	oldFull := filepath.Join(c.Dir, filepath.FromSlash(r.Path))
 	oldDir := filepath.ToSlash(filepath.Dir(r.Path))
+	if oldDir == "." {
+		oldDir = "" // 根目录下的请求：filepath.Dir 给 "."，要和 dest 的空串口径一致，否则误判成「跨目录」
+	}
 	if oldDir == dest {
 		return nil // 已在目标分组
 	}
@@ -1843,6 +1849,9 @@ func (c *Collection) MoveFolder(uid, destParent string) error {
 		return fmt.Errorf("不能移动到自己或其子分组下")
 	}
 	oldParent := filepath.ToSlash(filepath.Dir(dir))
+	if oldParent == "." {
+		oldParent = "" // 根目录下的分组：与 dest 的空串口径一致
+	}
 	if oldParent == dest {
 		return nil
 	}
