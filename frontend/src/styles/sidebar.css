@@ -105,6 +105,29 @@
   cursor: not-allowed;
 }
 
+/* 同层自定义排序的落点：命中行的上/下缘拉一条强调色横线（指明会插到它前/后）。
+   与 drop-ok 互斥（后者表示「放进这个容器」），所以这里只用 ::before / ::after 各画一条。 */
+.row.drop-before::before,
+.row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--app-accent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.row.drop-before::before {
+  top: -1px;
+}
+
+.row.drop-after::after {
+  bottom: -1px;
+}
+
 .drop-tip {
   margin-left: auto;
   padding-left: 8px;

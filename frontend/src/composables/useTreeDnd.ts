@@ -1,15 +1,30 @@
 // 集合树的指针拖拽（不依赖 HTML5 dataTransfer，自己按 pointermove/up + elementFromPoint 命中落点）。
-// 从 Sidebar 抽出：组件只提供「能否拖」「落点重名提示」「松手后如何搬运」三个回调，
+// 从 Sidebar 抽出：组件只提供「能否拖」「落点重名提示」「松手后如何响应落点」三个回调，
 // 拖拽过程中的按下/移动/松手/取消、阈值判定与落点高亮状态由本 composable 自持。
+//
+// 落点分三种：
+//   inside  = 放进容器（分组 / 工作目录根）：改上级；
+//   before  = 插到命中行之前（同层自定义排序）；
+//   after   = 插到命中行之后（同层排序）。
+// 行高上/下缘（EDGE_RATIO）判定为排序，中间判定为放进容器。
 import { canDrop } from '@/lib/collTree'
 import type { TreeNode } from '@/types'
 import { computed, ref } from 'vue'
+
+/** 拖拽源：普通节点，或工作目录根行（type=root，仅支持根之间排序）。 */
+export type TreeDragNode =
+  | TreeNode
+  | { type: 'root'; uid: string; name: string; path: string }
+
+/** 落点位置：同层前 / 同层后 / 放进容器。 */
+export type DropPos = 'before' | 'after' | 'inside'
 
 /** 当前指针下的放置目标；ok=false 表示非法，给「禁止」反馈而不是静默。 */
 export interface DropHint {
     root: string
     uid: string
     path: string
+    pos: DropPos
     ok: boolean
     tip?: string
 }
@@ -19,25 +34,55 @@ export interface TreeDndCtx {
     /** 此刻是否允许拖拽（搜索过滤 / 重命名中禁用） */
     dragEnabled: () => boolean
     /** 落点非法原因提示（如目标下已有同名分组）；返回 undefined 表示无额外提示 */
-    dropTip: (node: TreeNode, destRoot: string, destPath: string) => string | undefined
-    /** 松手落在合法目标上时执行移动（同根改上级 / 跨根整棵搬） */
-    onDrop: (srcRoot: string, node: TreeNode, destRoot: string, destPath: string) => void
+    dropTip: (node: TreeDragNode, destRoot: string, destPath: string) => string | undefined
+    /** 松手落在合法目标上时执行（按 hint.pos 决定改上级还是排序） */
+    onDrop: (srcRoot: string, node: TreeDragNode, hint: DropHint) => void
 }
 
 /** 位移小于它算点击，不算拖动 */
 const DRAG_THRESHOLD = 4
+/** 行高上/下缘的比例：落在边缘 = 同层排序，落在中间 = 放进容器 */
+const EDGE_RATIO = 0.3
+
+/** 根行的合成节点（uid 固定，仅用于根之间排序的命中判断）。 */
+export const ROOT_NODE: TreeDragNode = { type: 'root', uid: '__root__', name: '', path: '' }
+
+/** 命中行可拖/可放的类型（request / doc 是叶子，folder / root 是容器）。 */
+function isLeaf(kind: string): boolean {
+    return kind === 'request' || kind === 'doc'
+}
+
+/** 根据命中行类型与指针在行内的相对位置，决定落点；返回 null 表示不在可放区。 */
+function dropPos(node: TreeDragNode, kind: string, ratio: number): DropPos | null {
+    const edge = ratio < EDGE_RATIO ? 'before' : ratio > 1 - EDGE_RATIO ? 'after' : 'inside'
+    if (node.type === 'root') {
+        // 集合只和其它集合排序：根行是唯一可放目标，按上下半区决定插到其前/后
+        return kind === 'root' ? (ratio < 0.5 ? 'before' : 'after') : null
+    }
+    if (kind === 'root') {
+        // 根行没有兄弟排序语义：边缘 = 放进该根的头/尾，中间 = 放进该根末尾
+        return edge
+    }
+    if (node.type === 'folder') {
+        // 分组只能和分组排序（分组恒排在叶子之前）；落在叶子行上不提供落点
+        return kind === 'folder' ? edge : null
+    }
+    // 叶子（请求 / 文档）：叶子之间可任意排序；落到分组行边缘 = 放进该分组头/尾
+    if (isLeaf(kind)) return ratio < 0.5 ? 'before' : 'after'
+    return edge
+}
 
 /** 建立树拖拽：返回拖拽状态、点击抑制标记与行按下入口。 */
 export function useTreeDnd(ctx: TreeDndCtx) {
-    const dragNode = ref<{ root: string; node: TreeNode } | null>(null)
+    const dragNode = ref<{ root: string; node: TreeDragNode } | null>(null)
     /** 按下但还没越过阈值：等他动了才算拖动，避免影响正常点击打开请求 */
-    const pending = ref<{ root: string; node: TreeNode; x: number; y: number } | null>(null)
+    const pending = ref<{ root: string; node: TreeDragNode; x: number; y: number } | null>(null)
     const dropHint = ref<DropHint | null>(null)
     const dragging = computed(() => dragNode.value !== null)
     /** 拖动结束后紧跟的那次 click 要吞掉，否则松手会顺手打开请求 */
     const clickSuppressed = ref(false)
 
-    function onRowPointerDown(root: string, node: TreeNode, ev: PointerEvent): void {
+    function onRowPointerDown(root: string, node: TreeDragNode, ev: PointerEvent): void {
         if (!ctx.dragEnabled() || ev.button !== 0) return
         // 只排除「行内操作控件」：展开箭头、悬停动作按钮、重命名输入框、下拉与链接。
         // 注意不能一刀切排除所有 button —— 请求/分组的名字本身就是个 <button class="rname">，
@@ -67,16 +112,25 @@ export function useTreeDnd(ctx: TreeDndCtx) {
         if (!row) return null
         const root = row.dataset.root ?? ''
         const isRootRow = row.dataset.testid === 'tree.root'
-        if (!isRootRow && row.dataset.kind !== 'folder') return null // 请求行不能当容器
+        const kind = isRootRow ? 'root' : (row.dataset.kind ?? '')
+        if (!isRootRow && !isLeaf(kind) && kind !== 'folder') return null
+        const rect = row.getBoundingClientRect()
+        const ratio = rect.height > 0 ? (y - rect.top) / rect.height : 0.5
+        const pos = dropPos(drag.node, kind, ratio)
+        if (!pos) return null
         const path = isRootRow ? '' : (row.dataset.path ?? '')
         // 跨根搬分组时目标下已有同名分组：后端会拒（CreateFolder 会把同名目录复用掉），
         // 这里提前置灰并把原因写在落点提示上，别让用户拖完才吃一个报错
-        const tip = drag.node.type === 'folder' ? ctx.dropTip(drag.node, root, path) : undefined
+        const tip =
+            pos === 'inside' && drag.node.type === 'folder' ? ctx.dropTip(drag.node, root, path) : undefined
+        const containerOk =
+            pos !== 'inside' ? true : drag.node.type !== 'root' && canDrop(drag.node as TreeNode, drag.root, root, path)
         return {
             root,
             uid: isRootRow ? '__root__' : (row.dataset.uid ?? ''),
             path,
-            ok: canDrop(drag.node, drag.root, root, path) && !tip,
+            pos,
+            ok: containerOk && !tip,
             tip,
         }
     }
@@ -114,7 +168,7 @@ export function useTreeDnd(ctx: TreeDndCtx) {
         if (!dragged) return // 只是点击：交给 click 处理
         clickSuppressed.value = true
         setTimeout(() => (clickSuppressed.value = false), 0)
-        if (drag && hint?.ok) ctx.onDrop(drag.root, drag.node, hint.root, hint.path)
+        if (drag && hint?.ok) ctx.onDrop(drag.root, drag.node, hint)
     }
 
     return { dragNode, dropHint, dragging, clickSuppressed, onRowPointerDown }

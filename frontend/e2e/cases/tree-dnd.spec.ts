@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '../helpers/app'
-import { listCollectionFiles } from '../helpers/fs'
+import { listCollectionFiles, readCollectionFile } from '../helpers/fs'
 import { openCollection, treeRow, treeRowByUid } from '../helpers/ui'
 
 /**
@@ -42,6 +42,26 @@ async function mouseDrag(page: Page, src: Locator, dst: Locator, opts: { release
   // 先小步越过 4px 阈值进入拖动状态，再移到目标
   await page.mouse.move(a.x + a.width / 2 + 8, a.y + a.height / 2 + 8, { steps: 3 })
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 })
+  if (opts.release !== false) await page.mouse.up()
+}
+
+/**
+ * 拖到目标行的指定纵向比例处：0.15 = 上缘（插到它之前）、0.85 = 下缘（插到它之后）、
+ * 0.5 = 行中间（放进容器）。同层排序用上/下缘，改上级用中间。
+ */
+async function mouseDragAt(
+  page: Page,
+  src: Locator,
+  dst: Locator,
+  ratio: number,
+  opts: { release?: boolean } = {},
+): Promise<void> {
+  const a = await waitBox(page, src, '源')
+  const b = await waitBox(page, dst, '目标')
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(a.x + a.width / 2 + 8, a.y + a.height / 2 + 8, { steps: 3 })
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height * ratio, { steps: 12 })
   if (opts.release !== false) await page.mouse.up()
 }
 
@@ -174,5 +194,92 @@ test.describe('集合树拖动', () => {
     await mouseDrag(page, treeRow(page, 'ping'), folderRow(page, 'empty'))
     await page.waitForTimeout(400)
     expect(await page.getByTestId('tab.item').count()).toBe(before)
+  })
+
+  // ---- 自定义拖动排序：落点改到行上/下缘（同层排序），行中间仍是「放进容器」 ----
+
+  test('[T7] 请求拖到同行上缘：按落点排序并写回 seq', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    const reqRows = page.locator('[data-testid="tree.row"][data-kind="request"]')
+    await expect(reqRows.nth(0)).toHaveAttribute('data-path', 'api/ping.yml')
+
+    // 拖动中：目标行给「插入线」样式（drop-before），不再是「放进容器」的高亮
+    await mouseDragAt(page, treeRow(page, 'pong'), treeRow(page, 'ping'), 0.15, { release: false })
+    await expect(treeRow(page, 'ping')).toHaveClass(/drop-before/)
+    await expect(treeRow(page, 'ping')).not.toHaveClass(/drop-ok/)
+    await page.mouse.up()
+
+    await expect.poll(async () => reqRows.nth(0).getAttribute('data-path')).toBe('api/pong.yml')
+    await expect.poll(async () => reqRows.nth(1).getAttribute('data-path')).toBe('api/ping.yml')
+    expect(readCollectionFile(dir, 'api/pong.yml') ?? '').toContain('seq: 1')
+    expect(readCollectionFile(dir, 'api/ping.yml') ?? '').toContain('seq: 2')
+
+    // 再把它拖回 ping 的下缘：顺序恢复（下缘 = 插到 ping 之后）
+    await mouseDragAt(page, treeRow(page, 'pong'), treeRow(page, 'ping'), 0.85)
+    await expect.poll(async () => reqRows.nth(0).getAttribute('data-path')).toBe('api/ping.yml')
+    await expect.poll(async () => reqRows.nth(1).getAttribute('data-path')).toBe('api/pong.yml')
+
+    // 拖到自己身上（上缘）是空操作：不能把请求甩到末尾
+    await mouseDragAt(page, treeRow(page, 'ping'), treeRow(page, 'ping'), 0.15)
+    await expect.poll(async () => reqRows.nth(0).getAttribute('data-path')).toBe('api/ping.yml')
+    await expect.poll(async () => reqRows.nth(1).getAttribute('data-path')).toBe('api/pong.yml')
+  })
+
+  test('[T8] 分组拖到同行上缘：按落点排序并写回 folder.yml 的 seq', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    const folderRows = page.locator('[data-testid="tree.row"][data-kind="folder"]')
+    // 初始：两个分组的 seq 相同，按名称 api 在前
+    await expect(folderRows.nth(0)).toHaveAttribute('data-path', 'api')
+
+    await mouseDragAt(page, treeRowByUid(page, EMPTY_UID), treeRowByUid(page, API_UID), 0.15)
+
+    await expect.poll(async () => folderRows.nth(0).getAttribute('data-path')).toBe('empty')
+    await expect.poll(async () => folderRows.nth(1).getAttribute('data-path')).toBe('api')
+    expect(readCollectionFile(dir, 'empty/folder.yml') ?? '').toContain('seq: 1')
+    expect(readCollectionFile(dir, 'api/folder.yml') ?? '').toContain('seq: 2')
+  })
+
+  test('[T9] 拖动根行：集合之间的顺序按落点调整', async ({ page, app }) => {
+    await app.newCollection('basic')
+    await app.addCollection('basic')
+    await openCollection(page, app)
+    const roots = page.getByTestId('tree.root')
+    await expect(roots).toHaveCount(2)
+    const first = await roots.nth(0).getAttribute('data-root')
+    const second = await roots.nth(1).getAttribute('data-root')
+    expect(first).not.toBe(second)
+
+    // 把第二个根拖到第一个根的上缘 → 两者交换
+    await mouseDragAt(page, roots.nth(1), roots.nth(0), 0.15)
+    await expect.poll(async () => roots.nth(0).getAttribute('data-root')).toBe(second)
+    await expect.poll(async () => roots.nth(1).getAttribute('data-root')).toBe(first)
+  })
+
+  test('[T10] 文档与请求同层排序：文档拖到请求之后并写回 frontmatter seq', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    await openCollection(page, app)
+    // 直接在 api 分组里造一篇文档（IPC 写盘后重进页面刷新树）
+    await app.ipc('CreateDoc', '说明', 'api')
+    await openCollection(page, app)
+
+    const apiLeaves = page.locator(
+      '[data-testid="tree.row"][data-path^="api/"][data-kind="request"], ' +
+        '[data-testid="tree.row"][data-path^="api/"][data-kind="doc"]',
+    )
+    // 新建文档的 seq 为 0：排在请求之前（叶子组内按 seq 升序）
+    await expect.poll(async () => apiLeaves.nth(0).getAttribute('data-path')).toBe('api/说明.md')
+
+    // 把请求拖到文档的上缘：请求 1、文档 2（pong 顺延为 3）
+    await mouseDragAt(page, treeRow(page, 'ping'), treeRow(page, '说明'), 0.15)
+    await expect.poll(async () => apiLeaves.nth(0).getAttribute('data-path')).toBe('api/ping.yml')
+    await expect.poll(async () => apiLeaves.nth(1).getAttribute('data-path')).toBe('api/说明.md')
+    expect(readCollectionFile(dir, 'api/说明.md') ?? '').toContain('seq: 2')
+
+    // 再把文档拖到 pong 之后：文档变成最后一行
+    await mouseDragAt(page, treeRow(page, '说明'), treeRow(page, 'pong'), 0.85)
+    await expect.poll(async () => apiLeaves.nth(2).getAttribute('data-path')).toBe('api/说明.md')
+    expect(readCollectionFile(dir, 'api/说明.md') ?? '').toContain('seq: 3')
   })
 })

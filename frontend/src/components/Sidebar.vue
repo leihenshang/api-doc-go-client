@@ -4,8 +4,17 @@
 // 分组行 hover「＋/✎/🗑」、请求行 hover「✎/🗑」；行内输入回车提交、Esc 取消；删除二次确认。
 import MethodTag from '@/components/MethodTag.vue'
 import SidebarDialogs from '@/components/SidebarDialogs.vue'
-import { useTreeDnd } from '@/composables/useTreeDnd'
-import { ancestorPaths, canDrop, filterTree, folderNameTaken, searchNode, sortTree, type SortMode } from '@/lib/collTree'
+import { useTreeDnd, ROOT_NODE, type DropHint, type TreeDragNode } from '@/composables/useTreeDnd'
+import {
+  ancestorPaths,
+  canDrop,
+  filterTree,
+  findFolderByPath,
+  folderNameTaken,
+  searchNode,
+  sortTree,
+  type SortMode,
+} from '@/lib/collTree'
 import { api } from '@/lib/ipc'
 import { dialog, message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
@@ -554,6 +563,7 @@ function toggleRootAll(root: string): void {
  * 右侧「···」菜单（Side Menu）照常打开，不会因为想折展集合就误触发切根或折叠。
  */
 function onRootRowClick(root: string, ev: MouseEvent): void {
+  if (clickSuppressed.value) return // 拖动调整集合顺序刚结束：别顺手把根切换/折叠了
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
   if (root !== props.activeRoot) {
@@ -563,6 +573,11 @@ function onRootRowClick(root: string, ev: MouseEvent): void {
     return
   }
   toggleRoot(root)
+}
+
+/** 根行按下：拖动根行 = 调整集合之间的顺序（其余落点逻辑与树行共用 useTreeDnd）。 */
+function onRootPointerDown(root: string, ev: PointerEvent): void {
+  onRowPointerDown(root, ROOT_NODE, ev)
 }
 
 function fail(e: unknown): void {
@@ -782,18 +797,20 @@ function confirmDelete(root: string, node: TreeNode, kind: 'folder' | 'request' 
   })
 }
 
-// ---- 拖动调整上级目录（自己实现，不用 HTML5 拖拽）----
-// 拖动分组或请求行到目标分组上即改其上级目录；拖到顶部「集合根」行则移回根。
+// ---- 拖动调整上级目录 / 自定义排序（自己实现，不用 HTML5 拖拽）----
+// 落点分三种（判定见 composables/useTreeDnd）：
+//   inside = 放进容器（分组 / 工作目录根）：改上级，追加到同类型末尾；
+//   before/after = 插到命中行的前/后：同层自定义排序（分组一套、请求+文档一套）。
+// 拖到工作目录根行的上下缘 = 放进该根的头/尾；拖动根行本身 = 调整集合之间的顺序。
 //
 // 为什么不用 draggable / HTML5 DnD：桌面端跑在 WebView2 里，原生拖拽在嵌入式 WebView 下
 // 触发不可靠（用户反馈：鼠标根本拖不动），而且拖拽期间渲染进程的输入派发会被原生拖拽循环
 // 阻塞 —— 现象就是「按下去动了、但什么都不会发生」。改成 pointerdown/move/up 自己算命中，
 // 行为在 WebView2 / Chromium / Firefox 下一致，也不再依赖 dataTransfer。
-// 拖拽状态与按下/移动/松手/取消的指针编排见 composables/useTreeDnd。
 // canDrop（能否落点）已抽到 lib/collTree；这里只补一个「重名分组」落点提示（需 props.roots + i18n）。
 
 /** 落点重名提示：目标分组（含跨根）下已有同名分组时给原因（后端会拒同名目录复用）。 */
-function dropTipFor(node: TreeNode, destRoot: string, destPath: string): string | undefined {
+function dropTipFor(node: TreeDragNode, destRoot: string, destPath: string): string | undefined {
   const item = props.roots.find((r) => r.root === destRoot)
   if (!item) return undefined
   if (node.type === 'folder' && folderNameTaken(item.info.tree, destPath, node.name)) {
@@ -803,9 +820,10 @@ function dropTipFor(node: TreeNode, destRoot: string, destPath: string): string 
 }
 
 const { dragNode, dropHint, dragging, clickSuppressed, onRowPointerDown } = useTreeDnd({
-  dragEnabled: () => !searching.value && editing.value === null,
+  // 名称排序（asc/desc）只是显示过滤，与磁盘 seq 顺序不一致：此时禁用拖动，避免「拖了却没按落点排」。
+  dragEnabled: () => !searching.value && editing.value === null && sortMode.value === 'default',
   dropTip: dropTipFor,
-  onDrop: performMove,
+  onDrop: performDrop,
 })
 
 /**
@@ -848,6 +866,121 @@ function revealMoved(targetRoot: string, destPath: string, node: TreeNode): void
     next.delete(key)
   }
   collapsed.value = next
+}
+
+/** 某个根里指定分组的子节点（树序 = 磁盘 seq 顺序；path 空 = 集合根）。 */
+function childrenOf(root: string, path: string): TreeNode[] {
+  const item = props.roots.find((r) => r.root === root)
+  if (!item) return []
+  if (!path) return item.info.tree
+  return findFolderByPath(item.info.tree, path)?.children ?? []
+}
+
+/** 同层「排序组」：分组一套、叶子（请求/文档）一套 —— 与集合树「分组在前」的排序规则一致。 */
+function siblingsOf(root: string, path: string, folderGroup: boolean): TreeNode[] {
+  return childrenOf(root, path).filter((n) => (n.type === 'folder') === folderGroup)
+}
+
+/** 命中行所属的父分组路径（分组取自身路径的上级；请求/文档取文件所在目录 —— 两者同一算法）。 */
+function parentPathOf(node: TreeNode): string {
+  return node.path.split('/').slice(0, -1).join('/')
+}
+
+/**
+ * 把落点换算成「目标分组 + 锚点（插到哪个兄弟之前）」，beforeUID 空 = 同类型末尾。
+ * 四种情况：放进容器 / 命中根行 / 叶子落到分组行（放进该分组头尾）/ 同组排序。
+ */
+function resolveDropTarget(
+  node: TreeDragNode,
+  hint: DropHint,
+): { root: string; path: string; beforeUID: string } {
+  if (node.type === 'root') return { root: hint.root, path: '', beforeUID: '' }
+  if (hint.pos === 'inside') return { root: hint.root, path: hint.path, beforeUID: '' }
+  const tree = props.roots.find((r) => r.root === hint.root)?.info.tree ?? []
+  const hit = hint.uid === '__root__' ? null : searchNode(tree, hint.uid)
+  const folderGroup = node.type === 'folder'
+  if (!hit) {
+    // 命中根行：放进该根的头（插到第一个同组兄弟之前）或末尾
+    const first = siblingsOf(hint.root, '', folderGroup)[0]
+    return { root: hint.root, path: '', beforeUID: hint.pos === 'before' ? (first?.uid ?? '') : '' }
+  }
+  if (hit.type === 'folder' && !folderGroup) {
+    // 叶子落在分组行上/下缘：放进该分组的叶子头/尾
+    const first = siblingsOf(hint.root, hit.path, false)[0]
+    return { root: hint.root, path: hit.path, beforeUID: hint.pos === 'before' ? (first?.uid ?? '') : '' }
+  }
+  const parent = parentPathOf(hit)
+  const list = siblingsOf(hint.root, parent, folderGroup)
+  const idx = list.findIndex((n) => n.uid === hit.uid)
+  const beforeUID = hint.pos === 'before' ? hit.uid : (list[idx + 1]?.uid ?? '')
+  return { root: hint.root, path: parent, beforeUID }
+}
+
+/** 拖动落点分发：根行排序 / 放进容器（改上级）/ 同层排序。 */
+async function performDrop(srcRoot: string, node: TreeDragNode, hint: DropHint): Promise<void> {
+  if (node.type === 'root') {
+    if (hint.pos !== 'inside') await reorderRoot(srcRoot, hint.root, hint.pos)
+    return
+  }
+  if (hint.pos === 'inside') {
+    await performMove(srcRoot, node, hint.root, hint.path)
+    return
+  }
+  await performArrange(srcRoot, node, hint)
+}
+
+/** 集合之间排序：把 srcRoot 插到 targetRoot 的前/后（store 会同时写回「下次启动恢复」的顺序）。 */
+async function reorderRoot(srcRoot: string, targetRoot: string, pos: 'before' | 'after'): Promise<void> {
+  if (srcRoot === targetRoot) return
+  const order = props.roots.map((r) => r.root).filter((r) => r !== srcRoot)
+  const at = order.indexOf(targetRoot)
+  if (at < 0) return
+  order.splice(pos === 'before' ? at : at + 1, 0, srcRoot)
+  try {
+    await coll.reorderRoots(order)
+  } catch (e) {
+    fail(e)
+  }
+}
+
+/** 同层排序：换算成目标分组 + 锚点后调用 ArrangeNode（同层排序 / 跨分组拖到指定位置）。 */
+async function performArrange(srcRoot: string, node: TreeNode, hint: DropHint): Promise<void> {
+  const target = resolveDropTarget(node, hint)
+  // 拖到自己身上（上缘 = 插到自己之前）：空操作 —— 后端会把 uid==beforeUID 归一成「末尾」，
+  // 不加这道判断会让「拖回原处」变成「甩到最后」。
+  if (target.beforeUID === node.uid) return
+  if (node.type === 'doc' && srcRoot !== target.root) {
+    message.warning(t('tree.docCrossRoot'))
+    return
+  }
+  if (node.type === 'folder' && !canDrop(node, srcRoot, target.root, target.path)) return
+  const sameRoot = srcRoot === target.root
+  try {
+    let uid = node.uid
+    if (!sameRoot) {
+      // 跨工作目录：先搬（目标侧重建，请求会拿到新 uid），再把新节点插到落点
+      if (node.type === 'folder') {
+        // 分组跨根是整棵重建、新 uid 不回传：只搬（追加到目标分组末尾）
+        const moved = await coll.moveFolderTo(srcRoot, node.uid, target.root, target.path)
+        for (const u of moved) tabs.forgetRequest(u)
+      } else {
+        uid = await coll.moveRequestTo(srcRoot, node.uid, target.root, target.path)
+        tabs.forgetRequest(node.uid)
+      }
+      message.success(t('tree.movedToDir', { name: rootName(target.root) }))
+    }
+    // 分组跨根时没有可用的新 uid，排序按「追加」处理
+    if (sameRoot || node.type !== 'folder') {
+      await ensureActive(target.root)
+      await coll.arrangeNode(uid, target.path, target.beforeUID)
+      if (node.type !== 'folder') tabs.syncPath(uid, target.path)
+    }
+    await nextTick()
+    expandRoot(target.root)
+    revealMoved(target.root, target.path, node)
+  } catch (e) {
+    fail(e)
+  }
 }
 
 /** 执行移动：同目录改上级；跨目录则把请求 / 分组整棵搬到另一个工作目录。 */
@@ -985,11 +1118,15 @@ watch(
           <div class="row root" :class="{
             on: row.root === props.activeRoot,
             'root-active': row.root === props.activeRoot,
-            'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.ok,
-            'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && !dropHint.ok,
+            dragging: dragging && dragNode?.root === row.root && dragNode?.node.type === 'root',
+            'drop-ok': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.pos === 'inside' && dropHint.ok,
+            'drop-bad': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.pos === 'inside' && !dropHint.ok,
+            'drop-before': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.pos === 'before' && dropHint.ok,
+            'drop-after': dragging && dropHint?.root === row.root && dropHint?.uid === '__root__' && dropHint.pos === 'after' && dropHint.ok,
           }" :style="{ paddingLeft: '8px' }" :data-root="row.root" :data-path="''"
             :data-expanded="isRootCollapsed(row.root) ? 'false' : 'true'" data-testid="tree.root"
-            @click="onRootRowClick(row.root, $event)">
+            @click="onRootRowClick(row.root, $event)"
+            @pointerdown="onRootPointerDown(row.root, $event)">
             <!-- 根行 → 子行的连接线：从展开图标圆心向下接出（收起 / 没有子行时不画） -->
             <span v-if="rootHasVisibleKids(row.root)" class="guides" aria-hidden="true" data-testid="tree.root.guides">
               <span class="gl root-down" :style="{ left: GUIDE_OFFSET + 'px' }" />
@@ -1044,8 +1181,10 @@ watch(
             clickable: row.node?.type === 'request' || row.node?.type === 'doc',
             dim: row.root !== props.activeRoot,
             dragging: dragNode?.root === row.root && dragNode?.node.uid === row.node?.uid,
-            'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.ok,
-            'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && !dropHint.ok,
+            'drop-ok': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.pos === 'inside' && dropHint.ok,
+            'drop-bad': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.pos === 'inside' && !dropHint.ok,
+            'drop-before': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.pos === 'before' && dropHint.ok,
+            'drop-after': dropHint?.root === row.root && dropHint?.uid === row.node?.uid && dropHint.pos === 'after' && dropHint.ok,
           }" :data-root="row.root" :data-uid="row.node?.uid" :data-kind="row.node?.type" :data-path="row.node?.path"
             :data-collapsed="row.node?.type === 'folder' && row.node.children?.length ? (isCollapsed(row.root, row.node.path) ? 'true' : 'false') : undefined"
             data-testid="tree.row"

@@ -276,6 +276,44 @@ func (a *App) ListCollections() ([]*CollectionSummary, error) {
 	return items, nil
 }
 
+// ReorderCollections 按给定顺序重排侧栏根行（拖动集合调整顺序）。
+//
+// roots 传 ListCollections 里的 Root；重复项去重、未知/已关闭的标识忽略，
+// 未列出的已打开根按原顺序追加在后面 —— 多端并发关闭时也不至于整体失败。
+func (a *App) ReorderCollections(roots []string) error {
+	if len(roots) == 0 {
+		return errors.New("缺少工作目录顺序")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen := make(map[string]bool, len(a.collOrder))
+	next := make([]string, 0, len(a.collOrder))
+	for _, r := range roots {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		key := rootKey(r)
+		if seen[key] {
+			continue
+		}
+		if _, ok := a.colls[key]; !ok {
+			continue
+		}
+		seen[key] = true
+		next = append(next, key)
+	}
+	for _, key := range a.collOrder {
+		if !seen[key] {
+			next = append(next, key)
+		}
+	}
+	if len(next) != len(a.collOrder) {
+		return errors.New("工作目录顺序不完整")
+	}
+	a.collOrder = next
+	return nil
+}
+
 // ActiveCollection 当前活动根的标识（空串 = 未打开任何目录）。
 func (a *App) ActiveCollection() string { return a.activeRootID() }
 
