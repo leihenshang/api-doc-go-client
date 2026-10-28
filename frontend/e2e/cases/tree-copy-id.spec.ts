@@ -74,3 +74,37 @@ test.describe('集合树复制 ID / MCP 指令', () => {
     await expect(page.getByText(t('tree.copyId'), { exact: true })).toHaveCount(0)
   })
 })
+
+test('[T22] 右键菜单：选中 / 点击外部 / Esc / 滚动后都消失', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  const menu = page.locator('.n-dropdown-menu')
+
+  // ① 选中条目后立即消失（不能挡住下一次右键）
+  await openRowCtx(page, 'ping')
+  await expect(menu).toBeVisible()
+  await pickCtxItem(page, t('tree.copyId'))
+  await expect(menu).toHaveCount(0)
+
+  // ② Esc
+  await openRowCtx(page, 'ping')
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+
+  // ③ 点击外部（详情区空白处）
+  await openRowCtx(page, 'ping')
+  await page.mouse.click(700, 320)
+  await expect(menu).toHaveCount(0)
+
+  // ④ 滚动（树的滚动事件要能关掉菜单，避免浮在旧位置）
+  await openRowCtx(page, 'ping')
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')))
+  await expect(menu).toHaveCount(0)
+
+  // ⑤ 鼠标进过菜单后移开：延迟关闭（不长期浮在原处）
+  await openRowCtx(page, 'ping')
+  await page.locator('.n-dropdown-option').filter({ hasText: t('tree.copyId') }).last().hover()
+  await page.mouse.move(700, 320)
+  await expect(menu).toHaveCount(0)
+})
