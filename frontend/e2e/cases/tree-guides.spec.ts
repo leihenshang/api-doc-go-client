@@ -208,3 +208,44 @@ test('[B16] 连接线竖线落在展开图标圆心；方法标签与请求名�
   await expect(basicRootRow).toHaveClass(/root-active/)
   expect(await px(basicName)).toBe(idleSize)
 })
+
+/**
+ * [B16] 徽标在自身列内左对齐：GET 的 G、POST 的 P、MD 的 M 必须落在同一条竖线上。
+ * 旧实现用 `justify-content: flex-end` 让文字贴右缘 —— 词越长字头越靠左（G/P 错开），
+ * 而且右侧只剩 1px，文档的 MD 与标题几乎贴在一起。
+ */
+test('[B16] 集合树徽标文字左对齐；MD 与标题留出间距', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+  // 造一篇文档（放在 api 里，与请求同层，便于比较同一列的徽标）
+  await app.ipc('CreateDoc', '说明', 'api')
+  await openCollection(page, app)
+
+  const rowOf = (text: string): Locator => page.getByTestId('tree.row').filter({ hasText: text }).first()
+  /** 徽标文字相对徽标盒子的左偏移 + 文字右缘到标题左缘的间距。 */
+  const measure = (loc: Locator): Promise<{ textLeft: number; gap: number }> =>
+    loc.evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const text = range.getBoundingClientRect()
+      const name = el.parentElement?.querySelector('.rname')
+      const nb = name ? name.getBoundingClientRect() : null
+      return { textLeft: text.left - box.left, gap: nb ? nb.left - text.right : NaN }
+    })
+
+  const md = await measure(rowOf('说明').locator('.md-tree'))
+  const get = await measure(rowOf('ping').locator('.mt'))
+  const post = await measure(rowOf('pong').locator('.mt'))
+
+  // ① 三个徽标的字头同列（左对齐），而不是按右缘对齐
+  const lefts = [md.textLeft, get.textLeft, post.textLeft]
+  for (const left of lefts) {
+    expect(Math.abs(left - lefts[0]), `字头偏移 ${JSON.stringify(lefts)}`).toBeLessThanOrEqual(1)
+  }
+  // ② 文字确实贴在列首（避免退回右对齐后本断言仍然通过）
+  for (const m of [md, get, post]) expect(m.textLeft).toBeLessThan(2)
+  // ③ 与标题的间距：旧实现恒为 1px（MD 几乎贴住标题）
+  expect(md.gap, `MD→标题间距 ${md.gap}`).toBeGreaterThanOrEqual(8)
+  for (const m of [get, post]) expect(m.gap).toBeGreaterThanOrEqual(2)
+})
