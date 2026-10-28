@@ -57,6 +57,10 @@ export const useSettingsStore = defineStore('settings', {
         loaded.mcp = {
           ...DEFAULTS.mcp,
           ...(loaded.mcp ?? {}),
+          // allowOrigins 也要补空数组：Go 侧空列表归一为 null，
+          // 直接透传会让「store 的 null」与对话框里的 [] 比较不相等，
+          // 一打开设置就凭空显示「配置已修改」。
+          allowOrigins: loaded.mcp?.allowOrigins ?? [],
           allow: loaded.mcp?.allow ?? [],
         }
         if (!loaded.mcp.port) loaded.mcp.port = this.mcpPortDefault

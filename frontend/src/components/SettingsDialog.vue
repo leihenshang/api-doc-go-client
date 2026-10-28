@@ -299,8 +299,9 @@ function snapshot(s: Settings): string {
       token: m.token,
       readOnly: m.readOnly,
       enabled: m.enabled,
-      allowOrigins: m.allowOrigins,
-      allow: m.allow,
+      // 空列表在 Go 侧是 null：比较前统一成 []，否则「一打开就 dirty」
+      allowOrigins: m.allowOrigins ?? [],
+      allow: m.allow ?? [],
     },
   })
 }
@@ -317,8 +318,8 @@ const mcpDirty = computed(() => {
     a.token !== b.token ||
     a.readOnly !== b.readOnly ||
     a.enabled !== b.enabled ||
-    JSON.stringify(a.allowOrigins) !== JSON.stringify(b.allowOrigins) ||
-    JSON.stringify(a.allow) !== JSON.stringify(b.allow)
+    JSON.stringify(a.allowOrigins ?? []) !== JSON.stringify(b.allowOrigins ?? []) ||
+    JSON.stringify(a.allow ?? []) !== JSON.stringify(b.allow ?? [])
   )
 })
 

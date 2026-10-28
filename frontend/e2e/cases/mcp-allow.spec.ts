@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '../helpers/app'
-import { openCollection, openMcpSettings, saveSettings } from '../helpers/ui'
+import { openCollection, openMcpSettings, reopenApp, saveSettings } from '../helpers/ui'
 
 /**
  * MCP 工作目录白名单（设置页）。
@@ -62,4 +62,32 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
 
   await openMcpSettings(page)
   await expect(allowCheck).not.toBeChecked()
+})
+
+/**
+ * 回归：打开 MCP 设置不应凭空提示「配置已修改」。
+ * 根因是 Go 侧把空列表归一成 null，而对话框把 allowOrigins 归一成 []：
+ * dirty 用 JSON 快照比较，null ≠ [] 就会一打开就显示未保存提示。
+ */
+test('[I7] 打开 MCP 设置不显示未保存提示（空列表归一）', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+  const hint = page.getByTestId('settings.dirtyHint')
+
+  // ① 首次打开：什么都没改 → 不应有未保存提示
+  await openMcpSettings(page)
+  await expect(hint).toHaveCount(0)
+
+  // ② 原样保存一次（把归一后的空列表写回磁盘，模拟用户曾保存过配置）→ 再打开仍不应提示
+  //    注意不要动启用/端口：同一 worker 的配置会在用例间保留，MCP 可能已是启用/运行态。
+  await saveSettings(page)
+  await openMcpSettings(page)
+  await expect(hint).toHaveCount(0)
+
+  // ③ 关闭弹窗 → 刷新页面（模拟重启后重开）→ 直接进 MCP 分区：仍不应提示
+  await page.getByTestId('settings.cancel').click()
+  await page.reload()
+  await reopenApp(page)
+  await openMcpSettings(page)
+  await expect(hint).toHaveCount(0)
 })
