@@ -73,8 +73,11 @@ test('文档树叶子：分组内新建 → 开页签 → 编辑保存落盘', a
       doc: gapFor(rows.find((r) => r.getAttribute('data-kind') === 'doc')),
     }
   })
-  expect(treeGaps.req).toBeGreaterThan(0)
-  expect(Math.abs(treeGaps.req - treeGaps.doc)).toBeLessThanOrEqual(2)
+  // 树上 MD 与名称的视觉间距：徽标文字在固定 34px 列内**左对齐**后，
+  // 间距 = 列宽 − 字形宽 + 1px，因此不再要求「请求与文档的间距相等」
+  // （词宽不同自然不同）；只要求都留出可见间距。字形左缘同列由 tree-guides 的 B16 守护。
+  expect(treeGaps.req).toBeGreaterThanOrEqual(2)
+  expect(treeGaps.doc).toBeGreaterThanOrEqual(8)
 
   // ② 点叶子 → 开文档页签（Markdown 编辑器可见即已挂载；保存改由工具栏按钮 / Ctrl+S）
   await treeRow(page, '接口说明').click()

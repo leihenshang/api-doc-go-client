@@ -229,7 +229,7 @@
   justify-content: flex-start;
   flex: 0 0 auto;
   height: 16px;
-  /* 与树上 MethodTag 的 34px 最小宽度一致：名称起点、视觉间距都对齐 */
+  /* 与树上 MethodTag 的 34px 最小宽度一致：名称起点对齐（列内文字左对齐，间距随字形宽度变化） */
   min-width: 34px;
   font-family: inherit;
   font-size: 12.5px;
