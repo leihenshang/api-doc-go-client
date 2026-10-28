@@ -21,6 +21,8 @@ export function AnswerMCPAuthz(arg1:string,arg2:string):Promise<void>;
 
 export function ApplyMCPSettings():Promise<app.MCPStatus>;
 
+export function ArrangeNode(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function Authorize(arg1:context.Context,arg2:mcpauth.Request):Promise<mcpauth.Result>;
 
 export function CancelSend(arg1:string):Promise<void>;
@@ -190,6 +192,8 @@ export function RenameEnv(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function RenameFolder(arg1:string,arg2:string):Promise<void>;
 
 export function RenameRequest(arg1:string,arg2:string):Promise<void>;
+
+export function ReorderCollections(arg1:Array<string>):Promise<void>;
 
 export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 

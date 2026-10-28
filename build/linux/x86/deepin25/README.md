@@ -14,7 +14,7 @@
 # Go/Node 由 vfox 管理时，先激活：eval "$(vfox activate bash)"
 scripts/build-deb.sh                 # 默认 amd64，正式 + dev 各出一包
 scripts/build-deb.sh arm64           # 交叉打 arm64（需 aarch64 工具链，见 arm README）
-VERSION=1.2.3 scripts/build-deb.sh   # 覆盖版本号
+VERSION=0.0.2 scripts/build-deb.sh   # 覆盖版本号
 SKIP_BUILD=1 scripts/build-deb.sh    # 复用 build/bin 现有二进制（需 prod/dev 两份都在）
 ```
 

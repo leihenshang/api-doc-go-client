@@ -14,6 +14,10 @@ export function ApplyMCPSettings() {
   return window['go']['app']['App']['ApplyMCPSettings']();
 }
 
+export function ArrangeNode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ArrangeNode'](arg1, arg2, arg3);
+}
+
 export function Authorize(arg1, arg2) {
   return window['go']['app']['App']['Authorize'](arg1, arg2);
 }
@@ -352,6 +356,10 @@ export function RenameFolder(arg1, arg2) {
 
 export function RenameRequest(arg1, arg2) {
   return window['go']['app']['App']['RenameRequest'](arg1, arg2);
+}
+
+export function ReorderCollections(arg1) {
+  return window['go']['app']['App']['ReorderCollections'](arg1);
 }
 
 export function ResolveConflict(arg1, arg2) {
