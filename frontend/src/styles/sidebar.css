@@ -212,11 +212,13 @@
 /* 请求行方法与文字：同字号、同基线。
    方法徽标默认 10px（给页签 / 请求栏那种紧凑场景），树上比 12.5px 的请求名小一截；
    字号不同时，相同 line-height 下两者的基线会差出 1px 以上，看着就是两个字错位。
-   这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。 */
+   这里统一成与请求名同样的字号（line-height 本来就都是 26px），基线随之对齐到 0.5px 内。
+   徽标文字在 34px 徽标列内**左对齐**：GET 的 G 与 POST 的 P 落在同一列
+   （用 flex-end 时是右缘对齐，字头会因词长不同而错开，标题也跟着显得忽远忽近）。 */
 .row>.mt {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   font-size: 12.5px;
 }
 
@@ -224,7 +226,7 @@
 .md-tree {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex: 0 0 auto;
   height: 16px;
   /* 与树上 MethodTag 的 34px 最小宽度一致：名称起点、视觉间距都对齐 */
