@@ -3,6 +3,12 @@
     "includeRequests": {
       "type": "boolean"
     },
+    "onlyMatched": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
     "project": {
       "type": "string"
     },

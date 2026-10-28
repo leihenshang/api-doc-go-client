@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -345,7 +346,9 @@ func (ts *toolSet) registerReadTools(server *mcp.Server) {
 	addTool(ts, server, "list_projects", ts.listProjects)
 	addTool(ts, server, "get_project_modules", ts.getProjectModules)
 	addTool(ts, server, "get_request_detail", ts.getRequestDetail)
+	addTool(ts, server, "get_request_details", ts.getRequestDetails)
 	addTool(ts, server, "search_requests", ts.searchRequests)
+	addTool(ts, server, "search_docs", ts.searchDocs)
 	addTool(ts, server, "list_envs", ts.listEnvs)
 	addTool(ts, server, "get_doc_template", ts.getDocTemplate)
 	// 文档条目：只读两个（列表不含正文，取全文走 get_doc）
@@ -480,19 +483,27 @@ type getModulesIn struct {
 	Project         string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Query           string `json:"query,omitempty" jsonschema:"对模块名与请求名/方法/路径做模糊过滤"`
 	IncludeRequests bool   `json:"includeRequests,omitempty" jsonschema:"true = 附带每个模块下的请求清单"`
+	OnlyMatched     *bool  `json:"onlyMatched,omitempty" jsonschema:"有 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求）；传 false 可看全部模块（汇总行始终给出模块总数）"`
 }
 
 func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolRequest, in getModulesIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
 		in.Project = ts.proj(req, in.Project)
-		res, err := ts.svc.GetProjectModules(in.Project, in.Query, in.IncludeRequests)
+		// 默认：带 query 就收敛到「有命中的模块」；显式传 onlyMatched=false 才看全量
+		onlyMatched := strings.TrimSpace(in.Query) != ""
+		if in.OnlyMatched != nil {
+			onlyMatched = *in.OnlyMatched
+		}
+		res, err := ts.svc.GetProjectModules(in.Project, in.Query, in.IncludeRequests, onlyMatched)
 		if err != nil {
 			return "", err
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "项目 %s：%d 个模块，%d 个请求", in.Project, len(res.Modules), res.Total)
 		if in.Query != "" {
-			fmt.Fprintf(&sb, "，其中 %d 个匹配「%s」", res.Matched, in.Query)
+			fmt.Fprintf(&sb, "项目 %s：共 %d 个模块（有命中 %d 个），%d 个请求，其中 %d 个匹配「%s」",
+				in.Project, res.ModuleTotal, len(res.Modules), res.Total, res.Matched, in.Query)
+		} else {
+			fmt.Fprintf(&sb, "项目 %s：%d 个模块，%d 个请求", in.Project, res.ModuleTotal, res.Total)
 		}
 		sb.WriteString("\n")
 		for _, m := range res.Modules {
@@ -510,36 +521,142 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 
 // getDetailIn get_request_detail 的入参。
 type getDetailIn struct {
-	Project      string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID          string `json:"uid" jsonschema:"接口 uid（用 search_requests 或 get_project_modules 获取）"`
-	Query        string `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
-	IncludeBody  bool   `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
-	MaxBodyBytes int    `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
+	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID          string   `json:"uid" jsonschema:"接口 uid（用 search_requests 或 get_project_modules 获取）"`
+	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
+	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
+	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
+	Sections     []string `json:"sections,omitempty" jsonschema:"只返回指定分段以控制体积：overview（请求本体/概述/参数/头/体）/ docs（说明文档与相关文档）/ bodyFields（请求体字段表）/ respDoc（响应字段与样例）/ examples（已保存响应示例）。不传 = 全量（旧行为）"`
 }
 
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
 		in.Project = ts.proj(req, in.Project)
+		sel, err := NormalizeDetailSections(in.Sections)
+		if err != nil {
+			return "", err
+		}
 		d, err := ts.svc.GetRequestDetail(in.Project, in.UID, DetailOptions{
-			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query,
+			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
 		})
 		if err != nil {
 			return "", err
 		}
-		return renderDetail(d), nil
+		return renderDetail(d, sel), nil
 	})
 }
 
-// searchIn_ search_requests 的入参（名字避开 fuzzy.go 的 candidate 类型冲突）。
+// maxBatchDetails get_request_details 单次 uid 上限。
+const maxBatchDetails = 10
+
+// getDetailsIn get_request_details（批量）的入参。
+type getDetailsIn struct {
+	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UIDs         []string `json:"uids" jsonschema:"接口 uid 列表，一次 1–10 个（超出直接报错，请分批）"`
+	Sections     []string `json:"sections,omitempty" jsonschema:"同 get_request_detail：overview / docs / bodyFields / respDoc / examples；不传 = 全量"`
+	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
+	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
+	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
+}
+
+// getRequestDetails 批量取详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
+func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolRequest, in getDetailsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		uids := make([]string, 0, len(in.UIDs))
+		for _, u := range in.UIDs {
+			if u = strings.TrimSpace(u); u != "" {
+				uids = append(uids, u)
+			}
+		}
+		if len(uids) == 0 {
+			return "", errors.New("uids 不能为空：一次传 1–10 个 uid（uid 从 search_requests / get_project_modules 取）")
+		}
+		if len(uids) > maxBatchDetails {
+			return "", fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDetails, len(uids))
+		}
+		sel, err := NormalizeDetailSections(in.Sections)
+		if err != nil {
+			return "", err
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "批量详情（%d 个请求，项目 %s）：", len(uids), in.Project)
+		ok := 0
+		for _, uid := range uids {
+			d, derr := ts.svc.GetRequestDetail(in.Project, uid, DetailOptions{
+				IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
+			})
+			sb.WriteString("\n")
+			if derr != nil {
+				fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
+				continue
+			}
+			ok++
+			fmt.Fprintf(&sb, "===== %s =====\n", uid)
+			sb.WriteString(renderDetail(d, sel))
+		}
+		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
+		return sb.String(), nil
+	})
+}
+
+// searchDocsIn search_docs 的入参。
+type searchDocsIn struct {
+	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略则在所有已加载项目里搜"`
+	Pattern    string `json:"pattern" jsonschema:"要搜索的文本（按行匹配，大小写不敏感）"`
+	ExactMatch bool   `json:"exactMatch,omitempty" jsonschema:"true = 整词匹配（左右必须是词边界），默认子串匹配"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"返回文档数上限，默认 50，最大 200"`
+}
+
+// searchDocs 在文档条目正文里搜索：返回 uid/路径/命中行号/片段，避免逐篇 get_doc 全文拉回。
+func (ts *toolSet) searchDocs(ctx context.Context, req *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		hits, total, err := ts.svc.SearchDocs(in.Project, in.Pattern, in.ExactMatch, in.Limit)
+		if err != nil {
+			return "", err
+		}
+		if len(hits) == 0 {
+			return fmt.Sprintf("没有文档包含「%s」。", in.Pattern), nil
+		}
+		var sb strings.Builder
+		mode := ""
+		if in.ExactMatch {
+			mode = "，整词匹配"
+		}
+		fmt.Fprintf(&sb, "「%s」命中 %d 篇文档（返回 %d 篇，按命中行数排序%s）：\n", in.Pattern, total, len(hits), mode)
+		for _, h := range hits {
+			fmt.Fprintf(&sb, "\n- %s（路径 %s，uid %s，%d 处命中）\n", h.Name, h.Path, h.UID, h.Count)
+			for _, m := range h.Matches {
+				fmt.Fprintf(&sb, "    L%d: %s\n", m.Line, m.Snippet)
+			}
+			if h.Count > len(h.Matches) {
+				fmt.Fprintf(&sb, "    …还有 %d 处未列出（用 get_doc 读全文）\n", h.Count-len(h.Matches))
+			}
+		}
+		return sb.String(), nil
+	})
+}
+
+// searchArgs search_requests 的入参（名字避开 fuzzy.go 的 candidate 类型冲突）。
 type searchArgs struct {
-	Query   string `json:"query" jsonschema:"搜索关键词（名称/URL/方法/路径/header/说明/请求体片段）"`
-	Project string `json:"project,omitempty" jsonschema:"限定项目；省略则在所有已加载项目里搜"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"返回条数上限，默认 50，最大 200"`
+	Query       string   `json:"query" jsonschema:"搜索关键词（名称/URL/方法/路径/header/说明/请求体片段）"`
+	Project     string   `json:"project,omitempty" jsonschema:"限定项目；省略则在所有已加载项目里搜"`
+	Limit       int      `json:"limit,omitempty" jsonschema:"返回条数上限，默认 50，最大 200"`
+	ExactMatch  bool     `json:"exactMatch,omitempty" jsonschema:"true = 只认整串出现（不切词、不做子序列兜底），长标识符搜索用它消掉误报"`
+	Fields      []string `json:"fields,omitempty" jsonschema:"限定搜索范围：name / uri（方法+URL+路径）/ docs / respDoc / bodyFields / header / body；不传 = 全部"`
+	IncludeHash bool     `json:"includeHash,omitempty" jsonschema:"true = 每条结果附完整 hash（可直接回传 update_request.ifMatch）；默认 false 省体积"`
 }
 
 func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest, in searchArgs) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
-		ms, total, err := ts.svc.SearchRequests(in.Query, in.Project, in.Limit)
+		fields, err := NormalizeSearchFields(in.Fields)
+		if err != nil {
+			return "", err
+		}
+		ms, total, err := ts.svc.SearchRequests(in.Query, in.Project, in.Limit, SearchOptions{
+			Exact: in.ExactMatch, Fields: fields,
+		})
 		if err != nil {
 			return "", err
 		}
@@ -547,10 +664,24 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 			return fmt.Sprintf("没有匹配「%s」的请求。", in.Query), nil
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "「%s」命中 %d 条（返回 %d 条，按相关度排序）：\n", in.Query, total, len(ms))
+		mode := ""
+		if in.ExactMatch {
+			mode = "，整串匹配"
+		}
+		fmt.Fprintf(&sb, "「%s」命中 %d 条（返回 %d 条，按相关度排序%s）：\n", in.Query, total, len(ms), mode)
 		for _, m := range ms {
-			fmt.Fprintf(&sb, "- [%s] %s %s\n    项目 %s · 路径 %s · uid %s · 分数 %d · 命中 %s\n",
-				m.Method, m.Name, m.URL, m.Project, m.Path, m.UID, m.Score, strings.Join(m.Matched, "/"))
+			fmt.Fprintf(&sb, "- [%s] %s %s\n", m.Method, m.Name, m.URL)
+			fmt.Fprintf(&sb, "    项目 %s · 路径 %s · uid %s · 分数 %d · 命中 %s",
+				m.Project, m.Path, m.UID, m.Score, strings.Join(m.Matched, "/"))
+			if in.IncludeHash && m.Hash != "" {
+				fmt.Fprintf(&sb, " · hash %s", m.Hash)
+			}
+			sb.WriteString("\n")
+			if m.Snippet != "" {
+				for _, line := range strings.Split(m.Snippet, "\n") {
+					fmt.Fprintf(&sb, "    ↳ %s\n", line)
+				}
+			}
 		}
 		return sb.String(), nil
 	})
@@ -656,11 +787,25 @@ type updateArg = UpdateRequestInput
 func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, in updateArg) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
 		in.Project = ts.proj(req, in.Project)
+		// 动说明文档前先留旧文本：成功响应要给「改动行 ±1」的落盘确认（取不到旧文本则回落前 5 行）
+		oldDocs := ""
+		touched := in.Docs != nil || len(in.Replaces) > 0
+		if touched {
+			if s, derr := ts.svc.DocsOf(in.Project, in.UID); derr == nil {
+				oldDocs = s
+			}
+		}
 		r, err := ts.svc.UpdateRequest(in)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("已更新 [%s] %s（uid=%s，路径 %s）", r.Method, r.Name, r.UID, r.Path), nil
+		out := fmt.Sprintf("已更新 [%s] %s（uid=%s，路径 %s）", r.Method, r.Name, r.UID, r.Path)
+		if touched {
+			if kind, body := changePreview(oldDocs, r.Docs); body != "" {
+				out += "\n落盘确认（说明文档" + kind + "）：\n" + body
+			}
+		}
+		return out, nil
 	})
 }
 
@@ -701,11 +846,25 @@ type updateDocArg = UpdateDocInput
 func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in updateDocArg) (*mcp.CallToolResult, any, error) {
 	return ts.wrap(func() (string, error) {
 		in.Project = ts.proj(req, in.Project)
+		// 动正文前先留旧文本：成功响应要给「改动行 ±1」的落盘确认
+		oldContent := ""
+		touched := in.Content != nil || len(in.Replaces) > 0
+		if touched {
+			if d0, derr := ts.svc.GetDoc(in.Project, in.UID); derr == nil {
+				oldContent = d0.Content
+			}
+		}
 		d, err := ts.svc.UpdateDoc(in)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("已更新文档 %s（uid=%s，路径 %s，%d 字节）", d.Name, d.UID, d.Path, d.Size), nil
+		out := fmt.Sprintf("已更新文档 %s（uid=%s，路径 %s，%d 字节）", d.Name, d.UID, d.Path, d.Size)
+		if touched {
+			if kind, body := changePreview(oldContent, d.Content); body != "" {
+				out += "\n落盘确认（正文" + kind + "）：\n" + body
+			}
+		}
+		return out, nil
 	})
 }
 

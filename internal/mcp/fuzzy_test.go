@@ -38,7 +38,7 @@ func TestScoreCandidate(t *testing.T) {
 		Path: "api/ping.yml", Header: "Content-Type:application/json", Docs: "探活接口",
 	}
 	for _, c := range cases {
-		score, fields := scoreCandidate(base, c.q)
+		score, fields, _ := scoreCandidate(base, c.q, SearchOptions{})
 		if got := score > 0; got != c.wantScore {
 			t.Errorf("%s: query=%q score=%d 命中=%v，期望命中=%v", c.name, c.q, score, fields, c.wantScore)
 			continue
@@ -51,10 +51,10 @@ func TestScoreCandidate(t *testing.T) {
 
 func TestTokenScoreAcrossFields(t *testing.T) {
 	c := candidate{Name: "user", URL: "/v1/list"}
-	if score, _ := scoreCandidate(c, "user list"); score == 0 {
+	if score, _, _ := scoreCandidate(c, "user list", SearchOptions{}); score == 0 {
 		t.Errorf("跨字段的分词查询应命中：user + list")
 	}
-	if score, _ := scoreCandidate(c, "zzz"); score != 0 {
+	if score, _, _ := scoreCandidate(c, "zzz", SearchOptions{}); score != 0 {
 		t.Errorf("无关查询不应命中：%d", score)
 	}
 }
@@ -62,8 +62,8 @@ func TestTokenScoreAcrossFields(t *testing.T) {
 func TestScoreCandidatePrefersName(t *testing.T) {
 	a := candidate{Name: "order-list", URL: "/a"}
 	b := candidate{Name: "user", URL: "/order/list"}
-	sa, _ := scoreCandidate(a, "order")
-	sb, _ := scoreCandidate(b, "order")
+	sa, _, _ := scoreCandidate(a, "order", SearchOptions{})
+	sb, _, _ := scoreCandidate(b, "order", SearchOptions{})
 	if sa <= sb {
 		t.Errorf("名称命中的分数应高于 URL 命中：%d vs %d", sa, sb)
 	}

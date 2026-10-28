@@ -51,7 +51,7 @@ func truncateNote(truncated bool, total, shown int) string {
 	if !truncated {
 		return ""
 	}
-	return fmt.Sprintf("…（已截断：共 %d 字节，本次仅返回 %d 字节；需要完整内容请用 get_request_detail 的 include_body）", total, shown)
+	return fmt.Sprintf("…（已截断：共 %d 字节，本次仅返回 %d 字节；要更多内容请调大 maxBodyBytes，或用 get_request_detail 的 sections 只取需要的分段 / includeBody 取全文）", total, shown)
 }
 
 // SendOutcome send_request 的返回（响应体已裁剪）。
@@ -138,7 +138,7 @@ func renderSend(o *SendOutcome) string {
 	if o.Body != "" {
 		sb.WriteString(o.Body)
 	} else {
-		sb.WriteString("（未返回响应体：include_body=false）")
+		sb.WriteString("（未返回响应体：includeBody=false）")
 	}
 	if o.Saved {
 		fmt.Fprintf(&sb, "\n\n已保存为响应示例：%s（uid=%s）", o.ExamplePath, o.ExampleUID)
@@ -148,40 +148,89 @@ func renderSend(o *SendOutcome) string {
 	return sb.String()
 }
 
-// renderDetail 把接口详情渲染为紧凑文本。
-func renderDetail(d *RequestDetail) string {
+// 详情分段的合法取值（get_request_detail / get_request_details 的 sections）。
+// 不传 = 全量（与旧行为一致）；显式传时只渲染选中的段，便于把单次响应压到 3000 字符内。
+var detailSectionNames = []string{"overview", "docs", "bodyFields", "respDoc", "examples"}
+
+// NormalizeDetailSections 校验并归一 sections：空/全空串 = nil（全量）。
+func NormalizeDetailSections(sections []string) (map[string]bool, error) {
+	if len(sections) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]bool, len(sections))
+	for _, raw := range sections {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s == "" {
+			continue
+		}
+		ok := false
+		for _, name := range detailSectionNames {
+			if s == name {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("sections 含未知取值 %q；可选值：%s", raw, strings.Join(detailSectionNames, "/"))
+		}
+		out[s] = true
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// hasSection sel 为空 = 全量；否则只渲染选中的段。
+func hasSection(sel map[string]bool, name string) bool { return len(sel) == 0 || sel[name] }
+
+// renderDetail 把接口详情渲染为紧凑文本；sections 为空 = 全量（旧行为）。
+func renderDetail(d *RequestDetail, sections map[string]bool) string {
 	var sb strings.Builder
+	// 身份行恒输出：即使只取 docs，也要让 AI 知道这是哪张卡片（占不了多少体积）
 	fmt.Fprintf(&sb, "%s [%s] %s\n", d.Name, d.Method, d.URL)
 	fmt.Fprintf(&sb, "项目 %s · 路径 %s · uid %s", d.Project, d.Path, d.UID)
 	if d.Hash != "" {
-		// 只展示 12 位：服务端按 git 风格前缀比对（≥8 位），这个前缀可直接回传给 update_request.ifMatch
-		fmt.Fprintf(&sb, " · hash %s…", d.Hash[:min(12, len(d.Hash))])
+		// 完整 hash：可直接回传 update_request.ifMatch（服务端按 git 风格前缀比对，全串当然也认）
+		fmt.Fprintf(&sb, " · hash %s", d.Hash)
 	}
 	sb.WriteString("\n")
-	// 概述（summary）：写得到就要读得回 —— 详情是 AI 唯一的结构化出口，
-	// 漏渲染会让 create/update 传的概述「写进文件但读不出来」，也让 get_request_detail 文案落空。
-	if d.Summary != "" {
-		fmt.Fprintf(&sb, "概述：%s\n", d.Summary)
-	}
-	// 新建请求默认带一行空参数（占位行），渲染时要跳过，否则输出里出现无意义的「 = 」
-	if params := nonEmpty(d.Params); len(params) > 0 {
-		sb.WriteString("\n参数：\n")
-		for _, p := range params {
-			fmt.Fprintf(&sb, "  %s = %s\n", p.Name, p.Value)
+	if hasSection(sections, "overview") {
+		// 概述（summary）：写得到就要读得回 —— 详情是 AI 唯一的结构化出口，
+		// 漏渲染会让 create/update 传的概述「写进文件但读不出来」，也让 get_request_detail 文案落空。
+		if d.Summary != "" {
+			fmt.Fprintf(&sb, "概述：%s\n", d.Summary)
 		}
-	}
-	if len(d.Headers) > 0 {
-		sb.WriteString("\nHeaders：\n")
-		for _, h := range d.Headers {
-			fmt.Fprintf(&sb, "  %s: %s\n", h.Name, h.Value)
+		// 新建请求默认带一行空参数（占位行），渲染时要跳过，否则输出里出现无意义的「 = 」
+		if params := nonEmpty(d.Params); len(params) > 0 {
+			sb.WriteString("\n参数：\n")
+			for _, p := range params {
+				fmt.Fprintf(&sb, "  %s = %s\n", p.Name, p.Value)
+			}
 		}
-	}
-	if d.Body.Type != "" && d.Body.Type != "none" {
-		fmt.Fprintf(&sb, "\nBody（%s）：\n%s\n", d.Body.Type, d.Body.Raw)
+		if len(d.Headers) > 0 {
+			sb.WriteString("\nHeaders：\n")
+			for _, h := range d.Headers {
+				fmt.Fprintf(&sb, "  %s: %s\n", h.Name, h.Value)
+			}
+		}
+		if d.Body.Type != "" && d.Body.Type != "none" {
+			fmt.Fprintf(&sb, "\nBody（%s）：\n%s\n", d.Body.Type, d.Body.Raw)
+		}
+		if d.GRPC != nil {
+			fmt.Fprintf(&sb, "\ngRPC：%s（服务 %s / 方法 %s）", d.GRPC.Target, d.GRPC.Service, d.GRPC.Method)
+			if d.GRPC.Proto != "" {
+				fmt.Fprintf(&sb, " 定义 %s", d.GRPC.Proto)
+			}
+			fmt.Fprintln(&sb)
+		}
+		if d.Auth != nil {
+			fmt.Fprintf(&sb, "\nAuth：%s\n", d.Auth.Type)
+		}
 	}
 	// 请求体字段表格（body.fields，唯一真源）：5 列与 get_doc_template / 客户端「生成接口文档」同口径。
 	// 表格有行才输出 —— 空表格只给原文（与"表格为空只出请求体原文"的约定一致）。
-	if len(d.Body.Fields) > 0 {
+	if hasSection(sections, "bodyFields") && len(d.Body.Fields) > 0 {
 		fmt.Fprintf(&sb, "\n请求体字段（%d 行，body.fields）：\n", len(d.Body.Fields))
 		sb.WriteString("| 字段名 | 必选 | 类型 | 示例值 | 说明 |\n")
 		sb.WriteString("| --- | --- | --- | --- | --- |\n")
@@ -198,20 +247,18 @@ func renderDetail(d *RequestDetail) string {
 		}
 		sb.WriteString("（整表回写用 update_request.bodyFields；只更新 body 原文不会清掉本表）\n")
 	}
-	if d.GRPC != nil {
-		fmt.Fprintf(&sb, "\ngRPC：%s（服务 %s / 方法 %s）", d.GRPC.Target, d.GRPC.Service, d.GRPC.Method)
-		if d.GRPC.Proto != "" {
-			fmt.Fprintf(&sb, " 定义 %s", d.GRPC.Proto)
+	if hasSection(sections, "docs") {
+		if d.Docs != "" {
+			fmt.Fprintf(&sb, "\n说明文档：\n%s\n", d.Docs)
 		}
-		fmt.Fprintln(&sb)
+		if len(d.RelatedDocs) > 0 {
+			sb.WriteString("\n相关文档条目：\n")
+			for _, r := range d.RelatedDocs {
+				fmt.Fprintf(&sb, "  %s（%s）\n", r.Name, r.Path)
+			}
+		}
 	}
-	if d.Auth != nil {
-		fmt.Fprintf(&sb, "\nAuth：%s\n", d.Auth.Type)
-	}
-	if d.Docs != "" {
-		fmt.Fprintf(&sb, "\n说明文档：\n%s\n", d.Docs)
-	}
-	if d.RespDoc != nil {
+	if hasSection(sections, "respDoc") && d.RespDoc != nil {
 		fmt.Fprintf(&sb, "\n响应字段文档（返回类型 %s，共 %d 个字段）：\n", d.RespDoc.Type, len(d.RespDoc.Params))
 		for _, p := range d.RespDoc.Params {
 			req := "可选"
@@ -229,27 +276,79 @@ func renderDetail(d *RequestDetail) string {
 		}
 		fmt.Fprintln(&sb, "（整表回写：改字段说明用 update_request.respDoc，传完整的新表）")
 	}
-	if len(d.RelatedDocs) > 0 {
-		sb.WriteString("\n相关文档条目：\n")
-		for _, r := range d.RelatedDocs {
-			fmt.Fprintf(&sb, "  %s（%s）\n", r.Name, r.Path)
-		}
-	}
-	if len(d.Examples) > 0 {
-		// uid 必须打出来：update_response_example / delete_response_example 的 exampleUid 只能从这里拿
-		// （工具结果是一段文本，没有结构化字段可回引），漏了就没法定位「已存在」的示例。
-		fmt.Fprintf(&sb, "\n已保存的响应示例（%d 个）：\n", len(d.Examples))
-		for _, e := range d.Examples {
-			fmt.Fprintf(&sb, "  - %s：%d · %d ms · %d 字节（%s，uid=%s）\n",
-				e.Name, e.Status, e.TimeMS, e.BodyBytes, e.Path, e.UID)
-			if e.WithBody != "" {
-				fmt.Fprintf(&sb, "    %s\n", e.WithBody)
+	if hasSection(sections, "examples") {
+		if len(d.Examples) > 0 {
+			// uid 必须打出来：update_response_example / delete_response_example 的 exampleUid 只能从这里拿
+			// （工具结果是一段文本，没有结构化字段可回引），漏了就没法定位「已存在」的示例。
+			fmt.Fprintf(&sb, "\n已保存的响应示例（%d 个）：\n", len(d.Examples))
+			for _, e := range d.Examples {
+				fmt.Fprintf(&sb, "  - %s：%d · %d ms · %d 字节（%s，uid=%s）\n",
+					e.Name, e.Status, e.TimeMS, e.BodyBytes, e.Path, e.UID)
+				if e.WithBody != "" {
+					fmt.Fprintf(&sb, "    %s\n", e.WithBody)
+				}
 			}
+		} else {
+			sb.WriteString("\n（还没有保存的响应示例：用 send_request 发送一次即可留存）")
 		}
-	} else {
-		sb.WriteString("\n（还没有保存的响应示例：用 send_request 发送一次即可留存）")
 	}
 	return sb.String()
+}
+
+// previewFirstLines 取文本前 n 行（每行截到 200 字符）：update_* 成功后的「落盘确认」。
+func previewFirstLines(text string, n int) string {
+	if strings.TrimSpace(text) == "" || n <= 0 {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	for i, l := range lines {
+		lines[i] = clipRunes(strings.TrimRight(l, " \t"), 200)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// changePreview 生成「落盘确认」的标注与片段（update_* 成功后用）：
+//   - 能按行定位改动（共同前缀/后缀夹出的区间）→ 标注「第 N–M 行 ±1 行」，片段取改动区 ±1 行；
+//   - 整篇重写 / 首次写入（没有可比对的前缀与后缀）→ 回落「前 5 行」。
+//
+// 只做行级粗定位（不引入 diff 依赖）：足够回答「我改的那段进文件了吗」。
+func changePreview(oldText, newText string) (string, string) {
+	if strings.TrimSpace(newText) == "" {
+		return "", ""
+	}
+	oldLines := strings.Split(strings.ReplaceAll(oldText, "\r\n", "\n"), "\n")
+	newLines := strings.Split(strings.ReplaceAll(newText, "\r\n", "\n"), "\n")
+	p := 0
+	for p < len(oldLines) && p < len(newLines) && oldLines[p] == newLines[p] {
+		p++
+	}
+	s := 0
+	for s < len(oldLines)-p && s < len(newLines)-p &&
+		oldLines[len(oldLines)-1-s] == newLines[len(newLines)-1-s] {
+		s++
+	}
+	if p == 0 && s == 0 {
+		return "前 5 行", previewFirstLines(newText, 5)
+	}
+	from := p               // 0-based 改动起点（新文本）
+	to := len(newLines) - s // 0-based 改动终点（不含）
+	kind := ""
+	if to <= from {
+		// 纯删除（新文本没有变多）：标注删除点附近（p 是删除处的 0-based 下标）
+		line := min(p+1, len(newLines))
+		if line < 1 {
+			line = 1
+		}
+		kind = fmt.Sprintf("第 %d 行附近 ±1 行", line)
+		from, to = max(0, p-1), min(len(newLines), p+1)
+	} else {
+		kind = fmt.Sprintf("第 %d–%d 行 ±1 行", from+1, to)
+	}
+	lo, hi := max(0, from-1), min(len(newLines), to+1)
+	return kind, clipRunes(strings.Join(newLines[lo:hi], "\n"), 400)
 }
 
 // cell 转义 Markdown 表格单元格：竖线与换行会破坏表格行（口径同客户端 genDocs 的 esc）。
@@ -388,8 +487,8 @@ func renderDocDetail(d *DocDetail) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s\n路径 %s · uid %s", d.Name, d.Path, d.UID)
 	if d.Hash != "" {
-		// 只展示 12 位（同 renderDetail）：可直接回传给 update_doc.ifMatch
-		fmt.Fprintf(&sb, " · hash %s…", d.Hash[:min(12, len(d.Hash))])
+		// 完整 hash（同 renderDetail）：可直接回传给 update_doc.ifMatch
+		fmt.Fprintf(&sb, " · hash %s", d.Hash)
 	}
 	sb.WriteString("\n")
 	if strings.TrimSpace(d.Content) == "" {

@@ -24,6 +24,30 @@
     "project": {
       "type": "string"
     },
+    "replaces": {
+      "items": {
+        "properties": {
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "replaceAll": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "uid": {
       "type": "string"
     }

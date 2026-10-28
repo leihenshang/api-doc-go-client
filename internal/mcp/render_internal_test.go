@@ -51,7 +51,7 @@ func TestRenderDetailShowsSummaryAndBodyFields(t *testing.T) {
 			},
 		},
 	}
-	out := renderDetail(d)
+	out := renderDetail(d, nil)
 	for _, want := range []string{
 		"概述：下单接口，创建一笔待支付订单",
 		"请求体字段（2 行",
@@ -66,7 +66,7 @@ func TestRenderDetailShowsSummaryAndBodyFields(t *testing.T) {
 	}
 
 	// 空概述 / 空表格不占位：没有内容就没有这一行（避免 AI 误以为「有个空表格」）。
-	bare := renderDetail(&RequestDetail{Project: "coll", UID: "u-2", Name: "无概述", Method: "GET", Body: collection.Body{Type: "none"}})
+	bare := renderDetail(&RequestDetail{Project: "coll", UID: "u-2", Name: "无概述", Method: "GET", Body: collection.Body{Type: "none"}}, nil)
 	for _, banned := range []string{"概述：", "请求体字段（"} {
 		if strings.Contains(bare, banned) {
 			t.Errorf("空内容不应输出 %q:\n%s", banned, bare)
@@ -77,7 +77,7 @@ func TestRenderDetailShowsSummaryAndBodyFields(t *testing.T) {
 	broken := renderDetail(&RequestDetail{
 		Project: "coll", UID: "u-3", Name: "转义", Method: "POST",
 		Body: collection.Body{Fields: []collection.BodyField{{Name: "a|b", Type: "string", Description: "x|y"}}},
-	})
+	}, nil)
 	if strings.Contains(broken, "| a|b |") || !strings.Contains(broken, `a\|b`) {
 		t.Errorf("竖线未转义:\n%s", broken)
 	}
@@ -95,10 +95,28 @@ func TestRenderDetailExposesExampleUID(t *testing.T) {
 			{UID: "ex-aaa-111", Name: "线上 504", Path: "examples/带示例/线上 504.yml", Status: 504, BodyBytes: 12},
 			{UID: "ex-bbb-222", Name: "正常", Path: "examples/带示例/正常.yml", Status: 200},
 		},
-	})
+	}, nil)
 	for _, want := range []string{"uid=ex-aaa-111", "uid=ex-bbb-222", "线上 504", "504"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("示例段缺少 %q（AI 拿不到 exampleUid 就改不了已存在的示例）:\n%s", want, out)
 		}
+	}
+}
+
+// T10：截断提示里提到的参数必须真实存在（旧文案写 include_body、还提过分页参数）。
+func TestTruncateNoteMentionsRealParams(t *testing.T) {
+	note := truncateNote(true, 100, 10)
+	for _, want := range []string{"maxBodyBytes", "sections", "includeBody"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("截断提示应提到真实参数 %s：%s", want, note)
+		}
+	}
+	for _, bad := range []string{"分页", "pagination", "include_body"} {
+		if strings.Contains(note, bad) {
+			t.Errorf("截断提示不应出现不存在的参数 %q：%s", bad, note)
+		}
+	}
+	if truncateNote(false, 1, 1) != "" {
+		t.Error("未截断时不应有提示")
 	}
 }

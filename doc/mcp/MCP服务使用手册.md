@@ -6,15 +6,17 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **27 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **29 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
 | 查询 | `list_workspaces` / `use_workspace` | 看授权了哪些工作目录；选定**本会话**默认目标（之后 `project` 可省略） |
 | 查询 | `list_projects` | 有哪些项目（集合） |
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
-| 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例（返回 `hash` 供冲突保护） |
-| 查询 | `search_requests` | 模糊搜索（「记得内容、记不清名字」时最该用） |
+| 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例；`sections` 可只取分段；返回**完整** `hash` 供冲突保护 |
+| 查询 | `get_request_details` | 批量详情：一次 1–10 个 uid，参数同 `get_request_detail`，按 uid 分组返回 |
+| 查询 | `search_requests` | 搜索（`exactMatch` 整词、`fields` 限定范围，每条带 `snippet` 命中行） |
+| 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处） |
 | 查询 | `list_envs` | 有哪些环境与变量（**敏感值只回掩码**，每个环境带 `hash`） |
 | 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
 | 查询 | `list_docs` / `get_doc` | 集合里的**文档条目**（独立 .md）：列清单 / 读正文（带 `hash` 供冲突保护） |
@@ -31,7 +33,7 @@
 
 各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
 
-工具按风险分三级（服务端元数据表锁定）：**low = 10 个只读工具**（随便用，无副作用）；**medium = `send_request`**
+工具按风险分三级（服务端元数据表锁定）：**low = 12 个只读工具**（随便用，无副作用）；**medium = `send_request`**
 （真实网络外发）；**high = 16 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
 **弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
 `-require-consent` 约束。
@@ -128,20 +130,28 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 返回每个项目的 `路径/名称/uid/请求数/模块数/环境列表`；不可用目录带跳过原因。统计在**首次访问该项目后**才有值（懒加载）。
 
 ### 4.2 `get_project_modules`
-`project?`、`query?`（过滤模块名与模块下请求名/方法/路径）、`includeRequests?`（附带请求清单含 uid）。
+`project?`、`query?`（过滤模块名与模块下请求名/方法/路径）、`includeRequests?`（附带请求清单含 uid）、
+`onlyMatched?`（**默认 true**：带 query 时只返回有命中的模块——模块名命中，或其下有命中请求；传 false 可看全部模块，汇总行始终给出模块总数）。
 返回模块树 + 每模块请求数/子模块数；根目录下的请求归到 `(根目录)`。
 
 ### 4.3 `get_request_detail`
-`project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）。
+`project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）、
+`sections?`（只取指定分段：`overview`/`docs`/`bodyFields`/`respDoc`/`examples`；不传 = 全量；未知值报错）。
 返回 method/url/params/headers/body/auth/settings/grpc + **概述 `summary`** + 请求内 `docs` + **请求体字段表 `body.fields`**
 （5 列：字段名/必填/类型/示例值/说明，空表不出）+ **响应字段文档 `respDoc`**
 （返回类型/字段表全量；样例不传 includeBody 时只回前 2048 字节）+ 关联的 `docs/*.md` + **已保存响应示例列表**
-+ **`hash`**（演示为前 12 位）——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
++ **完整 `hash`**——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
+
+配套 `get_request_details`：`uids`（1–10 个，超出直接报错），其余参数与本节相同，结果按 `===== uid =====` 分组。
 
 ### 4.4 `search_requests`
-`query` ✅（名称/URL/方法/路径/header/说明/请求体片段都能命中，中文按子串）、`project?`（省略 = 所有已加载项目）、
-`limit?`（默认 50，上限 200）。
-返回按相关度降序，每条带 `score` 与 `matched`（命中的字段）、`uid`/`path`/`hash`。
+`query` ✅（名称/URL/方法/路径/header/说明/请求体/响应字段/请求体字段表都能命中，中文按子串）、`project?`（省略 = 所有已加载项目）、
+`limit?`（默认 50，上限 200）、`exactMatch?`（true = 整词匹配：不走分词/子序列，长标识符用它消误报）、
+`fields?`（`name`/`uri`/`docs`/`respDoc`/`bodyFields`/`header`/`body`，不传 = 全部）、
+`includeHash?`（true = 每条结果附完整 `hash`，可直接回传 `update_request.ifMatch`；默认不带以省体积）。
+返回按相关度降序，每条带 `score`、`matched`（命中的字段）与 `snippet`（命中行±1，≤200 字符）。
+
+配套 `search_docs`：`pattern` ✅、`project?`、`exactMatch?`、`limit?`——按行搜文档条目正文，返回 `uid`/路径/`L<行号>: 片段`。
 
 ### 4.5 `create_request`
 三种来源（互斥，按顺序判断）：
@@ -188,6 +198,11 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 `bodyFields` 显式传了才覆盖表格（空数组 = 清空）；`summary` 传空串即清空概述。
 `params` 整表覆盖（传空数组 = 清空）；`settings` 仅单请求级，不碰全局配置。
+
+**长文档局部改 `replaces`**：`replaces: [{old, new, replaceAll?}]` 只改 `docs` 里出现的片段（与 `docs` 互斥）；
+任一 `old` 找不到即整单拒绝、不落盘。动过 `docs`/`replaces` 时，成功响应附落盘确认：
+能按行定位改动时给「第 N–M 行 ±1 行」片段（长文档改一段也能看到），定位不到时回落前 5 行。
+`ifMatch` 不匹配时返回明确错误 + 当前完整 hash（不会静默覆盖；不传 = 最后写者赢）。
 
 **`section` 节点守卫（可选）**：一次调用只想动一个节点时传 `section`，混用其它节点的字段会**直接报错**
 （报错里会点名越界的字段名 + 该 section 的允许清单，照着改就行）：
@@ -266,9 +281,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?` | 列清单（名称/路径/字节数）；`query` 按名称与路径模糊过滤 |
-| `get_doc` | `project?`、`uid` ✅ | 读正文（Markdown 原文）+ `hash`；`hash` 回传给 `update_doc.ifMatch` |
+| `get_doc` | `project?`、`uid` ✅ | 读正文（Markdown 原文）+ **完整 `hash`**；`hash` 回传给 `update_doc.ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?` | `folder` 留空 = 集合根；`content` 可一次给全文，留空先建空文档 |
-| `update_doc` | `project?`、`uid` ✅、`content?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`name` 改显示名（文件名不变）、`folder` 换分组（空串=根） |
+| `update_doc` | `project?`、`uid` ✅、`content?`、`replaces?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换（与 `content` 互斥，`old` 找不到整单拒绝）、`name` 改显示名、`folder` 换分组；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
 > 集合**根目录**下的 `.md`（含 `README.md`）即使没有 frontmatter 也会作为文档条目出现在 `list_docs` 里：

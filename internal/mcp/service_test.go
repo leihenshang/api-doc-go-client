@@ -76,7 +76,7 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 	uidOrder := mk("api/user", "order-detail", "GET", "http://127.0.0.1:1/orders/1", "订单详情")
 
 	// 模块树
-	mods, err := svc.GetProjectModules("demo", "", true)
+	mods, err := svc.GetProjectModules("demo", "", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 	}
 	// 模块名模糊
 	// "user" 同时命中 user-list（名称）与 order-detail（路径 api/user）
-	mods, err = svc.GetProjectModules("demo", "user", false)
+	mods, err = svc.GetProjectModules("demo", "user", false, false)
 	if err != nil || mods.Matched != 2 {
 		t.Errorf("模块内模糊匹配应命中 2 个: %+v %v", mods, err)
 	}
@@ -105,7 +105,7 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 		{"用户列表", "user-list"},
 		{"探活", "ping"},
 	} {
-		ms, _, err := svc.SearchRequests(tc.q, "demo", 10)
+		ms, _, err := svc.SearchRequests(tc.q, "demo", 10, SearchOptions{})
 		if err != nil {
 			t.Fatalf("搜索 %q 失败: %v", tc.q, err)
 		}
@@ -113,7 +113,7 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 			t.Errorf("搜索 %q 期望首位 %q，实际 %+v", tc.q, tc.wantName, ms)
 		}
 	}
-	if _, _, err := svc.SearchRequests("", "demo", 10); err == nil {
+	if _, _, err := svc.SearchRequests("", "demo", 10, SearchOptions{}); err == nil {
 		t.Error("空 query 应报错")
 	}
 
@@ -190,7 +190,7 @@ func TestSearchAgainstLiveServer(t *testing.T) {
 	if err := a.SaveRequest(r); err != nil {
 		t.Fatal(err)
 	}
-	ms, _, err := svc.SearchRequests("live", "demo", 5)
+	ms, _, err := svc.SearchRequests("live", "demo", 5, SearchOptions{})
 	if err != nil || len(ms) != 1 {
 		t.Fatalf("应能搜到刚建的请求: %+v %v", ms, err)
 	}
