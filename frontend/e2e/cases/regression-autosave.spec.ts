@@ -1,6 +1,6 @@
 // 对应 doc §5 回归要点 22：保存模型（默认手动 + 可选自动保存）与写盘冲突检测。
 // 依赖 devserver 的 /api/events（SSE）转发文件监听事件 —— 浏览器态与桌面态行为一致。
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
@@ -230,3 +230,114 @@ async function exists(p: string): Promise<boolean> {
   const { existsSync } = await import('node:fs')
   return existsSync(p)
 }
+
+/**
+ * [E26] 文档页签的外部改动：MCP / 其它编辑器改了 .md 之后，
+ * 干净页签要自动回填，脏页签要弹冲突条（旧实现 openDocTab 没记 baseHash，两种情况都被静默跳过）。
+ */
+function rewriteDocBody(file: string, body: string): void {
+  const s = readFileSync(file, 'utf8')
+  const close = s.indexOf('---\n', 4) // 跳过开头的 ---\n，找到 frontmatter 的结束行
+  writeFileSync(file, s.slice(0, close + 4) + body, 'utf8')
+}
+
+test('[E26] 文档页签：外部改动回填干净页签；脏页签标冲突并可用「重新加载」', async ({ page, app }) => {
+  const dir = await app.newCollection('basic')
+  await openCollection(page, app)
+  const created = await app.ipc<{ uid: string; path: string }>('CreateDoc', '说明', 'api')
+  await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '旧正文' })
+  await openCollection(page, app) // 重进页面让树看到新文档
+
+  await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  const editor = page.locator('.md-editor').first()
+  await expect(editor).toContainText('旧正文')
+  const file = path.join(dir, created.path)
+
+  // 上面用 IPC SaveDoc 造的数据：文档写盘用的是「内容无关」的 1.5s 自写忽略窗口，
+  // 立刻从外部改会被吞掉（真实 MCP 走的是另一个 App 实例、不存在这个窗口）。
+  // 等窗口过去再模拟外部写入。
+  await page.waitForTimeout(1800)
+
+  // ① 干净页签：外部写入新正文 → 自动回填（不需要用户手动重载）
+  rewriteDocBody(file, 'MCP 更新后的正文')
+  await expect(editor).toContainText('MCP 更新后的正文', { timeout: 10_000 })
+  await expect(editor).not.toContainText('旧正文')
+
+  // ② 脏页签：本地有未保存编辑时被外部改动 → 冲突条出现（提示用户选「重新加载 / 另存为副本」）
+  await page.locator('.md-editor textarea, .md-editor .cm-content').first().click()
+  await page.keyboard.type('本地未保存的编辑')
+  rewriteDocBody(file, 'MCP 第二次更新')
+  const bar = page.getByTestId('req.conflict')
+  await expect(bar).toBeVisible({ timeout: 10_000 })
+
+  // ③ 「重新加载」对文档同样有效：正文换成磁盘版本、冲突条消失、脏点清掉
+  await page.getByTestId('conflict.reload').click()
+  await expect(editor).toContainText('MCP 第二次更新')
+  await expect(bar).toHaveCount(0)
+  await expect(page.getByTestId('tab.item').filter({ hasText: '说明' }).locator('.dot')).toHaveCount(0)
+})
+
+/**
+ * [E26] 文档被外部删除（MCP delete_doc / 其它编辑器 / 回收站）：
+ * 页签保留内容并给出提示条，「仍然保存」可用当前内容重建文件。
+ */
+test('[E26] 文档被外部删除：提示条提供「仍然保存」并重建文件', async ({ page, app }) => {
+  const dir = await app.newCollection('basic')
+  await openCollection(page, app)
+  const created = await app.ipc<{ uid: string; path: string }>('CreateDoc', '说明', 'api')
+  await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '待重建内容' })
+  await openCollection(page, app)
+
+  await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  await expect(page.locator('.md-editor').first()).toContainText('待重建内容')
+  // 等过 IPC SaveDoc 的自写忽略窗口，再模拟外部删除
+  await page.waitForTimeout(1800)
+  unlinkSync(path.join(dir, created.path))
+
+  const bar = page.getByTestId('req.conflict')
+  await expect(bar).toBeVisible({ timeout: 10_000 })
+  await expect(bar).toContainText(t('conflict.docMissingBar'))
+  // 文件没了：不给「重新加载」，但保留「仍然保存」
+  await expect(page.getByTestId('conflict.reload')).toHaveCount(0)
+  await expect(page.getByTestId('conflict.overwrite')).toBeVisible()
+
+  await page.getByTestId('conflict.overwrite').click()
+  await page.locator('.n-dialog').last()
+    .getByRole('button', { name: t('conflict.overwrite'), exact: true }).click()
+
+  await expect.poll(() => existsSync(path.join(dir, created.path))).toBe(true)
+  expect(readFileSync(path.join(dir, created.path), 'utf8')).toContain('待重建内容')
+  await expect(bar).toHaveCount(0)
+  // 重建后的文档回到集合树
+  await expect(page.getByTestId('tree.row').filter({ hasText: '说明' })).toHaveCount(1)
+})
+
+/**
+ * [E26] 冲突时「仍然保存」：确认后当前编辑覆盖磁盘上的外部版本（不再只能重新加载/另存副本）。
+ */
+test('[E26] 文档冲突时「仍然保存」：当前编辑覆盖外部版本', async ({ page, app }) => {
+  const dir = await app.newCollection('basic')
+  await openCollection(page, app)
+  const created = await app.ipc<{ uid: string; path: string }>('CreateDoc', '说明', 'api')
+  await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '旧正文' })
+  await openCollection(page, app)
+
+  await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  const editor = page.locator('.md-editor textarea, .md-editor .cm-content').first()
+  await expect(page.locator('.md-editor').first()).toContainText('旧正文')
+  await page.waitForTimeout(1800)
+  await editor.click()
+  await page.keyboard.type('本地未保存')
+
+  rewriteDocBody(path.join(dir, created.path), '外部版本')
+  const bar = page.getByTestId('req.conflict')
+  await expect(bar).toBeVisible({ timeout: 10_000 })
+
+  await page.getByTestId('conflict.overwrite').click()
+  await page.locator('.n-dialog').last()
+    .getByRole('button', { name: t('conflict.overwrite'), exact: true }).click()
+
+  await expect.poll(() => readFileSync(path.join(dir, created.path), 'utf8')).toContain('本地未保存')
+  await expect(bar).toHaveCount(0)
+  await expect(page.getByTestId('tab.item').filter({ hasText: '说明' }).locator('.dot')).toHaveCount(0)
+})

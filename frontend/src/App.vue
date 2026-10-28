@@ -696,6 +696,17 @@ function onExternalChange(root: string): void {
   })()
 }
 
+/** 冲突条 / 文档被删提示条上的「仍然保存」：先确认，再用当前编辑覆盖磁盘（删除时=重建文件）。 */
+function askOverwrite(key: string): void {
+  dialog.warning({
+    title: t('conflict.overwriteTitle'),
+    content: t('conflict.overwriteHint'),
+    positiveText: t('conflict.overwrite'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => tabs.saveOverwriting(key),
+  })
+}
+
 // ---- 新建请求：直接开一个未落盘的空 tab；名称与分组在**关闭时**才问 ----
 // 分组用 n-tree-select 树形选择：key=目录相对路径；根目录用 sentinel 避免空串被当成无效 key
 // 经常量锚定组件：Volar「整理导入」曾多次把模板里使用的组件误判为未使用而删除导入，
@@ -858,15 +869,20 @@ watch(
 
               <transition :name="skipDetailTransition ? '' : 'rb-fade'" mode="out-in">
                 <div v-if="detailTab" :key="detailTab.key" class="detail">
-                  <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的两个出口 -->
-                  <div v-if="detailTab.conflict" class="conflict-bar" data-testid="req.conflict">
+                  <!-- 冲突条：磁盘文件被外部改动且本页签有未保存编辑，写盘被拒后给出的出口；
+                       文档被外部删除（missing）也走同一条：隐藏「重新加载」，保留「仍然保存」重建文件 -->
+                  <div v-if="detailTab.conflict || detailTab.missing" class="conflict-bar" data-testid="req.conflict">
                     <n-icon :component="WarningOutline" :size="14" />
-                    <span class="ct">{{ t('conflict.bar') }}</span>
-                    <button class="cb" type="button" data-testid="conflict.reload"
+                    <span class="ct">{{ detailTab.missing ? t('conflict.docMissingBar') : t('conflict.bar') }}</span>
+                    <button v-if="!detailTab.missing" class="cb" type="button" data-testid="conflict.reload"
                       @click="tabs.reloadFromDisk(detailTab.key)">
                       {{ t('conflict.reload') }}
                     </button>
-                    <button class="cb strong" type="button" data-testid="conflict.copy"
+                    <button class="cb strong" type="button" data-testid="conflict.overwrite"
+                      @click="askOverwrite(detailTab.key)">
+                      {{ t('conflict.overwrite') }}
+                    </button>
+                    <button v-if="!detailTab.missing" class="cb" type="button" data-testid="conflict.copy"
                       @click="tabs.saveAsCopy(detailTab.key)">
                       {{ t('conflict.saveCopy') }}
                     </button>

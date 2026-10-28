@@ -47,6 +47,11 @@ export interface Tab {
   baseHash?: string
   /** 磁盘文件已被外部改动且本页签有未保存编辑：写盘会被拒，需先「重新加载 / 另存为副本」 */
   conflict?: boolean
+  /**
+   * 文档页签对应的 .md 已被外部删除（MCP / 其它编辑器 / 回收站）：
+   * 页签内容保留，界面提示「仍然保存」即可用当前内容重建文件。
+   */
+  missing?: boolean
   /** 一次写盘正在进行（状态栏「保存中…」） */
   saving?: boolean
 }
@@ -245,6 +250,9 @@ export const useTabsStore = defineStore('tabs', {
       }
       this.tabs.push(tab)
       this.setActive(tab.key)
+      // 与请求页签一致，记录磁盘基线（hash）。没有它，外部改动（MCP / 其它编辑器）
+      // 在 syncExternalChanges 里会被 `!tab.baseHash` 直接跳过：既不回填内容，也不标冲突。
+      await this.refreshDocHash(tab)
       this.saveSession()
     },
     /**
@@ -253,7 +261,8 @@ export const useTabsStore = defineStore('tabs', {
      */
     async saveDoc(key: string): Promise<void> {
       const tab = this.tabs.find((t) => t.key === key)
-      if (!tab || tab.kind !== 'doc' || !tab.doc || !tab.dirty) return
+      // 文件被外部删除（missing）时也允许保存：Ctrl+S 即可用当前内容重建，不必先改动
+      if (!tab || tab.kind !== 'doc' || !tab.doc || (!tab.dirty && !tab.missing)) return
       if (tab.saving || tab.conflict) return
       const doc = {
         uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
@@ -263,8 +272,10 @@ export const useTabsStore = defineStore('tabs', {
       let saved = false
       tab.saving = true
       try {
-        await api.saveDocExpectHash(doc, tab.baseHash ?? '')
+        // missing（文件已被外部删除）：expectHash 传空 = 跳过哈希校验，直接重建文件
+        await api.saveDocExpectHash(doc, tab.missing ? '' : (tab.baseHash ?? ''))
         saved = true
+        tab.missing = false
         // 保存期间可能又有编辑：本次只写入了快照，不能把后续内容也标成已保存。
         tab.dirty = snapDoc(tab.doc) !== snapshot
         await this.refreshDocHash(tab)
@@ -281,6 +292,45 @@ export const useTabsStore = defineStore('tabs', {
         if (saved && tab.dirty && !tab.conflict && useSettingsStore().autoSave && this.tabs.includes(tab)) {
           this.scheduleAfterEdit(tab)
         }
+      }
+    },
+    /**
+     * 冲突 / 外部删除时的第三条出口「仍然保存」：不带 expectHash 直接写盘 ——
+     * 覆盖磁盘上的外部版本；文档已被删除时用当前内容重建文件。完成后刷新基线并清标记。
+     */
+    async saveOverwriting(key: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.key === key)
+      if (!tab || tab.draft || !tab.uid || tab.saving) return
+      tab.saving = true
+      this.savingCount++
+      try {
+        if ((tab.kind ?? 'request') === 'doc' && tab.doc) {
+          await api.saveDoc({
+            uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
+            content: tab.doc.content, icon: tab.doc.icon,
+          })
+          tab.dirty = false
+          tab.conflict = false
+          tab.missing = false
+          await this.refreshDocHash(tab)
+          // 自写落在文件监听的忽略窗口里：显式重扫一次，让重建/覆盖后的文档回到树上
+          await useCollectionStore().reload()
+        } else {
+          await api.saveRequest({ ...tab.request, expectHash: undefined })
+          tab.dirty = false
+          tab.conflict = false
+          tab.grpcError = ''
+          await this.refreshHashes()
+          tab.baseHash = this.hashes[tab.uid] ?? ''
+          void this.doResolve(tab)
+        }
+        this.lastSavedAt = Date.now()
+        message.success(i18n.global.t('conflict.overwriteDone'))
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      } finally {
+        tab.saving = false
+        this.savingCount--
       }
     },
     /** 文档页签的磁盘 hash 刷新（文档不进 SQLite 索引，单独读一次 hash）。 */
@@ -643,7 +693,17 @@ export const useTabsStore = defineStore('tabs', {
           } catch {
             continue
           }
-          if (!cur || !tab.baseHash || cur === tab.baseHash) continue
+          // 文件已不存在（外部删除 / 进回收站）：保留页签内容，提示一次；
+          // 用户可在冲突条里选「仍然保存」用当前内容重建文件（不会静默丢掉编辑）。
+          if (!cur) {
+            if (!tab.missing) {
+              tab.missing = true
+              message.warning(i18n.global.t('conflict.docMissing', { name: tab.doc?.name || tab.title }))
+            }
+            continue
+          }
+          if (tab.missing) tab.missing = false // 文件回来了（撤销删除等）：恢复正常态
+          if (!tab.baseHash || cur === tab.baseHash) continue
           if (tab.dirty) {
             if (!tab.conflict) {
               tab.conflict = true
@@ -699,6 +759,23 @@ export const useTabsStore = defineStore('tabs', {
     async reloadFromDisk(key: string): Promise<void> {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab?.uid) return
+      // 文档页签：冲突条上的「重新加载」走 readDoc（文档不进 SQLite 索引，不能按请求读）
+      if ((tab.kind ?? 'request') === 'doc') {
+        const d = await api.readDoc(tab.uid)
+        if (tab.doc) {
+          tab.doc = {
+            uid: d.uid, path: d.path ?? '', name: d.name ?? '',
+            content: d.content ?? '', icon: d.icon ?? '',
+          }
+          tab.title = d.name || tab.title
+        }
+        tab.dirty = false
+        tab.conflict = false
+        tab.missing = false
+        await this.refreshDocHash(tab)
+        message.success(i18n.global.t('conflict.reloaded'))
+        return
+      }
       const doc = await api.readRequest(tab.uid)
       tab.request = doc
       tab.title = doc.name || tab.title
@@ -718,6 +795,27 @@ export const useTabsStore = defineStore('tabs', {
     async saveAsCopy(key: string): Promise<void> {
       const tab = this.tabs.find((t) => t.key === key)
       if (!tab) return
+      // 文档页签：新建一篇副本（保留正文/图标），并切到副本 —— 冲突条对文档同样可用
+      if ((tab.kind ?? 'request') === 'doc' && tab.doc) {
+        const p = tab.doc.path ?? ''
+        const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+        // CreateDoc 的 folder 为空 = 旧的 docs/ 默认位；要留在集合根必须显式传 "."
+        const folder = dir || '.'
+        const name = i18n.global.t('conflict.copyName', { name: tab.doc.name || tab.title })
+        const created = await api.createDoc(name, folder)
+        await api.saveDoc({
+          uid: created.uid,
+          name: created.name || name,
+          path: created.path ?? '',
+          content: tab.doc.content ?? '',
+          icon: tab.doc.icon ?? '',
+        })
+        // 自写会被文件监听忽略：显式重扫一次，让副本出现在树上
+        await useCollectionStore().reload()
+        await this.openDocTab(created.uid)
+        message.success(i18n.global.t('conflict.copySaved', { name }))
+        return
+      }
       const p = tab.request.path ?? ''
       const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
       const name = i18n.global.t('conflict.copyName', { name: tab.request.name })
