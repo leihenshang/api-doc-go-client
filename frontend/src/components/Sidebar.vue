@@ -48,7 +48,7 @@ import {
 } from '@vicons/ionicons5'
 import type { DropdownOption, InputInst } from 'naive-ui'
 import { NDropdown, NIcon, NInput } from 'naive-ui'
-import { computed, h, nextTick, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
@@ -796,15 +796,87 @@ const ctxMenu = ref<{ show: boolean; x: number; y: number; row: Row | null }>({
   show: false, x: 0, y: 0, row: null,
 })
 
+// 右键菜单的「移开自动关闭」状态：光标进过菜单后再移开，延迟 400ms 关闭，
+// 避免「从行移动到菜单边缘」时被误判为移开。
+let ctxHovered = false
+let ctxLeaveTimer: number | undefined
+
+function cancelCtxLeave(): void {
+  if (ctxLeaveTimer !== undefined) {
+    window.clearTimeout(ctxLeaveTimer)
+    ctxLeaveTimer = undefined
+  }
+}
+
+/** 关闭右键菜单：选择条目 / 点击外部 / 滚动 / Esc / 失焦 / 移开都走这里。 */
+function closeCtxMenu(): void {
+  ctxHovered = false
+  cancelCtxLeave()
+  if (!ctxMenu.value.show) return
+  ctxMenu.value = { show: false, x: 0, y: 0, row: null }
+}
+
+/** 菜单本体（teleport 到 body）内的按下不算「点击外部」，否则会吃掉选项的点击。 */
+function insideCtxMenu(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return !!el?.closest?.('.n-dropdown-option, .n-dropdown-menu, .n-popover')
+}
+
+function onCtxPointerMove(ev: PointerEvent): void {
+  if (!ctxMenu.value.show) return
+  if (insideCtxMenu(ev.target)) {
+    ctxHovered = true
+    cancelCtxLeave()
+    return
+  }
+  if (!ctxHovered || ctxLeaveTimer !== undefined) return
+  ctxLeaveTimer = window.setTimeout(() => {
+    ctxLeaveTimer = undefined
+    closeCtxMenu()
+  }, 400)
+}
+
+function onCtxOutside(ev: Event): void {
+  if (!ctxMenu.value.show) return
+  if (ev.type === 'keydown') {
+    if ((ev as KeyboardEvent).key === 'Escape') closeCtxMenu()
+    return
+  }
+  // 菜单内的 pointerdown 交给条目自己处理（select 后会再关一次）
+  if (ev.type === 'pointerdown' && insideCtxMenu(ev.target)) return
+  closeCtxMenu()
+}
+
+onMounted(() => {
+  // 捕获阶段：先于行点击/拖动执行，保证「点别处」时菜单立即消失
+  window.addEventListener('pointerdown', onCtxOutside, true)
+  window.addEventListener('pointermove', onCtxPointerMove, true)
+  window.addEventListener('keydown', onCtxOutside, true)
+  window.addEventListener('scroll', onCtxOutside, true)
+  window.addEventListener('resize', onCtxOutside)
+  window.addEventListener('blur', onCtxOutside)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', onCtxOutside, true)
+  window.removeEventListener('pointermove', onCtxPointerMove, true)
+  window.removeEventListener('keydown', onCtxOutside, true)
+  window.removeEventListener('scroll', onCtxOutside, true)
+  window.removeEventListener('resize', onCtxOutside)
+  window.removeEventListener('blur', onCtxOutside)
+  cancelCtxLeave()
+})
+
 function openCtxMenu(row: Row, ev: MouseEvent): void {
   if (row.isRoot || !row.node) return
   ev.preventDefault()
+  ctxHovered = false
+  cancelCtxLeave()
   ctxMenu.value = { show: true, x: ev.clientX, y: ev.clientY, row }
 }
 
 async function onCtxSelect(key: string | number): Promise<void> {
   const row = ctxMenu.value.row
-  ctxMenu.value = { show: false, x: 0, y: 0, row: null }
+  closeCtxMenu()
   if (row) await onRowMenu(row, key)
 }
 
