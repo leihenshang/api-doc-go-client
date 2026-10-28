@@ -29,6 +29,7 @@ import {
   ChevronForwardOutline,
   CloseOutline,
   ContractOutline,
+  CopyOutline,
   CreateOutline,
   DocumentTextOutline,
   EllipsisHorizontalOutline,
@@ -715,14 +716,22 @@ function rowMenuOptions(row: Row): DropdownOption[] {
       { key: 'delete', label: t('tree.delDir'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
     ]
   }
+  // 复制项：请求 / 文档都有；ID 用于任意 MCP 模板，指令则连同短 hash 一起给出
+  const copyItems: DropdownOption[] = [
+    { key: 'copyId', label: t('tree.copyId'), icon: () => h(NIcon, { component: CopyOutline }), testid: 'tree.row.copyId' },
+    { key: 'copyMcp', label: t('tree.copyMcp'), icon: () => h(NIcon, { component: TerminalOutline }), testid: 'tree.row.copyMcp' },
+    { type: 'divider', key: 'd-copy' },
+  ]
   if (n.type === 'doc') {
     return [
+      ...copyItems,
       { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
       { key: 'delete', label: t('tree.delDoc'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
     ]
   }
   const fav = coll.isFav(n.uid)
   return [
+    ...copyItems,
     { key: 'fav', label: fav ? t('tree.unfav') : t('tree.fav'), icon: () => h(NIcon, { component: fav ? Star : StarOutline }), testid: 'tree.row.fav' },
     { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
     { key: 'delete', label: t('tree.delApi'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
@@ -740,9 +749,77 @@ function renderMenuLabel(option: DropdownOption) {
   return h('div', { class: 'row-menu-item', 'data-testid': o.testid }, [h('span', { class: 'lbl' }, o.label ?? '')])
 }
 
+/** 写剪贴板；不支持/被拒时给明确提示（不静默）。 */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    message.error(t('tree.copyFailed'))
+    return false
+  }
+}
+
+/** 节点内容的短 hash（前 12 位；Go 侧允许 ≥8 位前缀直接回传 ifMatch）。取不到返回空串。 */
+async function shortHashOf(node: TreeNode): Promise<string> {
+  if (node.type === 'doc') {
+    try {
+      return ((await api.docFileHash(node.uid)) ?? '').slice(0, 12)
+    } catch {
+      return ''
+    }
+  }
+  // 请求 hash 来自索引：复制前刷一次，保证是磁盘当前内容
+  await tabs.refreshHashes()
+  return (tabs.hashes[node.uid] ?? '').slice(0, 12)
+}
+
+/** 「复制 ID」：只复制 uid，便于贴进任意 MCP 模板。 */
+async function copyNodeId(node: TreeNode): Promise<void> {
+  if (await copyToClipboard(node.uid)) message.success(t('tree.idCopied'))
+}
+
+/** 「复制 MCP 指令」：给出可直接贴给 AI 的一句话（带 uid / 名称 / 短 hash）。 */
+async function copyMcpPrompt(node: TreeNode): Promise<void> {
+  const hash = await shortHashOf(node)
+  const isDoc = node.type === 'doc'
+  const key = isDoc
+    ? (hash ? 'tree.mcpPromptDoc' : 'tree.mcpPromptDocNoHash')
+    : (hash ? 'tree.mcpPromptRequest' : 'tree.mcpPromptRequestNoHash')
+  const text = t(key, { name: node.name, uid: node.uid, hash })
+  if (await copyToClipboard(text)) message.success(t('tree.mcpCopied'))
+}
+
+/** 行右键菜单（与悬停「···」共用同一份选项；NDropdown 受控定位到光标处）。 */
+const ctxMenu = ref<{ show: boolean; x: number; y: number; row: Row | null }>({
+  show: false, x: 0, y: 0, row: null,
+})
+
+function openCtxMenu(row: Row, ev: MouseEvent): void {
+  if (row.isRoot || !row.node) return
+  ev.preventDefault()
+  ctxMenu.value = { show: true, x: ev.clientX, y: ev.clientY, row }
+}
+
+async function onCtxSelect(key: string | number): Promise<void> {
+  const row = ctxMenu.value.row
+  ctxMenu.value = { show: false, x: 0, y: 0, row: null }
+  if (row) await onRowMenu(row, key)
+}
+
 async function onRowMenu(row: Row, key: string | number): Promise<void> {
   const n = row.node!
   await ensureActive(row.root)
+  // 复制类动作与节点类型无关（请求 / 文档都支持）
+  if (key === 'copyId') {
+    await copyNodeId(n)
+    return
+  }
+  if (key === 'copyMcp') {
+    await copyMcpPrompt(n)
+    return
+  }
   if (n.type === 'folder') {
     if (key === 'request') emit('new-request', n.path)
     else if (key === 'grpc') emit('new-grpc-request', n.path)
@@ -1110,6 +1187,12 @@ watch(
     </div>
 
     <div ref="treeEl" class="tree" :class="{ 'dnd-active': dragging }">
+      <!-- 行右键菜单：与悬停「···」共用选项，定位到光标处 -->
+      <n-dropdown trigger="manual" :show="ctxMenu.show" :x="ctxMenu.x" :y="ctxMenu.y"
+        :options="ctxMenu.row ? rowMenuOptions(ctxMenu.row) : []" :render-label="renderMenuLabel"
+        placement="bottom-start" :show-arrow="false" @select="onCtxSelect"
+        @update:show="(v: boolean) => (ctxMenu.show = v)">
+      </n-dropdown>
       <div v-if="!rows.length && !adding" class="empty muted">{{ t('sidebar.empty') }}</div>
 
       <template v-for="row in rows" :key="row.isRoot ? `root:${row.root}` : `${row.root}|${row.node?.path}`">
@@ -1191,7 +1274,8 @@ watch(
             :aria-current="row.node?.uid === props.activeUid && row.root === props.activeRoot ? 'true' : undefined"
             :style="{ paddingLeft: 8 + (row.depth + 1) * INDENT + 'px' }"
             @click="onRowClick(row.root, row.node!, $event)"
-            @pointerdown="onRowPointerDown(row.root, row.node!, $event)">
+            @pointerdown="onRowPointerDown(row.root, row.node!, $event)"
+            @contextmenu="openCtxMenu(row, $event)">
             <!-- 层级连接线：祖先列竖线 + 本行 ├/└ + 指向内容的短横线（纯装饰，不参与布局）。
                  深度 0（直接挂在集合根下的分组/请求）也要画：它的那一列就是根行展开图标的圆心，
                  由根行自己向下接出（见 .gl.root-down），于是「集合 → 顶层条目」连成一条。 -->
