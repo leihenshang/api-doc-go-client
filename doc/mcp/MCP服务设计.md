@@ -79,11 +79,11 @@ Claude Desktop 配置：
 | `use_workspace` | low | 选定**本会话**的默认工作目录（选定后可省略 `project`） | `workspace` |
 | `list_projects` | low | 项目列表（模糊过滤/刷新） | `project?`、`refresh?` |
 | `get_project_modules` | low | 模块结构 + 每模块请求数 | `project?`、`query?`、`includeRequests?` |
-| `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例） | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?` |
+| `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例）；`docs` 段可分段/大纲 | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?`、`sections?`、`docsStartLine?`、`docsMaxLines?`、`docsOutline?` |
 | `search_requests` | low | 搜索（可跨项目，支持整词/字段限定/片段） | `query`、`project?`、`limit?`、`exactMatch?`、`fields?`、`includeHash?` |
 | `get_doc_template` | low | 接口说明（docs）的 Markdown 分节结构契约（对齐前端 buildApiDoc） | — |
 | `list_docs` | low | 文档条目清单（集合树里的独立 .md；名称/路径/字节数） | `project?`、`query?` |
-| `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`） | `project?`、`uid` |
+| `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`）；支持 `outline` 大纲与 `startLine`/`maxLines` 分段 | `project?`、`uid`、`startLine?`、`maxLines?`、`outline?` |
 | `list_envs` | low | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
 | `send_request` | medium | 发送并可选保存示例（唯一网络外发工具，只读模式也注册） | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
 | `create_request` | high | 创建请求（手填 / cURL / 复制；可带完整 body/settings/respDoc） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |

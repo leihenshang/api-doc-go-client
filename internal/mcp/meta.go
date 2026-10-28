@@ -69,7 +69,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。sections 只取指定分段（overview/docs/bodyFields/respDoc/examples），可把单次响应压到 3000 字符内；不传 = 全量。返回的 hash 是**完整值**，可直接传给 update_request.ifMatch 做冲突保护。",
+		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。sections 只取指定分段（overview/docs/bodyFields/respDoc/examples），可把单次响应压到 3000 字符内；不传 = 全量；说明文档很长时用 docsOutline=true 看标题大纲，或 docsStartLine+docsMaxLines 分段读取（与 get_doc 同口径）。返回的 hash 是**完整值**，可直接传给 update_request.ifMatch 做冲突保护。",
 	},
 	{
 		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
@@ -81,7 +81,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
-		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回。",
+		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回；命中行号（L<n>）可作为 get_doc 的 startLine 继续精读。",
 	},
 	{
 		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
@@ -97,7 +97,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的**完整 hash**：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动（不传 = 最后写者赢，不匹配时返回明确错误与当前 hash，不会静默覆盖）。uid 来自 list_docs / search_docs。",
+		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的**完整 hash**：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动（不传 = 最后写者赢，不匹配时返回明确错误与当前 hash，不会静默覆盖）。uid 来自 list_docs / search_docs。默认返回全文；长文档先 outline=true 看标题大纲（带行号），再用 startLine+maxLines 分段读取（默认 100 行、上限 500），search_docs 的 L<行号> 可直接作为 startLine；区间读取的行号仅供阅读，写回时不要带。",
 	},
 
 	// ---- 11 个集合写工具（只读模式不注册）：请求 5 + 文档 3 + 响应示例 3 ----

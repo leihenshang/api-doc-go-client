@@ -185,7 +185,7 @@ func NormalizeDetailSections(sections []string) (map[string]bool, error) {
 func hasSection(sel map[string]bool, name string) bool { return len(sel) == 0 || sel[name] }
 
 // renderDetail 把接口详情渲染为紧凑文本；sections 为空 = 全量（旧行为）。
-func renderDetail(d *RequestDetail, sections map[string]bool) string {
+func renderDetail(d *RequestDetail, sections map[string]bool, docsView LineView) string {
 	var sb strings.Builder
 	// 身份行恒输出：即使只取 docs，也要让 AI 知道这是哪张卡片（占不了多少体积）
 	fmt.Fprintf(&sb, "%s [%s] %s\n", d.Name, d.Method, d.URL)
@@ -249,7 +249,9 @@ func renderDetail(d *RequestDetail, sections map[string]bool) string {
 	}
 	if hasSection(sections, "docs") {
 		if d.Docs != "" {
-			fmt.Fprintf(&sb, "\n说明文档：\n%s\n", d.Docs)
+			// 说明文档可能很长：与 get_doc 共用行区间 / 大纲视图（全文时超长会加一行建议）
+			docsView.Suggest = true
+			fmt.Fprintf(&sb, "\n说明文档：\n%s", renderDocContent(d.Docs, docsView))
 		}
 		if len(d.RelatedDocs) > 0 {
 			sb.WriteString("\n相关文档条目：\n")
@@ -483,7 +485,7 @@ func renderDocs(project string, docs []DocItem) string {
 }
 
 // renderDocDetail get_doc / create_doc / update_doc 的结果：头部元信息 + 正文原文。
-func renderDocDetail(d *DocDetail) string {
+func renderDocDetail(d *DocDetail, v LineView) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s\n路径 %s · uid %s", d.Name, d.Path, d.UID)
 	if d.Hash != "" {
@@ -495,11 +497,8 @@ func renderDocDetail(d *DocDetail) string {
 		sb.WriteString("\n（正文为空，可用 update_doc 写入）\n")
 		return sb.String()
 	}
-	// 正文原样给出：AI 要能一字不差地改它，不做转义/截断（大小由 list_docs 的字节数提示）
+	// 全文原样给出（不转义）；区间/大纲模式带行号，超长全文只加一行「建议分段」提示
 	sb.WriteString("\n")
-	sb.WriteString(d.Content)
-	if !strings.HasSuffix(d.Content, "\n") {
-		sb.WriteString("\n")
-	}
+	sb.WriteString(renderDocContent(d.Content, v))
 	return sb.String()
 }

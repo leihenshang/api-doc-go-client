@@ -1,7 +1,16 @@
 {
   "properties": {
+    "maxLines": {
+      "type": "integer"
+    },
+    "outline": {
+      "type": "boolean"
+    },
     "project": {
       "type": "string"
+    },
+    "startLine": {
+      "type": "integer"
     },
     "uid": {
       "type": "string"
