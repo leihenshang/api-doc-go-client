@@ -281,7 +281,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?` | 列清单（名称/路径/字节数）；`query` 按名称与路径模糊过滤 |
-| `get_doc` | `project?`、`uid` ✅ | 读正文（Markdown 原文）+ **完整 `hash`**；`hash` 回传给 `update_doc.ifMatch` |
+| `get_doc` | `project?`、`uid` ✅、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?` | `folder` 留空 = 集合根；`content` 可一次给全文，留空先建空文档 |
 | `update_doc` | `project?`、`uid` ✅、`content?`、`replaces?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换（与 `content` 互斥，`old` 找不到整单拒绝）、`name` 改显示名、`folder` 换分组；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
@@ -294,9 +294,26 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 // 读一篇再改正文（带冲突保护）
 {"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae"}
 {"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae","content":"# 接入指南\n…","ifMatch":"<get_doc 返回的 hash>"}
+
+// 长文档：先看大纲，再分段精读（search_docs 的 L 行号可直接当 startLine）
+{"project":"shop","uid":"142310aa-…","outline":true}
+{"project":"shop","uid":"142310aa-…","startLine":51,"maxLines":50}
 ```
 
+分段读取的输出形如：
+
+```
+行 51–100 / 共 1240 行（下一段 startLine=101）；行号仅供阅读，写回时不要带
+
+  51│ ## 请求示例
+  52│ ...
+```
+
+写回仍用 `replaces`（`old` 取原文、**去掉行号**），`ifMatch` 用同一次响应里的 hash。
+
 `get_request_detail` 返回的 `relatedDocs` 里能看到「与该接口相关的文档条目」，拿其中的 uid 直接 `get_doc` 即可。
+
+> 接口自带说明（`docs` 段）同样可能很长：`get_request_detail` 支持 `docsOutline` / `docsStartLine` + `docsMaxLines`，口径与 `get_doc` 完全一致（`sections=["docs"]` 时最省体积）。
 
 ### 4.13 响应示例工具：`save_response_example` / `update_response_example` / `delete_response_example`
 

@@ -1,5 +1,14 @@
 {
   "properties": {
+    "docsMaxLines": {
+      "type": "integer"
+    },
+    "docsOutline": {
+      "type": "boolean"
+    },
+    "docsStartLine": {
+      "type": "integer"
+    },
     "includeBody": {
       "type": "boolean"
     },

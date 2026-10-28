@@ -527,6 +527,10 @@ type getDetailIn struct {
 	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
 	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
 	Sections     []string `json:"sections,omitempty" jsonschema:"只返回指定分段以控制体积：overview（请求本体/概述/参数/头/体）/ docs（说明文档与相关文档）/ bodyFields（请求体字段表）/ respDoc（响应字段与样例）/ examples（已保存响应示例）。不传 = 全量（旧行为）"`
+	// 说明文档可能很长：这三个参数只作用于 docs 段（与 get_doc 的 startLine/maxLines/outline 同口径）
+	DocsStartLine int  `json:"docsStartLine,omitempty" jsonschema:"说明文档从第几行开始（1 基）；与 docsMaxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
+	DocsMaxLines  int  `json:"docsMaxLines,omitempty" jsonschema:"说明文档本次最多行数（默认 100，最大 500）"`
+	DocsOutline   bool `json:"docsOutline,omitempty" jsonschema:"true = 只返回说明文档的 Markdown 标题大纲（带行号）"`
 }
 
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
@@ -542,7 +546,8 @@ func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolReques
 		if err != nil {
 			return "", err
 		}
-		return renderDetail(d, sel), nil
+		view := LineView{Start: in.DocsStartLine, Max: in.DocsMaxLines, Outline: in.DocsOutline}
+		return renderDetail(d, sel, view), nil
 	})
 }
 
@@ -593,7 +598,7 @@ func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolReque
 			}
 			ok++
 			fmt.Fprintf(&sb, "===== %s =====\n", uid)
-			sb.WriteString(renderDetail(d, sel))
+			sb.WriteString(renderDetail(d, sel, LineView{}))
 		}
 		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
 		return sb.String(), nil
@@ -719,6 +724,10 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 type getDocIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid" jsonschema:"文档 uid（list_docs 返回）"`
+	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
+	StartLine int  `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
+	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
+	Outline   bool `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号），先看结构再分段读取"`
 }
 
 func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
@@ -728,7 +737,8 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 		if err != nil {
 			return "", err
 		}
-		return renderDocDetail(d), nil
+		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
+		return renderDocDetail(d, view), nil
 	})
 }
 
