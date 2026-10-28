@@ -2,6 +2,8 @@
 
 基于 **Wails v2** 的桌面客户端：Go 内核 + Vue3/TS 前端。集合以纯文本 YAML 文件存储（文件即真相源），支持接口调试、环境变量、Mock、代码生成、导入 / 导出（OpenAPI / Postman / Bruno）与双向同步。
 
+版本与变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 技术栈
 
 - Wails v2（Go 内核 + webview）

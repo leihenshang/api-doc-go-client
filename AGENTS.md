@@ -45,3 +45,14 @@ go run ./cmd/clientctl run <collection-dir> --env dev --reporter junit --output 
 |---|---|
 | `.doc/` | 方案 / 设计文档 |
 | `doc/` | 功能进展（`客户端功能规划与完成情况.md`）、问题记录（`客户端问题记录.md`） |
+| `CHANGELOG.md`（根目录） | 对外更新日志：当前 dev / prod 版本 + 按日期记录的变更 |
+
+## 更新日志（根目录 `CHANGELOG.md`）
+
+根目录 `CHANGELOG.md` 是唯一的对外更新日志。**每次修复 Bug、或新增/调整用户可感知的功能，都要在文件顶部补一条（1–3 句）并更新版本号**，不能只写提交信息。
+
+- `prod:` = 最近一次发布版，必须与 `wails.json` 的 `info.productVersion` 一致（当前 `0.1.0`）；只在发布时抬升。
+- `dev:` = 当前开发线版本（`X.Y.Z-dev`，当前 `0.1.3-dev`），**每新增一条日期条目 patch +1**；发布时把它去掉 `-dev` 写入 `wails.json` 作为新的 `prod`，随后 `dev` 继续 +1。
+- 条目格式：`## YYYY-MM-DD  版本` + 变更列表；**同一天的多条改动合并进当天条目**（版本只加一次），最新条目在最上方；跨阶段的历史可合并为带日期范围的条目。
+- 只写用户能感知的变化（功能 / 行为 / 修复 / 兼容性），不写内部重构、测试细节与文件清单；细节留在提交信息与 `doc/`。
+- 顺序：改完代码 → `bash scripts/check.sh` 通过 → 更新 `CHANGELOG.md` → 一起提交；提交信息与 CHANGELOG 措辞保持一致。
