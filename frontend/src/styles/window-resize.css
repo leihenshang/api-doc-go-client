@@ -1,0 +1,92 @@
+/* 窗口可见边框的缩放热区（Linux 桌面壳专用，见 components/WindowResizeHandles.vue）。
+   几何：容器与外壳可见边界重合（inset = --app-frame-gap），热区在外壳内侧 6px，
+   正好是用户拖的「边框」；最大化时留白为 0 且由 Wails 自身边缘检测兜底，直接隐藏。 */
+
+.win-resize {
+  display: none;
+}
+
+:root[data-shell='desktop'][data-platform='linux']:not([data-window='max']) .win-resize {
+  display: block;
+  position: fixed;
+  inset: var(--app-frame-gap);
+  pointer-events: none;
+  /* 高于内容与吸顶工具栏，低于 naive-ui 弹窗/浮层（~2000）：弹窗打开时不抢边缘点击 */
+  z-index: 40;
+}
+
+.wr {
+  position: absolute;
+  pointer-events: auto;
+  /* 透明热区：只负责命中与光标 */
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.wr-n,
+.wr-s {
+  left: 8px;
+  right: 8px;
+  height: 6px;
+}
+
+.wr-n {
+  top: 0;
+  cursor: n-resize;
+}
+
+.wr-s {
+  bottom: 0;
+  cursor: s-resize;
+}
+
+.wr-w,
+.wr-e {
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+}
+
+.wr-w {
+  left: 0;
+  cursor: w-resize;
+}
+
+.wr-e {
+  right: 0;
+  cursor: e-resize;
+}
+
+/* 四角比边略大，避免「边与角之间」出现 2px 死角 */
+.wr-nw,
+.wr-ne,
+.wr-sw,
+.wr-se {
+  width: 10px;
+  height: 10px;
+}
+
+.wr-nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+}
+
+.wr-ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+}
+
+.wr-sw {
+  bottom: 0;
+  left: 0;
+  cursor: sw-resize;
+}
+
+.wr-se {
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+}
