@@ -12,6 +12,15 @@
     "query": {
       "type": "string"
     },
+    "sections": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "uid": {
       "type": "string"
     }

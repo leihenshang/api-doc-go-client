@@ -18,9 +18,17 @@ var (
 	errNeedName        = errors.New("缺少 name：创建请求必须给名称")
 	errEmptyDraft      = errors.New("没有可用的请求内容")
 	errNeedUID         = errors.New("缺少 uid：请用 search_requests 或 get_project_modules 找到目标请求")
-	errConflict        = errors.New("文件已被外部修改，本次保存被拒绝：请重新 get_request_detail 读取最新内容，合并后再试（或用 create_request 另存为新请求）")
 	errRespDocGRPC     = errors.New("gRPC 请求不承载响应字段文档（respDoc）：与客户端 UpdateResponseDoc 的限制一致")
 )
+
+// conflictError ifMatch 冲突的统一报错：明确「未写入任何内容」并附当前 hash，
+// AI 可以立刻带着新 hash 重新读取/重试，而不是猜「到底是报错还是静默覆盖」。
+func conflictError(kind, uid, hash string) error {
+	if hash == "" {
+		return fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid)
+	}
+	return fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。当前 hash=%s，请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid, hash)
+}
 
 // Service 是 MCP 工具的语义实现（不依赖 SDK，便于单测与将来复用到 CLI）。
 //
@@ -257,10 +265,13 @@ type ModulesResult struct {
 	Requests map[string][]Match `json:"requests,omitempty"` // 模块 → 请求（include_requests=true）
 	Total    int                `json:"total"`              // 项目内请求总数
 	Matched  int                `json:"matched"`            // 命中 query 的请求数
+	// ModuleTotal 过滤前的模块总数（onlyMatched 收敛后，Modules 会变少；汇总行仍能说清「共几个」）。
+	ModuleTotal int `json:"moduleTotal"`
 }
 
 // GetProjectModules 项目目录（模块）列表；query 模糊匹配模块名与模块下请求名/方法/路径。
-func (s *Service) GetProjectModules(project, query string, includeRequests bool) (*ModulesResult, error) {
+// onlyMatched=true 且 query 非空时，只保留「模块名命中」或「其下有命中请求」的模块。
+func (s *Service) GetProjectModules(project, query string, includeRequests, onlyMatched bool) (*ModulesResult, error) {
 	// 集合的扫描/索引是打开时缓存的（桌面端每次写完都 Reload），这里同样先刷新再读树
 	info, err := s.reload(project)
 	if err != nil {
@@ -316,6 +327,17 @@ func (s *Service) GetProjectModules(project, query string, includeRequests bool)
 	}
 	for i := range res.Modules {
 		res.Modules[i].Dirs = countDirs(info.Tree, res.Modules[i].Path)
+	}
+	res.ModuleTotal = len(res.Modules)
+	// 收敛：query 非空时只留有命中的模块（模块名本身命中也算）；ModuleTotal 保留过滤前总数
+	if onlyMatched && q != "" {
+		kept := res.Modules[:0]
+		for _, m := range res.Modules {
+			if m.Requests > 0 || strings.Contains(normalize(m.Path), q) || strings.Contains(normalize(m.Name), q) {
+				kept = append(kept, m)
+			}
+		}
+		res.Modules = kept
 	}
 	if q != "" { // 有查询时把有命中的模块排前面
 		sort.SliceStable(res.Modules, func(i, j int) bool { return res.Modules[i].Requests > res.Modules[j].Requests })
@@ -393,7 +415,8 @@ func candidatesFromIndex(nodes []index.Node) []candidate {
 }
 
 // SearchRequests 跨项目（或单项目）模糊搜索请求。project 为空时搜所有已加载项目。
-func (s *Service) SearchRequests(query, project string, limit int) ([]Match, int, error) {
+// opts.Exact=true 时只认整串出现（消掉分词/子序列误报）；opts.Fields 可限定搜索范围。
+func (s *Service) SearchRequests(query, project string, limit int, opts SearchOptions) ([]Match, int, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, 0, errEmptyQuery
@@ -406,7 +429,7 @@ func (s *Service) SearchRequests(query, project string, limit int) ([]Match, int
 	var all []Match
 	total := 0
 	for key, a := range targets {
-		ms, n, err := s.searchIn(a, key, query, 0)
+		ms, n, err := s.searchIn(a, key, query, 0, opts)
 		if err != nil {
 			continue // 单个项目失败不影响整体
 		}
@@ -445,9 +468,9 @@ func (s *Service) searchTargets(project string) (map[string]ProjectApp, error) {
 	return out, nil
 }
 
-// searchIn 对一个项目做两阶段打分：先用索引字段（name/url/method/path），
-// 命中不足时再读候选文件补 header/docs/body 后重新打分。
-func (s *Service) searchIn(a ProjectApp, project, query string, limit int) ([]Match, int, error) {
+// searchIn 对一个项目做两阶段打分：先用索引字段（name/uri），
+// 命中不足时再读候选文件补 header/docs/body/respDoc/bodyFields 后重新打分。
+func (s *Service) searchIn(a ProjectApp, project, query string, limit int, opts SearchOptions) ([]Match, int, error) {
 	if _, err := a.ReloadCollection(); err != nil { // 索引/树是缓存的，先刷新
 		return nil, 0, err
 	}
@@ -457,13 +480,13 @@ func (s *Service) searchIn(a ProjectApp, project, query string, limit int) ([]Ma
 	}
 	var matches []Match
 	for _, c := range candidatesFromIndex(nodes) {
-		score, fields := scoreCandidate(c, query)
+		score, fields, snippet := scoreCandidate(c, query, opts)
 		if score <= 0 {
 			continue
 		}
 		matches = append(matches, Match{
 			UID: c.UID, Name: c.Name, Method: c.Method, URL: c.URL, Path: c.Path,
-			Project: project, Score: score, Matched: fields, Hash: c.hash,
+			Project: project, Score: score, Matched: fields, Snippet: snippet, Hash: c.hash,
 		})
 	}
 	total := len(matches)
@@ -482,7 +505,16 @@ func (s *Service) searchIn(a ProjectApp, project, query string, limit int) ([]Ma
 		} else if len(seeds) > enrichLimit {
 			seeds = seeds[:enrichLimit]
 		}
-		s.enrichAndRescore(a, seeds, query)
+		s.enrichAndRescore(a, seeds, query, opts)
+		// 深读只是补字段：读完后仍 0 分的候选说明其实没命中，不能当结果返回
+		// （旧实现会把「索引前 N 个」原样吐出，看起来像一堆无关命中）。
+		kept := seeds[:0]
+		for _, m := range seeds {
+			if m.Score > 0 {
+				kept = append(kept, m)
+			}
+		}
+		seeds = kept
 		sortMatches(seeds)
 		matches = seeds
 		total = len(matches)
@@ -506,8 +538,8 @@ func matchFromNodes(nodes []index.Node, project string) []Match {
 	return out
 }
 
-// enrichAndRescore 读候选文件，补 header / docs / body 字段后重打分（分数只升不降）。
-func (s *Service) enrichAndRescore(a ProjectApp, matches []Match, query string) {
+// enrichAndRescore 读候选文件，补 header / docs / body / respDoc / bodyFields 字段后重打分（分数只升不降）。
+func (s *Service) enrichAndRescore(a ProjectApp, matches []Match, query string, opts SearchOptions) {
 	for i := range matches {
 		r, err := a.ReadRequest(matches[i].UID)
 		if err != nil {
@@ -520,14 +552,32 @@ func (s *Service) enrichAndRescore(a ProjectApp, matches []Match, query string) 
 			sb.WriteString(h.Value)
 			sb.WriteByte(' ')
 		}
+		var fb strings.Builder
+		for _, f := range r.Body.Fields {
+			fmt.Fprintf(&fb, "%s %s %s\n", f.Name, f.Description, f.Example)
+		}
 		c := candidate{
 			UID: r.UID, Name: r.Name, Method: r.Method, URL: r.URL, Path: r.Path,
 			Header: sb.String(), Docs: r.Docs, Body: bodySummary(r),
+			RespDoc: respDocSearchText(r.RespDoc), BodyFields: fb.String(),
 		}
-		if score, fields := scoreCandidate(c, query); score > matches[i].Score {
-			matches[i].Score, matches[i].Matched = score, fields
+		if score, fields, snippet := scoreCandidate(c, query, opts); score > matches[i].Score {
+			matches[i].Score, matches[i].Matched, matches[i].Snippet = score, fields, snippet
 		}
 	}
+}
+
+// respDocSearchText 把响应字段表与样例压成可搜索文本（只用于打分/片段，不进输出）。
+func respDocSearchText(d *collection.ResponseDoc) string {
+	if d == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, p := range d.Params {
+		fmt.Fprintf(&sb, "%s %s %s\n", p.FieldName, p.Description, p.Example)
+	}
+	sb.WriteString(d.Sample)
+	return sb.String()
 }
 
 // sortMatches 分数降序；同分按名称升序，保证结果稳定可复现。
@@ -574,11 +624,16 @@ type DocBrief struct {
 type DetailOptions struct {
 	IncludeBody  bool // 是否返回响应示例/请求体的完整内容
 	MaxBodyBytes int
-	Query        string // 在示例名/文档名里再筛一遍（可选）
+	Query        string   // 在示例名/文档名里再筛一遍（可选）
+	Sections     []string // 只取指定分段：overview/docs/bodyFields/respDoc/examples；空 = 全量
 }
 
 // GetRequestDetail 接口详情：请求（含 headers/body/auth/grpc）+ 说明 + 已保存响应示例。
 func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*RequestDetail, error) {
+	// 先校验分段取值：未知值直接报错（免得静默返回全量让 AI 以为筛选生效了）
+	if _, err := NormalizeDetailSections(opts.Sections); err != nil {
+		return nil, err
+	}
 	a, e, err := s.resolve(project)
 	if err != nil {
 		return nil, err
@@ -885,6 +940,32 @@ const (
 	sectionDocs     = "docs"
 )
 
+// ReplaceOp 文本局部替换（update_request.docs / update_doc.content）。
+// 与整篇覆盖（docs / content）互斥：长文档只想改一段时用它能避免「抄全文再重写」的截断风险。
+type ReplaceOp struct {
+	Old        string `json:"old" jsonschema:"要被替换的原文片段（必须与正文完全一致，区分大小写）"`
+	New        string `json:"new" jsonschema:"替换后的内容（传空串 = 删除该片段）"`
+	ReplaceAll bool   `json:"replaceAll,omitempty" jsonschema:"true = 替换全部出现；默认只替换第一处"`
+}
+
+// applyReplaces 依次应用替换；任何一处 old 找不到都整体报错（调用方在写盘前调用，保证不落盘）。
+func applyReplaces(text string, ops []ReplaceOp) (string, error) {
+	for i, op := range ops {
+		if op.Old == "" {
+			return "", fmt.Errorf("replaces[%d].old 不能为空", i)
+		}
+		if !strings.Contains(text, op.Old) {
+			return "", fmt.Errorf("replaces[%d] 未匹配到 old 片段（未写入任何内容）：%s", i, clipRunes(op.Old, 60))
+		}
+		if op.ReplaceAll {
+			text = strings.ReplaceAll(text, op.Old, op.New)
+		} else {
+			text = strings.Replace(text, op.Old, op.New, 1)
+		}
+	}
+	return text, nil
+}
+
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
@@ -903,7 +984,9 @@ type UpdateRequestInput struct {
 	RespDoc    *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
 	Auth       *collection.Auth            `json:"auth,omitempty"`
 	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
-	Folder     *string                     `json:"folder,omitempty"` // 移动到别的模块
+	// Replaces 接口说明的局部替换：与 docs 互斥；old 找不到即整单拒绝（不落盘）。
+	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"接口说明的局部替换：[{old,new,replaceAll}]，与 docs 互斥；任一 old 找不到则整单拒绝、不落盘"`
+	Folder   *string     `json:"folder,omitempty"` // 移动到别的模块
 	// IfMatch 冲突检测：传 get_request_detail / search_requests 返回的 hash，
 	// 若磁盘文件在此期间被外部改动则拒绝写入（不传 = 不做保护，行为同客户端「最后写者赢」）。
 	IfMatch string `json:"ifMatch,omitempty"`
@@ -961,6 +1044,9 @@ func validateSection(section string, in UpdateRequestInput) error {
 	if in.Docs != nil {
 		present = append(present, "docs")
 	}
+	if len(in.Replaces) > 0 {
+		present = append(present, "replaces")
+	}
 	var allowed []string
 	switch sec {
 	case sectionRequest:
@@ -968,7 +1054,7 @@ func validateSection(section string, in UpdateRequestInput) error {
 	case sectionResponse:
 		allowed = []string{"respDoc"}
 	case sectionDocs:
-		allowed = []string{"docs"}
+		allowed = []string{"docs", "replaces"}
 	default:
 		return fmt.Errorf("不支持的 section %q：只支持 request（请求本身）/ response（响应字段文档 respDoc）/ docs（接口说明），省略 section 表示不限制", section)
 	}
@@ -995,6 +1081,10 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	if err := validateSection(in.Section, in); err != nil {
 		return nil, err
 	}
+	// 整篇覆盖与局部替换互斥（同时传会让「到底以谁为准」变得不可预期）
+	if len(in.Replaces) > 0 && in.Docs != nil {
+		return nil, errors.New("docs 与 replaces 互斥：整篇覆盖用 docs，局部替换用 replaces（不要同时传）")
+	}
 	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
 		return nil, err
@@ -1002,6 +1092,14 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	r, err := a.ReadRequest(strings.TrimSpace(in.UID))
 	if err != nil {
 		return nil, fmt.Errorf("读取请求 %s 失败: %w", in.UID, err)
+	}
+	// 局部替换先算：old 找不到就整单拒绝（此时还没写盘）
+	if len(in.Replaces) > 0 {
+		docs, rerr := applyReplaces(r.Docs, in.Replaces)
+		if rerr != nil {
+			return nil, rerr
+		}
+		r.Docs = docs
 	}
 	if err := applyUpdateFields(r, in); err != nil {
 		return nil, err
@@ -1017,7 +1115,8 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	// 移动模块要在保存后做（路径/seq 由集合层分配）
 	if err := a.SaveRequest(r); err != nil {
 		if strings.Contains(err.Error(), "[conflict]") {
-			return nil, errConflict
+			cur, _ := s.hashOf(a, r.UID)
+			return nil, conflictError("请求", r.UID, cur)
 		}
 		return nil, err
 	}
@@ -1095,6 +1194,20 @@ func (s *Service) CreateProject(root, name, dirName string) (Project, error) {
 		return Project{}, err
 	}
 	return s.reg.CreateProjectIn(al.Path, name, dirName)
+}
+
+// DocsOf 读取请求的说明文档原文（仅 docs 字段）：
+// update_request 成功后的「落盘确认」需要旧文本做行级对比，不拉示例/响应字段。
+func (s *Service) DocsOf(project, uid string) (string, error) {
+	a, _, err := s.resolve(project)
+	if err != nil {
+		return "", err
+	}
+	r, err := a.ReadRequest(strings.TrimSpace(uid))
+	if err != nil {
+		return "", err
+	}
+	return r.Docs, nil
 }
 
 // hashOf 取请求文件的当前磁盘哈希（index 提供，失败返回空串=跳过冲突检测）。

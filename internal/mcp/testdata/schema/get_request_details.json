@@ -1,0 +1,38 @@
+{
+  "properties": {
+    "includeBody": {
+      "type": "boolean"
+    },
+    "maxBodyBytes": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    },
+    "sections": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "uids": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    }
+  },
+  "required": [
+    "uids"
+  ],
+  "type": "object"
+}

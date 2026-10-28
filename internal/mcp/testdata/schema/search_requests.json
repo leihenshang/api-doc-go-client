@@ -1,5 +1,20 @@
 {
   "properties": {
+    "exactMatch": {
+      "type": "boolean"
+    },
+    "fields": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "includeHash": {
+      "type": "boolean"
+    },
     "limit": {
       "type": "integer"
     },

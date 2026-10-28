@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "exactMatch": {
+      "type": "boolean"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "pattern": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pattern"
+  ],
+  "type": "object"
+}

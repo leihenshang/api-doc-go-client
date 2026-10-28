@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// 本文件是 27 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
+// 本文件是 29 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
 // 注册描述。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
 // 不允许在别处再硬编码一份工具风险/读写分类。
 //
@@ -48,9 +48,9 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 27 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 29 个（ValidateMetas 锁定）。
 var toolMetas = []ToolMeta{
-	// ---- 10 个只读工具（只读模式也注册）----
+	// ---- 12 个只读工具（只读模式也注册）----
 	{
 		Name: "list_workspaces", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
 		Description: "列出 MCP 可访问的工作目录（客户端授权的白名单）与其中的项目、当前默认目标。白名单为空时 AI 无法读写任何集合 —— 需要时请让用户在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加。",
@@ -65,15 +65,23 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。",
+		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。带 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求），汇总行始终给出模块总数；传 onlyMatched=false 可看全部模块。",
 	},
 	{
 		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。返回的 hash 可传给 update_request.if_match 做冲突保护。",
+		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。sections 只取指定分段（overview/docs/bodyFields/respDoc/examples），可把单次响应压到 3000 字符内；不传 = 全量。返回的 hash 是**完整值**，可直接传给 update_request.ifMatch 做冲突保护。",
+	},
+	{
+		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
+		Description: "批量获取多个接口的详情（一次 1–10 个 uid，超出直接报错）：参数与 get_request_detail 相同（sections/include_body/maxBodyBytes/query 对每个卡片生效），结果按 uid 分组，单个 uid 失败不影响其它。用于一次取多张卡片，省掉逐个调用的往返。",
 	},
 	{
 		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "模糊搜索接口：按名称/URL/方法/路径/header/说明/body 打分排序（分数越高越相关，matched 列出命中字段）。project 省略时在所有已加载项目里搜。适合「记得大概内容但记不清名字」的场景。",
+		Description: "搜索接口：按名称/URL/方法/路径/header/说明/请求体/响应字段/请求体字段表打分排序（分数越高越相关，matched 列出命中字段，snippet 给出命中行±1，可先判断相关性再取详情）。exactMatch=true 走整词匹配（词边界，不切词、不做子序列兜底），适合长标识符；fields 限定搜索范围（name/uri/docs/respDoc/bodyFields/header/body），不传 = 全部；includeHash=true 时每条附完整 hash（可直接回传 ifMatch），默认不带以省体积。project 省略时在所有已加载项目里搜。",
+	},
+	{
+		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
+		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回。",
 	},
 	{
 		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
@@ -89,7 +97,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的 hash：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动。uid 来自 list_docs。",
+		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的**完整 hash**：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动（不传 = 最后写者赢，不匹配时返回明确错误与当前 hash，不会静默覆盖）。uid 来自 list_docs / search_docs。",
 	},
 
 	// ---- 11 个集合写工具（只读模式不注册）：请求 5 + 文档 3 + 响应示例 3 ----
@@ -107,7 +115,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。概述用 summary、请求体字段表格用 bodyFields，各自独立设置：body 整份覆盖不会清掉表格与概述（body.fields/body.descs 传 null 保留原值，显式传空数组/空对象才清空），bodyFields 不传=不动、传空数组=清空；summary 不传=不动、传空串=清空。folder 可移动模块；ifMatch 传详情里拿到的 hash 可检测外部改动并拒绝覆盖（不传则最后写者赢）。改名会自动同步文件名。",
+		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。概述用 summary、请求体字段表格用 bodyFields，各自独立设置：body 整份覆盖不会清掉表格与概述（body.fields/body.descs 传 null 保留原值，显式传空数组/空对象才清空），bodyFields 不传=不动、传空数组=清空；summary 不传=不动、传空串=清空。folder 可移动模块。长文档只想改局部时用 replaces（[{old,new,replaceAll}]，作用于 docs，与 docs 互斥；old 找不到会整单拒绝、不落盘）。ifMatch 传详情里的完整 hash：不匹配时返回明确错误 + 当前 hash、不写入任何内容；不传则最后写者赢。成功响应会附落盘确认：能按行定位改动时给「第 N–M 行 ±1 行」片段，定位不到时回落前 5 行。改名会自动同步文件名。",
 	},
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -119,7 +127,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
-		Description: "修改已有文档（只改传入的字段）：content 覆盖正文（传空串=清空）、name 改显示名（文件名不变）、folder 移动到别的分组目录（传空串=移到集合根）。ifMatch 传 get_doc 返回的 hash 可检测期间的外部改动并拒绝覆盖（不传则最后写者赢）。",
+		Description: "修改已有文档（只改传入的字段）：content 覆盖正文（传空串=清空）、name 改显示名（文件名不变）、folder 移动到别的分组目录（传空串=移到集合根）。长文档只想改局部时用 replaces（[{old,new,replaceAll}]，作用于正文，与 content 互斥；old 找不到会整单拒绝、不落盘）。ifMatch 传 get_doc 返回的完整 hash：不匹配时返回明确错误 + 当前 hash、不写入任何内容；不传则最后写者赢。成功响应会附落盘确认：能按行定位改动时给「第 N–M 行 ±1 行」片段，定位不到时回落前 5 行。",
 	},
 	{
 		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
@@ -194,7 +202,7 @@ func ToolNames() []string {
 }
 
 // NamesForMode 返回指定模式下应注册的工具名集合：
-// readOnly=true 时仅 InReadOnly 的工具（10 读 + send_request = 11 个；全模式 27 个）。
+// readOnly=true 时仅 InReadOnly 的工具（12 读 + send_request = 13 个；全模式 29 个）。
 func NamesForMode(readOnly bool) []string {
 	out := make([]string, 0, len(toolMetas))
 	for _, m := range toolMetas {
@@ -209,7 +217,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 27
+	const expectTools = 29
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}

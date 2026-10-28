@@ -121,8 +121,10 @@ type UpdateDocInput struct {
 	UID     string  `json:"uid" jsonschema:"文档 uid（list_docs / get_doc 返回）"`
 	Name    *string `json:"name,omitempty" jsonschema:"新的显示名（只改 frontmatter 的 name，文件名不变）"`
 	Content *string `json:"content,omitempty" jsonschema:"新的 Markdown 正文；传空串 = 清空正文；不传不动"`
-	Folder  *string `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
-	IfMatch string  `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的 hash；磁盘在此期间被外部改动则拒绝写入"`
+	// Replaces 正文的局部替换：与 content 互斥；old 找不到即整单拒绝（不落盘）。
+	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文的局部替换：[{old,new,replaceAll}]，与 content 互斥；任一 old 找不到则整单拒绝、不落盘"`
+	Folder   *string     `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
+	IfMatch  string      `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的完整 hash；磁盘在此期间被外部改动则拒绝写入并返回当前 hash"`
 }
 
 // UpdateDoc 局部更新文档：正文（带 ifMatch 校验）/ 改名 / 移动可任意组合。
@@ -142,10 +144,23 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err)
 	}
+	// 正文：整篇覆盖（content）与局部替换（replaces）互斥；两者都走 ifMatch 校验。
+	if in.Content != nil && len(in.Replaces) > 0 {
+		return nil, errors.New("content 与 replaces 互斥：整篇覆盖用 content，局部替换用 replaces（不要同时传）")
+	}
 	if in.Content != nil {
 		d.Content = *in.Content
 		if err := a.SaveDocExpectHash(d, strings.TrimSpace(in.IfMatch)); err != nil {
-			return nil, err
+			return nil, s.docWriteErr(a, uid, err)
+		}
+	} else if len(in.Replaces) > 0 {
+		content, rerr := applyReplaces(d.Content, in.Replaces)
+		if rerr != nil {
+			return nil, rerr
+		}
+		d.Content = content
+		if err := a.SaveDocExpectHash(d, strings.TrimSpace(in.IfMatch)); err != nil {
+			return nil, s.docWriteErr(a, uid, err)
 		}
 	}
 	if in.Folder != nil {
@@ -192,4 +207,92 @@ func (s *Service) DeleteDoc(project, uid string) error {
 // docBrief 把集合层的 DocEntry 投影成 MCP 返回结构（正文只算长度，列表里不带全文）。
 func docItem(d *collection.DocEntry) DocItem {
 	return DocItem{UID: d.UID, Name: d.Name, Path: d.Path, Icon: d.Icon, Seq: d.Seq, Size: len(d.Content)}
+}
+
+// DocHitLine 文档正文里的一处命中（1-based 行号 + 该行片段，200 字符内）。
+type DocHitLine struct {
+	Line    int    `json:"line"`
+	Snippet string `json:"snippet"`
+}
+
+// maxDocHitLines 每篇文档最多回几处命中行（避免正文长时把上下文打爆）。
+const maxDocHitLines = 5
+
+// DocHit 一篇文档的搜索命中：count = 全文命中行数，matches = 前 maxDocHitLines 处。
+type DocHit struct {
+	UID     string       `json:"uid"`
+	Name    string       `json:"name"`
+	Path    string       `json:"path"`
+	Project string       `json:"project,omitempty"`
+	Count   int          `json:"count"`
+	Matches []DocHitLine `json:"matches"`
+}
+
+// SearchDocs 在文档正文里逐行搜索（不读请求的 docs 字段，那是接口说明）。
+// exact=true 走整词匹配（词边界，不切词）；否则大小写不敏感的子串。
+// project 为空时在所有已加载项目里搜；返回按命中行数降序、名称升序排列。
+func (s *Service) SearchDocs(project, pattern string, exact bool, limit int) ([]DocHit, int, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, 0, errEmptyQuery
+	}
+	limit = clampLimit(limit)
+	targets, err := s.searchTargets(project)
+	if err != nil {
+		return nil, 0, err
+	}
+	var hits []DocHit
+	matchedDocs := 0
+	for key, a := range targets {
+		docs, derr := a.ListDocs()
+		if derr != nil {
+			continue // 单个项目失败不影响整体
+		}
+		for _, d := range docs {
+			var lines []DocHitLine
+			count := 0
+			for i, line := range strings.Split(d.Content, "\n") {
+				if !docLineHit(line, pattern, exact) {
+					continue
+				}
+				count++
+				if len(lines) < maxDocHitLines {
+					lines = append(lines, DocHitLine{Line: i + 1, Snippet: clipRunes(strings.TrimSpace(line), 200)})
+				}
+			}
+			if count == 0 {
+				continue
+			}
+			matchedDocs++
+			hits = append(hits, DocHit{
+				UID: d.UID, Name: d.Name, Path: d.Path, Project: key, Count: count, Matches: lines,
+			})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Count != hits[j].Count {
+			return hits[i].Count > hits[j].Count
+		}
+		return hits[i].Name < hits[j].Name
+	})
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits, matchedDocs, nil
+}
+
+// docLineHit 单行匹配：exact=true 要求整词（左右词边界），否则大小写不敏感子串。
+func docLineHit(line, pattern string, exact bool) bool {
+	if exact {
+		return wholeWordHit(line, pattern)
+	}
+	return strings.Contains(strings.ToLower(line), strings.ToLower(pattern))
+}
+
+// docWriteErr 映射文档写盘错误：ifMatch 冲突 → 明确「未写入任何内容」并附当前 hash。
+func (s *Service) docWriteErr(a ProjectApp, uid string, err error) error {
+	if strings.Contains(err.Error(), "[conflict]") {
+		return conflictError("文档", uid, a.DocFileHash(uid))
+	}
+	return err
 }
