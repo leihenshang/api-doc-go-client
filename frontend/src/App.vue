@@ -27,6 +27,7 @@ import TitleBar from '@/components/TitleBar.vue'
 import Toolbar from '@/components/Toolbar.vue'
 import TrashDialog from '@/components/TrashDialog.vue'
 import Welcome from '@/components/Welcome.vue'
+import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
 import { useCloseFlow } from '@/composables/useCloseFlow'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { api, hasWailsRuntime, onAppEvent, runtimePlatform } from '@/lib/ipc'
@@ -833,6 +834,8 @@ watch(
 <template>
   <n-config-provider :locale="naiveLocale" :date-locale="naiveDateLocale" :theme="naiveTheme"
     :theme-overrides="themeOverrides">
+    <!-- Linux 无边框窗口：可见边框内侧的缩放热区（见组件注释；其他平台/浏览器态自动隐藏） -->
+    <window-resize-handles />
     <div class="app">
       <!-- 标题栏常驻：无边框窗口下即使没打开集合也要有拖动区（主题切换也放这里，未打开集合时也可用） -->
       <!-- 布局切换跟着「有没有打开的请求」走：没有请求时该按钮组不渲染 -->
