@@ -394,6 +394,8 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_doc", ts.createDoc)
 	addTool(ts, server, "update_doc", ts.updateDoc)
 	addTool(ts, server, "delete_doc", ts.deleteDoc)
+	// 图片：存到项目 assets/，返回可写进正文的 URL（Markdown 编辑器同款）
+	addTool(ts, server, "save_doc_image", ts.saveDocImage)
 	// 响应示例的写操作：手工新增 / 局部更新（改名·状态码·响应体）/ 删除（进 .trash）
 	addTool(ts, server, "save_response_example", ts.saveResponseExample)
 	addTool(ts, server, "update_response_example", ts.updateResponseExample)
@@ -739,6 +741,28 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 		}
 		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
 		return renderDocDetail(d, view), nil
+	})
+}
+
+// saveImageIn save_doc_image 的入参。
+type saveImageIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Data    string `json:"data" jsonschema:"图片的 base64（可带 data:image/...;base64, 前缀）；只接受 PNG / JPEG / GIF / WebP，单张 ≤5MB"`
+	Name    string `json:"name,omitempty" jsonschema:"图片说明（写进 Markdown 的 alt 文本），默认「图片」"`
+}
+
+func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, in saveImageIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrap(func() (string, error) {
+		in.Project = ts.proj(req, in.Project)
+		url, err := ts.svc.SaveImage(in.Project, in.Data)
+		if err != nil {
+			return "", err
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			name = "图片"
+		}
+		return fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：![%s](%s)", url, name, url), nil
 	})
 }
 

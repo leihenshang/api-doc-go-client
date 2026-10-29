@@ -235,6 +235,10 @@ export default {
     urlPlaceholder: 'https://api.example.com/users',
     summaryPlaceholder: 'API summary: one line about what this endpoint does (optional)',
     summaryAdd: 'Add a summary…',
+    // Local image upload for Markdown (lib/md-image.ts)
+    imageTooLarge: 'Image "{name}" exceeds {mb} MB and was not inserted',
+    imageTypeUnsupported: 'Unsupported image type "{name}" (PNG / JPEG / GIF / WebP only)',
+    imageFailed: 'Failed to insert image "{name}": {err}',
     send: 'Send',
     sending: 'Sending',
     cancelSend: 'Cancel',

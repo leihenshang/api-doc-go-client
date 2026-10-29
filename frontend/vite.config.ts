@@ -12,6 +12,8 @@ export default defineConfig({
     port: 5275,
     proxy: {
       '/api': 'http://127.0.0.1:8175',
+      // 文档图片（Markdown 本地图片）：devserver 的只读路由
+      '/doc-assets': 'http://127.0.0.1:8175',
     },
   },
 })

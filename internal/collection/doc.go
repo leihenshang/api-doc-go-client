@@ -403,7 +403,23 @@ func DocImageURLs(content string) []string {
 	var out []string
 	// 简单匹配 ![](...) 与 <img src="...">
 	for _, m := range imageURLPattern.FindAllStringSubmatch(content, -1) {
+		// m[1] 是 Markdown ![]()，m[2] 是 <img src="">：两种写法都要覆盖，
+		// 否则 HTML 图片既不会被离线镜像（R9），也不会在同步时本地化/服务端化。
 		u := m[1]
+		if u == "" && len(m) > 2 {
+			u = m[2]
+		}
+		// 去掉可选的 <…> 包裹与 "title"（Markdown 允许 `![a](url "标题")`）：
+		// 后面的下载/改写都按纯 URL 匹配，不裁掉标题会整条匹配失败。
+		u = strings.TrimSpace(u)
+		if strings.HasPrefix(u, "<") {
+			if i := strings.Index(u, ">"); i > 0 {
+				u = u[1:i]
+			}
+		}
+		if i := strings.IndexAny(u, " \t\n"); i > 0 {
+			u = u[:i]
+		}
 		if u != "" {
 			out = append(out, u)
 		}

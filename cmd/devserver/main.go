@@ -114,6 +114,8 @@ func main() {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "data": data})
 	}, *token))
+	// 文档图片（/doc-assets/<sha256>）：与桌面壳 AssetServer.Handler 同一处理器
+	mux.Handle("/doc-assets/", core.DocAssetHandler())
 	// 前端静态资源（SPA 回退 index.html）
 	webRoot, _ := filepath.Abs(*web)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

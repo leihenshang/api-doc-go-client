@@ -402,6 +402,10 @@ export function SaveDoc(arg1) {
   return window['go']['app']['App']['SaveDoc'](arg1);
 }
 
+export function SaveDocImage(arg1) {
+  return window['go']['app']['App']['SaveDocImage'](arg1);
+}
+
 export function SaveDocExpectHash(arg1, arg2) {
   return window['go']['app']['App']['SaveDocExpectHash'](arg1, arg2);
 }

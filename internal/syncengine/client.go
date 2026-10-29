@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,6 +57,10 @@ type BindInfo struct {
 	// FieldMappingHashes 字段字典的已推送状态（UID → 单条内容摘要）。
 	// 字段字典是单文件多条目，用条目摘要而非文件 hash，避免改一条导致全量重推。
 	FieldMappingHashes map[string]string `json:"fieldMappingHashes,omitempty"`
+	// AssetURLs 文档图片的远端地址映射（本地 sha256 → 服务端 URL，形如 /uploads/<name>）。
+	// 推送时把正文里的本地 /doc-assets/<hash> 换回服务端 URL；拉取时反向填充。
+	// 有了它，同一张图只需要上传一次，改正文不会重复上传。
+	AssetURLs map[string]string `json:"assetUrls,omitempty"`
 }
 
 // UnmarshalJSON 兼容旧版明文 token：读到后暂存内存，由 LoadBind 负责迁成 TokenEnc。
@@ -208,6 +213,117 @@ func (c *Client) do(method, path string, body any, out any) error {
 		return json.Unmarshal(wrap.Data, out)
 	}
 	return nil
+}
+
+// UploadAsset 上传一张文档图片（multipart POST /api/file/upload），返回服务端 URL 与其 sha256。
+// 服务端会再校验一次扩展名白名单、文件头与大小上限（默认 5MB），并把文件按内容寻址登记。
+func (c *Client) UploadAsset(data []byte, filename string) (string, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return "", "", err
+	}
+	if err := mw.Close(); err != nil {
+		return "", "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/api/file/upload", &buf)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("上传图片失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxSyncBody))
+	if err != nil {
+		return "", "", err
+	}
+	var wrap struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			URL  string `json:"url"`
+			Hash string `json:"hash"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return "", "", fmt.Errorf("上传响应解析失败: %s", truncate(string(raw), 200))
+	}
+	if wrap.Code != 200 || wrap.Data.URL == "" {
+		return "", "", fmt.Errorf("服务端拒绝上传图片: %s", wrap.Msg)
+	}
+	return wrap.Data.URL, wrap.Data.Hash, nil
+}
+
+// FetchAsset 拉取服务端**同源**的文档图片（/uploads/* 或 /api/file/<hash>）。
+// 外链一律拒绝：既不把 PAT 发给第三方域名，也不做 SSRF。
+func (c *Client) FetchAsset(rawURL string) ([]byte, error) {
+	full, err := c.sameOriginAssetURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, full, nil)
+	if err != nil {
+		return nil, err
+	}
+	// /uploads 是公开路由，但 /api/file 需要令牌；同源时统一带上不增加暴露面。
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("下载图片失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("下载图片失败: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAssetBytes))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, errors.New("图片内容为空")
+	}
+	return data, nil
+}
+
+// maxAssetBytes 单张文档图片的下载上限（与服务端上传上限、R9 附件上限同量级）。
+const maxAssetBytes = 32 << 20
+
+// sameOriginAssetURL 把相对地址补全为服务端地址；绝对地址必须是同源，且路径只能是
+// /uploads/* 或 /api/file/*（文档图片仅有的两种合法形态）。
+func (c *Client) sameOriginAssetURL(raw string) (string, error) {
+	base, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return "", fmt.Errorf("服务端地址无效: %w", err)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("图片地址无效: %w", err)
+	}
+	full := u
+	if u.IsAbs() {
+		if !strings.EqualFold(u.Host, base.Host) {
+			return "", errors.New("不是同步服务端同源地址")
+		}
+	} else {
+		if !strings.HasPrefix(raw, "/") {
+			return "", errors.New("图片地址必须是站内绝对路径")
+		}
+		full = base.ResolveReference(u)
+	}
+	switch {
+	case strings.HasPrefix(full.Path, "/uploads/"), strings.HasPrefix(full.Path, "/api/file/"):
+		return full.String(), nil
+	default:
+		return "", fmt.Errorf("不支持的图片地址: %s", full.Path)
+	}
 }
 
 // Meta 能力协商。

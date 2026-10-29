@@ -235,6 +235,10 @@ export default {
     urlPlaceholder: 'https://api.example.com/users',
     summaryPlaceholder: '接口概述：一句话说明这个接口做什么（选填）',
     summaryAdd: '添加概要…',
+    // Markdown 本地图片上传（lib/md-image.ts）
+    imageTooLarge: '图片「{name}」超过 {mb} MB，未插入',
+    imageTypeUnsupported: '图片「{name}」类型不支持（只接受 PNG / JPEG / GIF / WebP）',
+    imageFailed: '图片「{name}」插入失败：{err}',
     send: '发送',
     sending: '发送中',
     cancelSend: '取消',
