@@ -5,12 +5,14 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"api-doc-go-client/internal/collection"
 	share "github.com/leihenshang/api-doc-go-share/collection"
@@ -147,6 +149,11 @@ func (r *Registry) scan() error {
 		}
 		for _, it := range items {
 			if !it.IsDir() {
+				continue
+			}
+			// 点目录（.trash / .git / .conflicts…）不是项目：delete_project 的回收位
+			// 就放在授权根下的 .trash，不能被 list_projects 当成坏项目列出来。
+			if strings.HasPrefix(it.Name(), ".") {
 				continue
 			}
 			abs := filepath.Join(a.Path, it.Name())
@@ -460,4 +467,50 @@ func countTree(nodes []*collection.Node, reqs, folders *int) {
 		}
 		countTree(n.Children, reqs, folders)
 	}
+}
+
+// ErrProjectConfirmMismatch delete_project 的确认名不匹配（防误删）。
+var ErrProjectConfirmMismatch = errors.New("confirm 与项目名不一致")
+
+// DeleteProject 把项目目录移入「授权根/.trash/<目录名>-<时间戳>」（可人工移回恢复），
+// 同时关闭该项目实例并刷新扫描结果。confirm 必须等于项目显示名或目录名。
+//
+// 为什么放授权根下的 .trash：与集合内 .trash 同构、跨平台可用（不依赖桌面回收站）；
+// scan() 已跳过点目录，因此它不会出现在 list_projects 里。
+func (r *Registry) DeleteProject(key, confirm string) (string, error) {
+	e, err := r.Find(key)
+	if err != nil {
+		return "", err
+	}
+	if !e.writable {
+		return "", fmt.Errorf("工作目录 %s 是只读授权（writable=false），不能删除项目", e.allowRoot)
+	}
+	confirm = strings.TrimSpace(confirm)
+	if confirm == "" {
+		return "", fmt.Errorf("需要 confirm 参数：请填项目名 %q 以确认删除", e.Name)
+	}
+	base := filepath.Base(e.Dir)
+	if confirm != e.Name && confirm != base && confirm != e.Path {
+		return "", fmt.Errorf("%w：当前项目是 %q（目录 %s），confirm 需要与它一致", ErrProjectConfirmMismatch, e.Name, base)
+	}
+
+	// 先释放该项目的集合（watcher/索引），否则 Windows 上目录被占用无法移动。
+	r.mu.Lock()
+	if a, ok := r.opened[e.Dir]; ok {
+		a.CloseProject()
+		delete(r.opened, e.Dir)
+		delete(r.infos, e.Dir)
+	}
+	r.mu.Unlock()
+
+	trash := filepath.Join(e.allowRoot, ".trash")
+	if err := os.MkdirAll(trash, 0o755); err != nil {
+		return "", fmt.Errorf("创建回收目录: %w", err)
+	}
+	dest := filepath.Join(trash, fmt.Sprintf("%s-%d", base, time.Now().UnixNano()))
+	if err := os.Rename(e.Dir, dest); err != nil {
+		return "", fmt.Errorf("移动项目到回收位失败: %w", err)
+	}
+	_ = r.scan()
+	return dest, nil
 }

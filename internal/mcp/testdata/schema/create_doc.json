@@ -3,13 +3,22 @@
     "content": {
       "type": "string"
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "folder": {
       "type": "string"
     },
     "name": {
       "type": "string"
     },
+    "onConflict": {
+      "type": "string"
+    },
     "project": {
+      "type": "string"
+    },
+    "uid": {
       "type": "string"
     }
   },

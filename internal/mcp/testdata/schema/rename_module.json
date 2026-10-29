@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name"
+  ],
+  "type": "object"
+}

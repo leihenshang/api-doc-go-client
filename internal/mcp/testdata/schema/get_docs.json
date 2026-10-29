@@ -1,0 +1,29 @@
+{
+  "properties": {
+    "maxLines": {
+      "type": "integer"
+    },
+    "outline": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
+    },
+    "startLine": {
+      "type": "integer"
+    },
+    "uids": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    }
+  },
+  "required": [
+    "uids"
+  ],
+  "type": "object"
+}

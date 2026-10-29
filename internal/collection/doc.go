@@ -3,6 +3,7 @@ package collection
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -90,44 +91,153 @@ func (c *Collection) ReadDoc(uid string) (*DocEntry, error) {
 
 // CreateDoc 新建文档条目（uid 为空时自动生成）。
 // folder 为空落到 docs/ 默认位（兼容旧行为）；非空为分组目录相对路径（B19：与请求同目录混排）。
+// 文档创建冲突策略（MCP create_doc 的 onConflict）。
+const (
+	// DocConflictError 同名/同 uid 已存在即报错（默认；调用方必须显式选择放宽）。
+	DocConflictError = "error"
+	// DocConflictSuffix 自动加 -2/-3 后缀（历史行为，前端「新建文档」仍用）。
+	DocConflictSuffix = "suffix"
+	// DocConflictOverwrite 命中已有文档时复用其 uid/path（正文由调用方覆盖）。
+	DocConflictOverwrite = "overwrite"
+)
+
+// ErrDocConflict 创建文档时命中同名路径或同 uid 的已有文档（onConflict=error）。
+// MCP 侧据此映射为 [CONFLICT] 错误码。
+var ErrDocConflict = errors.New("文档已存在")
+
+// NormalizeDocConflict 归一冲突策略：空串 = error；未知取值报错。
+func NormalizeDocConflict(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", DocConflictError:
+		return DocConflictError, nil
+	case DocConflictSuffix:
+		return DocConflictSuffix, nil
+	case DocConflictOverwrite:
+		return DocConflictOverwrite, nil
+	default:
+		return "", fmt.Errorf("onConflict 只能是 error / suffix / overwrite（当前 %q）", v)
+	}
+}
+
+// CreateDoc 新建文档条目（历史行为：重名自动加 -2 后缀；前端「新建文档」走这里）。
 func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
+	return c.CreateDocEx(name, uid, folder, DocConflictSuffix)
+}
+
+// CreateDocEx 新建文档条目，冲突策略由 onConflict 决定：
+//   - error（默认）：同名路径或同 uid 已存在 → ErrDocConflict（带现有 uid/path）
+//   - suffix：自动 -2/-3…（旧行为）
+//   - overwrite：复用已有条目的 uid/path（调用方随后写正文）
+//
+// 身份约定：uid 与 path 才是身份；name 只是 frontmatter 显示名，允许重复。
+func (c *Collection) CreateDocEx(name, uid, folder, onConflict string) (*DocEntry, error) {
+	mode, err := NormalizeDocConflict(onConflict)
+	if err != nil {
+		return nil, err
+	}
+	d, existing, err := c.planCreateDoc(name, uid, folder, mode)
+	if err != nil {
+		return nil, err
+	}
+	if existing {
+		return d, nil // overwrite：复用已有条目（正文由调用方写）
+	}
+	if err := c.SaveDoc(d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// PlanCreateDoc 只做校验与冲突判定（不落盘），供 MCP create_doc 的 dryRun 使用。
+// 返回将写入的条目与动作（create / overwrite / conflict 由 error 表达）。
+func (c *Collection) PlanCreateDoc(name, uid, folder, onConflict string) (*DocEntry, string, error) {
+	mode, err := NormalizeDocConflict(onConflict)
+	if err != nil {
+		return nil, "", err
+	}
+	d, existing, err := c.planCreateDoc(name, uid, folder, mode)
+	if err != nil {
+		return nil, "", err
+	}
+	if existing {
+		return d, DocConflictOverwrite, nil
+	}
+	return d, "create", nil
+}
+
+// planCreateDoc CreateDocEx / PlanCreateDoc 的共同实现；existing=true 表示命中已有条目（仅 overwrite）。
+func (c *Collection) planCreateDoc(name, uid, folder, mode string) (*DocEntry, bool, error) {
 	if !validEntryName(name) {
-		return nil, fmt.Errorf("名称含非法字符或为空")
+		return nil, false, fmt.Errorf("名称含非法字符或为空")
 	}
-	if uid == "" {
-		uid = uuid.NewString()
-	}
+	uid = strings.TrimSpace(uid)
 	dir := strings.TrimSpace(folder)
 	switch dir {
 	case "":
 		// 未指定目录 = 旧的默认位 docs/（MCP create_doc 等沿用）
 		dir = docsDir
 	case ".", "/":
-		// 显式要求集合根（树根菜单「新建文档」走这条），不能留 "."：
-		// joinRel 是字符串拼接，会造出 "./x.md" 与扫描结果 "x.md" 不一致的路径。
 		dir = ""
 	}
-	// 子目录里的 README.md 扫不出来（scanExtAllowed 按规则排除）：
-	// 入口直接拒绝，避免造出「文件存在、树里看不见」的文档。根级 README 允许。
+	// 子目录里的 README.md 扫不出来（scanExtAllowed 按规则排除）：入口直接拒绝。
 	if isReadmeDocName(name) && !isRootRelDir(dir) {
-		return nil, fmt.Errorf("子目录里的 README.md 不作为文档条目显示，请先改名再创建")
+		return nil, false, fmt.Errorf("子目录里的 README.md 不作为文档条目显示，请先改名再创建")
 	}
-	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(dir)), 0o755); err != nil {
-		return nil, err
+
+	docs, err := c.ListDocs()
+	if err != nil {
+		return nil, false, err
 	}
+	if uid != "" {
+		if existing := docByUID(docs, uid); existing != nil {
+			if mode == DocConflictOverwrite {
+				return existing, true, nil
+			}
+			return nil, false, fmt.Errorf("%w：uid=%s（path=%s）", ErrDocConflict, uid, existing.Path)
+		}
+	}
+
 	base := sanitizeFileName(name)
 	rel := joinRel(dir, base+".md")
 	for i := 2; ; i++ {
-		if _, err := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(rel))); os.IsNotExist(err) {
+		existing := docByPath(docs, rel)
+		if existing != nil {
+			switch mode {
+			case DocConflictError:
+				return nil, false, fmt.Errorf("%w：path=%s（uid=%s）。如确需并存请传 onConflict=suffix，覆盖已有正文请传 onConflict=overwrite", ErrDocConflict, existing.Path, existing.UID)
+			case DocConflictOverwrite:
+				return existing, true, nil
+			}
+		}
+		if _, statErr := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(rel))); os.IsNotExist(statErr) {
 			break
 		}
 		rel = joinRel(dir, fmt.Sprintf("%s-%d.md", base, i))
 	}
-	d := &DocEntry{UID: uid, Name: name, Path: rel, Content: ""}
-	if err := c.SaveDoc(d); err != nil {
-		return nil, err
+	if uid == "" {
+		uid = uuid.NewString()
 	}
-	return d, nil
+	return &DocEntry{UID: uid, Name: name, Path: rel, Content: ""}, false, nil
+}
+
+// docByUID / docByPath 在文档清单里查重（路径按 slash 归一比较）。
+func docByUID(docs []*DocEntry, uid string) *DocEntry {
+	for _, d := range docs {
+		if d.UID == uid {
+			return d
+		}
+	}
+	return nil
+}
+
+func docByPath(docs []*DocEntry, rel string) *DocEntry {
+	want := filepath.ToSlash(rel)
+	for _, d := range docs {
+		if filepath.ToSlash(d.Path) == want {
+			return d
+		}
+	}
+	return nil
 }
 
 // SaveDoc 写回文档文件。Path 必须落在集合目录内（B19：任意目录，防越界写盘）。

@@ -13,21 +13,21 @@ import (
 
 // 工具层的常见错误（AI 读得懂的中文提示）。
 var (
-	errEmptyQuery      = errors.New("缺少 query：请给出要搜索的关键词")
-	errNoProjectLoaded = errors.New("当前没有已加载的项目：先用 list_workspaces 查看可用工作目录并 use_workspace 选定，或用 list_projects 打开一个项目再搜")
-	errNeedName        = errors.New("缺少 name：创建请求必须给名称")
-	errEmptyDraft      = errors.New("没有可用的请求内容")
-	errNeedUID         = errors.New("缺少 uid：请用 search_requests 或 get_project_modules 找到目标请求")
-	errRespDocGRPC     = errors.New("gRPC 请求不承载响应字段文档（respDoc）：与客户端 UpdateResponseDoc 的限制一致")
+	errEmptyQuery      = coded(CodeInvalid, errors.New("缺少 query：请给出要搜索的关键词"))
+	errNoProjectLoaded = coded(CodeInvalid, errors.New("当前没有已加载的项目：先用 list_workspaces 查看可用工作目录并 use_workspace 选定，或用 list_projects 打开一个项目再搜"))
+	errNeedName        = coded(CodeInvalid, errors.New("缺少 name：创建请求必须给名称"))
+	errEmptyDraft      = coded(CodeInvalid, errors.New("没有可用的请求内容"))
+	errNeedUID         = coded(CodeInvalid, errors.New("缺少 uid：请用 search_requests 或 get_project_modules 找到目标请求"))
+	errRespDocGRPC     = coded(CodeInvalid, errors.New("gRPC 请求不承载响应字段文档（respDoc）：与客户端 UpdateResponseDoc 的限制一致"))
 )
 
 // conflictError ifMatch 冲突的统一报错：明确「未写入任何内容」并附当前 hash，
 // AI 可以立刻带着新 hash 重新读取/重试，而不是猜「到底是报错还是静默覆盖」。
 func conflictError(kind, uid, hash string) error {
 	if hash == "" {
-		return fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid)
+		return coded(CodeConflict, fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid))
 	}
-	return fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。当前 hash=%s，请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid, hash)
+	return coded(CodeConflict, fmt.Errorf("ifMatch 不匹配：%s %s 已被外部修改，本次未写入任何内容。当前 hash=%s，请重新读取后合并再试；不传 ifMatch 可强制覆盖", kind, uid, hash))
 }
 
 // Service 是 MCP 工具的语义实现（不依赖 SDK，便于单测与将来复用到 CLI）。
@@ -50,18 +50,45 @@ func (s *Service) Reg() *Registry { return s.reg }
 func (s *Service) resolve(project string) (ProjectApp, *Entry, error) {
 	key, err := s.resolveKey(project)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, withInvalid(err)
 	}
-	return s.reg.App(key)
+	a, e, err := s.reg.App(key)
+	if err != nil {
+		return nil, nil, classifyAccessError(err)
+	}
+	return a, e, nil
 }
 
 // resolveWrite 写操作的解析：额外要求目标工作目录是**可写**授权。
 func (s *Service) resolveWrite(project string) (ProjectApp, *Entry, error) {
 	key, err := s.resolveKey(project)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, withInvalid(err)
 	}
-	return s.reg.WriteApp(key)
+	a, e, err := s.reg.WriteApp(key)
+	if err != nil {
+		return nil, nil, classifyAccessError(err)
+	}
+	return a, e, nil
+}
+
+// classifyAccessError 把项目解析错误映射成稳定错误码：
+//   - 不在授权白名单 → AUTH
+//   - 只读授权 → READONLY
+//   - 找不到项目 / 项目不可用 / 尚未打开 → NOT_FOUND
+//   - 打开失败（清单损坏、IO）→ IO
+func classifyAccessError(err error) error {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "不在 MCP 授权"):
+		return coded(CodeAuth, err)
+	case strings.Contains(msg, "只读授权"):
+		return coded(CodeReadOnly, err)
+	case strings.Contains(msg, "无法打开"):
+		return coded(CodeIO, err)
+	default:
+		return coded(CodeNotFound, err)
+	}
 }
 
 // resolveKey 把 project 解析成项目标识；空 = 没指定（报错并给出可用项目提示）。
@@ -640,7 +667,7 @@ func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*Re
 	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return nil, fmt.Errorf("读取请求 %s 失败: %w", uid, err)
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, err))
 	}
 	hash, _ := s.hashOf(a, r.UID)
 	d := &RequestDetail{
@@ -1083,7 +1110,7 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	}
 	// 整篇覆盖与局部替换互斥（同时传会让「到底以谁为准」变得不可预期）
 	if len(in.Replaces) > 0 && in.Docs != nil {
-		return nil, errors.New("docs 与 replaces 互斥：整篇覆盖用 docs，局部替换用 replaces（不要同时传）")
+		return nil, withInvalid(errors.New("docs 与 replaces 互斥：整篇覆盖用 docs，局部替换用 replaces（不要同时传）"))
 	}
 	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {
@@ -1230,7 +1257,10 @@ func (s *Service) DeleteRequest(project, uid string) error {
 	if err != nil {
 		return err
 	}
-	return a.DeleteRequest(strings.TrimSpace(uid))
+	if err := a.DeleteRequest(strings.TrimSpace(uid)); err != nil {
+		return withNotFound(err)
+	}
+	return nil
 }
 
 // SendRequestInput send_request 的入参。
@@ -1244,7 +1274,7 @@ type SendRequestInput struct {
 	Body    *collection.Body `json:"body,omitempty"`
 	// 行为
 	Env          string `json:"env,omitempty"`         // 空 = 默认环境
-	SaveExample  *bool  `json:"saveExample,omitempty"` // 默认 true：把响应存成 examples/*.yml
+	SaveExample  *bool  `json:"saveExample,omitempty"` // 默认 false：显式 true 才把响应存成 examples/*.yml
 	ExampleName  string `json:"exampleName,omitempty"` // 示例名；空则按状态码自动命名
 	IncludeBody  *bool  `json:"includeBody,omitempty"` // 是否返回响应体；不传 = 默认返回
 	MaxBodyBytes int    `json:"maxBodyBytes,omitempty"`
@@ -1287,7 +1317,9 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 	if in.IncludeBody != nil && !*in.IncludeBody {
 		out.Body, out.Truncated, out.OriginalBytes = "", false, 0
 	}
-	if in.SaveExample == nil || *in.SaveExample {
+	// 默认不落盘（外部评审 T7）：只读探测「打一下看看返回什么」不应产生副作用；
+	// 需要留存的调用方显式传 saveExample=true。
+	if in.SaveExample != nil && *in.SaveExample {
 		// 只读授权目录不能写示例：发送本身允许（只读 / 镜像集合同样要能试打），落盘要拦
 		if e != nil && !e.Writable() {
 			return &out, fmt.Errorf("响应已返回，但工作目录 %s 是只读授权，示例未保存（需要保存请在客户端设置里把该目录改成可写）", e.AllowRoot())
