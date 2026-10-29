@@ -20,6 +20,8 @@ type Match struct {
 	Snippet string `json:"snippet,omitempty"`
 	// Hash 磁盘内容哈希（来自索引）：传给 update_request 的 ifMatch 可获得冲突保护。
 	Hash string `json:"hash,omitempty"`
+	// WeakMatch 仅靠分词/有序子序列命中（没有原串子串命中）：删除前务必核对 name/path。
+	WeakMatch bool `json:"weakMatch,omitempty"`
 }
 
 // 命中方式对应的基础分：全串子串 > 分词累加 > 有序子序列（兜底）。
@@ -81,6 +83,44 @@ func NormalizeSearchFields(fields []string) (map[string]bool, error) {
 		return nil, nil
 	}
 	return out, nil
+}
+
+// searchFields 参与打分的字段（顺序与权重表一致）。
+func (c candidate) searchFields() []struct {
+	name string
+	text string
+} {
+	return []struct {
+		name string
+		text string
+	}{
+		{"name", c.Name},
+		{"uri", strings.TrimSpace(c.Method + " " + c.URL + " " + c.Path)},
+		{"docs", c.Docs},
+		{"respDoc", c.RespDoc},
+		{"bodyFields", c.BodyFields},
+		{"header", c.Header},
+		{"body", c.Body},
+	}
+}
+
+// isWeakMatch 没有任何字段原串包含查询（只能靠分词/子序列命中）→ 弱匹配。
+func (c candidate) isWeakMatch(query string, opts SearchOptions) bool {
+	// 用「原始 query」判断：normalize 会把 _ / - / 空格都去掉，
+	// 导致 "_t_" 被归成 "t" 而命中 "GET" 这类无关文本（v3 反馈的弱匹配问题）。
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return false
+	}
+	for _, f := range c.searchFields() {
+		if !fieldOn(opts.Fields, f.name) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(f.text), q) {
+			return false
+		}
+	}
+	return true
 }
 
 // fieldOn 字段是否参与本次搜索（未限定 = 全部参与）。

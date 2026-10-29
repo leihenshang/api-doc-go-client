@@ -70,16 +70,16 @@ var toolMetas = []ToolMeta{
 		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。带 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求），汇总行始终给出模块总数；传 onlyMatched=false 可看全部模块。",
 	},
 	{
-		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: requestDetailFullOutput(),
 		Description: "接口详情：请求/headers/概述/说明/响应字段/示例。sections 可只取分段（overview/docs/bodyFields/respDoc/examples）；说明长时用 docsOutline 或 docsStartLine+docsMaxLines；hash 完整可直接回传 ifMatch。",
 	},
 	{
-		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
+		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: requestDetailsOutput(),
 		Description: "批量获取多个接口的详情（一次 1–10 个 uid，超出直接报错）：参数与 get_request_detail 相同（sections/include_body/maxBodyBytes/query 对每个卡片生效），结果按 uid 分组，单个 uid 失败不影响其它。用于一次取多张卡片，省掉逐个调用的往返。",
 	},
 	{
 		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: searchRequestsOutput(),
-		Description: "搜索接口（名称/URL/方法/header/说明/请求体/响应字段/字段表打分）：exactMatch 整词、fields 限定、includeHash 附 hash；snippet 给命中行。",
+		Description: "搜索接口（名称/URL/方法/header/说明/请求体/响应字段/字段表打分）：exactMatch 整词、fields 限定、includeHash 附 hash；snippet 给命中行。模糊匹配可能返回弱相关结果（results[].weakMatch=true），删除前核对 name/path。",
 	},
 	{
 		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: searchDocsOutput(),
@@ -125,7 +125,11 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDeleteOutput(),
-		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
+		Description: "移除接口请求（移入 .trash 可找回）；ifMatch/confirmName 可二次防护，批量用 delete_requests。",
+	},
+	{
+		Name: "delete_requests", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: deleteRequestsOutput(),
+		Description: "批量删除接口（1–10 条）：每条必须给 uid + ifMatch（search_requests 的 results[].hash），防误删；dryRun=true 只校验。单条请用 delete_request。",
 	},
 	{
 		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDetailOutput(false),
@@ -200,8 +204,8 @@ var toolMetas = []ToolMeta{
 
 	// ---- 唯一的网络外发工具（只读模式也注册，但强制不落盘）----
 	{
-		Name: "send_request", Risk: RiskMedium, NetEgress: true, InReadOnly: true, Since: "0.1.0",
-		Description: "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 false（探测请求不落盘）；需要留存时显式 saveExample=true，响应存成该请求的响应示例（examples/*.yml）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例）。",
+		Name: "send_request", Risk: RiskMedium, Output: sendRequestOutput(), NetEgress: true, InReadOnly: true, Since: "0.1.0",
+		Description: "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 false（探测请求不落盘）；需要留存时显式 saveExample=true，响应存成该请求的响应示例（examples/*.yml）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例；临时请求也需要 project，或先 use_workspace）。",
 	},
 }
 
@@ -247,7 +251,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 36
+	const expectTools = 37
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}
@@ -354,7 +358,7 @@ func searchRequestsOutput() map[string]any {
 	item := objSchema(map[string]any{
 		"uid": strSchema(), "name": strSchema(), "method": strSchema(), "url": strSchema(),
 		"path": strSchema(), "project": strSchema(), "score": intSchema(),
-		"matched": arrSchema(strSchema()), "snippet": strSchema(), "hash": strSchema(),
+		"matched": arrSchema(strSchema()), "snippet": strSchema(), "hash": strSchema(), "weakMatch": boolSchema(),
 	}, "uid", "path")
 	return objSchema(map[string]any{
 		"query": strSchema(), "total": intSchema(), "returned": intSchema(), "results": arrSchema(item),
@@ -406,6 +410,15 @@ func requestDetailOutput() map[string]any {
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(),
 		"path": strSchema(), "method": strSchema(), "url": strSchema(),
 	}, "uid", "path")
+}
+
+// deleteRequestsOutput delete_requests（批量）的结果。
+func deleteRequestsOutput() map[string]any {
+	f := objSchema(map[string]any{"uid": strSchema(), "error": strSchema()}, "uid")
+	return objSchema(map[string]any{
+		"project": strSchema(), "requested": intSchema(), "dryRun": boolSchema(),
+		"deleted": arrSchema(strSchema()), "failed": arrSchema(f),
+	}, "requested")
 }
 
 // requestDeleteOutput delete_request 的结果（删除前取到的身份信息）。
@@ -505,6 +518,44 @@ func imageOutput() map[string]any {
 		"url": strSchema(), "sha256": strSchema(), "size": intSchema(),
 		"deduped": boolSchema(), "markdown": strSchema(), "name": strSchema(),
 	}, "url", "sha256")
+}
+
+// requestDetailOutput 的扩展版：详情（含 hash/示例/相关文档摘要）。
+func requestDetailFullOutput() map[string]any {
+	ex := objSchema(map[string]any{
+		"uid": strSchema(), "name": strSchema(), "path": strSchema(),
+		"hash": strSchema(), "status": intSchema(),
+	}, "uid", "path")
+	rel := objSchema(map[string]any{"uid": strSchema(), "name": strSchema(), "path": strSchema()}, "uid", "path")
+	return objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
+		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "summary": strSchema(),
+		"bodyFields": intSchema(), "params": intSchema(), "headers": intSchema(),
+		"examples": arrSchema(ex), "relatedDocs": arrSchema(rel),
+	}, "uid", "path")
+}
+
+// requestDetailsOutput get_request_details 的批量结果。
+func requestDetailsOutput() map[string]any {
+	item := objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
+		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "error": strSchema(),
+	}, "uid")
+	return objSchema(map[string]any{
+		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
+		"items": arrSchema(item),
+	}, "items")
+}
+
+// sendRequestOutput send_request 的结果。
+func sendRequestOutput() map[string]any {
+	return objSchema(map[string]any{
+		"status": intSchema(), "url": strSchema(), "timeMs": intSchema(),
+		"size": intSchema(), "contentType": strSchema(), "body": strSchema(),
+		"truncated": boolSchema(), "originalBytes": intSchema(), "headerCount": intSchema(),
+		"redirects": intSchema(), "remoteAddr": strSchema(),
+		"saved": boolSchema(), "exampleUid": strSchema(), "examplePath": strSchema(),
+	}, "status")
 }
 
 // docsBatchOutput get_docs 的结果（单篇失败不影响其他：error 只在失败条目出现）。

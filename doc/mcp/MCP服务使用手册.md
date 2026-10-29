@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **36 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **37 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -173,7 +173,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 **`summary`** 是 API 概述（纯文本一句话，与 `docs` 分列）；
 `settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（**按子项合并**，
 只给 `params` 字段表时样例/响应头/状态码不动；gRPC 拒绝）；
-`docs` 结构先取 `get_doc_template`；返回落盘后的 `uid` 与 `path`。
+`docs` 结构先取 `get_doc_template`；`method` 仅接受 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC（其它值 `[INVALID]`）；返回落盘后的 `uid` 与 `path`。
 
 ### 4.6 `create_module` / `create_project`
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
@@ -353,7 +353,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **30 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 6 个"纯详情/会话"类）：
+共 **34 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（37 个工具里除 3 个纯会话/模板类）：
 
 - **列表/搜索（6）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
 - **文档（5）**：`get_doc`（含 `content`）/ `get_docs`（批量，单篇失败只在该条带 `error`）/ `create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc`
@@ -364,7 +364,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 - **图片（1）**：`save_doc_image`（`url/sha256/size/deduped/markdown`）
 
 `outputSchema` 的数组元素与结果对象都写明**具体字段与 `required`**（可直接生成类型/做字段校验）。
-未结构化的 6 个是纯详情/会话工具（`list_workspaces`、`use_workspace`、`get_doc_template`、`get_request_detail(s)`、`send_request`），
+未结构化的 3 个是纯会话/模板类（`list_workspaces`、`use_workspace`、`get_doc_template`），
 它们仍以文本为主，避免大正文重复一倍。文本输出保持不变，旧客户端不受影响。
 
 ### 4.12.3 写操作契约（统一）
@@ -373,7 +373,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 |---|---|---|
 | `uid`（幂等身份） | `create_doc` / `create_request` | 给固定 uid：已存在时按 `onConflict` 处理，可做幂等导入 |
 | `onConflict` | `create_doc` / `create_request` | `error`（默认，返回 `[CONFLICT]` + 已有 uid/path）/ `suffix` / `overwrite`；其余创建工具一律默认报冲突，不再静默加序号 |
-| `dryRun`（只预演） | `create_doc` / `update_doc` / `delete_doc` / `delete_request` / `delete_module` / `delete_project` / `delete_env` / `delete_env_var` / `delete_response_example` | 返回将发生的动作与路径，不落盘 |
+| `dryRun`（只预演） | `create_doc` / `update_doc` / `delete_doc` / `delete_request` / `delete_module` / `delete_project` / `delete_env` / `delete_env_var` / `delete_response_example` / `delete_requests` | 返回将发生的动作与路径，不落盘 |
 | `ifMatch`（并发保护） | `update_doc` / `update_request` / `set_env_var` / `rename_env` / `delete_doc` / `delete_request` / `delete_response_example` / `delete_env` / `delete_env_var` | 传读取时拿到的 hash，完整值或 12 位前缀均可（响应示例的 hash 见 `get_request_detail` 的 `examples[].hash=`）；不传 = 最后写者赢 |
 ### 4.12.3 错误码（所有工具统一）
 

@@ -1,5 +1,8 @@
 {
   "properties": {
+    "confirmName": {
+      "type": "string"
+    },
     "dryRun": {
       "type": "boolean"
     },
