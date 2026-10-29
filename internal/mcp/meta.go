@@ -112,12 +112,12 @@ var toolMetas = []ToolMeta{
 		Description: "新建接口：给 method/url/…，或 curl，或 copyFromUid；可同时写 summary/bodyFields/docs/respDoc/settings；同名或同 uid 默认 [CONFLICT]（onConflict=suffix/overwrite 可改），uid 可固定身份。",
 	},
 	{
-		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: moduleWriteOutput(),
 		Description: "创建模块（目录）。parent 为空表示在项目根下建；支持嵌套（如 parent=api 建 api/user）。",
 	},
 	{
-		Name: "create_project", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "在**授权且可写**的工作目录下新建项目。root 必须是工作目录（不能是项目目录本身或项目内子目录，否则 [INVALID] 并提示改传父级）；留空用第一个可写工作目录。白名单外 [AUTH]、只读 [READONLY]、重名 [CONFLICT]。",
+		Name: "create_project", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: projectWriteOutput(),
+		Description: "在**授权且可写**的工作目录下新建项目。root 必须是工作目录（不能是项目目录本身或项目内子目录，否则 [INVALID] 并提示改传父级）；留空用第一个可写工作目录。白名单外 [FORBIDDEN]、只读 [READONLY]、重名 [CONFLICT]。",
 	},
 	{
 		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDetailOutput(),
@@ -140,61 +140,61 @@ var toolMetas = []ToolMeta{
 		Description: "移除文档（移入集合 .trash，可人工找回）；dryRun=true 只返回目标路径、不删。",
 	},
 	{
-		Name: "save_doc_image", Risk: RiskHigh, Write: true, Since: "0.5.0",
+		Name: "save_doc_image", Risk: RiskHigh, Write: true, Since: "0.5.0", Output: imageOutput(),
 		Description: "保存图片到项目 assets/（base64；PNG/JPEG/GIF/WebP≤5MB，同图去重），返回 /doc-assets/<sha256>，可直接写进 Markdown。",
 	},
 	{
-		Name: "rename_module", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Name: "rename_module", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: moduleWriteOutput(),
 		Description: "改模块显示名（只改 folder.yml；path 是目录名，改名后路径不变）。path 用 get_project_modules 返回的值，如 api/user。",
 	},
 	{
-		Name: "delete_module", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Name: "delete_module", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: moduleDeleteOutput(),
 		Description: "删除模块：recursive=true 连子模块/请求/文档整棵移入集合 .trash（可找回）；false（默认）只允许空模块，非空会拒绝。",
 	},
 	{
-		Name: "rename_project", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Name: "rename_project", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: projectWriteOutput(),
 		Description: "改项目显示名（opencollection.yml 的 info.name；目录不变）。project 必须显式指定。",
 	},
 	{
-		Name: "delete_project", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Name: "delete_project", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: projectDeleteOutput(),
 		Description: "删除项目：confirm 必须等于项目显示名或目录名（防误删）；目录移入授权根下 .trash/<名>-<时间戳>，可人工移回，list_projects 立即刷新。",
 	},
 	{
-		Name: "prune_empty_modules", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Name: "prune_empty_modules", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: pruneModulesOutput(),
 		Description: "清理空模块目录（只有 folder.yml、没有请求/文档/子模块），返回删除数量；集合根与 assets/environments/examples 不动。",
 	},
 	{
-		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleWriteOutput(),
 		Description: "手工存一条响应示例（不发请求）：name/status/headers/body/contentType；重名自动加 (1)；返回示例 uid/path。",
 	},
 	{
-		Name: "update_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Name: "update_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleWriteOutput(),
 		Description: "改响应示例：name/status/headers/body/contentType 局部更新（不传不动）；改名同步文件名。",
 	},
 	{
-		Name: "delete_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Name: "delete_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleDeleteOutput(),
 		Description: "删除一条已保存的响应示例。文件会移入集合的 .trash 目录（可人工找回），不会真正删除；只删示例，不动请求本身。",
 	},
 
 	// ---- 5 个环境/变量写工具（只读模式不注册）----
 	{
-		Name: "create_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Name: "create_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envWriteOutput(),
 		Description: "新建环境（environments/<name>.yml），可同时写入初始变量。重名会报错，不覆盖已有环境。环境名只允许字母、数字、- 与 _。",
 	},
 	{
-		Name: "rename_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Name: "rename_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envWriteOutput(),
 		Description: "给环境改名：按新名写一份（敏感值一起搬过去），再把旧名移入 .trash。目标名已被占用会报错；只改大小写（如 dev→DEV）也会被拒绝——在 Windows 上那是同一个文件，改名会让环境消失。ifMatch 传 list_envs 里的 hash 可检测期间的外部改动并拒绝覆盖。",
 	},
 	{
-		Name: "delete_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Name: "delete_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envDeleteOutput(),
 		Description: "删除环境（两个文件都移入集合的 .trash，可人工找回）。删之前建议先 list_envs 确认里面没有还要用的变量。",
 	},
 	{
-		Name: "set_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Name: "set_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envVarWriteOutput(),
 		Description: "写单个环境变量（upsert）：name/value/secret/enabled；敏感值传掩码=不改；ifMatch 用 list_envs 的 hash 防覆盖。",
 	},
 	{
-		Name: "delete_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Name: "delete_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envVarDeleteOutput(),
 		Description: "从某环境里删掉一个变量。变量不存在会报错（避免「以为删掉了」）。ifMatch 传 list_envs 里该环境的 hash 可获得并发保护。",
 	},
 
@@ -415,6 +415,93 @@ func requestDeleteOutput() map[string]any {
 		"method": strSchema(), "url": strSchema(),
 		"deleted": boolSchema(), "trash": boolSchema(),
 	}, "uid")
+}
+
+// moduleWriteOutput create_module / rename_module 的结果。
+func moduleWriteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "path": strSchema(), "name": strSchema(),
+	}, "path")
+}
+
+// moduleDeleteOutput delete_module 的结果。
+func moduleDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "path": strSchema(), "recursive": boolSchema(),
+		"deleted": boolSchema(), "trash": boolSchema(), "dryRun": boolSchema(),
+	}, "path")
+}
+
+// pruneModulesOutput prune_empty_modules 的结果。
+func pruneModulesOutput() map[string]any {
+	return objSchema(map[string]any{"project": strSchema(), "count": intSchema()}, "count")
+}
+
+// projectWriteOutput create_project / rename_project 的结果。
+func projectWriteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "name": strSchema(), "path": strSchema(), "uid": strSchema(),
+	}, "name", "path")
+}
+
+// projectDeleteOutput delete_project 的结果。
+func projectDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "trashPath": strSchema(), "deleted": boolSchema(), "dryRun": boolSchema(),
+	}, "project", "deleted")
+}
+
+// envWriteOutput create_env / rename_env 的结果。
+func envWriteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "oldName": strSchema(), "name": strSchema(),
+		"hash": strSchema(), "varsCount": intSchema(),
+	}, "name")
+}
+
+// envDeleteOutput delete_env 的结果。
+func envDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "name": strSchema(), "deleted": boolSchema(),
+		"trash": boolSchema(), "dryRun": boolSchema(),
+	}, "name")
+}
+
+// envVarWriteOutput set_env_var 的结果。
+func envVarWriteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "env": strSchema(), "name": strSchema(), "value": strSchema(),
+		"secret": boolSchema(), "enabled": boolSchema(), "keptSecret": boolSchema(), "hash": strSchema(),
+	}, "env", "name")
+}
+
+// envVarDeleteOutput delete_env_var 的结果。
+func envVarDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "env": strSchema(), "name": strSchema(),
+		"deleted": boolSchema(), "dryRun": boolSchema(),
+	}, "env", "name")
+}
+
+// exampleWriteOutput save/update_response_example 的结果。
+func exampleWriteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "requestUid": strSchema(), "uid": strSchema(),
+		"name": strSchema(), "path": strSchema(), "status": intSchema(),
+	}, "uid")
+}
+
+// exampleDeleteOutput delete_response_example 的结果。
+func exampleDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "requestUid": strSchema(), "uid": strSchema(),
+		"deleted": boolSchema(), "trash": boolSchema(), "dryRun": boolSchema(),
+	}, "uid")
+}
+
+// imageOutput save_doc_image 的结果。
+func imageOutput() map[string]any {
+	return objSchema(map[string]any{"url": strSchema(), "name": strSchema()}, "url")
 }
 
 // docDeleteOutput delete_doc 的结果（只带身份与路径，避免暴露内容）。

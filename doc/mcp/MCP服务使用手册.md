@@ -22,7 +22,7 @@
 | 查询 | `list_docs` / `get_doc` / `get_docs` | 文档条目：列清单（分页 + `hash`）/ 读正文（分段/大纲）/ 批量读 1–10 篇 |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc；`uid` 幂等、`onConflict` 默认 error） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
-| 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[AUTH]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
+| 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[FORBIDDEN]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
@@ -179,7 +179,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
 - `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（**必须是工作目录**，
   留空 = 第一个可写授权目录）。`root` 指向项目目录本身/项目内子目录会 `[INVALID]` 并提示改传父级（否则新项目不会被扫描到）；
-  白名单外 `[AUTH]`、只读 `[READONLY]`、重名 `[CONFLICT]`。建完 `list_projects` 立刻可见。
+  白名单外 `[FORBIDDEN]`、只读 `[READONLY]`、重名 `[CONFLICT]`。建完 `list_projects` 立刻可见。
 
 ### 4.7 `send_request`
 `project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 false；要留存示例时显式传 true）、
@@ -353,17 +353,28 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **13 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`：
+共 **29 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 7 个"纯详情/会话"类）：
 
-- **列表/搜索**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
-- **文档详情与写**：`get_doc`（含 `content`）/ `create_doc` / `update_doc`（回传 `uid/path/size/hash`，`dryRun` 带 `planned`）/ `delete_doc`（`uid/path/deleted/trash/dryRun`）
-- **接口写**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（再加 `deleted/trash`）
+- **列表/搜索（6）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
+- **文档（4）**：`get_doc`（含 `content`）/ `create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc`
+- **接口（3）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（+`deleted/trash/dryRun`）
+- **容器（7）**：`create_module` / `rename_module` / `delete_module` / `create_project` / `rename_project` / `delete_project`（`trashPath`）/ `prune_empty_modules`（`count`）
+- **环境（5）**：`create_env` / `rename_env` / `delete_env` / `set_env_var`（含 `hash` / `keptSecret`）/ `delete_env_var`
+- **响应示例（3）**：`save_response_example` / `update_response_example` / `delete_response_example`
+- **图片（1）**：`save_doc_image`（`url`）
 
-`outputSchema` 里的数组元素**写明具体字段与 `required`**（如 `docs[].{uid,name,path,size,hash}`），
-可直接用于生成类型或字段校验，而不是只写 `items:{type:"object"}`。文本输出保持不变，旧客户端不受影响；
-其余详情类（`get_request_detail`、批量 `get_docs` 等）仍只返回文本，避免响应体积翻倍。
-`create_doc` 建完即可从 `structuredContent.uid/path/hash` 取值，不必再 `list_docs` 复查。
+`outputSchema` 的数组元素与结果对象都写明**具体字段与 `required`**（可直接生成类型/做字段校验）。
+未结构化的 7 个是纯详情/会话工具（`list_workspaces`、`use_workspace`、`get_doc_template`、`get_request_detail(s)`、`send_request`、`get_docs`），
+它们仍以文本为主，避免大正文重复一倍。文本输出保持不变，旧客户端不受影响。
 
+### 4.12.3 写操作契约（统一）
+
+| 能力 | 适用工具 | 说明 |
+|---|---|---|
+| `uid`（幂等身份） | `create_doc` / `create_request` | 给固定 uid：已存在时按 `onConflict` 处理，可做幂等导入 |
+| `onConflict` | `create_doc` / `create_request` | `error`（默认，返回 `[CONFLICT]` + 已有 uid/path）/ `suffix` / `overwrite`；其余创建工具一律默认报冲突，不再静默加序号 |
+| `dryRun`（只预演） | `create_doc` / `update_doc` / `delete_doc` / `delete_request` / `delete_module` / `delete_project` / `delete_env` / `delete_env_var` / `delete_response_example` | 返回将发生的动作与路径，不落盘 |
+| `ifMatch`（并发保护） | `update_doc` / `update_request` / `set_env_var` / `rename_env` / `delete_env` / `delete_env_var` | 传读取时拿到的 hash（环境可只传 12 位前缀） |
 ### 4.12.3 错误码（所有工具统一）
 
 失败结果的文本统一为 `失败: [CODE] 说明`，调用方可按前缀分流（不必匹配中文）：
@@ -374,7 +385,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `[CONFLICT]` | 同名冲突、`ifMatch` 不匹配（文档创建默认就是这条） |
 | `[INVALID]` | 参数缺失/取值非法（含 SDK 的 inputSchema 校验失败） |
 | `[READONLY]` | 工作目录是只读授权 |
-| `[AUTH]` | 目录不在 MCP 白名单（等价 `FORBIDDEN`；本实现统一用 `AUTH`，区分于参数错 `[INVALID]`） |
+| `[FORBIDDEN]` | 目录不在 MCP 白名单 / 无写权限（原 `[AUTH]` 已更名为 `FORBIDDEN`，破坏性变更） |
 | `[LIMIT]` | 批量/分页超过上限（如一次 >10 个 uid） |
 | `[IO]` | 读写磁盘失败 |
 | `[INTERNAL]` | 其它内部错误 |

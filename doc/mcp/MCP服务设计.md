@@ -68,7 +68,7 @@ Claude Desktop 配置：
 
 ## 三、工具清单（36 个）
 
-> 约定：失败文本统一 `失败: [CODE] 说明`；列表/搜索工具与文档/接口写工具（get_doc / create_doc / update_doc / delete_doc / create_request / update_request / delete_request）另外返回 `structuredContent`（声明 `outputSchema`，数组元素写明具体字段与 required）；文档写工具支持 `dryRun`；容器删除进 `.trash`。
+> 约定：失败文本统一 `失败: [CODE] 说明`（权限=`FORBIDDEN`）；全部写工具 + 列表/搜索/文档详情（29 个）返回 `structuredContent`（声明 `outputSchema`，数组元素写明具体字段与 required）；文档写工具支持 `dryRun`；容器删除进 `.trash`。
 
 名称/描述/风险级别/读写标记的**单一事实源是 `meta.go`**（T1）：`Risk`（low/medium/high）、`Write`（落盘）、
 `NetEgress`（真实外发）、`EnvWrite`（触碰 `*.secrets.yml`）、`InReadOnly`（只读模式仍注册）。

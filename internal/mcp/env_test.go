@@ -24,7 +24,7 @@ func resetEnvs(t *testing.T, svc *Service, project string) {
 		t.Fatal(err)
 	}
 	for _, e := range envs {
-		if err := svc.DeleteEnv(project, e.Name); err != nil {
+		if err := svc.DeleteEnv(project, e.Name, "", false); err != nil {
 			t.Fatalf("清理环境 %s 失败: %v", e.Name, err)
 		}
 	}
@@ -370,7 +370,7 @@ func TestEnvDeleteGoesToTrash(t *testing.T) {
 	if _, err := svc.CreateEnv(CreateEnvInput{Project: "demo", Name: "dev"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.DeleteEnv("demo", "dev"); err != nil {
+	if err := svc.DeleteEnv("demo", "dev", "", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "environments", "dev.yml")); !os.IsNotExist(err) {
@@ -464,7 +464,7 @@ func TestEnvNameAndVarNameValidation(t *testing.T) {
 	if _, err := svc.RenameEnv("demo", "dev", "dev", ""); err == nil {
 		t.Error("改成同名应报错")
 	}
-	if err := svc.DeleteEnv("demo", "nope"); err == nil {
+	if err := svc.DeleteEnv("demo", "nope", "", false); err == nil {
 		t.Error("删除不存在的环境应报错")
 	}
 }
@@ -486,5 +486,18 @@ func TestNewServerWithoutFactoryWorks(t *testing.T) {
 	// 新建集合自带 dev 环境，能读到就说明链路通了
 	if len(envs) != 1 || envs[0].Name != "dev" {
 		t.Fatalf("环境列表 = %v，期望脚手架生成的 [dev]", envNames(envs))
+	}
+}
+
+// 统一写契约：同名环境重复创建 → [CONFLICT]（此前是 [INTERNAL]）。
+func TestEnvCreateConflictCode(t *testing.T) {
+	_, svc := setup(t)
+	if _, err := svc.CreateEnv(CreateEnvInput{Project: "demo", Name: "dup"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateEnv(CreateEnvInput{Project: "demo", Name: "dup"}); err == nil {
+		t.Fatalf("重复创建应报错")
+	} else if CodeOf(err) != CodeConflict {
+		t.Errorf("应为 [CONFLICT]，实际 %s: %v", CodeOf(err), err)
 	}
 }

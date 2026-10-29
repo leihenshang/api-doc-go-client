@@ -86,6 +86,13 @@ func TestStructuredListTools(t *testing.T) {
 		// 写/单条读也补：调用方拿 uid/path/hash 无需二次查询
 		"create_doc": true, "update_doc": true, "delete_doc": true, "get_doc": true,
 		"create_request": true, "update_request": true, "delete_request": true,
+		// 其余写工具（统一写契约：所有落盘工具都带 outputSchema/structuredContent）
+		"create_module": true, "rename_module": true, "delete_module": true,
+		"create_project": true, "rename_project": true, "delete_project": true,
+		"prune_empty_modules": true, "save_doc_image": true,
+		"save_response_example": true, "update_response_example": true, "delete_response_example": true,
+		"create_env": true, "rename_env": true, "delete_env": true,
+		"set_env_var": true, "delete_env_var": true,
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil

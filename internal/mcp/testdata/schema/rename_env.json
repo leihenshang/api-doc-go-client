@@ -1,5 +1,8 @@
 {
   "properties": {
+    "dryRun": {
+      "type": "boolean"
+    },
     "ifMatch": {
       "type": "string"
     },

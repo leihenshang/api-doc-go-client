@@ -35,7 +35,7 @@ func (s *Service) RenameModule(project, path, name string) error {
 }
 
 // DeleteModule 删除模块：recursive=true 整棵进 .trash；false 仅当空模块（非空会拒绝）。
-func (s *Service) DeleteModule(project, path string, recursive bool) error {
+func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) error {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
@@ -47,6 +47,9 @@ func (s *Service) DeleteModule(project, path string, recursive bool) error {
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
 		return withNotFound(fmt.Errorf("模块 %q 不存在（用 get_project_modules 查看路径）", path))
+	}
+	if dryRun {
+		return nil
 	}
 	if recursive {
 		err = a.DeleteFolderTree(uid)
@@ -79,12 +82,12 @@ func (s *Service) RenameProject(project, name string) error {
 }
 
 // DeleteProject 删除项目：confirm 必须等于项目名/目录名；目录移入授权根 .trash 后可人工恢复。
-func (s *Service) DeleteProject(project, confirm string) (string, error) {
+func (s *Service) DeleteProject(project, confirm string, dryRun bool) (string, error) {
 	key, err := s.resolveKey(project)
 	if err != nil {
 		return "", withInvalid(err)
 	}
-	dest, err := s.reg.DeleteProject(key, confirm)
+	dest, err := s.reg.DeleteProject(key, confirm, dryRun)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrProjectConfirmMismatch):

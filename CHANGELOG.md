@@ -23,6 +23,7 @@ prod:
   - 列表类工具返回 `structuredContent` + `outputSchema`（文本不变）。
   - `send_request` 默认**不再**保存响应示例（显式 `saveExample=true` 才存）。
   - 工具描述瘦身：总字符 6135 → 3799，并加预算回归测试；`list_envs` 支持分页。
+  - 统一写契约（破坏性）：权限码 `[AUTH]` → `[FORBIDDEN]`；结构化输出扩到 **29/36**（容器/环境/响应示例/图片全部补 `outputSchema` + `structuredContent`）；`dryRun` 覆盖全部破坏性删除（request/module/project/env/env_var/response_example），`delete_env` 新增 `ifMatch` 并发保护；创建类统一默认 `[CONFLICT]`（仅 create_doc/create_request 支持 suffix/overwrite；`create_module`/`create_env` 重名已补 `[CONFLICT]`）。
   - 第四轮实测修复：`get_request_detail(s)` 的 `sections` 支持 `bodyFields`/`respDoc`（大小写不敏感，此前恒定 `[INVALID]`）；`create_request` 新增 `uid` 与 `onConflict`（默认 error，不再静默加 `-2`），并返回 `structuredContent`（连同 `update_request`/`delete_request`，结构化工具 6 → 13）；`list_docs` 描述写明只含 .md 文档、接口请求用 `get_project_modules`。
   - 结构化输出补全：`create_doc`/`update_doc`/`get_doc`/`delete_doc` 也返回 `structuredContent`（uid/path/size/hash 等），`outputSchema` 的数组元素写明具体字段与 required（不再只有 `items:{type:"object"}`）；`create_doc` 建完可直接取 uid/path/hash。
   - 复测修正：`create_doc` 的 dryRun 只输出计划（不再同时打印「已创建」）；`create_project` 的 `root` 必须是工作目录（指向项目目录时 `[INVALID]` 并提示父级），白名单外 `[AUTH]`、重名 `[CONFLICT]`（不传 root 时若默认可写目录本身是项目也会 `[INVALID]` 提示改父级）；`list_docs` 带 hash 由「逐篇重扫」改为单次扫描（30 篇实测 168ms → 24ms）。
