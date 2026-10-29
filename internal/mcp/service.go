@@ -515,6 +515,7 @@ func (s *Service) searchIn(a ProjectApp, project, query string, limit int, opts 
 		matches = append(matches, Match{
 			UID: c.UID, Name: c.Name, Method: c.Method, URL: c.URL, Path: c.Path,
 			Project: project, Score: score, Matched: fields, Snippet: snippet, Hash: c.hash,
+			WeakMatch: c.isWeakMatch(query, opts),
 		})
 	}
 	total := len(matches)
@@ -824,7 +825,7 @@ type CreateRequestInput struct {
 	Project     string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Folder      string                      `json:"folder,omitempty"`
 	Name        string                      `json:"name"`
-	Method      string                      `json:"method,omitempty"`
+	Method      string                      `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL         string                      `json:"url,omitempty"`
 	Headers     []collection.KV             `json:"headers,omitempty"`
 	Params      []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；行可带 description（说明列）与 type（multipart 文件行）"`
@@ -858,6 +859,11 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if err := applyCreateFields(draft, in); err != nil {
 		return nil, err
 	}
+	method, merr := normalizeMethod(draft.Method)
+	if merr != nil {
+		return nil, merr
+	}
+	draft.Method = method
 	// 草稿模板的默认 headers 会在没有 headers 时被 CreateRequestFromDraft 填上，这里不覆盖
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -1034,7 +1040,7 @@ type UpdateRequestInput struct {
 	// Section 节点守卫：限定本次调用只改某一个节点（见 validateSection）。
 	Section    string                      `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
 	Name       *string                     `json:"name,omitempty"`
-	Method     *string                     `json:"method,omitempty"`
+	Method     *string                     `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL        *string                     `json:"url,omitempty"`
 	Params     []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
 	Headers    []collection.KV             `json:"headers,omitempty"`
@@ -1138,6 +1144,13 @@ func validateSection(section string, in UpdateRequestInput) error {
 
 // UpdateRequest 局部更新；带冲突检测（磁盘被外部改过就拒写）。
 func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, error) {
+	if in.Method != nil {
+		m, merr := normalizeMethod(*in.Method)
+		if merr != nil {
+			return nil, merr
+		}
+		in.Method = &m
+	}
 	// 节点守卫放在最前面：不值得为一次注定被拒的调用去读盘/建索引。
 	if err := validateSection(in.Section, in); err != nil {
 		return nil, err
@@ -1341,6 +1354,73 @@ func (s *Service) DeleteRequest(project, uid, ifMatch string) error {
 	return nil
 }
 
+// 允许的请求方法（schema enum 与运行时校验同源）。
+var allowedMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true,
+	"HEAD": true, "OPTIONS": true, "TRACE": true, "CONNECT": true, "GRPC": true,
+}
+
+// normalizeMethod 校验并大写 method；空值原样返回（不改动）。
+func normalizeMethod(m string) (string, error) {
+	m = strings.ToUpper(strings.TrimSpace(m))
+	if m == "" || allowedMethods[m] {
+		return m, nil
+	}
+	return "", withInvalid(fmt.Errorf("method %q 不合法；可选：GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC", m))
+}
+
+// DeleteRequestItem 批量删除的一条：uid + 必填 ifMatch（防误删）。
+type DeleteRequestItem struct {
+	UID     string `json:"uid"`
+	IfMatch string `json:"ifMatch"`
+}
+
+// DeleteRequestFailure 单条失败（不影响其它条目）。
+type DeleteRequestFailure struct {
+	UID   string `json:"uid"`
+	Error string `json:"error"`
+}
+
+// DeleteRequests 批量删除（每条强制 ifMatch；dryRun 只校验不落盘）。
+func (s *Service) DeleteRequests(project string, items []DeleteRequestItem, dryRun bool) ([]string, []DeleteRequestFailure, error) {
+	if len(items) == 0 {
+		return nil, nil, withInvalid(errors.New("items 不能为空：每条给 {uid, ifMatch}（ifMatch 从 search_requests 的 results[].hash 取）"))
+	}
+	if len(items) > maxBatchDocs {
+		return nil, nil, withLimit(fmt.Errorf("items 一次最多 %d 条（本次 %d 条）：请分批调用", maxBatchDocs, len(items)))
+	}
+	a, _, err := s.resolveWrite(project)
+	if err != nil {
+		return nil, nil, err
+	}
+	var deleted []string
+	var failed []DeleteRequestFailure
+	for _, it := range items {
+		uid := strings.TrimSpace(it.UID)
+		if uid == "" || strings.TrimSpace(it.IfMatch) == "" {
+			failed = append(failed, DeleteRequestFailure{UID: uid, Error: "[INVALID] 每条都必须给 uid 与 ifMatch"})
+			continue
+		}
+		r, rerr := a.ReadRequest(uid)
+		if rerr != nil {
+			failed = append(failed, DeleteRequestFailure{UID: uid, Error: withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, rerr)).Error()})
+			continue
+		}
+		if !hashPrefixMatch(a.FileHash(r.Path), it.IfMatch) {
+			failed = append(failed, DeleteRequestFailure{UID: uid, Error: fmt.Sprintf("[CONFLICT] 请求 %s 已被他人修改，本次未删除", uid)})
+			continue
+		}
+		if !dryRun {
+			if derr := a.DeleteRequest(uid); derr != nil {
+				failed = append(failed, DeleteRequestFailure{UID: uid, Error: coded(CodeIO, derr).Error()})
+				continue
+			}
+		}
+		deleted = append(deleted, uid)
+	}
+	return deleted, failed, nil
+}
+
 // hashPrefixMatch 空的 expect 不校验；否则要求完整相等或 actual 以 expect 为前缀（12 位短 hash 也可）。
 func hashPrefixMatch(actual, expect string) bool {
 	expect = strings.TrimSpace(expect)
@@ -1352,7 +1432,7 @@ type SendRequestInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid,omitempty"` // 与下面的临时请求字段二选一
 	// 临时请求（不落盘）：AI 只想试发一个地址时用
-	Method  string           `json:"method,omitempty"`
+	Method  string           `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL     string           `json:"url,omitempty"`
 	Headers []collection.KV  `json:"headers,omitempty"`
 	Body    *collection.Body `json:"body,omitempty"`
@@ -1366,6 +1446,13 @@ type SendRequestInput struct {
 
 // SendRequest 发送请求；saveExample 为真时把响应存为响应示例（客户端可回看/删除）。
 func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
+	if strings.TrimSpace(in.Method) != "" {
+		m, merr := normalizeMethod(in.Method)
+		if merr != nil {
+			return nil, merr
+		}
+		in.Method = m
+	}
 	a, e, err := s.resolve(in.Project)
 	if err != nil {
 		return nil, err
@@ -1395,6 +1482,9 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 	}
 	res, err := a.SendRequest(req, strings.TrimSpace(in.Env))
 	if err != nil {
+		if strings.Contains(err.Error(), "不是 http/https") {
+			return nil, withInvalid(fmt.Errorf("URL 无法发送：%w", err))
+		}
 		return nil, fmt.Errorf("发送失败: %w", err)
 	}
 	out := outcomeOf(res, in.MaxBodyBytes)

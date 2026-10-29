@@ -1,0 +1,35 @@
+{
+  "properties": {
+    "dryRun": {
+      "type": "boolean"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "ifMatch": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "ifMatch"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "type": "object"
+}

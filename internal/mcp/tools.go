@@ -426,6 +426,7 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_project", ts.createProject)
 	addTool(ts, server, "update_request", ts.updateRequest)
 	addTool(ts, server, "delete_request", ts.deleteRequest)
+	addTool(ts, server, "delete_requests", ts.deleteRequests)
 	// 文档条目的写操作：新建 / 局部更新（正文·改名·移动）/ 删除（进 .trash）
 	addTool(ts, server, "create_doc", ts.createDoc)
 	addTool(ts, server, "update_doc", ts.updateDoc)
@@ -472,17 +473,17 @@ func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
 				no := false
 				in.SaveExample = &no
 			}
-			return ts.wrap(func() (string, error) {
+			return ts.wrapData(func() (string, any, error) {
 				in.Project = ts.proj(req, in.Project)
 				out, err := ts.svc.SendRequest(in)
 				if err != nil {
-					return "", err
+					return "", nil, err
 				}
-				return renderSend(out), nil
+				return renderSend(out), sendData(out), nil
 			})
 		})
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: meta.Name, Description: desc}, handler)
+	mcp.AddTool(server, &mcp.Tool{Name: meta.Name, Description: desc, OutputSchema: meta.Output}, handler)
 }
 
 // ---- 各工具的 handler（统一经 wrap 把 panic/错误转成工具结果） ----
@@ -499,7 +500,7 @@ func (ts *toolSet) listProjects(ctx context.Context, req *mcp.CallToolRequest, i
 		if err != nil {
 			return "", nil, err
 		}
-		data := map[string]any{"projects": items, "skipped": skipped}
+		data := map[string]any{"projects": nonNilSlice(items), "skipped": skipped}
 		if len(items) == 0 {
 			return "没有匹配的项目。用 refresh=true 重新扫描，或确认 -root 下有含 opencollection.yml 的目录。", data, nil
 		}
@@ -545,7 +546,7 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 		}
 		data := map[string]any{
 			"project": in.Project, "moduleTotal": res.ModuleTotal, "matched": res.Matched,
-			"total": res.Total, "modules": res.Modules,
+			"total": res.Total, "modules": nonNilSlice(res.Modules),
 		}
 		if len(res.Requests) > 0 {
 			data["requests"] = res.Requests
@@ -586,20 +587,20 @@ type getDetailIn struct {
 }
 
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		sel, err := NormalizeDetailSections(in.Sections)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		d, err := ts.svc.GetRequestDetail(in.Project, in.UID, DetailOptions{
 			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
 		})
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		view := LineView{Start: in.DocsStartLine, Max: in.DocsMaxLines, Outline: in.DocsOutline}
-		return renderDetail(d, sel, view), nil
+		return renderDetail(d, sel, view), detailData(d), nil
 	})
 }
 
@@ -618,7 +619,7 @@ type getDetailsIn struct {
 
 // getRequestDetails 批量取详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
 func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolRequest, in getDetailsIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		uids := make([]string, 0, len(in.UIDs))
 		for _, u := range in.UIDs {
@@ -627,18 +628,19 @@ func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolReque
 			}
 		}
 		if len(uids) == 0 {
-			return "", withInvalid(errors.New("uids 不能为空：一次传 1–10 个 uid（uid 从 search_requests / get_project_modules 取）"))
+			return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个 uid（uid 从 search_requests / get_project_modules 取）"))
 		}
 		if len(uids) > maxBatchDetails {
-			return "", withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDetails, len(uids)))
+			return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDetails, len(uids)))
 		}
 		sel, err := NormalizeDetailSections(in.Sections)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "批量详情（%d 个请求，项目 %s）：", len(uids), in.Project)
 		ok := 0
+		items := make([]map[string]any, 0, len(uids))
 		for _, uid := range uids {
 			d, derr := ts.svc.GetRequestDetail(in.Project, uid, DetailOptions{
 				IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
@@ -646,14 +648,19 @@ func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolReque
 			sb.WriteString("\n")
 			if derr != nil {
 				fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
+				items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
 				continue
 			}
 			ok++
 			fmt.Fprintf(&sb, "===== %s =====\n", uid)
 			sb.WriteString(renderDetail(d, sel, LineView{}))
+			items = append(items, detailData(d))
 		}
 		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
-		return sb.String(), nil
+		data := map[string]any{
+			"project": in.Project, "total": len(uids), "returned": ok, "items": items,
+		}
+		return sb.String(), data, nil
 	})
 }
 
@@ -674,7 +681,7 @@ func (ts *toolSet) searchDocs(ctx context.Context, req *mcp.CallToolRequest, in 
 			return "", nil, err
 		}
 		data := map[string]any{
-			"pattern": in.Pattern, "total": total, "returned": len(hits), "docs": hits,
+			"pattern": in.Pattern, "total": total, "returned": len(hits), "docs": nonNilSlice(hits),
 		}
 		if len(hits) == 0 {
 			return fmt.Sprintf("没有文档包含「%s」。", in.Pattern), data, nil
@@ -721,7 +728,7 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 			return "", nil, err
 		}
 		data := map[string]any{
-			"query": in.Query, "total": total, "returned": len(ms), "results": ms,
+			"query": in.Query, "total": total, "returned": len(ms), "results": nonNilSlice(ms),
 		}
 		if len(ms) == 0 {
 			return fmt.Sprintf("没有匹配「%s」的请求。", in.Query), data, nil
@@ -783,7 +790,7 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 			return "", nil, err
 		}
 		data := map[string]any{
-			"project": in.Project, "total": total, "returned": len(docs), "offset": in.Offset, "docs": docs,
+			"project": in.Project, "total": total, "returned": len(docs), "offset": in.Offset, "docs": nonNilSlice(docs),
 		}
 		return renderDocs(in.Project, docs, total, in.Offset), data, nil
 	})
@@ -847,6 +854,35 @@ func exampleData(project, requestUID string, ex *collection.ResponseExample) map
 	return map[string]any{
 		"project": project, "requestUid": requestUID, "uid": ex.UID,
 		"name": ex.Name, "path": ex.Path, "status": ex.Response.Status,
+	}
+}
+
+// sendData send_request 的结构化输出（与 sendRequestOutput 对齐）。
+func sendData(o *SendOutcome) map[string]any {
+	return map[string]any{
+		"status": o.Status, "url": o.URL, "timeMs": o.TimeMS, "size": o.Size,
+		"contentType": o.ContentType, "body": o.Body, "truncated": o.Truncated,
+		"originalBytes": o.OriginalBytes, "headerCount": o.HeaderCount,
+		"redirects": o.Redirects, "remoteAddr": o.RemoteAddr,
+		"saved": o.Saved, "exampleUid": o.ExampleUID, "examplePath": o.ExamplePath,
+	}
+}
+
+// detailData get_request_detail 的结构化输出（与 requestDetailFullOutput 对齐）。
+func detailData(d *RequestDetail) map[string]any {
+	ex := make([]map[string]any, 0, len(d.Examples))
+	for _, e := range d.Examples {
+		ex = append(ex, map[string]any{"uid": e.UID, "name": e.Name, "path": e.Path, "hash": e.Hash, "status": e.Status})
+	}
+	rel := make([]map[string]any, 0, len(d.RelatedDocs))
+	for _, r := range d.RelatedDocs {
+		rel = append(rel, map[string]any{"uid": r.UID, "name": r.Name, "path": r.Path})
+	}
+	return map[string]any{
+		"project": d.Project, "uid": d.UID, "name": d.Name, "method": d.Method,
+		"url": d.URL, "path": d.Path, "hash": d.Hash, "summary": d.Summary,
+		"params": len(d.Params), "headers": len(d.Headers), "bodyFields": len(d.Body.Fields),
+		"examples": nonNilSlice(ex), "relatedDocs": nonNilSlice(rel),
 	}
 }
 
@@ -1117,10 +1153,11 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 
 // deleteIn delete_request 的入参。
 type deleteIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string `json:"uid" jsonschema:"要移除的接口 uid"`
-	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
-	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 search_requests 里该请求的 hash；不传 = 最后写者赢"`
+	Project     string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID         string `json:"uid" jsonschema:"要移除的接口 uid"`
+	DryRun      bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
+	IfMatch     string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 search_requests 里该请求的 hash；不传 = 最后写者赢"`
+	ConfirmName string `json:"confirmName,omitempty" jsonschema:"二次确认：填请求名称；与磁盘上的 name 不一致直接拒绝（防误删）"`
 }
 
 func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
@@ -1130,6 +1167,9 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		r, err := ts.svc.ReadRequest(in.Project, in.UID)
 		if err != nil {
 			return "", nil, err
+		}
+		if in.ConfirmName != "" && strings.TrimSpace(in.ConfirmName) != r.Name {
+			return "", nil, coded(CodeConflict, fmt.Errorf("confirmName 与请求名不一致（当前 name=%q），未删除", r.Name))
 		}
 		if !in.DryRun {
 			if err := ts.svc.DeleteRequest(in.Project, in.UID, in.IfMatch); err != nil {
@@ -1148,6 +1188,45 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 }
 
 // createDocArg create_doc 的入参（复用 service 结构，json/描述已写好）。
+type deleteRequestsItem struct {
+	UID     string `json:"uid" jsonschema:"要删除的请求 uid（search_requests 的 results[].uid）"`
+	IfMatch string `json:"ifMatch" jsonschema:"必填：该请求的 hash（search_requests 的 results[].hash，可传 12 位前缀）"`
+}
+
+type deleteRequestsIn struct {
+	Project string               `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
+	Items   []deleteRequestsItem `json:"items" jsonschema:"1–10 条；每条必须给 uid + ifMatch"`
+	DryRun  bool                 `json:"dryRun,omitempty" jsonschema:"true = 只校验并列出将删除的条目，不落盘"`
+}
+
+func (ts *toolSet) deleteRequests(ctx context.Context, req *mcp.CallToolRequest, in deleteRequestsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrapData(func() (string, any, error) {
+		in.Project = ts.proj(req, in.Project)
+		items := make([]DeleteRequestItem, 0, len(in.Items))
+		for _, it := range in.Items {
+			items = append(items, DeleteRequestItem{UID: it.UID, IfMatch: it.IfMatch})
+		}
+		deleted, failed, err := ts.svc.DeleteRequests(in.Project, items, in.DryRun)
+		if err != nil {
+			return "", nil, err
+		}
+		data := map[string]any{
+			"project": in.Project, "requested": len(items), "dryRun": in.DryRun,
+			"deleted": nonNilSlice(deleted), "failed": nonNilSlice(failed),
+		}
+		var sb strings.Builder
+		action := "已删除"
+		if in.DryRun {
+			action = "（dryRun：未落盘）将删除"
+		}
+		fmt.Fprintf(&sb, "%s %d/%d 条（项目 %s）", action, len(deleted), len(items), in.Project)
+		for _, f := range failed {
+			fmt.Fprintf(&sb, "\n- %s：%s", f.UID, f.Error)
+		}
+		return sb.String(), data, nil
+	})
+}
+
 type createDocArg = CreateDocInput
 
 func (ts *toolSet) createDoc(_ context.Context, req *mcp.CallToolRequest, in createDocArg) (*mcp.CallToolResult, any, error) {
@@ -1326,7 +1405,7 @@ func (ts *toolSet) listEnvs(ctx context.Context, req *mcp.CallToolRequest, in li
 			return "", nil, err
 		}
 		data := map[string]any{
-			"project": in.Project, "total": total, "returned": len(envs), "offset": in.Offset, "envs": envs,
+			"project": in.Project, "total": total, "returned": len(envs), "offset": in.Offset, "envs": nonNilSlice(envs),
 		}
 		return renderEnvs(in.Project, envs, total, in.Offset), data, nil
 	})
@@ -1469,6 +1548,14 @@ func (ts *toolSet) wrap(fn func() (string, error)) (*mcp.CallToolResult, any, er
 		}, nil, nil
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+}
+
+// nonNilSlice 让空结果序列化为 [] 而不是 null（outputSchema 声明的是 array）。
+func nonNilSlice[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 // errorData 错误态的结构化体：{error:{code,message}}，让调用方不必解析文本前缀。

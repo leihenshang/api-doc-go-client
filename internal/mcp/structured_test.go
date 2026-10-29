@@ -4,6 +4,8 @@ package mcp_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -93,7 +95,8 @@ func TestStructuredListTools(t *testing.T) {
 		"save_response_example": true, "update_response_example": true, "delete_response_example": true,
 		"create_env": true, "rename_env": true, "delete_env": true,
 		"set_env_var": true, "delete_env_var": true,
-		"get_docs": true,
+		"get_docs": true, "delete_requests": true,
+		"get_request_detail": true, "get_request_details": true, "send_request": true,
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil
@@ -102,6 +105,27 @@ func TestStructuredListTools(t *testing.T) {
 		}
 	}
 	_ = strings.TrimSpace
+}
+
+// send_request：状态/耗时/大小/正文结构化。
+func TestStructuredSendRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	cs := connectSelf(t)
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "send_request", Arguments: map[string]any{
+		"project": "demo", "method": "GET", "url": srv.URL,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("send_request 失败：%v %v", err, res.Content)
+	}
+	sc, ok := res.StructuredContent.(map[string]any)
+	if !ok || sc["status"].(float64) != 200 || sc["size"].(float64) == 0 || sc["saved"] != false {
+		t.Fatalf("send_request 结构化不符：%v", res.StructuredContent)
+	}
 }
 
 // get_docs：批量结构化（单篇失败只在该条带 error，其它照常返回）。
