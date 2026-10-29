@@ -42,9 +42,17 @@ func (a *App) ImportCollection(parent, format, text string) (*collection.ImportS
 		// 本客户端导出的集合整包（目录 + 请求 + 文档），无损回灌
 		return c.ImportBundle(parent, []byte(text))
 	case "bruno":
-		return nil, fmt.Errorf("Bruno 请使用 ImportBrunoDir 选择目录导入")
+		return nil, fmt.Errorf("%w: Bruno 请使用 ImportBrunoDir 选择目录导入", collection.ErrImportInvalid)
 	}
-	return nil, fmt.Errorf("不支持的导入格式：%s（仅支持 postman / openapi / apidocgo）", format)
+	return nil, fmt.Errorf("%w: 不支持的导入格式：%s（仅支持 postman / openapi / apidocgo）", collection.ErrImportInvalid, format)
+}
+
+// ParseImport 只解析集合文件并回报将导入的条数，不落盘（MCP import_collection 的 dryRun）。
+func (a *App) ParseImport(format, text string) (*collection.ImportSummary, error) {
+	if _, err := a.requireCollection(); err != nil {
+		return nil, err
+	}
+	return collection.ParseImport(format, []byte(text))
 }
 
 // ImportBrunoDir 导入原生 Bruno 集合目录（按本客户端格式解析）。

@@ -31,7 +31,9 @@ type Config struct {
 	// Root 单根便捷写法（等价于 Allow=[{Root, writable}]）：-root 场景与既有测试用。
 	Root     string
 	ReadOnly bool // 只读模式：不注册写工具，send_request 不落盘
-	Logger   *log.Logger
+	// Groups 启用的工具组（空 = 全部；session 恒开）。只影响注册集合，不影响单次权限判断。
+	Groups []string
+	Logger *log.Logger
 	// NewApp 构造项目级运行时（必填）：*app.App 满足 ProjectApp。
 	// 由调用方注入以避免 internal/mcp 与 internal/app 互相依赖。
 	NewApp NewAppFunc
@@ -65,7 +67,7 @@ func NewServer(cfg Config) (*mcp.Server, *Service, error) {
 		Title:   "api-doc-go 接口集合",
 		Version: serverVersion,
 	}, nil)
-	if err := registerToolsWithOpts(server, svc, cfg.ReadOnly, toolGuardOpts{
+	if err := registerToolsWithOpts(server, svc, cfg.ReadOnly, cfg.Groups, toolGuardOpts{
 		authorizer: cfg.Authorizer,
 		auditor:    cfg.Auditor,
 		transport:  cfg.Transport,

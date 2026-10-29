@@ -84,19 +84,20 @@ func TestStructuredListTools(t *testing.T) {
 	}
 	want := map[string]bool{
 		"list_projects": true, "list_docs": true, "list_envs": true,
+		"list_tools":          true,
 		"get_project_modules": true, "search_requests": true, "search_docs": true,
 		// 写/单条读也补：调用方拿 uid/path/hash 无需二次查询
-		"create_doc": true, "update_doc": true, "delete_doc": true, "get_doc": true,
-		"create_request": true, "update_request": true, "delete_request": true,
+		"create_doc": true, "update_doc": true, "delete_doc": true,
+		"create_request": true, "update_request": true, "delete_request": true, "import_collection": true,
 		// 其余写工具（统一写契约：所有落盘工具都带 outputSchema/structuredContent）
 		"create_module": true, "rename_module": true, "delete_module": true,
 		"create_project": true, "rename_project": true, "delete_project": true,
-		"prune_empty_modules": true, "save_doc_image": true,
+		"save_doc_image":        true,
 		"save_response_example": true, "update_response_example": true, "delete_response_example": true,
 		"create_env": true, "rename_env": true, "delete_env": true,
 		"set_env_var": true, "delete_env_var": true,
-		"get_docs": true, "delete_requests": true,
-		"get_request_detail": true, "get_request_details": true, "send_request": true,
+		"delete_requests": true, "send_request": true,
+		// get_doc / get_request_detail 单条与批量共用同一工具（两种形态），不声明 outputSchema。
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil
@@ -134,7 +135,7 @@ func TestStructuredGetDocs(t *testing.T) {
 	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
 		"project": "demo", "name": "批量结构", "folder": "docs", "content": "# 批量",
 	}))
-	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "get_docs", Arguments: map[string]any{
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "get_doc", Arguments: map[string]any{
 		"project": "demo", "uids": []string{uid, "00000000-0000-0000-0000-000000000000"},
 	}})
 	if err != nil {

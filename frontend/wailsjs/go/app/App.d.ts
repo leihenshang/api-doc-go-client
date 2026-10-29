@@ -48,6 +48,8 @@ export function CreateDoc(arg1:string,arg2:string):Promise<collection.DocEntry>;
 
 export function CreateDocEx(arg1:string,arg2:string,arg3:string,arg4:string):Promise<collection.DocEntry>;
 
+export function CreateDocWithOpts(arg1:collection.CreateDocOpts):Promise<collection.DocEntry>;
+
 export function CreateFolder(arg1:string,arg2:string):Promise<void>;
 
 export function CreateRequest(arg1:string,arg2:string,arg3:string):Promise<collection.Request>;
@@ -55,6 +57,8 @@ export function CreateRequest(arg1:string,arg2:string,arg3:string):Promise<colle
 export function CreateRequestFromDraft(arg1:string,arg2:string,arg3:collection.Request):Promise<collection.Request>;
 
 export function CreateRequestFromDraftEx(arg1:string,arg2:string,arg3:collection.Request,arg4:string,arg5:string):Promise<collection.Request>;
+
+export function CreateRequestWithOpts(arg1:collection.RequestCreateOpts):Promise<collection.Request>;
 
 export function DeleteCookie(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -174,6 +178,8 @@ export function OpenCollection(arg1:string):Promise<collection.CollectionInfo>;
 
 export function ParseCurl(arg1:string):Promise<collection.Request>;
 
+export function ParseImport(arg1:string,arg2:string):Promise<collection.ImportSummary>;
+
 export function PickDirectory():Promise<string>;
 
 export function PickFile():Promise<string>;
@@ -182,7 +188,11 @@ export function PickGrpcProtoFiles():Promise<Array<string>>;
 
 export function PlanCreateDoc(arg1:string,arg2:string,arg3:string,arg4:string):Promise<collection.DocEntry>;
 
+export function PlanCreateDocWithOpts(arg1:collection.CreateDocOpts):Promise<collection.DocEntry>;
+
 export function PlanCreateRequest(arg1:string,arg2:string,arg3:collection.Request,arg4:string,arg5:string):Promise<collection.Request>;
+
+export function PlanCreateRequestWithOpts(arg1:collection.RequestCreateOpts):Promise<collection.Request>;
 
 export function PlanResponseExampleRaw(arg1:string,arg2:string,arg3:number,arg4:Array<collection.KV>,arg5:string,arg6:string):Promise<collection.ResponseExample>;
 

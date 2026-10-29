@@ -34,17 +34,39 @@ func NormalizeRequestConflict(v string) (string, error) {
 	}
 }
 
+// RequestCreateOpts Plan/CreateRequestWithOpts 的入参（FileName 可选，见该字段说明）。
+type RequestCreateOpts struct {
+	Folder     string   // 目标模块（相对集合根；空 = 项目根）
+	Name       string   // 请求名
+	Src        *Request // 草稿内容
+	UID        string   // 可选：指定 uid 做幂等
+	OnConflict string   // error（默认）/ suffix / overwrite
+	// FileName 可选：落盘文件名（不含 .yml）。留空 = 由 Name slug 化推导（既有行为）。
+	// 用途与 CreateDocOpts.FileName 一致：显示名是中文时文件也会是中文名，
+	// 需要 ASCII 文件名（脚本/工具链友好）时由调用方显式给。
+	FileName string
+}
+
 // PlanCreateRequest 只做冲突判定与身份/路径分配，不写盘（dryRun）。
 func (c *Collection) PlanCreateRequest(folder, name string, src *Request, uid, onConflict string) (*Request, error) {
-	mode, err := NormalizeRequestConflict(onConflict)
+	return c.PlanCreateRequestWithOpts(RequestCreateOpts{
+		Folder: folder, Name: name, Src: src, UID: uid, OnConflict: onConflict,
+	})
+}
+
+// PlanCreateRequestWithOpts 同 PlanCreateRequest，但可显式指定落盘文件名（FileName）。
+func (c *Collection) PlanCreateRequestWithOpts(o RequestCreateOpts) (*Request, error) {
+	mode, err := NormalizeRequestConflict(o.OnConflict)
 	if err != nil {
 		return nil, err
 	}
-	next, err := requestFromDraft(name, src)
+	name := o.Name
+	next, err := requestFromDraft(name, o.Src)
 	if err != nil {
 		return nil, err
 	}
-	uid = strings.TrimSpace(uid)
+	uid := strings.TrimSpace(o.UID)
+	folder := o.Folder
 	res, err := c.scan()
 	if err != nil {
 		return nil, err
@@ -58,6 +80,13 @@ func (c *Collection) PlanCreateRequest(folder, name string, src *Request, uid, o
 			ErrRequestConflict, old.UID, old.Path)
 	}
 	base := sanitizeFileName(name)
+	if fn := strings.TrimSpace(o.FileName); fn != "" {
+		// 与 name 同口径：显式 fileName 不合法时报错，而不是清洗成另一个名字。
+		if !validEntryName(fn) {
+			return nil, fmt.Errorf("fileName 含非法字符或为空: %q（不能带路径分隔符，不能以点开头或结尾）", fn)
+		}
+		base = sanitizeFileName(fn)
+	}
 	rel := joinRel(folder, base+".yml")
 	for i := 2; old == nil; i++ {
 		if hit, ok := res.reqByPath[rel]; ok {
@@ -93,11 +122,18 @@ func (c *Collection) PlanCreateRequest(folder, name string, src *Request, uid, o
 //   - suffix：同路径已存在 → 追加 -2、-3…（同 uid 视为冲突，不能复制身份）
 //   - overwrite：同 uid 或同路径已存在 → 复用其 uid/path/seq 覆盖内容
 func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request, uid, onConflict string) (*Request, error) {
-	next, err := c.PlanCreateRequest(folder, name, src, uid, onConflict)
+	return c.CreateRequestWithOpts(RequestCreateOpts{
+		Folder: folder, Name: name, Src: src, UID: uid, OnConflict: onConflict,
+	})
+}
+
+// CreateRequestWithOpts 同 CreateRequestFromDraftEx，但可显式指定落盘文件名（FileName）。
+func (c *Collection) CreateRequestWithOpts(o RequestCreateOpts) (*Request, error) {
+	next, err := c.PlanCreateRequestWithOpts(o)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.ensureDir(folder); err != nil {
+	if err := c.ensureDir(o.Folder); err != nil {
 		return nil, err
 	}
 	if err := c.SaveRequest(next); err != nil {

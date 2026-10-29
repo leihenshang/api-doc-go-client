@@ -26,7 +26,8 @@ const DEFAULTS: Settings = {
   // 地址默认 127.0.0.1 两端一致；**端口默认不写死**，由后端 MCPPortDefault 下发
   // （正式版 8189 / 开发版 8190），避免前端硬编码与后端命名空间错配。
   // allow = MCP 可访问的工作目录白名单（空 = 不授权任何目录，安全默认）
-  mcp: { enabled: false, addr: '127.0.0.1', port: 0, token: '', readOnly: true, allowOrigins: [], allow: [] },
+  // toolGroups = 启用的工具组（空 = 全部）；session 组恒开，不在这里出现。
+  mcp: { enabled: false, addr: '127.0.0.1', port: 0, token: '', readOnly: true, allowOrigins: [], allow: [], toolGroups: [] },
 }
 
 export const useSettingsStore = defineStore('settings', {

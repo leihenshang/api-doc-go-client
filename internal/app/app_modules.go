@@ -3,7 +3,7 @@ package app
 // 模块（分组）与集合级维护（MCP 容器工具）：
 //   - rename_module / delete_module → app_doc.go 的 RenameFolder / DeleteFolder(Tree)（删除进 .trash）
 //   - rename_project               → RenameCollection（只改显示名，目录不变）
-//   - prune_empty_modules          → PruneEmptyFolders（只删空模块目录）
+//   - delete_module(pruneEmpty)    → PruneEmptyFolders（只删空模块目录）
 //   - CloseProject                 → MCP delete_project 前释放 watcher/索引
 //
 // RenameFolder / DeleteFolder / DeleteFolderTree 已随前端分组菜单存在（app_doc.go），

@@ -3,11 +3,15 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// 本文件是 36 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
-// 注册描述。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
-// 不允许在别处再硬编码一份工具风险/读写分类。
+// 本文件是 MCP Tool 的**单一事实源**：名称、工具组、风险级别、副作用标记、只读模式注册位、
+// 注册描述与一句话摘要（Brief）。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
+// 不允许在别处再硬编码一份工具风险/读写/分组。
+//
+// 数量不在这里写死（历史上写过 36/37/38/39，每次加工具都会漂移）：工具总数与风险分布
+// 由 ToolNames() / meta_test.go 的基线锁定，注释只描述结构。
 //
 // 旧 9-Tool 别名决策（详见开发设计 01-T1 §7.3）：**默认不实现别名层**。
 // 旧名从未在任何发布版本注册过，tools/list 出现双名同义只会放大 AI 选错工具的概率。
@@ -24,9 +28,27 @@ const (
 	RiskHigh   RiskLevel = "high"   // 文件 / 集合 / 环境落盘写
 )
 
+// 工具组：设置页可按组启停，减少 tools/list 的体积。
+//
+// session 组恒开（发现类工具：工具总览、工作目录、项目列表）—— 关掉它调用方就
+// 连"有哪些工具/哪些项目"都问不到，会把用户锁死。
+const (
+	GroupSession    = "session"
+	GroupCollection = "collection"
+	GroupDocs       = "docs"
+	GroupEnv        = "env"
+	GroupExample    = "example"
+	GroupNetwork    = "network"
+)
+
+// ConfigurableGroups 设置页可勾选的工具组（不含恒开的 session）；顺序即展示顺序。
+var ConfigurableGroups = []string{GroupCollection, GroupDocs, GroupEnv, GroupExample, GroupNetwork}
+
 // ToolMeta 单个工具的契约元数据。
 type ToolMeta struct {
-	Name string // MCP Tool 名（snake_case，对外契约，禁改）
+	Name string // MCP Tool 名（snake_case，对外契约）
+
+	Group string // 工具组（见 Group* 常量）；session 组恒开
 
 	Risk RiskLevel // 风险级别
 
@@ -36,9 +58,12 @@ type ToolMeta struct {
 
 	InReadOnly bool // 只读模式下是否仍注册
 
-	Description string // 与注册到 mcp.Tool.Description 的文案一致（注册直接读这里）
-	Since       string // 引入版本
-	// Output 可选 outputSchema（仅列表类工具声明；详情类不声明，避免响应 payload 翻倍）。
+	Description string // 完整描述（注册到 mcp.Tool.Description，供拉取 schema 的客户端阅读）
+	// Brief 一句话摘要（≤40 字）：list_tools 只回它，避免"省上下文"的工具自己
+	// 把全量长描述再塞回上下文。
+	Brief string
+	Since string // 引入版本
+	// Output 可选 outputSchema（仅结构稳定的列表类工具声明；详情类不声明，避免响应 payload 翻倍）。
 	Output     any
 	Deprecated bool   // 是否废弃（预留，当前全 false）
 	AliasOf    string // 非空 = 别名项，指向正式 Tool（当前无任何别名）
@@ -50,162 +75,232 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 36 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列。
 var toolMetas = []ToolMeta{
-	// ---- 12 个只读工具（只读模式也注册）----
+	// ---- 恒开的会话/发现类（只读模式也注册）----
 	{
-		Name: "list_workspaces", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "列出 MCP 可访问的工作目录（客户端授权的白名单）与其中的项目、当前默认目标。白名单为空时 AI 无法读写任何集合 —— 需要时请让用户在客户端「设置 → MCP 服务 → 可访问的工作目录」里添加。",
+		Name: "list_tools", Group: GroupSession, Risk: RiskLow, InReadOnly: true, Since: "0.7.0",
+		Brief:       "工具总览：名称、用途、必填参数",
+		Description: "一次返回全部工具名、一句话用途与必填参数（filter 过滤，mode=read|write 分类）；要完整入参再取该工具的 schema。",
+		Output:      toolsCatalogOutput(),
 	},
 	{
-		Name: "use_workspace", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "选定默认工作目录：选定后其余工具的 project 参数即可省略。workspace 传 list_workspaces 返回的工作目录 path，或一个项目标识（名称/路径/uid）；不在白名单内会直接拒绝。",
+		Name: "list_workspaces", Group: GroupSession, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "列出可访问的工作目录与项目",
+		Description: "列出 MCP 可访问的工作目录（白名单）、其中的项目与当前默认目标；白名单为空时需在客户端设置里添加。",
 	},
 	{
-		Name: "list_projects", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listProjectsOutput(),
-		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。范围仅限客户端授权的 MCP 工作目录（见 list_workspaces）。返回名称、路径、uid、请求数/模块数/环境列表。",
+		Name: "use_workspace", Group: GroupSession, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "选定本会话默认工作目录",
+		Description: "选定后其余工具可省略 project；默认目标按会话保存，重连或服务重启后需重新选定。",
 	},
 	{
-		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: modulesOutput(),
-		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。带 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求），汇总行始终给出模块总数；传 onlyMatched=false 可看全部模块。",
-	},
-	{
-		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: requestDetailFullOutput(),
-		Description: "接口详情：请求/headers/概述/说明/响应字段/示例。sections 可只取分段（overview/docs/bodyFields/respDoc/examples）；说明长时用 docsOutline 或 docsStartLine+docsMaxLines；hash 完整可直接回传 ifMatch。",
-	},
-	{
-		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: requestDetailsOutput(),
-		Description: "批量获取多个接口的详情（一次 1–10 个 uid，超出直接报错）：参数与 get_request_detail 相同（sections/include_body/maxBodyBytes/query 对每个卡片生效），结果按 uid 分组，单个 uid 失败不影响其它。用于一次取多张卡片，省掉逐个调用的往返。",
-	},
-	{
-		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: searchRequestsOutput(),
-		Description: "搜索接口（名称/URL/方法/header/说明/请求体/响应字段/字段表打分）：exactMatch 整词、fields 限定、includeHash 附 hash；snippet 给命中行。模糊匹配可能返回弱相关结果（results[].weakMatch=true），删除前核对 name/path。",
-	},
-	{
-		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: searchDocsOutput(),
-		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回；命中行号（L<n>）可作为 get_doc 的 startLine 继续精读。",
-	},
-	{
-		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: envsOutput(),
-		Description: "列出环境与变量（敏感值只回掩码）。query 过滤环境/变量名；limit（默认 200）/offset 分页，首行给总数。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
-	},
-	{
-		Name: "get_doc_template", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Description: "返回「接口说明（docs）」的分节结构契约：与客户端一键「生成接口文档」的 Markdown 骨架逐节对齐（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注，含列名与 {{host}} 掩码规则）。写 docs 前先取本模板，保证客户端展示与导出渲染一致。无需项目上下文。",
-	},
-	{
-		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: listDocsOutput(),
-		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：只含文档条目（.md）；接口请求请用 get_project_modules，接口自带的说明是 request.docs，也不在这里。",
-	},
-	{
-		Name: "get_docs", Risk: RiskLow, InReadOnly: true, Since: "0.6.0", Output: docsBatchOutput(),
-		Description: "批量读文档：一次 1–10 个 uid，按 uid 分组；单条失败不影响其他。支持与 get_doc 相同的 startLine/maxLines/outline。",
-	},
-	{
-		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: docDetailOutput(true),
-		Description: "读文档正文+完整 hash（可回传 update_doc.ifMatch 防覆盖）。默认全文；长文先 outline=true 看大纲，再 startLine+maxLines 分段（行号仅供阅读）。",
+		Name: "list_projects", Group: GroupSession, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "列出项目（集合）",
+		Description: "列出授权目录下的项目（集合）及请求数、模块数与环境；refresh=true 重新扫描。",
+		Output:      listProjectsOutput(),
 	},
 
-	// ---- 17 个集合写工具（只读模式不注册）：请求 5 + 文档 9（含图片与容器）+ 响应示例 3 ----
+	// ---- 集合读（只读模式也注册）----
 	{
-		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDetailOutput(),
-		Description: "新建接口：给 method/url/…，或 curl，或 copyFromUid；可同时写 summary/bodyFields/docs/respDoc/settings；同名或同 uid 默认 [CONFLICT]（onConflict=suffix/overwrite 可改），uid 可固定身份。",
+		Name: "get_project_modules", Group: GroupCollection, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "看模块结构与请求清单",
+		Description: "返回项目的模块树与每个模块的请求数；query 过滤，includeRequests=true 附带请求清单。",
+		Output:      modulesOutput(),
 	},
 	{
-		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: moduleWriteOutput(),
-		Description: "创建模块（目录）。parent 为空表示在项目根下建；支持嵌套（如 parent=api 建 api/user）。",
+		Name: "get_request_detail", Group: GroupCollection, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief: "接口详情（单个或批量）",
+		// 详情类不声明 outputSchema：同一工具两种形态（单条 / 批量 items）无法用一份稳定 schema 表达。
+		Description: "取接口详情（请求、头、概述、说明、字段表、示例）：uid 取单个，uids 批量 1–10 个；sections 可只取分段，hash 可回传 ifMatch。",
 	},
 	{
-		Name: "create_project", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: projectWriteOutput(),
-		Description: "在**授权且可写**的工作目录下新建项目。root 必须是工作目录（不能是项目目录本身或项目内子目录，否则 [INVALID] 并提示改传父级）；留空用第一个可写工作目录。白名单外 [FORBIDDEN]、只读 [READONLY]、重名 [CONFLICT]。",
-	},
-	{
-		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDetailOutput(),
-		Description: "改接口（只改传入字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc/summary/bodyFields 各自覆盖，不传不动；body 与 bodyFields 独立；docs 与 replaces 互斥（old 缺失整单拒绝）；ifMatch=完整 hash 防覆盖；folder 移动模块；成功附改动行确认。",
-	},
-	{
-		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDeleteOutput(),
-		Description: "移除接口请求（移入 .trash 可找回）；ifMatch/confirmName 可二次防护，批量用 delete_requests。",
-	},
-	{
-		Name: "delete_requests", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: deleteRequestsOutput(),
-		Description: "批量删除接口（1–10 条）：每条必须给 uid + ifMatch（search_requests 的 results[].hash），防误删；dryRun=true 只校验。单条请用 delete_request。",
-	},
-	{
-		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDetailOutput(false),
-		Description: "新建文档（独立 .md；folder 留空=docs/）。身份=uid/path（name 可重复）；同名/同 uid 默认 [CONFLICT]，onConflict=suffix/overwrite 放宽；uid 可幂等；dryRun 只演练。",
-	},
-	{
-		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDetailOutput(false),
-		Description: "改文档：content 覆盖（空串清空）/ name 显示名 / folder 移动 / replaces 局部替换（与 content 互斥，old 缺失整单拒绝）；ifMatch 防覆盖；成功附改动行；dryRun 只预览。",
-	},
-	{
-		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDeleteOutput(),
-		Description: "移除文档（移入集合 .trash，可人工找回）；dryRun=true 只返回目标路径、不删。",
-	},
-	{
-		Name: "save_doc_image", Risk: RiskHigh, Write: true, Since: "0.5.0", Output: imageOutput(),
-		Description: "保存图片到项目 assets/（base64；PNG/JPEG/GIF/WebP≤5MB，同图去重），返回 /doc-assets/<sha256>，可直接写进 Markdown。",
-	},
-	{
-		Name: "rename_module", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: moduleWriteOutput(),
-		Description: "改模块显示名（只改 folder.yml；path 是目录名，改名后路径不变）。path 用 get_project_modules 返回的值，如 api/user。",
-	},
-	{
-		Name: "delete_module", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: moduleDeleteOutput(),
-		Description: "删除模块：recursive=true 连子模块/请求/文档整棵移入集合 .trash（可找回）；false（默认）只允许空模块，非空会拒绝。",
-	},
-	{
-		Name: "rename_project", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: projectWriteOutput(),
-		Description: "改项目显示名（opencollection.yml 的 info.name；目录不变）。project 必须显式指定。",
-	},
-	{
-		Name: "delete_project", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: projectDeleteOutput(),
-		Description: "删除项目：confirm 必须等于项目显示名或目录名（防误删）；目录移入授权根下 .trash/<名>-<时间戳>，可人工移回，list_projects 立即刷新。",
-	},
-	{
-		Name: "prune_empty_modules", Risk: RiskHigh, Write: true, Since: "0.6.0", Output: pruneModulesOutput(),
-		Description: "清理空模块目录（只有 folder.yml、没有请求/文档/子模块），返回删除数量；集合根与 assets/environments/examples 不动。",
-	},
-	{
-		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleWriteOutput(),
-		Description: "手工存一条响应示例（不发请求）：name/status/headers/body/contentType；重名自动加 (1)；返回示例 uid/path。",
-	},
-	{
-		Name: "update_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleWriteOutput(),
-		Description: "改响应示例：name/status/headers/body/contentType 局部更新（不传不动）；改名同步文件名。",
-	},
-	{
-		Name: "delete_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0", Output: exampleDeleteOutput(),
-		Description: "删除一条已保存的响应示例。文件会移入集合的 .trash 目录（可人工找回），不会真正删除；只删示例，不动请求本身。",
+		Name: "search_requests", Group: GroupCollection, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "搜索接口",
+		Description: "按名称/URL/方法/头/说明/请求体/响应字段搜索接口；exactMatch 整串匹配，fields 限定范围。",
+		Output:      searchRequestsOutput(),
 	},
 
-	// ---- 5 个环境/变量写工具（只读模式不注册）----
+	// ---- 文档读（只读模式也注册）----
 	{
-		Name: "create_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envWriteOutput(),
-		Description: "新建环境（environments/<name>.yml），可同时写入初始变量。重名会报错，不覆盖已有环境。环境名只允许字母、数字、- 与 _。",
+		Name: "search_docs", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
+		Brief:       "搜索文档正文",
+		Description: "在文档条目正文里按行搜索，返回 uid/路径/命中行号；定位后再用 get_doc 精读。",
+		Output:      searchDocsOutput(),
 	},
 	{
-		Name: "rename_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envWriteOutput(),
-		Description: "给环境改名：按新名写一份（敏感值一起搬过去），再把旧名移入 .trash。目标名已被占用会报错；只改大小写（如 dev→DEV）也会被拒绝——在 Windows 上那是同一个文件，改名会让环境消失。ifMatch 传 list_envs 里的 hash 可检测期间的外部改动并拒绝覆盖。",
+		Name: "list_docs", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
+		Brief:       "列出文档条目",
+		Description: "列出文档条目（.md）及路径与 hash；query 过滤，limit/offset 分页。不含接口说明。",
+		Output:      listDocsOutput(),
 	},
 	{
-		Name: "delete_env", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envDeleteOutput(),
-		Description: "删除环境（两个文件都移入集合的 .trash，可人工找回）。删之前建议先 list_envs 确认里面没有还要用的变量。",
+		Name: "get_doc", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
+		Brief: "读文档正文（单个或批量）",
+		// 同上：单篇 / 批量两种形态，不声明 outputSchema。
+		Description: "读文档正文与完整 hash：uid 取单篇，uids 批量 1–10 篇；长文用 outline 或 startLine+maxLines。",
+	},
+
+	// ---- 环境读（只读模式也注册）----
+	{
+		Name: "list_envs", Group: GroupEnv, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Brief:       "列出环境与变量",
+		Description: "列出环境与变量（敏感值只回掩码）；query 过滤，limit/offset 分页。",
+		Output:      envsOutput(),
+	},
+
+	// ---- 集合写（只读模式不注册）：请求 5 + 容器 6 + 文档 4 + 示例 3 ----
+	{
+		Name: "create_request", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Brief:       "新建接口请求",
+		Description: "新建接口：手填字段、curl 或 copyFromUid；folder 指定模块；可同时写 summary/bodyFields/docs/respDoc/settings。",
+		Output:      requestDetailOutput(),
 	},
 	{
-		Name: "set_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envVarWriteOutput(),
-		Description: "写单个环境变量（upsert）：name/value/secret/enabled；敏感值传掩码=不改；ifMatch 用 list_envs 的 hash 防覆盖。",
+		Name: "import_collection", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.7.0",
+		Brief:       "批量导入外部集合",
+		Description: "把 Postman/OpenAPI/api-doc-go 集合正文一次导入成多条请求；dryRun 只解析并回报条数。",
+		Output:      importSummaryOutput(),
 	},
 	{
-		Name: "delete_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0", Output: envVarDeleteOutput(),
-		Description: "从某环境里删掉一个变量。变量不存在会报错（避免「以为删掉了」）。ifMatch 传 list_envs 里该环境的 hash 可获得并发保护。",
+		Name: "create_module", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Brief:       "新建模块",
+		Description: "在项目根或 parent 下新建模块（目录），支持嵌套。",
+		Output:      moduleWriteOutput(),
+	},
+	{
+		Name: "create_project", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Brief:       "新建项目（集合）",
+		Description: "在授权且可写的工作目录下新建项目；root 留空用第一个可写工作目录。",
+		Output:      projectWriteOutput(),
+	},
+	{
+		Name: "update_request", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Brief:       "修改或移动接口",
+		Description: "只改传入字段；folder 移动模块；ifMatch 防覆盖；body 与 bodyFields 相互独立。",
+		Output:      requestDetailOutput(),
+	},
+	{
+		Name: "delete_request", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Brief:       "删除单个接口",
+		Description: "移入 .trash 可找回；ifMatch/confirmName 可二次防护。",
+		Output:      requestDeleteOutput(),
+	},
+	{
+		Name: "delete_requests", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Brief:       "批量删除接口",
+		Description: "1–10 条，每条必须 uid+ifMatch；dryRun 只校验。",
+		Output:      deleteRequestsOutput(),
+	},
+	{
+		Name: "rename_module", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Brief:       "改模块显示名",
+		Description: "只改 folder.yml 的显示名，路径与目录不变。",
+		Output:      moduleWriteOutput(),
+	},
+	{
+		Name: "delete_module", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Brief:       "删除模块或清理空模块",
+		Description: "recursive=true 整棵移入 .trash；pruneEmpty=true 清理全部空模块（忽略 path）。",
+		Output:      moduleDeleteOutput(),
+	},
+	{
+		Name: "rename_project", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Brief:       "改项目显示名",
+		Description: "改 opencollection.yml 的 info.name，目录不变；project 必填。",
+		Output:      projectWriteOutput(),
+	},
+	{
+		Name: "delete_project", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Brief:       "删除项目",
+		Description: "confirm 必须等于项目显示名或目录名；目录移入授权根 .trash。",
+		Output:      projectDeleteOutput(),
+	},
+
+	// ---- 文档写 ----
+	{
+		Name: "create_doc", Group: GroupDocs, Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Brief:       "新建文档",
+		Description: "新建独立 .md；folder 默认 docs/；可指定 fileName；dryRun 只演练。",
+		Output:      docDetailOutput(false),
+	},
+	{
+		Name: "update_doc", Group: GroupDocs, Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Brief:       "修改文档",
+		Description: "content 覆盖或 replaces 局部替换；name/folder 可改；ifMatch 防覆盖。",
+		Output:      docDetailOutput(false),
+	},
+	{
+		Name: "delete_doc", Group: GroupDocs, Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Brief:       "删除文档",
+		Description: "移入集合 .trash 可找回；dryRun 只返回目标路径。",
+		Output:      docDeleteOutput(),
+	},
+	{
+		Name: "save_doc_image", Group: GroupDocs, Risk: RiskHigh, Write: true, Since: "0.5.0",
+		Brief:       "保存图片到 assets",
+		Description: "base64 保存 PNG/JPEG/GIF/WebP（≤5MB），返回 /doc-assets/<sha256>，可直接写进 Markdown。",
+		Output:      imageOutput(),
+	},
+
+	// ---- 响应示例写 ----
+	{
+		Name: "save_response_example", Group: GroupExample, Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Brief:       "手工保存响应示例",
+		Description: "不发请求，直接存一条响应示例；重名自动加序号。",
+		Output:      exampleWriteOutput(),
+	},
+	{
+		Name: "update_response_example", Group: GroupExample, Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Brief:       "修改响应示例",
+		Description: "局部更新 name/status/headers/body/contentType（不传不动）。",
+		Output:      exampleWriteOutput(),
+	},
+	{
+		Name: "delete_response_example", Group: GroupExample, Risk: RiskHigh, Write: true, Since: "0.3.0",
+		Brief:       "删除响应示例",
+		Description: "文件移入集合 .trash 可找回；只删示例，不动请求本身。",
+		Output:      exampleDeleteOutput(),
+	},
+
+	// ---- 环境写 ----
+	{
+		Name: "create_env", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Brief:       "新建环境",
+		Description: "新建 environments/<name>.yml，可同时写入初始变量；环境名只允许字母、数字、- 与 _。",
+		Output:      envWriteOutput(),
+	},
+	{
+		Name: "rename_env", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Brief:       "环境改名",
+		Description: "按新名写一份并搬敏感值，旧文件移入 .trash；目标名已占用或只改大小写会拒绝。",
+		Output:      envWriteOutput(),
+	},
+	{
+		Name: "delete_env", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Brief:       "删除环境",
+		Description: "两个文件都移入集合 .trash，可人工找回。",
+		Output:      envDeleteOutput(),
+	},
+	{
+		Name: "set_env_var", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Brief:       "写环境变量",
+		Description: "upsert 变量；secret=true 落 .secrets.yml 并对只回掩码；敏感值传掩码表示不改。",
+		Output:      envVarWriteOutput(),
+	},
+	{
+		Name: "delete_env_var", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
+		Brief:       "删环境变量",
+		Description: "变量不存在会报错；ifMatch 传 list_envs 的 hash 可获得并发保护。",
+		Output:      envVarDeleteOutput(),
 	},
 
 	// ---- 唯一的网络外发工具（只读模式也注册，但强制不落盘）----
 	{
-		Name: "send_request", Risk: RiskMedium, Output: sendRequestOutput(), NetEgress: true, InReadOnly: true, Since: "0.1.0",
-		Description: "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 false（探测请求不落盘）；需要留存时显式 saveExample=true，响应存成该请求的响应示例（examples/*.yml）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例；临时请求也需要 project，或先 use_workspace）。",
+		Name: "send_request", Group: GroupNetwork, Risk: RiskMedium, NetEgress: true, InReadOnly: true, Since: "0.1.0",
+		Brief:       "发送请求（可存示例）",
+		Description: "发已保存请求（uid）或临时请求（method+url），返回状态码/耗时/响应体；saveExample=true 时存为响应示例。",
+		Output:      sendRequestOutput(),
 	},
 }
 
@@ -235,12 +330,28 @@ func ToolNames() []string {
 	return out
 }
 
-// NamesForMode 返回指定模式下应注册的工具名集合：
-// readOnly=true 时仅 InReadOnly 的工具（12 读 + send_request = 13 个；全模式 29 个）。
-func NamesForMode(readOnly bool) []string {
+// groupEnabled 组是否启用：groups 为空 = 全部启用；session 组恒开。
+func groupEnabled(group string, groups []string) bool {
+	if group == GroupSession || len(groups) == 0 {
+		return true
+	}
+	for _, g := range groups {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// NamesForMode 返回指定模式 + 工具组下应注册的工具名集合。
+// readOnly=true 时只保留 InReadOnly；groups 为空表示全部组启用。
+func NamesForMode(readOnly bool, groups []string) []string {
 	out := make([]string, 0, len(toolMetas))
 	for _, m := range toolMetas {
 		if readOnly && !m.InReadOnly {
+			continue
+		}
+		if !groupEnabled(m.Group, groups) {
 			continue
 		}
 		out = append(out, m.Name)
@@ -248,14 +359,42 @@ func NamesForMode(readOnly bool) []string {
 	return out
 }
 
-// ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
-// 描述与版本齐备。供 RegisterTools 装配期与测试调用。
+// NormalizeGroups 过滤未知组、去重并按 ConfigurableGroups 的固定顺序返回。
+// 空输入返回空切片（= 全部启用），与配置文件兼容。
+func NormalizeGroups(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		g := strings.ToLower(strings.TrimSpace(raw))
+		if g == "" || g == GroupSession {
+			continue
+		}
+		for _, known := range ConfigurableGroups {
+			if g == known {
+				seen[g] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for _, g := range ConfigurableGroups {
+		if seen[g] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// ValidateMetas 完整性自检：name 唯一非空、分组合法、风险级别合法、无别名正式项、
+// 描述/Brief/版本齐备、副作用与风险自洽。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 37
-	if len(toolMetas) != expectTools {
-		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
+	if len(toolMetas) == 0 {
+		return errors.New("mcp meta: 工具表为空")
+	}
+	validGroups := map[string]bool{GroupSession: true}
+	for _, g := range ConfigurableGroups {
+		validGroups[g] = true
 	}
 	seen := make(map[string]bool, len(toolMetas))
+	hasListTools := false
 	for _, m := range toolMetas {
 		if m.Name == "" {
 			return errors.New("mcp meta: 存在空工具名")
@@ -266,6 +405,9 @@ func ValidateMetas() error {
 		if m.AliasOf != "" {
 			return fmt.Errorf("mcp meta: 别名项不得作为正式表发布: %q -> %q", m.Name, m.AliasOf)
 		}
+		if !validGroups[m.Group] {
+			return fmt.Errorf("mcp meta: 工具 %q 的工具组非法 %q", m.Name, m.Group)
+		}
 		switch m.Risk {
 		case RiskLow, RiskMedium, RiskHigh:
 		default:
@@ -273,6 +415,12 @@ func ValidateMetas() error {
 		}
 		if m.Description == "" {
 			return fmt.Errorf("mcp meta: 工具 %q 缺描述", m.Name)
+		}
+		if m.Brief == "" {
+			return fmt.Errorf("mcp meta: 工具 %q 缺 Brief", m.Name)
+		}
+		if n := len([]rune(m.Brief)); n > 40 {
+			return fmt.Errorf("mcp meta: 工具 %q 的 Brief 过长（%d 字，上限 40）", m.Name, n)
 		}
 		if m.Since == "" {
 			return fmt.Errorf("mcp meta: 工具 %q 缺 Since 版本", m.Name)
@@ -287,7 +435,17 @@ func ValidateMetas() error {
 		if m.NetEgress && m.Name != "send_request" {
 			return fmt.Errorf("mcp meta: 仅 send_request 可标记 NetEgress: %q", m.Name)
 		}
+		// session 组恒开：必须只读且始终注册，否则关掉其它组会连发现能力一起丢掉。
+		if m.Group == GroupSession && (!m.InReadOnly || m.Risk != RiskLow || m.Write) {
+			return fmt.Errorf("mcp meta: session 组工具必须 low+只读+InReadOnly: %q", m.Name)
+		}
+		if m.Name == "list_tools" {
+			hasListTools = true
+		}
 		seen[m.Name] = true
+	}
+	if !hasListTools {
+		return errors.New("mcp meta: 缺少 list_tools（发现入口）")
 	}
 	return nil
 }
@@ -312,6 +470,17 @@ func arrSchema(items map[string]any) map[string]any {
 func strSchema() map[string]any  { return map[string]any{"type": "string"} }
 func intSchema() map[string]any  { return map[string]any{"type": "integer"} }
 func boolSchema() map[string]any { return map[string]any{"type": "boolean"} }
+
+// toolsCatalogOutput list_tools 的结果：工具名 + 用途 + 必填参数（轻量总览，不含完整 schema）。
+func toolsCatalogOutput() map[string]any {
+	item := objSchema(map[string]any{
+		"name": strSchema(), "risk": strSchema(), "write": boolSchema(),
+		"description": strSchema(), "required": arrSchema(strSchema()),
+	}, "name", "description")
+	return objSchema(map[string]any{
+		"total": intSchema(), "returned": intSchema(), "tools": arrSchema(item),
+	}, "tools")
+}
 
 func listProjectsOutput() map[string]any {
 	project := objSchema(map[string]any{
@@ -430,6 +599,15 @@ func requestDeleteOutput() map[string]any {
 	}, "uid")
 }
 
+// importSummaryOutput import_collection 的结果（批量导入的条数与失败明细）。
+func importSummaryOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "format": strSchema(), "parent": strSchema(),
+		"imported": intSchema(), "skipped": intSchema(),
+		"failures": arrSchema(strSchema()), "dryRun": boolSchema(),
+	}, "format", "imported")
+}
+
 // moduleWriteOutput create_module / rename_module 的结果。
 func moduleWriteOutput() map[string]any {
 	return objSchema(map[string]any{
@@ -437,17 +615,13 @@ func moduleWriteOutput() map[string]any {
 	}, "path")
 }
 
-// moduleDeleteOutput delete_module 的结果。
+// moduleDeleteOutput delete_module 的结果（含 pruneEmpty 模式的 count）。
 func moduleDeleteOutput() map[string]any {
 	return objSchema(map[string]any{
 		"project": strSchema(), "path": strSchema(), "recursive": boolSchema(),
+		"pruneEmpty": boolSchema(), "count": intSchema(),
 		"deleted": boolSchema(), "trash": boolSchema(), "dryRun": boolSchema(),
-	}, "path")
-}
-
-// pruneModulesOutput prune_empty_modules 的结果。
-func pruneModulesOutput() map[string]any {
-	return objSchema(map[string]any{"project": strSchema(), "count": intSchema()}, "count")
+	}, "project")
 }
 
 // projectWriteOutput create_project / rename_project 的结果。
@@ -535,18 +709,6 @@ func requestDetailFullOutput() map[string]any {
 	}, "uid", "path")
 }
 
-// requestDetailsOutput get_request_details 的批量结果。
-func requestDetailsOutput() map[string]any {
-	item := objSchema(map[string]any{
-		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
-		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "error": strSchema(),
-	}, "uid")
-	return objSchema(map[string]any{
-		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
-		"items": arrSchema(item),
-	}, "items")
-}
-
 // sendRequestOutput send_request 的结果。
 func sendRequestOutput() map[string]any {
 	return objSchema(map[string]any{
@@ -556,18 +718,6 @@ func sendRequestOutput() map[string]any {
 		"redirects": intSchema(), "remoteAddr": strSchema(),
 		"saved": boolSchema(), "exampleUid": strSchema(), "examplePath": strSchema(),
 	}, "status")
-}
-
-// docsBatchOutput get_docs 的结果（单篇失败不影响其他：error 只在失败条目出现）。
-func docsBatchOutput() map[string]any {
-	item := objSchema(map[string]any{
-		"uid": strSchema(), "name": strSchema(), "path": strSchema(),
-		"size": intSchema(), "hash": strSchema(), "content": strSchema(), "error": strSchema(),
-	}, "uid", "path")
-	return objSchema(map[string]any{
-		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
-		"docs": arrSchema(item),
-	}, "docs")
 }
 
 // docDeleteOutput delete_doc 的结果（只带身份与路径，避免暴露内容）。

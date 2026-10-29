@@ -124,6 +124,18 @@ func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 	return c.CreateDocEx(name, uid, folder, DocConflictSuffix)
 }
 
+// CreateDocOpts CreateDocWithOpts 的入参（FileName 可选，见该字段说明）。
+type CreateDocOpts struct {
+	Name       string // 显示名（frontmatter 的 name），允许重复
+	UID        string // 可选：指定 uid 做幂等
+	Folder     string // 目标目录（相对集合根；空 = docs/）
+	OnConflict string // error（默认）/ suffix / overwrite
+	// FileName 可选：落盘文件名（不含 .md）。留空 = 由 Name slug 化推导（既有行为）。
+	// 为什么需要它：中文/带空格的显示名会原样落盘成中文文件名（集合是纯文本，文件即真相源，
+	// 改名不是我们能替用户决定的事）；需要 ASCII 文件名（脚本/工具链友好）时由调用方显式给。
+	FileName string
+}
+
 // CreateDocEx 新建文档条目，冲突策略由 onConflict 决定：
 //   - error（默认）：同名路径或同 uid 已存在 → ErrDocConflict（带现有 uid/path）
 //   - suffix：自动 -2/-3…（旧行为）
@@ -131,11 +143,16 @@ func (c *Collection) CreateDoc(name, uid, folder string) (*DocEntry, error) {
 //
 // 身份约定：uid 与 path 才是身份；name 只是 frontmatter 显示名，允许重复。
 func (c *Collection) CreateDocEx(name, uid, folder, onConflict string) (*DocEntry, error) {
-	mode, err := NormalizeDocConflict(onConflict)
+	return c.CreateDocWithOpts(CreateDocOpts{Name: name, UID: uid, Folder: folder, OnConflict: onConflict})
+}
+
+// CreateDocWithOpts 同 CreateDocEx，但可显式指定落盘文件名（FileName）。
+func (c *Collection) CreateDocWithOpts(o CreateDocOpts) (*DocEntry, error) {
+	mode, err := NormalizeDocConflict(o.OnConflict)
 	if err != nil {
 		return nil, err
 	}
-	d, existing, err := c.planCreateDoc(name, uid, folder, mode)
+	d, existing, err := c.planCreateDoc(o, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +168,16 @@ func (c *Collection) CreateDocEx(name, uid, folder, onConflict string) (*DocEntr
 // PlanCreateDoc 只做校验与冲突判定（不落盘），供 MCP create_doc 的 dryRun 使用。
 // 返回将写入的条目与动作（create / overwrite / conflict 由 error 表达）。
 func (c *Collection) PlanCreateDoc(name, uid, folder, onConflict string) (*DocEntry, string, error) {
-	mode, err := NormalizeDocConflict(onConflict)
+	return c.PlanCreateDocWithOpts(CreateDocOpts{Name: name, UID: uid, Folder: folder, OnConflict: onConflict})
+}
+
+// PlanCreateDocWithOpts 同 PlanCreateDoc，但可显式指定落盘文件名（FileName）。
+func (c *Collection) PlanCreateDocWithOpts(o CreateDocOpts) (*DocEntry, string, error) {
+	mode, err := NormalizeDocConflict(o.OnConflict)
 	if err != nil {
 		return nil, "", err
 	}
-	d, existing, err := c.planCreateDoc(name, uid, folder, mode)
+	d, existing, err := c.planCreateDoc(o, mode)
 	if err != nil {
 		return nil, "", err
 	}
@@ -165,13 +187,15 @@ func (c *Collection) PlanCreateDoc(name, uid, folder, onConflict string) (*DocEn
 	return d, "create", nil
 }
 
-// planCreateDoc CreateDocEx / PlanCreateDoc 的共同实现；existing=true 表示命中已有条目（仅 overwrite）。
-func (c *Collection) planCreateDoc(name, uid, folder, mode string) (*DocEntry, bool, error) {
+// planCreateDoc CreateDocWithOpts / PlanCreateDocWithOpts 的共同实现；
+// existing=true 表示命中已有条目（仅 overwrite）。
+func (c *Collection) planCreateDoc(o CreateDocOpts, mode string) (*DocEntry, bool, error) {
+	name := o.Name
 	if !validEntryName(name) {
 		return nil, false, fmt.Errorf("名称含非法字符或为空")
 	}
-	uid = strings.TrimSpace(uid)
-	dir := strings.TrimSpace(folder)
+	uid := strings.TrimSpace(o.UID)
+	dir := strings.TrimSpace(o.Folder)
 	switch dir {
 	case "":
 		// 未指定目录 = 旧的默认位 docs/（MCP create_doc 等沿用）
@@ -198,6 +222,14 @@ func (c *Collection) planCreateDoc(name, uid, folder, mode string) (*DocEntry, b
 	}
 
 	base := sanitizeFileName(name)
+	if fn := strings.TrimSpace(o.FileName); fn != "" {
+		// 显式 fileName 与 name 同口径校验：只清洗不校验会把 ".." 静默变成 untitled，
+		// 调用方以为写到了指定名字，实际拿到的是另一个文件。
+		if !validEntryName(fn) {
+			return nil, false, fmt.Errorf("fileName 含非法字符或为空: %q（不能带路径分隔符，不能以点开头或结尾）", fn)
+		}
+		base = sanitizeFileName(fn)
+	}
 	rel := joinRel(dir, base+".md")
 	for i := 2; ; i++ {
 		existing := docByPath(docs, rel)

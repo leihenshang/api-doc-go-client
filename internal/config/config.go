@@ -92,6 +92,9 @@ type MCPConfig struct {
 	// InteractiveAuth 风险工具（send_request + 10 个写工具）调用前是否弹窗确认（T2）。
 	// 用指针：旧配置文件无此字段（nil）时内嵌服务默认 true；用户显式关闭后落 false。
 	InteractiveAuth *bool `json:"interactiveAuth,omitempty"`
+	// ToolGroups 启用的工具组（collection/docs/env/example/network）；空 = 全部启用。
+	// 只影响 tools/list 注册哪些工具，不改变单次调用的权限判断（那由 ReadOnly 与目录授权决定）。
+	ToolGroups []string `json:"toolGroups,omitempty"`
 	// Grants 「始终允许」持久授权表（仅由用户在弹窗或设置页维护）。
 	Grants []mcpauth.Grant `json:"grants,omitempty"`
 }

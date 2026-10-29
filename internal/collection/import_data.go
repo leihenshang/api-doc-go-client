@@ -28,15 +28,62 @@ func (s *ImportSummary) addFailure(msg string) {
 	}
 }
 
+// ParseImport 只解析集合文件并回报「将导入多少条」，**不落盘**（MCP import_collection 的 dryRun）。
+//
+// 不复用 ImportPostman/ImportOpenAPI 的原因：它们是边解析边落盘，预演不能写任何文件。
+// 统计口径与真实导入一致（Postman 只数叶子请求、OpenAPI 数 ops、整包数 requests），
+// 但「已存在会跳过」这类结果只有在真导入时才知道，故预演的 skipped 恒为 0。
+func ParseImport(format string, data []byte) (*ImportSummary, error) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "postman":
+		col, err := shpostman.Decode(data)
+		if err != nil {
+			return nil, invalidImport(fmt.Errorf("Postman 集合解析失败: %w", err))
+		}
+		return &ImportSummary{Imported: countPostmanItems(col.Items)}, nil
+	case "openapi":
+		doc, err := shopenapi.Decode(data)
+		if err != nil {
+			return nil, invalidImport(fmt.Errorf("OpenAPI 解析失败: %w", err))
+		}
+		return &ImportSummary{Imported: len(doc.Ops)}, nil
+	case "apidocgo":
+		var b CollectionBundle
+		if err := json.Unmarshal(data, &b); err != nil {
+			return nil, invalidImport(fmt.Errorf("集合文件解析失败（应为 %s 的 JSON）: %w", BundleFormat, err))
+		}
+		if strings.TrimSpace(b.Format) != BundleFormat {
+			return nil, invalidImport(fmt.Errorf("不是 api-doc-go 集合文件：format = %q（期望 %q）", b.Format, BundleFormat))
+		}
+		return &ImportSummary{Imported: len(b.Requests)}, nil
+	}
+	return nil, invalidImport(fmt.Errorf("不支持的导入格式：%s（仅支持 postman / openapi / apidocgo）", format))
+}
+
+// countPostmanItems 递归统计 Postman 树里的叶子请求数（目录不算）。
+func countPostmanItems(items []shpostman.Item) int {
+	n := 0
+	for _, it := range items {
+		if it.Folder {
+			n += countPostmanItems(it.Items)
+			continue
+		}
+		if it.Req != nil {
+			n++
+		}
+	}
+	return n
+}
+
 // ImportPostman 把 Postman Collection JSON 导入到 parent 分组下：
 // 目录映射为分组、请求落盘；已存在「同方法同地址」的请求跳过。
 func (c *Collection) ImportPostman(parent string, data []byte) (*ImportSummary, error) {
 	col, err := shpostman.Decode(data)
 	if err != nil {
-		return nil, fmt.Errorf("Postman 集合解析失败: %w", err)
+		return nil, invalidImport(fmt.Errorf("Postman 集合解析失败: %w", err))
 	}
 	if len(col.Items) == 0 {
-		return nil, errors.New("集合里没有请求（item 为空）")
+		return nil, invalidImport(errors.New("集合里没有请求（item 为空）"))
 	}
 	sum := &ImportSummary{}
 	keys := c.existingKeys()
@@ -51,10 +98,10 @@ func (c *Collection) ImportPostman(parent string, data []byte) (*ImportSummary, 
 func (c *Collection) ImportOpenAPI(parent string, data []byte) (*ImportSummary, error) {
 	doc, err := shopenapi.Decode(data)
 	if err != nil {
-		return nil, fmt.Errorf("OpenAPI 解析失败: %w", err)
+		return nil, invalidImport(fmt.Errorf("OpenAPI 解析失败: %w", err))
 	}
 	if len(doc.Ops) == 0 {
-		return nil, errors.New("文档里没有可导入的接口（paths 为空）")
+		return nil, invalidImport(errors.New("文档里没有可导入的接口（paths 为空）"))
 	}
 	sum := &ImportSummary{}
 	keys := c.existingKeys()

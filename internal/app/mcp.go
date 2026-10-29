@@ -57,6 +57,8 @@ type MCPStatus struct {
 	Token    string   `json:"token"`    // Bearer 令牌（前端据此复制连接配置）
 	ReadOnly bool     `json:"readOnly"` // 只读模式：不注册创建/修改/删除类工具
 	Origins  []string `json:"origins"`  // 允许的浏览器来源（Origin 白名单）
+	// Groups 启用的工具组（空 = 全部）；设置页据此回填勾选状态
+	Groups []string `json:"groups,omitempty"`
 	// Allow MCP 可访问的工作目录白名单（路径 + 只读/可写）；空 = 不授权任何目录
 	Allow []config.MCPAllowDir `json:"allow,omitempty"`
 	// Root 展示用：第一个授权目录（空 = 白名单为空）
@@ -75,6 +77,8 @@ type MCPRequest struct {
 	Token        string
 	ReadOnly     bool
 	AllowOrigins []string
+	// Groups 启用的工具组（空 = 全部；session 恒开）。
+	Groups []string
 	// Allow 授权的工作目录白名单（来自设置）：内嵌服务只在这些目录里找项目。
 	// 空 = 不授权（AI 读写不到任何集合）—— 安全默认，需要时在设置里添加。
 	Allow []config.MCPAllowDir
@@ -148,7 +152,7 @@ func (a *App) MCPStatusText() *MCPStatus {
 	}
 	st := &MCPStatus{
 		Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow,
+		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow, Groups: cfg.ToolGroups,
 		CrossHost: !isLoopbackHost(cfg.Addr),
 	}
 	switch {
@@ -192,7 +196,7 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 	// 未注入实现（纯浏览器/devserver 未开启 MCP 的构建）：如实回报，不静默
 	if backend == nil {
 		st := &MCPStatus{Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Error: errNoMCPBackend.Error()}
+			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Groups: cfg.ToolGroups, Error: errNoMCPBackend.Error()}
 		a.setMCPStatus(st)
 		return st
 	}
@@ -210,12 +214,13 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 		ReadOnly:        cfg.ReadOnly,
 		AllowOrigins:    cfg.AllowOrigins,
 		Allow:           cfg.Allow,
+		Groups:          cfg.ToolGroups,
 		InteractiveAuth: cloneBool(cfg.InteractiveAuth),
 	})
 	if err != nil {
 		st = &MCPStatus{
 			Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow,
+			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow, Groups: cfg.ToolGroups,
 			CrossHost: !isLoopbackHost(cfg.Addr),
 			Error:     err.Error(),
 		}

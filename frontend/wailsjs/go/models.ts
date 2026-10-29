@@ -178,6 +178,7 @@ export namespace app {
 	    token: string;
 	    readOnly: boolean;
 	    origins: string[];
+	    groups?: string[];
 	    allow?: config.MCPAllowDir[];
 	    root: string;
 	    projects: number;
@@ -200,6 +201,7 @@ export namespace app {
 	        this.token = source["token"];
 	        this.readOnly = source["readOnly"];
 	        this.origins = source["origins"];
+	        this.groups = source["groups"];
 	        this.allow = this.convertValues(source["allow"], config.MCPAllowDir);
 	        this.root = source["root"];
 	        this.projects = source["projects"];
@@ -716,6 +718,26 @@ export namespace collection {
 	        this.createdAt = source["createdAt"];
 	    }
 	}
+	export class CreateDocOpts {
+	    Name: string;
+	    UID: string;
+	    Folder: string;
+	    OnConflict: string;
+	    FileName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateDocOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.UID = source["UID"];
+	        this.Folder = source["Folder"];
+	        this.OnConflict = source["OnConflict"];
+	        this.FileName = source["FileName"];
+	    }
+	}
 	export class DocEntry {
 	    uid: string;
 	    name: string;
@@ -1150,6 +1172,46 @@ export namespace collection {
 		    return a;
 		}
 	}
+	export class RequestCreateOpts {
+	    Folder: string;
+	    Name: string;
+	    Src?: Request;
+	    UID: string;
+	    OnConflict: string;
+	    FileName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RequestCreateOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Folder = source["Folder"];
+	        this.Name = source["Name"];
+	        this.Src = this.convertValues(source["Src"], Request);
+	        this.UID = source["UID"];
+	        this.OnConflict = source["OnConflict"];
+	        this.FileName = source["FileName"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	export class ResponseExample {
@@ -1266,6 +1328,7 @@ export namespace config {
 	    allowOrigins: string[];
 	    allow?: MCPAllowDir[];
 	    interactiveAuth?: boolean;
+	    toolGroups?: string[];
 	    grants?: mcpauth.Grant[];
 	
 	    static createFrom(source: any = {}) {
@@ -1282,6 +1345,7 @@ export namespace config {
 	        this.allowOrigins = source["allowOrigins"];
 	        this.allow = this.convertValues(source["allow"], MCPAllowDir);
 	        this.interactiveAuth = source["interactiveAuth"];
+	        this.toolGroups = source["toolGroups"];
 	        this.grants = this.convertValues(source["grants"], mcpauth.Grant);
 	    }
 	

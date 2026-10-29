@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +26,8 @@ var guardLogger = log.New(io.Discard, "[mcp-guard] ", log.LstdFlags)
 // 结果以「人类/AI 可读文本」放进 Content —— AI 工具链里文本比结构化 JSON 更省 token、也更好读。
 type toolSet struct {
 	svc      *Service
-	readOnly bool // 只读模式：不注册写工具，send_request 强制不落盘
+	readOnly bool     // 只读模式：不注册写工具，send_request 强制不落盘
+	groups   []string // 启用的工具组（空 = 全部；session 恒开）
 
 	// authz 风险工具交互授权（T2）：nil = 不拦截（stdio 自动化 / 开关关闭）。
 	authz mcpauth.Authorizer
@@ -40,6 +42,48 @@ type toolSet struct {
 	// stdio 与内嵌服务只有一个会话，等价于「进程里只有一份」；拿不到会话标识时用空串兜底。
 	mu  sync.Mutex
 	sel map[string]string
+
+	// required 工具名 → 必填参数名（注册期写入，之后只读），供 list_tools 回报。
+	// 从 In 结构体的 json tag 推导（不带 omitempty 即必填），与 SDK 生成 inputSchema
+	// 的规则同源，避免再手工维护一份清单而漂移。
+	required map[string][]string
+}
+
+// noteRequired 记录某工具的必填参数（注册期调用，运行期只读）。
+func (ts *toolSet) noteRequired(name string, in any) {
+	t := reflect.TypeOf(in)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return
+	}
+	list := make([]string, 0, 4)
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		comma := strings.Index(tag, ",")
+		field := tag
+		if comma >= 0 {
+			field = tag[:comma]
+		}
+		if field == "" || field == "-" || strings.Contains(tag, "omitempty") {
+			continue
+		}
+		list = append(list, field)
+	}
+	ts.mu.Lock()
+	if ts.required == nil {
+		ts.required = map[string][]string{}
+	}
+	ts.required[name] = list
+	ts.mu.Unlock()
+}
+
+// requiredOf 某工具的必填参数（无记录时返回空切片）。
+func (ts *toolSet) requiredOf(name string) []string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return append([]string(nil), ts.required[name]...)
 }
 
 // sessionID 本次工具调用所属的会话标识（拿不到时返回空串 = 进程级那一份）。
@@ -90,12 +134,20 @@ type toolGuardOpts struct {
 }
 
 func RegisterTools(server *mcp.Server, svc *Service, readOnly bool) {
-	if err := registerToolsWithOpts(server, svc, readOnly, toolGuardOpts{}); err != nil {
+	if err := registerToolsWithOpts(server, svc, readOnly, nil, toolGuardOpts{}); err != nil {
 		panic(err)
 	}
 }
 
-func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts toolGuardOpts) error {
+// RegisterToolsWithGroups 同 RegisterTools，但按工具组过滤（空 = 全部；session 恒开）。
+// 测试与嵌入式装配共用；内嵌服务走 NewServer(Config.Groups)。
+func RegisterToolsWithGroups(server *mcp.Server, svc *Service, readOnly bool, groups []string) {
+	if err := registerToolsWithOpts(server, svc, readOnly, groups, toolGuardOpts{}); err != nil {
+		panic(err)
+	}
+}
+
+func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, groups []string, opts toolGuardOpts) error {
 	if err := ValidateMetas(); err != nil {
 		return err
 	}
@@ -103,7 +155,7 @@ func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts
 	// 这里统一补 [INVALID]（其余未分类补 [INTERNAL]），保证「失败: [CODE] ...」恒成立。
 	server.AddReceivingMiddleware(toolErrorCodeMiddleware())
 	ts := &toolSet{
-		svc: svc, readOnly: readOnly,
+		svc: svc, readOnly: readOnly, groups: NormalizeGroups(groups),
 		authz:      opts.authorizer,
 		audit:      opts.auditor,
 		transport:  opts.transport,
@@ -117,11 +169,13 @@ func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, opts
 		ts.registerWriteTools(server)
 		ts.registerSendTool(server, false)
 	}
+	ts.registerDocTemplateResource(server)
 	return ts.assertRegistered(server, readOnly)
 }
 
 // addTool 按 meta.go 中的名称取描述注册一个工具；名字不在元数据表里即装配缺陷。
-// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，24 个业务 handler 零改动。
+// guard 在这一层包住所有 handler：panic recover + 风险工具交互授权，业务 handler 零改动。
+// 工具组未启用时直接跳过注册（handler 仍构造，但不会出现在 tools/list）。
 // 必须在内部构造**字面签名**的闭包交给 mcp.AddTool —— 若用具名 coreHandler[In] 类型，
 // SDK 的 ToolHandlerFor[In,Out] 泛型推断无法把具名类型与类型参数合一。
 func addTool[In any](ts *toolSet, server *mcp.Server, name string,
@@ -130,6 +184,11 @@ func addTool[In any](ts *toolSet, server *mcp.Server, name string,
 	if !ok {
 		panic(fmt.Sprintf("mcp: 工具 %q 缺少 meta.go 元数据", name))
 	}
+	if !groupEnabled(meta.Group, ts.groups) {
+		return
+	}
+	var zero In
+	ts.noteRequired(meta.Name, &zero)
 	wrapped := func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		return runGuarded(ts, meta, ctx, req, func() (*mcp.CallToolResult, any, error) {
 			return h(ctx, req, in)
@@ -317,7 +376,7 @@ func (ts *toolSet) assertRegistered(server *mcp.Server, readOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("mcp: 注册集合自检失败: %w", err)
 	}
-	want := NamesForMode(readOnly)
+	want := NamesForMode(readOnly, ts.groups)
 	gotSet := make(map[string]bool, len(got))
 	for _, n := range got {
 		gotSet[n] = true
@@ -346,6 +405,9 @@ func (ts *toolSet) assertRegistered(server *mcp.Server, readOnly bool) error {
 
 // toolErrorCodeMiddleware 给 SDK 层错误（参数 schema 校验、未知工具）补稳定错误码。
 // handler 已把业务错误包装成 `失败: [CODE] ...`，这里只处理「文本里没有 [CODE]」的情况。
+//
+// 顺带做一件评审提的事：SDK 的 schema 校验文案是英文（"validating ... missing properties"），
+// 与其余中文错误混排，且看不出是哪个参数。这里统一翻成中文并尽量带上参数名与工具名。
 func toolErrorCodeMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
@@ -361,35 +423,117 @@ func toolErrorCodeMiddleware() mcp.Middleware {
 			if !ok || strings.Contains(text.Text, "] ") {
 				return res, err
 			}
+			raw := strings.TrimPrefix(text.Text, "失败: ")
 			code := CodeInternal
-			if strings.Contains(text.Text, "validating") || strings.Contains(text.Text, "missing properties") {
-				code = CodeInvalid
-			} else if strings.Contains(text.Text, "unknown tool") || strings.Contains(text.Text, "not found") {
+			msg := raw
+			switch {
+			case strings.Contains(raw, "unknown tool"), strings.Contains(raw, "not found"):
 				code = CodeNotFound
+			case strings.Contains(raw, "validating"), strings.Contains(raw, "missing properties"),
+				strings.Contains(raw, "additional properties"):
+				code = CodeInvalid
+				msg = humanizeSchemaError(toolNameOf(req), raw)
 			}
-			out := strings.TrimPrefix(text.Text, "失败: ")
-			call.Content = []mcp.Content{&mcp.TextContent{Text: "失败: " + coded(code, errors.New(out)).Error()}}
+			call.Content = []mcp.Content{&mcp.TextContent{Text: "失败: " + coded(code, errors.New(msg)).Error()}}
 			return res, err
 		}
 	}
 }
 
+// toolNameOf 取本次调用的工具名（拿不到时返回空串，报错里退化为「本工具」）。
+func toolNameOf(req mcp.Request) string {
+	call, ok := req.(*mcp.CallToolRequest)
+	if !ok || call.Params == nil {
+		return ""
+	}
+	return call.Params.Name
+}
+
 func (ts *toolSet) registerReadTools(server *mcp.Server) {
+	addTool(ts, server, "list_tools", ts.listTools)
 	addTool(ts, server, "list_workspaces", ts.listWorkspaces)
 	addTool(ts, server, "use_workspace", ts.useWorkspace)
 	addTool(ts, server, "list_projects", ts.listProjects)
 	addTool(ts, server, "get_project_modules", ts.getProjectModules)
+	// 详情：uid 取单个，uids 批量（原 get_request_details 已并入）
 	addTool(ts, server, "get_request_detail", ts.getRequestDetail)
-	addTool(ts, server, "get_request_details", ts.getRequestDetails)
 	addTool(ts, server, "search_requests", ts.searchRequests)
 	addTool(ts, server, "search_docs", ts.searchDocs)
 	addTool(ts, server, "list_envs", ts.listEnvs)
-	addTool(ts, server, "get_doc_template", ts.getDocTemplate)
-	// 文档条目：只读两个（列表不含正文，取全文走 get_doc）
+	// 文档条目：列表不含正文，取全文走 get_doc（uid/uids 双形态）
 	addTool(ts, server, "list_docs", ts.listDocs)
 	addTool(ts, server, "get_doc", ts.getDoc)
-	// 批量读取：1–10 个 uid，按 uid 分组（文档侧对齐 get_request_details）
-	addTool(ts, server, "get_docs", ts.getDocs)
+}
+
+// ---- 工具总览（list_tools）----
+
+// listToolsIn list_tools 的入参。
+type listToolsIn struct {
+	Filter string `json:"filter,omitempty" jsonschema:"按工具名或描述关键词过滤（大小写无关）；留空 = 全部"`
+	Mode   string `json:"mode,omitempty" jsonschema:"all（默认，全部）/ read（只读与会话类）/ write（会落盘改集合的）"`
+}
+
+// toolCatalogItem 总览里的一行（结构化输出的最小集）。
+type toolCatalogItem struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Risk        string   `json:"risk"`
+	Write       bool     `json:"write"`
+	Required    []string `json:"required"`
+}
+
+func (ts *toolSet) listTools(_ context.Context, _ *mcp.CallToolRequest, in listToolsIn) (*mcp.CallToolResult, any, error) {
+	return ts.wrapData(func() (string, any, error) {
+		items, total := ts.catalog(in.Filter, in.Mode)
+		data := map[string]any{
+			"total":    total,
+			"returned": len(items),
+			"tools":    nonNilSlice(items),
+		}
+		return renderToolCatalog(items, total, in.Filter, in.Mode, ts.readOnly), data, nil
+	})
+}
+
+// catalog 按过滤条件产出总览行；total 恒为「当前模式已注册的工具总数」。
+// 只读模式下只列本模式可用的工具，避免 AI 挑了未注册的工具却调用不到。
+func (ts *toolSet) catalog(filter, mode string) ([]toolCatalogItem, int) {
+	total := len(NamesForMode(ts.readOnly, ts.groups))
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	wantWrite := -1 // -1=不限，0=只读，1=写
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "read":
+		wantWrite = 0
+	case "write":
+		wantWrite = 1
+	}
+	out := make([]toolCatalogItem, 0, total)
+	for _, m := range toolMetas {
+		if ts.readOnly && !m.InReadOnly {
+			continue
+		}
+		if !groupEnabled(m.Group, ts.groups) {
+			continue
+		}
+		if wantWrite == 0 && m.Write {
+			continue
+		}
+		if wantWrite == 1 && !m.Write {
+			continue
+		}
+		if filter != "" && !strings.Contains(strings.ToLower(m.Name), filter) &&
+			!strings.Contains(strings.ToLower(m.Description), filter) &&
+			!strings.Contains(strings.ToLower(m.Brief), filter) {
+			continue
+		}
+		out = append(out, toolCatalogItem{
+			Name:        m.Name,
+			Description: m.Brief, // 只回一句话摘要：完整描述留给该工具的 schema
+			Risk:        string(m.Risk),
+			Write:       m.Write,
+			Required:    nonNilSlice(ts.requiredOf(m.Name)),
+		})
+	}
+	return out, total
 }
 
 // ---- 工作目录（白名单 + 默认目标）----
@@ -422,6 +566,7 @@ func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in 
 
 func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_request", ts.createRequest)
+	addTool(ts, server, "import_collection", ts.importCollection)
 	addTool(ts, server, "create_module", ts.createModule)
 	addTool(ts, server, "create_project", ts.createProject)
 	addTool(ts, server, "update_request", ts.updateRequest)
@@ -433,12 +578,11 @@ func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "delete_doc", ts.deleteDoc)
 	// 图片：存到项目 assets/，返回可写进正文的 URL（Markdown 编辑器同款）
 	addTool(ts, server, "save_doc_image", ts.saveDocImage)
-	// 容器级：模块/项目的改名与删除（删除进 .trash）+ 空模块清理
+	// 容器级：模块/项目的改名与删除（删除进 .trash）；空模块清理并入 delete_module
 	addTool(ts, server, "rename_module", ts.renameModule)
 	addTool(ts, server, "delete_module", ts.deleteModule)
 	addTool(ts, server, "rename_project", ts.renameProject)
 	addTool(ts, server, "delete_project", ts.deleteProject)
-	addTool(ts, server, "prune_empty_modules", ts.pruneEmptyModules)
 	// 响应示例的写操作：手工新增 / 局部更新（改名·状态码·响应体）/ 删除（进 .trash）
 	addTool(ts, server, "save_response_example", ts.saveResponseExample)
 	addTool(ts, server, "update_response_example", ts.updateResponseExample)
@@ -461,6 +605,10 @@ func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
 	if !ok {
 		panic("mcp: 工具 send_request 缺少 meta.go 元数据")
 	}
+	if !groupEnabled(meta.Group, ts.groups) {
+		return
+	}
+	ts.noteRequired(meta.Name, &SendRequestInput{})
 	desc := meta.Description
 	if forceNoSave {
 		desc = "发送请求并返回结果（只读模式：不会保存响应示例）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求。"
@@ -484,6 +632,32 @@ func (ts *toolSet) registerSendTool(server *mcp.Server, forceNoSave bool) {
 		})
 	}
 	mcp.AddTool(server, &mcp.Tool{Name: meta.Name, Description: desc, OutputSchema: meta.Output}, handler)
+}
+
+// docTemplateURI 接口说明模板的 resource 地址（原 get_doc_template 工具已迁移至此）。
+const docTemplateURI = "apidoc://doc-template"
+
+// registerDocTemplateResource 把「接口说明（docs）分节结构」注册为 MCP resource。
+//
+// 为什么从工具迁到 resource：它是无参数、内容固定的静态文本，作为工具只会占用
+// tools/list 的 schema 与一次调用往返；resource 才是协议里"可读取的静态内容"。
+func (ts *toolSet) registerDocTemplateResource(server *mcp.Server) {
+	server.AddResource(&mcp.Resource{
+		URI:      docTemplateURI,
+		Name:     "doc_template",
+		Title:    "接口说明（docs）模板",
+		MIMEType: "text/markdown",
+		Description: "接口说明的分节结构契约：与客户端「生成接口文档」的 Markdown 骨架逐节对齐" +
+			"（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注）。",
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		uri := docTemplateURI
+		if req != nil && req.Params != nil && req.Params.URI != "" {
+			uri = req.Params.URI
+		}
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
+			URI: uri, MIMEType: "text/markdown", Text: ts.svc.DocTemplate(),
+		}}}, nil
+	})
 }
 
 // ---- 各工具的 handler（统一经 wrap 把 panic/错误转成工具结果） ----
@@ -572,10 +746,11 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 	})
 }
 
-// getDetailIn get_request_detail 的入参。
+// getDetailIn get_request_detail 的入参（uid 单个 / uids 批量，二选一）。
 type getDetailIn struct {
 	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID          string   `json:"uid" jsonschema:"接口 uid（用 search_requests 或 get_project_modules 获取）"`
+	UID          string   `json:"uid,omitempty" jsonschema:"接口 uid（单个查询；与 uids 二选一）"`
+	UIDs         []string `json:"uids,omitempty" jsonschema:"接口 uid 列表，一次 1–10 个（批量；与 uid 二选一，超出直接报错）"`
 	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
 	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
 	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
@@ -589,6 +764,18 @@ type getDetailIn struct {
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
+		if strings.TrimSpace(in.UID) != "" && len(in.UIDs) > 0 {
+			return "", nil, withInvalid(errors.New("uid 与 uids 只能给一个：单个用 uid，批量用 uids（1–10 个）"))
+		}
+		if len(in.UIDs) > 0 {
+			return ts.batchRequestDetails(getDetailsIn{
+				Project: in.Project, UIDs: in.UIDs, Sections: in.Sections, Query: in.Query,
+				IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes,
+			})
+		}
+		if strings.TrimSpace(in.UID) == "" {
+			return "", nil, withInvalid(errors.New("缺少 uid 或 uids：单个查询传 uid，批量查询传 uids（1–10 个）"))
+		}
 		sel, err := NormalizeDetailSections(in.Sections)
 		if err != nil {
 			return "", nil, err
@@ -604,10 +791,10 @@ func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolReques
 	})
 }
 
-// maxBatchDetails get_request_details 单次 uid 上限。
+// maxBatchDetails get_request_detail（uids 批量）单次 uid 上限。
 const maxBatchDetails = 10
 
-// getDetailsIn get_request_details（批量）的入参。
+// getDetailsIn get_request_detail 批量模式的入参（对调用方不可见，由 getDetailIn 转换）。
 type getDetailsIn struct {
 	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UIDs         []string `json:"uids" jsonschema:"接口 uid 列表，一次 1–10 个（超出直接报错，请分批）"`
@@ -617,51 +804,49 @@ type getDetailsIn struct {
 	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
 }
 
-// getRequestDetails 批量取详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
-func (ts *toolSet) getRequestDetails(ctx context.Context, req *mcp.CallToolRequest, in getDetailsIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrapData(func() (string, any, error) {
-		in.Project = ts.proj(req, in.Project)
-		uids := make([]string, 0, len(in.UIDs))
-		for _, u := range in.UIDs {
-			if u = strings.TrimSpace(u); u != "" {
-				uids = append(uids, u)
-			}
+// batchRequestDetails 批量取详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
+// 单条与批量共用 get_request_detail 的入参，这里只做批处理（Project 已由调用方解析）。
+func (ts *toolSet) batchRequestDetails(in getDetailsIn) (string, any, error) {
+	uids := make([]string, 0, len(in.UIDs))
+	for _, u := range in.UIDs {
+		if u = strings.TrimSpace(u); u != "" {
+			uids = append(uids, u)
 		}
-		if len(uids) == 0 {
-			return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个 uid（uid 从 search_requests / get_project_modules 取）"))
+	}
+	if len(uids) == 0 {
+		return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个 uid（uid 从 search_requests / get_project_modules 取）"))
+	}
+	if len(uids) > maxBatchDetails {
+		return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDetails, len(uids)))
+	}
+	sel, err := NormalizeDetailSections(in.Sections)
+	if err != nil {
+		return "", nil, err
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "批量详情（%d 个请求，项目 %s）：", len(uids), in.Project)
+	ok := 0
+	items := make([]map[string]any, 0, len(uids))
+	for _, uid := range uids {
+		d, derr := ts.svc.GetRequestDetail(in.Project, uid, DetailOptions{
+			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
+		})
+		sb.WriteString("\n")
+		if derr != nil {
+			fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
+			items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
+			continue
 		}
-		if len(uids) > maxBatchDetails {
-			return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDetails, len(uids)))
-		}
-		sel, err := NormalizeDetailSections(in.Sections)
-		if err != nil {
-			return "", nil, err
-		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "批量详情（%d 个请求，项目 %s）：", len(uids), in.Project)
-		ok := 0
-		items := make([]map[string]any, 0, len(uids))
-		for _, uid := range uids {
-			d, derr := ts.svc.GetRequestDetail(in.Project, uid, DetailOptions{
-				IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
-			})
-			sb.WriteString("\n")
-			if derr != nil {
-				fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
-				items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
-				continue
-			}
-			ok++
-			fmt.Fprintf(&sb, "===== %s =====\n", uid)
-			sb.WriteString(renderDetail(d, sel, LineView{}))
-			items = append(items, detailData(d))
-		}
-		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
-		data := map[string]any{
-			"project": in.Project, "total": len(uids), "returned": ok, "items": items,
-		}
-		return sb.String(), data, nil
-	})
+		ok++
+		fmt.Fprintf(&sb, "===== %s =====\n", uid)
+		sb.WriteString(renderDetail(d, sel, LineView{}))
+		items = append(items, detailData(d))
+	}
+	fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
+	data := map[string]any{
+		"project": in.Project, "total": len(uids), "returned": ok, "items": items,
+	}
+	return sb.String(), data, nil
 }
 
 // searchDocsIn search_docs 的入参。
@@ -757,15 +942,6 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 	})
 }
 
-// getDocTemplateIn get_doc_template 无入参。
-type getDocTemplateIn struct{}
-
-func (ts *toolSet) getDocTemplate(_ context.Context, _ *mcp.CallToolRequest, _ getDocTemplateIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
-		return ts.svc.DocTemplate(), nil
-	})
-}
-
 // ---- 文档条目（集合里的独立 .md；与 request.docs 区分）----
 
 // listDocsIn list_docs 的入参。
@@ -796,10 +972,11 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 	})
 }
 
-// getDocIn get_doc 的入参。
+// getDocIn get_doc 的入参（uid 单篇 / uids 批量，二选一）。
 type getDocIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string `json:"uid" jsonschema:"文档 uid（list_docs 返回）"`
+	Project string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；单个查询，与 uids 二选一）"`
+	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid 二选一，超出直接报错）"`
 	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
 	StartLine int  `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
 	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
@@ -809,6 +986,18 @@ type getDocIn struct {
 func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
+		if strings.TrimSpace(in.UID) != "" && len(in.UIDs) > 0 {
+			return "", nil, withInvalid(errors.New("uid 与 uids 只能给一个：单篇用 uid，批量用 uids（1–10 篇）"))
+		}
+		if len(in.UIDs) > 0 {
+			return ts.batchDocs(getDocsIn{
+				Project: in.Project, UIDs: in.UIDs,
+				StartLine: in.StartLine, MaxLines: in.MaxLines, Outline: in.Outline,
+			})
+		}
+		if strings.TrimSpace(in.UID) == "" {
+			return "", nil, withInvalid(errors.New("缺少 uid 或 uids：单篇传 uid，批量传 uids（1–10 篇）"))
+		}
 		d, err := ts.svc.GetDoc(in.Project, in.UID)
 		if err != nil {
 			return "", nil, err
@@ -920,53 +1109,51 @@ type getDocsIn struct {
 	Outline   bool     `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号）"`
 }
 
-// getDocs 批量取文档详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
-func (ts *toolSet) getDocs(_ context.Context, req *mcp.CallToolRequest, in getDocsIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrapData(func() (string, any, error) {
-		in.Project = ts.proj(req, in.Project)
-		uids := make([]string, 0, len(in.UIDs))
-		seen := make(map[string]bool, len(in.UIDs))
-		for _, u := range in.UIDs {
-			u = strings.TrimSpace(u)
-			if u == "" || seen[u] {
-				continue
-			}
-			seen[u] = true
-			uids = append(uids, u)
+// batchDocs 批量取文档详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
+// 单篇与批量共用 get_doc 的入参，这里只做批处理（Project 已由调用方解析）。
+func (ts *toolSet) batchDocs(in getDocsIn) (string, any, error) {
+	uids := make([]string, 0, len(in.UIDs))
+	seen := make(map[string]bool, len(in.UIDs))
+	for _, u := range in.UIDs {
+		u = strings.TrimSpace(u)
+		if u == "" || seen[u] {
+			continue
 		}
-		if len(uids) == 0 {
-			return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个文档 uid（从 list_docs 取）"))
+		seen[u] = true
+		uids = append(uids, u)
+	}
+	if len(uids) == 0 {
+		return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个文档 uid（从 list_docs 取）"))
+	}
+	if len(uids) > maxBatchDocs {
+		return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDocs, len(uids)))
+	}
+	view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "批量文档（%d 篇，项目 %s）：", len(uids), in.Project)
+	ok := 0
+	items := make([]map[string]any, 0, len(uids))
+	for _, uid := range uids {
+		d, derr := ts.svc.GetDoc(in.Project, uid)
+		sb.WriteString("\n")
+		if derr != nil {
+			fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
+			items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
+			continue
 		}
-		if len(uids) > maxBatchDocs {
-			return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDocs, len(uids)))
-		}
-		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "批量文档（%d 篇，项目 %s）：", len(uids), in.Project)
-		ok := 0
-		items := make([]map[string]any, 0, len(uids))
-		for _, uid := range uids {
-			d, derr := ts.svc.GetDoc(in.Project, uid)
-			sb.WriteString("\n")
-			if derr != nil {
-				fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
-				items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
-				continue
-			}
-			ok++
-			fmt.Fprintf(&sb, "===== %s =====\n", uid)
-			sb.WriteString(renderDocDetail(d, view))
-			items = append(items, docDetailData(in.Project, d, true))
-		}
-		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
-		data := map[string]any{
-			"project": in.Project, "total": len(uids), "returned": ok, "docs": items,
-		}
-		return sb.String(), data, nil
-	})
+		ok++
+		fmt.Fprintf(&sb, "===== %s =====\n", uid)
+		sb.WriteString(renderDocDetail(d, view))
+		items = append(items, docDetailData(in.Project, d, true))
+	}
+	fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
+	data := map[string]any{
+		"project": in.Project, "total": len(uids), "returned": ok, "docs": items,
+	}
+	return sb.String(), data, nil
 }
 
-// maxBatchDocs get_docs 单次 uid 上限（与 get_request_details 对齐）。
+// maxBatchDocs get_doc（uids 批量）单次 uid 上限（与 get_request_detail 对齐）。
 const maxBatchDocs = 10
 
 // ---- 容器级工具 ----
@@ -989,15 +1176,30 @@ func (ts *toolSet) renameModule(_ context.Context, req *mcp.CallToolRequest, in 
 }
 
 type deleteModuleIn struct {
-	Project   string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
-	Path      string `json:"path" jsonschema:"模块相对路径，如 api/user"`
-	Recursive bool   `json:"recursive,omitempty" jsonschema:"true = 连同子模块/请求/文档整棵删除（进 .trash）；false（默认）只允许空模块"`
-	DryRun    bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash"`
+	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
+	Path       string `json:"path,omitempty" jsonschema:"模块相对路径，如 api/user（pruneEmpty=true 时可省略）"`
+	Recursive  bool   `json:"recursive,omitempty" jsonschema:"true = 连同子模块/请求/文档整棵删除（进 .trash）；false（默认）只允许空模块"`
+	PruneEmpty bool   `json:"pruneEmpty,omitempty" jsonschema:"true = 清理全部空模块（只有 folder.yml、无请求/文档/子模块），忽略 path；返回删除数量"`
+	DryRun     bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash（pruneEmpty 不支持预演）"`
 }
 
 func (ts *toolSet) deleteModule(_ context.Context, req *mcp.CallToolRequest, in deleteModuleIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
+		if in.PruneEmpty {
+			if in.DryRun {
+				return "", nil, withInvalid(errors.New("pruneEmpty 不支持 dryRun：空模块清理没有预演模式"))
+			}
+			n, err := ts.svc.PruneEmptyModules(in.Project)
+			if err != nil {
+				return "", nil, err
+			}
+			data := map[string]any{"project": in.Project, "count": n, "deleted": true, "pruneEmpty": true}
+			return fmt.Sprintf("已清理 %d 个空模块目录（只删只有 folder.yml、没有请求/文档/子模块的目录）", n), data, nil
+		}
+		if strings.TrimSpace(in.Path) == "" {
+			return "", nil, withInvalid(errors.New("缺少 path：删除单个模块要给 path，或传 pruneEmpty=true 清理全部空模块"))
+		}
 		if err := ts.svc.DeleteModule(in.Project, in.Path, in.Recursive, in.DryRun); err != nil {
 			return "", nil, err
 		}
@@ -1017,7 +1219,7 @@ func (ts *toolSet) deleteModule(_ context.Context, req *mcp.CallToolRequest, in 
 }
 
 type renameProjectIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid（不能省略，避免改错）"`
+	Project string `json:"project" jsonschema:"必填：项目路径、名称或 uid（不能省略，避免改错）"`
 	Name    string `json:"name" jsonschema:"新的项目显示名（改 opencollection.yml 的 info.name，目录不变）"`
 }
 
@@ -1033,7 +1235,7 @@ func (ts *toolSet) renameProject(_ context.Context, req *mcp.CallToolRequest, in
 }
 
 type deleteProjectIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid（不能省略）"`
+	Project string `json:"project" jsonschema:"必填：项目路径、名称或 uid（不能省略，避免删错）"`
 	Confirm string `json:"confirm" jsonschema:"必填：填项目显示名或目录名，用于二次确认；不一致直接拒绝"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验 confirm 与可写性），不移动目录"`
 }
@@ -1052,22 +1254,6 @@ func (ts *toolSet) deleteProject(_ context.Context, req *mcp.CallToolRequest, in
 			return fmt.Sprintf("（dryRun：未落盘）将删除项目 %s（confirm=%s），目标回收位 %s", in.Project, in.Confirm, dest), data, nil
 		}
 		return fmt.Sprintf("已删除项目 %s：目录已移入 %s（可手动移回恢复）。list_projects 已刷新。", in.Project, dest), data, nil
-	})
-}
-
-type pruneModulesIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
-}
-
-func (ts *toolSet) pruneEmptyModules(_ context.Context, req *mcp.CallToolRequest, in pruneModulesIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrapData(func() (string, any, error) {
-		in.Project = ts.proj(req, in.Project)
-		n, err := ts.svc.PruneEmptyModules(in.Project)
-		if err != nil {
-			return "", nil, err
-		}
-		data := map[string]any{"project": in.Project, "count": n}
-		return fmt.Sprintf("已清理 %d 个空模块目录（只删只有 folder.yml、没有请求/文档/子模块的目录）", n), data, nil
 	})
 }
 
@@ -1094,7 +1280,7 @@ func (ts *toolSet) createModule(ctx context.Context, req *mcp.CallToolRequest, i
 type createProjectIn struct {
 	Name    string `json:"name" jsonschema:"项目名（写进 manifest 的 info.name）"`
 	DirName string `json:"dirName,omitempty" jsonschema:"目录名；留空 = 与 name 相同"`
-	Root    string `json:"root,omitempty" jsonschema:"项目根目录；留空 = 服务启动参数 -root"`
+	Root    string `json:"root,omitempty" jsonschema:"项目根目录（必须是授权且可写的工作目录）；留空 = 第一个可写工作目录"`
 }
 
 func (ts *toolSet) createProject(ctx context.Context, req *mcp.CallToolRequest, in createProjectIn) (*mcp.CallToolResult, any, error) {
@@ -1125,6 +1311,30 @@ func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, 
 				r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
 		}
 		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
+	})
+}
+
+// importCollectionArg import_collection 的入参。
+type importCollectionArg = ImportCollectionInput
+
+func (ts *toolSet) importCollection(ctx context.Context, req *mcp.CallToolRequest, in importCollectionArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrapData(func() (string, any, error) {
+		in.Project = ts.proj(req, in.Project)
+		sum, err := ts.svc.ImportCollection(in)
+		if err != nil {
+			return "", nil, err
+		}
+		format := strings.ToLower(strings.TrimSpace(in.Format))
+		data := map[string]any{
+			"project":  in.Project,
+			"format":   format,
+			"parent":   strings.TrimSpace(in.Parent),
+			"imported": sum.Imported,
+			"skipped":  sum.Skipped,
+			"failures": nonNilSlice(sum.Failures),
+			"dryRun":   in.DryRun,
+		}
+		return renderImportSummary(in.Project, format, in.Parent, sum, in.DryRun), data, nil
 	})
 }
 

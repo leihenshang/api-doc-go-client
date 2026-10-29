@@ -6,6 +6,9 @@
     "dryRun": {
       "type": "boolean"
     },
+    "fileName": {
+      "type": "string"
+    },
     "folder": {
       "type": "string"
     },
