@@ -209,6 +209,9 @@
     "name": {
       "type": "string"
     },
+    "onConflict": {
+      "type": "string"
+    },
     "params": {
       "items": {
         "properties": {
@@ -372,6 +375,9 @@
       ]
     },
     "summary": {
+      "type": "string"
+    },
+    "uid": {
       "type": "string"
     },
     "url": {

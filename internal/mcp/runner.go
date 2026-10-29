@@ -57,6 +57,8 @@ type ProjectApp interface {
 	CreateFolder(parent, name string) error
 	CreateRequest(folder, name, method string) (*collection.Request, error)
 	CreateRequestFromDraft(folder, name string, r *collection.Request) (*collection.Request, error)
+	// CreateRequestFromDraftEx 按 uid/onConflict 落盘草稿（默认 error，防重复同步产生 -2 副本）。
+	CreateRequestFromDraftEx(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error)
 	ParseCurl(curl string) (*collection.Request, error)
 	SearchIndex(query string, limit int) ([]index.Node, error)
 	SendRequest(r *collection.Request, envName string) (*runner.Result, error)

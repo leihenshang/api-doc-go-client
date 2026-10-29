@@ -95,7 +95,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: listDocsOutput(),
-		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：接口自带的说明是 request.docs，不在这里。",
+		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：只含文档条目（.md）；接口请求请用 get_project_modules，接口自带的说明是 request.docs，也不在这里。",
 	},
 	{
 		Name: "get_docs", Risk: RiskLow, InReadOnly: true, Since: "0.6.0",
@@ -108,8 +108,8 @@ var toolMetas = []ToolMeta{
 
 	// ---- 17 个集合写工具（只读模式不注册）：请求 5 + 文档 9（含图片与容器）+ 响应示例 3 ----
 	{
-		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "新建接口：给 method/url/…，或 curl，或 copyFromUid；可同时写 summary/bodyFields/docs/respDoc/settings；同名自动加序号。",
+		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDetailOutput(),
+		Description: "新建接口：给 method/url/…，或 curl，或 copyFromUid；可同时写 summary/bodyFields/docs/respDoc/settings；同名或同 uid 默认 [CONFLICT]（onConflict=suffix/overwrite 可改），uid 可固定身份。",
 	},
 	{
 		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -117,14 +117,14 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "create_project", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "在**授权且可写**的工作目录下新建一个项目（集合目录 + manifest），建完即可用 list_projects 看到。dir 必须是白名单内的可写目录，留空时用第一个可写目录；白名单外一律拒绝。",
+		Description: "在**授权且可写**的工作目录下新建项目。root 必须是工作目录（不能是项目目录本身或项目内子目录，否则 [INVALID] 并提示改传父级）；留空用第一个可写工作目录。白名单外 [AUTH]、只读 [READONLY]、重名 [CONFLICT]。",
 	},
 	{
-		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDetailOutput(),
 		Description: "改接口（只改传入字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc/summary/bodyFields 各自覆盖，不传不动；body 与 bodyFields 独立；docs 与 replaces 互斥（old 缺失整单拒绝）；ifMatch=完整 hash 防覆盖；folder 移动模块；成功附改动行确认。",
 	},
 	{
-		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
+		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0", Output: requestDeleteOutput(),
 		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
 	},
 	{
@@ -398,6 +398,23 @@ func docDetailOutput(withContent bool) map[string]any {
 		props["content"] = strSchema()
 	}
 	return objSchema(props, required...)
+}
+
+// requestDetailOutput create_request / update_request 的结果。
+func requestDetailOutput() map[string]any {
+	return objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(),
+		"path": strSchema(), "method": strSchema(), "url": strSchema(),
+	}, "uid", "path")
+}
+
+// requestDeleteOutput delete_request 的结果（删除前取到的身份信息）。
+func requestDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"uid": strSchema(), "path": strSchema(), "name": strSchema(),
+		"method": strSchema(), "url": strSchema(),
+		"deleted": boolSchema(), "trash": boolSchema(),
+	}, "uid")
 }
 
 // docDeleteOutput delete_doc 的结果（只带身份与路径，避免暴露内容）。

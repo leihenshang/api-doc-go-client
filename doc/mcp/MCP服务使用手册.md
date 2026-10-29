@@ -20,7 +20,7 @@
 | 查询 | `list_envs` | 环境与变量（**敏感值只回掩码**，每个环境带 `hash`）；`limit`/`offset` 分页 |
 | 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
 | 查询 | `list_docs` / `get_doc` / `get_docs` | 文档条目：列清单（分页 + `hash`）/ 读正文（分段/大纲）/ 批量读 1–10 篇 |
-| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc） |
+| 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc；`uid` 幂等、`onConflict` 默认 error） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[AUTH]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
@@ -166,7 +166,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | cURL 导入 | `name` ✅ + `curl` | `{"project":"shop","name":"from-curl","curl":"curl -X POST https://x/api/login -H 'Content-Type: application/json' -d '{\"u\":\"a\"}'"}` |
 | 复制现有 | `name` ✅ + `copyFromUid` | `{"project":"shop","name":"login-copy","copyFromUid":"<uid>"}` |
 
-同名在分组内**自动加序号**（不覆盖）；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
+同名或同 uid 默认 **`[CONFLICT]`**（与 `create_doc` 一致）：确需并存传 `onConflict=suffix`（加 `-2`、`-3`…），覆盖已有条目传 `onConflict=overwrite`；`uid` 可固定身份做幂等导入；`headers`/`params` 元素为 `{"name":..,"value":..,"enabled":true,description?,type?}`；
 `body` 是完整形态 `{"type":"form","form":[{name,value,enabled,type:"file"}]}`（支持 urlencoded/multipart 行），
 **按子项合并**（只传 `raw` 不会动 `form`，只传 `form` 不会动 `raw`；`bodyType`/`bodyRaw` 只覆盖对应的两个子项）；
 **`bodyFields`** 是请求体字段表格 `[{"name","type","required","example","description"}]`，与 `body` **相互独立**——只传 `body` 不会清掉表格；
@@ -177,8 +177,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.6 `create_module` / `create_project`
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
-- `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（**必须是白名单内的可写目录**，
-  留空 = 第一个可写授权目录；白名单外一律拒绝）。建完 `list_projects` 立刻可见。
+- `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（**必须是工作目录**，
+  留空 = 第一个可写授权目录）。`root` 指向项目目录本身/项目内子目录会 `[INVALID]` 并提示改传父级（否则新项目不会被扫描到）；
+  白名单外 `[AUTH]`、只读 `[READONLY]`、重名 `[CONFLICT]`。建完 `list_projects` 立刻可见。
 
 ### 4.7 `send_request`
 `project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 false；要留存示例时显式传 true）、
@@ -352,10 +353,11 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **10 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`：
+共 **13 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`：
 
 - **列表/搜索**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
 - **文档详情与写**：`get_doc`（含 `content`）/ `create_doc` / `update_doc`（回传 `uid/path/size/hash`，`dryRun` 带 `planned`）/ `delete_doc`（`uid/path/deleted/trash/dryRun`）
+- **接口写**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（再加 `deleted/trash`）
 
 `outputSchema` 里的数组元素**写明具体字段与 `required`**（如 `docs[].{uid,name,path,size,hash}`），
 可直接用于生成类型或字段校验，而不是只写 `items:{type:"object"}`。文本输出保持不变，旧客户端不受影响；
@@ -372,7 +374,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `[CONFLICT]` | 同名冲突、`ifMatch` 不匹配（文档创建默认就是这条） |
 | `[INVALID]` | 参数缺失/取值非法（含 SDK 的 inputSchema 校验失败） |
 | `[READONLY]` | 工作目录是只读授权 |
-| `[AUTH]` | 目录不在 MCP 白名单 |
+| `[AUTH]` | 目录不在 MCP 白名单（等价 `FORBIDDEN`；本实现统一用 `AUTH`，区分于参数错 `[INVALID]`） |
 | `[LIMIT]` | 批量/分页超过上限（如一次 >10 个 uid） |
 | `[IO]` | 读写磁盘失败 |
 | `[INTERNAL]` | 其它内部错误 |

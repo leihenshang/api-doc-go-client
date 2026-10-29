@@ -1578,6 +1578,15 @@ func (c *Collection) CreateRequest(folder, name, method string) (*Request, error
 // CreateRequestFromDraft 把内存草稿落盘成新请求（新建流程：先开空 tab 编辑，关闭时才落盘）。
 // uid / 文件名 / seq / path 一律由集合层重新分配（草稿里可能带临时 uid），其余内容原样采用。
 func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (*Request, error) {
+	r, err := requestFromDraft(name, src)
+	if err != nil {
+		return nil, err
+	}
+	return c.saveNewRequest(folder, name, r)
+}
+
+// requestFromDraft 由草稿构造待落盘的请求（身份字段留给调用方决定）。
+func requestFromDraft(name string, src *Request) (*Request, error) {
 	if !validEntryName(name) {
 		return nil, fmt.Errorf("名称含非法字符或为空")
 	}
@@ -1602,7 +1611,7 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 		r.GRPC = src.GRPC
 		r.Method = MethodGRPC
 		r.URL = GrpcURL(src.GRPC.Target, src.GRPC.Service, src.GRPC.Method)
-		return c.saveNewRequest(folder, name, r)
+		return r, nil
 	}
 	r.Method = strings.ToUpper(strings.TrimSpace(src.Method))
 	if r.Method == "" {
@@ -1612,7 +1621,7 @@ func (c *Collection) CreateRequestFromDraft(folder, name string, src *Request) (
 	if len(r.Params) == 0 {
 		r.Params = []KV{{Enabled: true}}
 	}
-	return c.saveNewRequest(folder, name, r)
+	return r, nil
 }
 
 // CreateRequestWithUID 用指定 uid 新建（同步 pull 落盘用，保证与服务端 ext_uid 一致）。

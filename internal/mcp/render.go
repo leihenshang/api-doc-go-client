@@ -163,17 +163,19 @@ func NormalizeDetailSections(sections []string) (map[string]bool, error) {
 		if s == "" {
 			continue
 		}
-		ok := false
+		// 输入统一小写后必须与枚举做「大小写无关」比较：
+		// bodyFields / respDoc 是驼峰，早先直接比 s == name 会永远匹配不上（评审 P0-1）。
+		canonical := ""
 		for _, name := range detailSectionNames {
-			if s == name {
-				ok = true
+			if s == strings.ToLower(name) {
+				canonical = name
 				break
 			}
 		}
-		if !ok {
+		if canonical == "" {
 			return nil, withInvalid(fmt.Errorf("sections 含未知取值 %q；可选值：%s", raw, strings.Join(detailSectionNames, "/")))
 		}
-		out[s] = true
+		out[canonical] = true
 	}
 	if len(out) == 0 {
 		return nil, nil

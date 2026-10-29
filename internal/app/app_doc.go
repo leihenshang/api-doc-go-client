@@ -286,6 +286,18 @@ func (a *App) CreateRequestFromDraft(folder, name string, r *collection.Request)
 	return c.CreateRequestFromDraft(folder, name, r)
 }
 
+// CreateRequestFromDraftEx 按 uid/onConflict 落盘草稿（MCP create_request 用；前端仍走 suffix 旧行为）。
+func (a *App) CreateRequestFromDraftEx(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkGrpcSavable(r); err != nil {
+		return nil, err
+	}
+	return c.CreateRequestFromDraftEx(folder, name, r, uid, onConflict)
+}
+
 // ParseCurl 把一段 curl 命令解析成请求草稿（不落盘），供「导入 cURL」预览与新建 tab 预填。
 func (a *App) ParseCurl(text string) (*collection.Request, error) {
 	return collection.ParseCurl(text)
