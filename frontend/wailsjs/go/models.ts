@@ -738,6 +738,22 @@ export namespace collection {
 	        this.seq = source["seq"];
 	    }
 	}
+	export class DocImageInfo {
+	    Hash: string;
+	    Size: number;
+	    Deduped: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocImageInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Hash = source["Hash"];
+	        this.Size = source["Size"];
+	        this.Deduped = source["Deduped"];
+	    }
+	}
 	
 	
 	export class ExampleRequest {
@@ -1829,6 +1845,7 @@ export namespace syncengine {
 	    envHashes?: Record<string, string>;
 	    varHashes?: Record<string, string>;
 	    fieldMappingHashes?: Record<string, string>;
+	    assetUrls?: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new BindInfo(source);
@@ -1847,6 +1864,7 @@ export namespace syncengine {
 	        this.envHashes = source["envHashes"];
 	        this.varHashes = source["varHashes"];
 	        this.fieldMappingHashes = source["fieldMappingHashes"];
+	        this.assetUrls = source["assetUrls"];
 	    }
 	}
 	export class Report {

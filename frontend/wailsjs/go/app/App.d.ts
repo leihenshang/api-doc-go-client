@@ -4,6 +4,7 @@ import {app} from '../models';
 import {context} from '../models';
 import {mcpauth} from '../models';
 import {collection} from '../models';
+import {http} from '../models';
 import {config} from '../models';
 import {syncengine} from '../models';
 import {proto} from '../models';
@@ -37,17 +38,23 @@ export function ClearMCPGrants():Promise<void>;
 
 export function CloseCollection(arg1:string):Promise<void>;
 
+export function CloseProject():Promise<void>;
+
 export function ConflictDetail(arg1:string):Promise<collection.ConflictDetail>;
 
 export function ConflictDetailFor(arg1:string,arg2:string):Promise<collection.ConflictDetail>;
 
 export function CreateDoc(arg1:string,arg2:string):Promise<collection.DocEntry>;
 
+export function CreateDocEx(arg1:string,arg2:string,arg3:string,arg4:string):Promise<collection.DocEntry>;
+
 export function CreateFolder(arg1:string,arg2:string):Promise<void>;
 
 export function CreateRequest(arg1:string,arg2:string,arg3:string):Promise<collection.Request>;
 
 export function CreateRequestFromDraft(arg1:string,arg2:string,arg3:collection.Request):Promise<collection.Request>;
+
+export function CreateRequestFromDraftEx(arg1:string,arg2:string,arg3:collection.Request,arg4:string,arg5:string):Promise<collection.Request>;
 
 export function DeleteCookie(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -67,7 +74,11 @@ export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
 
+export function DocAssetHandler():Promise<http.Handler>;
+
 export function DocFileHash(arg1:string):Promise<string>;
+
+export function DocHashes():Promise<Record<string, string>>;
 
 export function EnvFileHash(arg1:string):Promise<string>;
 
@@ -76,6 +87,10 @@ export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 export function ExportMCPAudit(arg1:string):Promise<string>;
 
 export function ExportRunReport(arg1:string,arg2:string):Promise<string>;
+
+export function FileHash(arg1:string):Promise<string>;
+
+export function FolderUIDByPath(arg1:string):Promise<string|boolean>;
 
 export function GenerateCode(arg1:string,arg2:string,arg3:collection.Request):Promise<string>;
 
@@ -165,7 +180,17 @@ export function PickFile():Promise<string>;
 
 export function PickGrpcProtoFiles():Promise<Array<string>>;
 
+export function PlanCreateDoc(arg1:string,arg2:string,arg3:string,arg4:string):Promise<collection.DocEntry>;
+
+export function PlanCreateRequest(arg1:string,arg2:string,arg3:collection.Request,arg4:string,arg5:string):Promise<collection.Request>;
+
+export function PlanResponseExampleRaw(arg1:string,arg2:string,arg3:number,arg4:Array<collection.KV>,arg5:string,arg6:string):Promise<collection.ResponseExample>;
+
+export function PlanUpdateResponseExample(arg1:string,arg2:string,arg3:any,arg4:any,arg5:any,arg6:any,arg7:any):Promise<collection.ResponseExample>;
+
 export function PreviewTrashFor(arg1:string,arg2:string):Promise<collection.TrashPreview>;
+
+export function PruneEmptyFolders():Promise<number>;
 
 export function Quit():Promise<void>;
 
@@ -184,6 +209,8 @@ export function ReloadCollectionOf(arg1:string):Promise<collection.CollectionInf
 export function RemoveGrpcProto(arg1:string):Promise<void>;
 
 export function RemoveMCPGrant(arg1:string,arg2:string):Promise<void>;
+
+export function RenameCollection(arg1:string):Promise<void>;
 
 export function RenameDoc(arg1:string,arg2:string):Promise<void>;
 
@@ -215,9 +242,11 @@ export function RunSyncForRoot(arg1:string):Promise<syncengine.Report>;
 
 export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
 
+export function SaveDocExpectHash(arg1:collection.DocEntry,arg2:string):Promise<void>;
+
 export function SaveDocImage(arg1:string):Promise<string>;
 
-export function SaveDocExpectHash(arg1:collection.DocEntry,arg2:string):Promise<void>;
+export function SaveDocImageInfo(arg1:string):Promise<string>;
 
 export function SaveEnv(arg1:collection.Env):Promise<void>;
 
