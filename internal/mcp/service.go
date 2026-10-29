@@ -82,7 +82,7 @@ func classifyAccessError(err error) error {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "不在 MCP 授权"):
-		return coded(CodeAuth, err)
+		return coded(CodeForbidden, err)
 	case strings.Contains(msg, "只读授权"):
 		return coded(CodeReadOnly, err)
 	case strings.Contains(msg, "无法打开"):
@@ -980,6 +980,10 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 	if name == "" {
 		return "", errNeedName
 	}
+	childPath := strings.Trim(strings.Join([]string{strings.TrimSpace(parent), name}, "/"), "/")
+	if _, ok := a.FolderUIDByPath(childPath); ok {
+		return "", coded(CodeConflict, fmt.Errorf("模块 %s 已存在（改显示名用 rename_module）", childPath))
+	}
 	if err := a.CreateFolder(strings.TrimSpace(parent), name); err != nil {
 		return "", err
 	}
@@ -1276,7 +1280,7 @@ func classifyCreateProjectErr(err error) error {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "不在 MCP 授权"):
-		return coded(CodeAuth, err)
+		return coded(CodeForbidden, err)
 	case strings.Contains(msg, "只读授权"):
 		return coded(CodeReadOnly, err)
 	case strings.Contains(msg, "项目已存在"):

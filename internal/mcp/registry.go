@@ -482,7 +482,7 @@ var ErrProjectConfirmMismatch = errors.New("confirm 与项目名不一致")
 //
 // 为什么放授权根下的 .trash：与集合内 .trash 同构、跨平台可用（不依赖桌面回收站）；
 // scan() 已跳过点目录，因此它不会出现在 list_projects 里。
-func (r *Registry) DeleteProject(key, confirm string) (string, error) {
+func (r *Registry) DeleteProject(key, confirm string, dryRun bool) (string, error) {
 	e, err := r.Find(key)
 	if err != nil {
 		return "", err
@@ -499,6 +499,12 @@ func (r *Registry) DeleteProject(key, confirm string) (string, error) {
 		return "", fmt.Errorf("%w：当前项目是 %q（目录 %s），confirm 需要与它一致", ErrProjectConfirmMismatch, e.Name, base)
 	}
 
+	trash := filepath.Join(e.allowRoot, ".trash")
+	dest := filepath.Join(trash, fmt.Sprintf("%s-%d", filepath.Base(e.Dir), time.Now().UnixNano()))
+	if dryRun {
+		return dest, nil
+	}
+
 	// 先释放该项目的集合（watcher/索引），否则 Windows 上目录被占用无法移动。
 	r.mu.Lock()
 	if a, ok := r.opened[e.Dir]; ok {
@@ -508,11 +514,9 @@ func (r *Registry) DeleteProject(key, confirm string) (string, error) {
 	}
 	r.mu.Unlock()
 
-	trash := filepath.Join(e.allowRoot, ".trash")
 	if err := os.MkdirAll(trash, 0o755); err != nil {
 		return "", fmt.Errorf("创建回收目录: %w", err)
 	}
-	dest := filepath.Join(trash, fmt.Sprintf("%s-%d", base, time.Now().UnixNano()))
 	if err := os.Rename(e.Dir, dest); err != nil {
 		return "", fmt.Errorf("移动项目到回收位失败: %w", err)
 	}

@@ -64,6 +64,19 @@ func TestModuleContainerTools(t *testing.T) {
 	if !isErr || !strings.Contains(bad, "[INVALID]") || !strings.Contains(bad, "recursive") {
 		t.Errorf("非空模块应拒绝并提示 recursive：%s", bad)
 	}
+	dry := mustCall(t, cs, "delete_module", map[string]any{
+		"project": "demo", "path": "API", "recursive": true, "dryRun": true,
+	})
+	if !strings.Contains(dry, "dryRun") {
+		t.Errorf("dryRun 应只预演：%s", dry)
+	}
+	if mods := mustCall(t, cs, "get_project_modules", map[string]any{"project": "demo"}); !strings.Contains(mods, "接口") {
+		t.Errorf("dryRun 不应真的删除：%s", mods)
+	}
+	// 同名创建 → [CONFLICT]（统一写契约：不再静默复用）
+	if out, isErr := callTool(t, cs, "create_module", map[string]any{"project": "demo", "name": "API"}); !isErr || !strings.Contains(out, "[CONFLICT]") {
+		t.Errorf("同名模块应 [CONFLICT]：%s", out)
+	}
 	ok := mustCall(t, cs, "delete_module", map[string]any{
 		"project": "demo", "path": "API", "recursive": true,
 	})
@@ -111,6 +124,13 @@ func TestProjectContainerTools(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "victim")); err != nil {
 		t.Errorf("拒绝时不应移动目录：%v", err)
+	}
+	dry := mustCall(t, cs, "delete_project", map[string]any{"project": "victim", "confirm": "victim", "dryRun": true})
+	if !strings.Contains(dry, "dryRun") {
+		t.Errorf("dryRun 应只预演：%s", dry)
+	}
+	if _, err := os.Stat(filepath.Join(root, "victim")); err != nil {
+		t.Errorf("dryRun 不应移动目录：%v", err)
 	}
 	ok := mustCall(t, cs, "delete_project", map[string]any{"project": "victim", "confirm": "victim"})
 	if !strings.Contains(ok, ".trash") {
@@ -195,11 +215,11 @@ func TestCreateProjectErrors(t *testing.T) {
 		t.Errorf("不应在项目里嵌套创建")
 	}
 
-	// ④ root 不在白名单 → [AUTH]（不是 [INTERNAL]）
+	// ④ root 不在白名单 → [FORBIDDEN]（不是 [INTERNAL]）
 	if out, isErr := callTool(t, cs, "create_project", map[string]any{
 		"name": "越权", "root": t.TempDir(),
-	}); !isErr || !strings.Contains(out, "[AUTH]") {
-		t.Errorf("白名单外应 [AUTH]：%s", out)
+	}); !isErr || !strings.Contains(out, "[FORBIDDEN]") {
+		t.Errorf("白名单外应 [FORBIDDEN]：%s", out)
 	}
 }
 

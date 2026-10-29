@@ -10,14 +10,14 @@ package mcp
 import "errors"
 
 const (
-	CodeNotFound = "NOT_FOUND" // 项目/文档/接口/示例/变量不存在
-	CodeConflict = "CONFLICT"  // 同名冲突、ifMatch 不匹配
-	CodeInvalid  = "INVALID"   // 参数缺失/取值非法
-	CodeReadOnly = "READONLY"  // 工作目录只读授权
-	CodeAuth     = "AUTH"      // 不在白名单 / 未授权
-	CodeLimit    = "LIMIT"     // 批量或分页上限
-	CodeIO       = "IO"        // 读写磁盘失败
-	CodeInternal = "INTERNAL"  // 其它内部错误
+	CodeNotFound  = "NOT_FOUND" // 项目/文档/接口/示例/变量不存在
+	CodeConflict  = "CONFLICT"  // 同名冲突、ifMatch 不匹配
+	CodeInvalid   = "INVALID"   // 参数缺失/取值非法
+	CodeReadOnly  = "READONLY"  // 工作目录只读授权
+	CodeForbidden = "FORBIDDEN" // 不在白名单 / 无权限（破坏性更名：原 AUTH）
+	CodeLimit     = "LIMIT"     // 批量或分页上限
+	CodeIO        = "IO"        // 读写磁盘失败
+	CodeInternal  = "INTERNAL"  // 其它内部错误
 )
 
 // codedError 带错误码的包装（不改变底层错误链，错误判定仍可用 errors.Is/As）。

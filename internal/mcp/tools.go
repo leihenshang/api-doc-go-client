@@ -819,18 +819,27 @@ type saveImageIn struct {
 }
 
 func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, in saveImageIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		url, err := ts.svc.SaveImage(in.Project, in.Data)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
 			name = "图片"
 		}
-		return fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：![%s](%s)", url, name, url), nil
+		data := map[string]any{"url": url, "name": name}
+		return fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：![%s](%s)", url, name, url), data, nil
 	})
+}
+
+// exampleData 响应示例写操作的结构化输出（与 exampleWriteOutput 对齐）。
+func exampleData(project, requestUID string, ex *collection.ResponseExample) map[string]any {
+	return map[string]any{
+		"project": project, "requestUid": requestUID, "uid": ex.UID,
+		"name": ex.Name, "path": ex.Path, "status": ex.Response.Status,
+	}
 }
 
 // requestDetailData 接口写操作的结构化输出（与 requestDetailOutput 对齐）。
@@ -919,12 +928,13 @@ type renameModuleIn struct {
 }
 
 func (ts *toolSet) renameModule(_ context.Context, req *mcp.CallToolRequest, in renameModuleIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		if err := ts.svc.RenameModule(in.Project, in.Path, in.Name); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已重命名模块 %s → %s（显示名变了，路径/目录仍是 %s）", in.Path, in.Name, in.Path), nil
+		data := map[string]any{"project": in.Project, "path": in.Path, "name": in.Name}
+		return fmt.Sprintf("已重命名模块 %s → %s（显示名变了，路径/目录仍是 %s）", in.Path, in.Name, in.Path), data, nil
 	})
 }
 
@@ -932,19 +942,27 @@ type deleteModuleIn struct {
 	Project   string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
 	Path      string `json:"path" jsonschema:"模块相对路径，如 api/user"`
 	Recursive bool   `json:"recursive,omitempty" jsonschema:"true = 连同子模块/请求/文档整棵删除（进 .trash）；false（默认）只允许空模块"`
+	DryRun    bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash"`
 }
 
 func (ts *toolSet) deleteModule(_ context.Context, req *mcp.CallToolRequest, in deleteModuleIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if err := ts.svc.DeleteModule(in.Project, in.Path, in.Recursive); err != nil {
-			return "", err
+		if err := ts.svc.DeleteModule(in.Project, in.Path, in.Recursive, in.DryRun); err != nil {
+			return "", nil, err
 		}
 		mode := "空模块"
 		if in.Recursive {
 			mode = "整棵（含子项）"
 		}
-		return fmt.Sprintf("已删除模块 %s（%s），目录已移入集合的 .trash，可人工找回", in.Path, mode), nil
+		data := map[string]any{
+			"project": in.Project, "path": in.Path, "recursive": in.Recursive,
+			"deleted": !in.DryRun, "trash": true, "dryRun": in.DryRun,
+		}
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将删除模块 %s（%s），目录将移入集合 .trash", in.Path, mode), data, nil
+		}
+		return fmt.Sprintf("已删除模块 %s（%s），目录已移入集合的 .trash，可人工找回", in.Path, mode), data, nil
 	})
 }
 
@@ -954,28 +972,36 @@ type renameProjectIn struct {
 }
 
 func (ts *toolSet) renameProject(_ context.Context, req *mcp.CallToolRequest, in renameProjectIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		if err := ts.svc.RenameProject(in.Project, in.Name); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已重命名项目 %s → %s（目录不变）", in.Project, in.Name), nil
+		data := map[string]any{"project": in.Project, "name": in.Name}
+		return fmt.Sprintf("已重命名项目 %s → %s（目录不变）", in.Project, in.Name), data, nil
 	})
 }
 
 type deleteProjectIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid（不能省略）"`
 	Confirm string `json:"confirm" jsonschema:"必填：填项目显示名或目录名，用于二次确认；不一致直接拒绝"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验 confirm 与可写性），不移动目录"`
 }
 
 func (ts *toolSet) deleteProject(_ context.Context, req *mcp.CallToolRequest, in deleteProjectIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		dest, err := ts.svc.DeleteProject(in.Project, in.Confirm)
+		dest, err := ts.svc.DeleteProject(in.Project, in.Confirm, in.DryRun)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已删除项目 %s：目录已移入 %s（可手动移回恢复）。list_projects 已刷新。", in.Project, dest), nil
+		data := map[string]any{
+			"project": in.Project, "trashPath": dest, "deleted": !in.DryRun, "dryRun": in.DryRun,
+		}
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将删除项目 %s（confirm=%s），目标回收位 %s", in.Project, in.Confirm, dest), data, nil
+		}
+		return fmt.Sprintf("已删除项目 %s：目录已移入 %s（可手动移回恢复）。list_projects 已刷新。", in.Project, dest), data, nil
 	})
 }
 
@@ -984,13 +1010,14 @@ type pruneModulesIn struct {
 }
 
 func (ts *toolSet) pruneEmptyModules(_ context.Context, req *mcp.CallToolRequest, in pruneModulesIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		n, err := ts.svc.PruneEmptyModules(in.Project)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已清理 %d 个空模块目录（只删只有 folder.yml、没有请求/文档/子模块的目录）", n), nil
+		data := map[string]any{"project": in.Project, "count": n}
+		return fmt.Sprintf("已清理 %d 个空模块目录（只删只有 folder.yml、没有请求/文档/子模块的目录）", n), data, nil
 	})
 }
 
@@ -1002,13 +1029,14 @@ type createModuleIn struct {
 }
 
 func (ts *toolSet) createModule(ctx context.Context, req *mcp.CallToolRequest, in createModuleIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		path, err := ts.svc.CreateModule(in.Project, in.Parent, in.Name)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已创建模块 %s（项目 %s）", path, in.Project), nil
+		data := map[string]any{"project": in.Project, "path": path, "name": in.Name}
+		return fmt.Sprintf("已创建模块 %s（项目 %s）", path, in.Project), data, nil
 	})
 }
 
@@ -1020,12 +1048,13 @@ type createProjectIn struct {
 }
 
 func (ts *toolSet) createProject(ctx context.Context, req *mcp.CallToolRequest, in createProjectIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		p, err := ts.svc.CreateProject(in.Root, in.Name, in.DirName)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已创建项目 %s（%s，uid=%s）", p.Path, p.Name, p.UID), nil
+		data := map[string]any{"project": p.Path, "name": p.Name, "path": p.Path, "uid": p.UID}
+		return fmt.Sprintf("已创建项目 %s（%s，uid=%s）", p.Path, p.Name, p.UID), data, nil
 	})
 }
 
@@ -1076,6 +1105,7 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 type deleteIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid" jsonschema:"要移除的接口 uid"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
 }
 
 func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
@@ -1086,12 +1116,18 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		if err != nil {
 			return "", nil, err
 		}
-		if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
-			return "", nil, err
+		if !in.DryRun {
+			if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
+				return "", nil, err
+			}
 		}
 		data := requestDetailData(in.Project, r)
-		data["deleted"] = true
+		data["deleted"] = !in.DryRun
 		data["trash"] = true
+		data["dryRun"] = in.DryRun
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将把请求 %s（%s）移入 .trash", in.UID, r.Path), data, nil
+		}
 		return fmt.Sprintf("已移除请求 %s（文件已移入 .trash，可人工找回）", in.UID), data, nil
 	})
 }
@@ -1197,14 +1233,15 @@ func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in del
 type saveResponseExampleArg = SaveResponseExampleInput
 
 func (ts *toolSet) saveResponseExample(_ context.Context, req *mcp.CallToolRequest, in saveResponseExampleArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		ex, err := ts.svc.SaveResponseExample(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := exampleData(in.Project, in.UID, ex)
 		return fmt.Sprintf("已保存响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节，项目 %s）",
-			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body), in.Project), nil
+			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body), in.Project), data, nil
 	})
 }
 
@@ -1212,14 +1249,15 @@ func (ts *toolSet) saveResponseExample(_ context.Context, req *mcp.CallToolReque
 type updateResponseExampleArg = UpdateResponseExampleInput
 
 func (ts *toolSet) updateResponseExample(_ context.Context, req *mcp.CallToolRequest, in updateResponseExampleArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		ex, err := ts.svc.UpdateResponseExample(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := exampleData(in.Project, in.UID, ex)
 		return fmt.Sprintf("已更新响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节）",
-			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body)), nil
+			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body)), data, nil
 	})
 }
 
@@ -1228,15 +1266,25 @@ type deleteResponseExampleIn struct {
 	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID        string `json:"uid" jsonschema:"请求 uid（示例所属请求）"`
 	ExampleUID string `json:"exampleUid" jsonschema:"要删除的响应示例 uid（get_request_detail 返回的 examples[].uid）"`
+	DryRun     bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash"`
 }
 
 func (ts *toolSet) deleteResponseExample(_ context.Context, req *mcp.CallToolRequest, in deleteResponseExampleIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if err := ts.svc.DeleteResponseExample(in.Project, in.UID, in.ExampleUID); err != nil {
-			return "", err
+		if !in.DryRun {
+			if err := ts.svc.DeleteResponseExample(in.Project, in.UID, in.ExampleUID); err != nil {
+				return "", nil, err
+			}
 		}
-		return fmt.Sprintf("已删除响应示例 %s（文件已移入 .trash，可人工找回）", in.ExampleUID), nil
+		data := map[string]any{
+			"project": in.Project, "requestUid": in.UID, "uid": in.ExampleUID,
+			"deleted": !in.DryRun, "trash": true, "dryRun": in.DryRun,
+		}
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将删除响应示例 %s（请求 %s）", in.ExampleUID, in.UID), data, nil
+		}
+		return fmt.Sprintf("已删除响应示例 %s（文件已移入 .trash，可人工找回）", in.ExampleUID), data, nil
 	})
 }
 
@@ -1270,17 +1318,19 @@ type renameEnvIn struct {
 	Name    string `json:"name" jsonschema:"当前环境名"`
 	NewName string `json:"newName" jsonschema:"新环境名（只允许字母、数字、- 与 _；不能与现有名重复，也不允许只改大小写）"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不落盘"`
 }
 
 func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in renameEnvIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		env, err := ts.svc.RenameEnv(in.Project, in.Name, in.NewName, in.IfMatch)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := map[string]any{"project": in.Project, "oldName": in.Name, "name": env.Name, "hash": env.Hash, "varsCount": len(env.Vars)}
 		return fmt.Sprintf("已把环境 %s 改名为 %s（%d 个变量已搬过去，旧文件在 .trash 可找回，hash %s…）",
-			in.Name, env.Name, len(env.Vars), env.Hash), nil
+			in.Name, env.Name, len(env.Vars), env.Hash), data, nil
 	})
 }
 
@@ -1288,36 +1338,50 @@ func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in r
 type deleteEnvIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	Name    string `json:"name" jsonschema:"要删除的环境名"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不落盘"`
 }
 
 func (ts *toolSet) deleteEnv(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if err := ts.svc.DeleteEnv(in.Project, in.Name); err != nil {
-			return "", err
+		if err := ts.svc.DeleteEnv(in.Project, in.Name, in.IfMatch, in.DryRun); err != nil {
+			return "", nil, err
 		}
-		return fmt.Sprintf("已删除环境 %s（文件已移入 .trash，可人工找回）", in.Name), nil
+		data := map[string]any{
+			"project": in.Project, "name": in.Name,
+			"deleted": !in.DryRun, "trash": true, "dryRun": in.DryRun,
+		}
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将删除环境 %s", in.Name), data, nil
+		}
+		return fmt.Sprintf("已删除环境 %s（文件已移入 .trash，可人工找回）", in.Name), data, nil
 	})
 }
 
 func (ts *toolSet) createEnv(ctx context.Context, req *mcp.CallToolRequest, in CreateEnvInput) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		env, err := ts.svc.CreateEnv(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := map[string]any{"project": in.Project, "name": env.Name, "hash": env.Hash, "varsCount": len(env.Vars)}
 		return fmt.Sprintf("已创建环境 %s（项目 %s，初始变量 %d 个）%s",
-			env.Name, in.Project, len(env.Vars), envTip(len(env.Vars))), nil
+			env.Name, in.Project, len(env.Vars), envTip(len(env.Vars))), data, nil
 	})
 }
 
 func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in SetEnvVarInput) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		v, err := ts.svc.SetEnvVar(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
+		}
+		data := map[string]any{
+			"project": in.Project, "env": in.Env, "name": v.Name, "value": v.Value,
+			"secret": v.Secret, "enabled": v.Enabled, "keptSecret": v.KeptSecret, "hash": v.Hash,
 		}
 		extra := ""
 		switch {
@@ -1330,8 +1394,9 @@ func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in S
 			extra += "（已停用：不参与 {{name}} 解析）"
 		}
 		return fmt.Sprintf("已写入变量 %s.%s = %s（secret=%v，enabled=%v）%s（环境 hash %s…）",
-			in.Env, v.Name, v.Value, v.Secret, v.Enabled, extra, v.Hash), nil
+			in.Env, v.Name, v.Value, v.Secret, v.Enabled, extra, v.Hash), data, nil
 	})
+
 }
 
 // deleteEnvVarIn delete_env_var 的入参。
@@ -1340,15 +1405,25 @@ type deleteEnvVarIn struct {
 	Env     string `json:"env" jsonschema:"所属环境名"`
 	Name    string `json:"name" jsonschema:"要删除的变量名"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不落盘"`
 }
 
 func (ts *toolSet) deleteEnvVar(ctx context.Context, req *mcp.CallToolRequest, in deleteEnvVarIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if err := ts.svc.DeleteEnvVar(in.Project, in.Env, in.Name, in.IfMatch); err != nil {
-			return "", err
+		if !in.DryRun {
+			if err := ts.svc.DeleteEnvVar(in.Project, in.Env, in.Name, in.IfMatch); err != nil {
+				return "", nil, err
+			}
 		}
-		return fmt.Sprintf("已从环境 %s 删除变量 %s", in.Env, in.Name), nil
+		data := map[string]any{
+			"project": in.Project, "env": in.Env, "name": in.Name,
+			"deleted": !in.DryRun, "dryRun": in.DryRun,
+		}
+		if in.DryRun {
+			return fmt.Sprintf("（dryRun：未落盘）将从环境 %s 删除变量 %s", in.Env, in.Name), data, nil
+		}
+		return fmt.Sprintf("已从环境 %s 删除变量 %s", in.Env, in.Name), data, nil
 	})
 }
 

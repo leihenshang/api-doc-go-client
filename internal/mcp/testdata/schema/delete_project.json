@@ -3,6 +3,9 @@
     "confirm": {
       "type": "string"
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "project": {
       "type": "string"
     }

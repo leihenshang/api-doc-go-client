@@ -173,8 +173,8 @@ func (s *Service) CreateEnv(in CreateEnvInput) (EnvEntry, error) {
 	// 判重必须大小写不敏感：环境名即文件名，Windows 上 "DEV" 与 "dev" 是同一个文件。
 	// 原来用 == 判重会让 "DEV" 绕过检查，随后 SaveEnv 截断覆盖 dev.yml，连密钥一起销毁。
 	if i := indexOfEnv(envs, name); i >= 0 {
-		return EnvEntry{}, fmt.Errorf("环境 %q 已存在（磁盘上实际是 %q；要改它的变量用 set_env_var，要换名字用 rename_env）",
-			name, envs[i].Name)
+		return EnvEntry{}, coded(CodeConflict, fmt.Errorf("环境 %q 已存在（磁盘上实际是 %q；要改它的变量用 set_env_var，要换名字用 rename_env）",
+			name, envs[i].Name))
 	}
 	env := collection.Env{Name: name}
 	for _, v := range in.Vars {
@@ -253,7 +253,7 @@ func (s *Service) RenameEnv(project, name, newName, ifMatch string) (EnvEntry, e
 //
 // 先查存在性：collection 层的删除对「文件不在」是静默成功的（幂等，界面反复点没问题），
 // 但对 AI 来说「删掉了」必须为真 —— 不存在时要报错，否则它会以为环境已清理而继续往下做。
-func (s *Service) DeleteEnv(project, name string) error {
+func (s *Service) DeleteEnv(project, name, ifMatch string, dryRun bool) error {
 	clean, err := checkEnvName(name)
 	if err != nil {
 		return err
@@ -268,6 +268,18 @@ func (s *Service) DeleteEnv(project, name string) error {
 	}
 	if indexOfEnv(envs, clean) < 0 {
 		return fmt.Errorf("找不到环境 %q（用 list_envs 看现有环境）", clean)
+	}
+	if ifMatch = strings.TrimSpace(ifMatch); ifMatch != "" {
+		cur, err := a.EnvFileHash(clean)
+		if err != nil {
+			return coded(CodeIO, err)
+		}
+		if cur == "" || !strings.HasPrefix(cur, ifMatch) {
+			return coded(CodeConflict, fmt.Errorf("环境 %s 已被他人修改（当前 hash %s，期望 %s），请重新 list_envs 后再删", clean, cur, ifMatch))
+		}
+	}
+	if dryRun {
+		return nil
 	}
 	return a.DeleteEnv(clean)
 }
