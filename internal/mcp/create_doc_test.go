@@ -172,6 +172,9 @@ func TestDocDryRun(t *testing.T) {
 	if !strings.Contains(plan, "（dryRun：未落盘）将创建") {
 		t.Errorf("dryRun 创建应给计划：%s", plan)
 	}
+	if strings.Contains(plan, "已创建文档") {
+		t.Errorf("dryRun 不应同时输出「已创建」（评审反馈的文案自相矛盾）：%s", plan)
+	}
 	after := mustCall(t, cs, "list_docs", map[string]any{"project": "demo"})
 	if before != after {
 		t.Errorf("dryRun 不应改变文档列表")

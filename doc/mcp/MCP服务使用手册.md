@@ -22,7 +22,7 @@
 | 查询 | `list_docs` / `get_doc` / `get_docs` | 文档条目：列清单（分页 + `hash`）/ 读正文（分段/大纲）/ 批量读 1–10 篇 |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
-| 写 | `create_project` | 新建项目（集合目录 + manifest） |
+| 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[AUTH]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
@@ -284,7 +284,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`） |
+| `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
 | `get_docs` | `project?`、`uids` ✅（1–10）、`startLine?`、`maxLines?`、`outline?` | 批量读：按 uid 分组，单条失败不影响其他；失败行内带错误码 |
 | `get_doc` | `project?`、`uid` ✅、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
@@ -352,10 +352,15 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
-在文本结果之外还会返回 **`structuredContent`**（并声明 `outputSchema`），字段与文本一一对应
-（如 `{project,total,returned,offset,docs[]}`）。文本输出保持不变，旧客户端不受影响；
-详情类工具**不做**结构化（避免响应体积翻倍）。
+共 **10 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`：
+
+- **列表/搜索**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
+- **文档详情与写**：`get_doc`（含 `content`）/ `create_doc` / `update_doc`（回传 `uid/path/size/hash`，`dryRun` 带 `planned`）/ `delete_doc`（`uid/path/deleted/trash/dryRun`）
+
+`outputSchema` 里的数组元素**写明具体字段与 `required`**（如 `docs[].{uid,name,path,size,hash}`），
+可直接用于生成类型或字段校验，而不是只写 `items:{type:"object"}`。文本输出保持不变，旧客户端不受影响；
+其余详情类（`get_request_detail`、批量 `get_docs` 等）仍只返回文本，避免响应体积翻倍。
+`create_doc` 建完即可从 `structuredContent.uid/path/hash` 取值，不必再 `list_docs` 复查。
 
 ### 4.12.3 错误码（所有工具统一）
 

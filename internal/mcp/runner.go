@@ -103,6 +103,8 @@ type ProjectApp interface {
 	SaveDocExpectHash(d *collection.DocEntry, expectHash string) error
 	// DocFileHash 文档文件的当前磁盘哈希（不存在返回空串），供写前校验与 get_doc 回传。
 	DocFileHash(uid string) string
+	// DocHashes 一次扫描取全部文档 hash（列表批量用，避免逐篇重扫）。
+	DocHashes() (map[string]string, error)
 	// MoveDoc 把文档移动到目标分组目录（destFolder 为空 = 集合根）。
 	MoveDoc(uid, destFolder string) error
 	// RenameDoc 只改 frontmatter 里的显示名（文件名不变）。

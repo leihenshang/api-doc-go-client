@@ -162,3 +162,58 @@ func TestGetDocsBatch(t *testing.T) {
 		t.Errorf("超限应 [LIMIT]：%s", out)
 	}
 }
+
+// create_project：错误码与 root 语义（评审反馈：此前一律 [INTERNAL]、项目目录当 root 会嵌套）。
+func TestCreateProjectErrors(t *testing.T) {
+	root, cs := newSessionWithRoot(t)
+
+	// ① 正常：root = 授权工作目录（不是项目目录）
+	out := mustCall(t, cs, "create_project", map[string]any{
+		"name": "新项目", "dirName": "newproj", "root": root,
+	})
+	if !strings.Contains(out, "newproj") {
+		t.Errorf("创建结果不符：%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "newproj", "opencollection.yml")); err != nil {
+		t.Errorf("项目清单应落盘：%v", err)
+	}
+
+	// ② 重名 → [CONFLICT]
+	if out, isErr := callTool(t, cs, "create_project", map[string]any{
+		"name": "新项目", "dirName": "newproj", "root": root,
+	}); !isErr || !strings.Contains(out, "[CONFLICT]") {
+		t.Errorf("重名应 [CONFLICT]：%s", out)
+	}
+
+	// ③ root 是项目目录本身 → [INVALID] 且给出可操作提示
+	if out, isErr := callTool(t, cs, "create_project", map[string]any{
+		"name": "嵌套", "dirName": "nested", "root": filepath.Join(root, "demo"),
+	}); !isErr || !strings.Contains(out, "[INVALID]") || !strings.Contains(out, "父级工作目录") {
+		t.Errorf("项目目录当 root 应 [INVALID] 并提示父级：%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "demo", "nested")); !os.IsNotExist(err) {
+		t.Errorf("不应在项目里嵌套创建")
+	}
+
+	// ④ root 不在白名单 → [AUTH]（不是 [INTERNAL]）
+	if out, isErr := callTool(t, cs, "create_project", map[string]any{
+		"name": "越权", "root": t.TempDir(),
+	}); !isErr || !strings.Contains(out, "[AUTH]") {
+		t.Errorf("白名单外应 [AUTH]：%s", out)
+	}
+}
+
+// create_project 不传 root：默认选第一个可写目录；若该目录本身是项目 → [INVALID]（不能嵌套）。
+func TestCreateProjectDefaultRootIsProject(t *testing.T) {
+	proj := newProjectDir(t, t.TempDir(), "onlyproj", "uid-only")
+	reg, err := appmcp.NewRegistryAllow([]appmcp.AllowDir{{Path: proj, Writable: true}}, testNewApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := appmcp.NewService(reg)
+	if _, err := svc.CreateProject("", "新项目", ""); err == nil {
+		t.Fatalf("授权目录本身是项目时应拒绝")
+	} else if appmcp.CodeOf(err) != appmcp.CodeInvalid {
+		t.Errorf("应为 [INVALID]，实际 %s: %v", appmcp.CodeOf(err), err)
+	}
+}

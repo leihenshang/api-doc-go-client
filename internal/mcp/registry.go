@@ -386,6 +386,11 @@ func (r *Registry) CreateProject(name, dirName string) (Project, error) {
 	if target == nil {
 		return Project{}, fmt.Errorf("没有可写的授权工作目录：请在客户端设置里添加目录并勾选可写（只读目录不能新建项目）")
 	}
+	// 授权目录本身就是一个项目时，在它里面建项目会嵌套（扫描只认顶层子目录，建完就「找不到」）：
+	// 明确拒绝并提示改成父级工作目录（评审第二轮实测的 create_project 不可用根因）。
+	if _, err := os.Stat(filepath.Join(target.Path, "opencollection.yml")); err == nil {
+		return Project{}, fmt.Errorf("可写工作目录 %s 本身是项目目录，无法在其中新建项目；请在设置里改为它的父目录", target.Path)
+	}
 	return r.CreateProjectIn(target.Path, name, dirName)
 }
 

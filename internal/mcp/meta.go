@@ -62,11 +62,11 @@ var toolMetas = []ToolMeta{
 		Description: "选定默认工作目录：选定后其余工具的 project 参数即可省略。workspace 传 list_workspaces 返回的工作目录 path，或一个项目标识（名称/路径/uid）；不在白名单内会直接拒绝。",
 	},
 	{
-		Name: "list_projects", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("projects"),
+		Name: "list_projects", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listProjectsOutput(),
 		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。范围仅限客户端授权的 MCP 工作目录（见 list_workspaces）。返回名称、路径、uid、请求数/模块数/环境列表。",
 	},
 	{
-		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("modules"),
+		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: modulesOutput(),
 		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。带 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求），汇总行始终给出模块总数；传 onlyMatched=false 可看全部模块。",
 	},
 	{
@@ -78,15 +78,15 @@ var toolMetas = []ToolMeta{
 		Description: "批量获取多个接口的详情（一次 1–10 个 uid，超出直接报错）：参数与 get_request_detail 相同（sections/include_body/maxBodyBytes/query 对每个卡片生效），结果按 uid 分组，单个 uid 失败不影响其它。用于一次取多张卡片，省掉逐个调用的往返。",
 	},
 	{
-		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("results"),
+		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: searchRequestsOutput(),
 		Description: "搜索接口（名称/URL/方法/header/说明/请求体/响应字段/字段表打分）：exactMatch 整词、fields 限定、includeHash 附 hash；snippet 给命中行。",
 	},
 	{
-		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: listOutput("docs"),
+		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: searchDocsOutput(),
 		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回；命中行号（L<n>）可作为 get_doc 的 startLine 继续精读。",
 	},
 	{
-		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("envs"),
+		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: envsOutput(),
 		Description: "列出环境与变量（敏感值只回掩码）。query 过滤环境/变量名；limit（默认 200）/offset 分页，首行给总数。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
 	},
 	{
@@ -94,7 +94,7 @@ var toolMetas = []ToolMeta{
 		Description: "返回「接口说明（docs）」的分节结构契约：与客户端一键「生成接口文档」的 Markdown 骨架逐节对齐（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注，含列名与 {{host}} 掩码规则）。写 docs 前先取本模板，保证客户端展示与导出渲染一致。无需项目上下文。",
 	},
 	{
-		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: listOutput("docs"),
+		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: listDocsOutput(),
 		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：接口自带的说明是 request.docs，不在这里。",
 	},
 	{
@@ -102,7 +102,7 @@ var toolMetas = []ToolMeta{
 		Description: "批量读文档：一次 1–10 个 uid，按 uid 分组；单条失败不影响其他。支持与 get_doc 相同的 startLine/maxLines/outline。",
 	},
 	{
-		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
+		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: docDetailOutput(true),
 		Description: "读文档正文+完整 hash（可回传 update_doc.ifMatch 防覆盖）。默认全文；长文先 outline=true 看大纲，再 startLine+maxLines 分段（行号仅供阅读）。",
 	},
 
@@ -128,15 +128,15 @@ var toolMetas = []ToolMeta{
 		Description: "移除接口请求。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
 	},
 	{
-		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDetailOutput(false),
 		Description: "新建文档（独立 .md；folder 留空=docs/）。身份=uid/path（name 可重复）；同名/同 uid 默认 [CONFLICT]，onConflict=suffix/overwrite 放宽；uid 可幂等；dryRun 只演练。",
 	},
 	{
-		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDetailOutput(false),
 		Description: "改文档：content 覆盖（空串清空）/ name 显示名 / folder 移动 / replaces 局部替换（与 content 互斥，old 缺失整单拒绝）；ifMatch 防覆盖；成功附改动行；dryRun 只预览。",
 	},
 	{
-		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
+		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0", Output: docDeleteOutput(),
 		Description: "移除文档（移入集合 .trash，可人工找回）；dryRun=true 只返回目标路径、不删。",
 	},
 	{
@@ -288,17 +288,121 @@ func ValidateMetas() error {
 	return nil
 }
 
-// listOutput 列表类工具的 outputSchema（宽松：数组元素不锁字段，避免与内部结构强耦合）。
-func listOutput(key string) map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"project":  map[string]any{"type": "string"},
-			"total":    map[string]any{"type": "integer"},
-			"returned": map[string]any{"type": "integer"},
-			"offset":   map[string]any{"type": "integer"},
-			key:        map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
-		},
-		"required": []string{key},
+// ---- outputSchema 构造器（结构化输出的"编译时契约"）----
+//
+// 评审第二轮指出：只写 items:{type:"object"} 等于没有字段契约——字段改名不会触发校验。
+// 这里把每个列表/详情工具的真实字段都写进 schema（required 标出必读字段）。
+
+func objSchema(props map[string]any, required ...string) map[string]any {
+	out := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		out["required"] = required
 	}
+	return out
+}
+
+func arrSchema(items map[string]any) map[string]any {
+	return map[string]any{"type": "array", "items": items}
+}
+
+func strSchema() map[string]any  { return map[string]any{"type": "string"} }
+func intSchema() map[string]any  { return map[string]any{"type": "integer"} }
+func boolSchema() map[string]any { return map[string]any{"type": "boolean"} }
+
+func listProjectsOutput() map[string]any {
+	project := objSchema(map[string]any{
+		"path":       strSchema(),
+		"name":       strSchema(),
+		"uid":        strSchema(),
+		"requests":   intSchema(),
+		"folders":    intSchema(),
+		"envs":       arrSchema(strSchema()),
+		"defaultEnv": strSchema(),
+		"skipped":    strSchema(),
+	}, "path", "name")
+	return objSchema(map[string]any{"projects": arrSchema(project), "skipped": intSchema()}, "projects")
+}
+
+func listDocsOutput() map[string]any {
+	doc := objSchema(map[string]any{
+		"uid":  strSchema(),
+		"name": strSchema(),
+		"path": strSchema(),
+		"size": intSchema(),
+		"hash": strSchema(),
+		"icon": strSchema(),
+		"seq":  intSchema(),
+	}, "uid", "path")
+	return objSchema(map[string]any{
+		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
+		"offset": intSchema(), "docs": arrSchema(doc),
+	}, "docs")
+}
+
+func searchDocsOutput() map[string]any {
+	hit := objSchema(map[string]any{
+		"uid": strSchema(), "name": strSchema(), "path": strSchema(), "project": strSchema(),
+		"count":   intSchema(),
+		"matches": arrSchema(objSchema(map[string]any{"line": intSchema(), "snippet": strSchema()}, "line", "snippet")),
+	}, "uid", "path")
+	return objSchema(map[string]any{
+		"pattern": strSchema(), "total": intSchema(), "returned": intSchema(), "docs": arrSchema(hit),
+	}, "docs")
+}
+
+func searchRequestsOutput() map[string]any {
+	item := objSchema(map[string]any{
+		"uid": strSchema(), "name": strSchema(), "method": strSchema(), "url": strSchema(),
+		"path": strSchema(), "project": strSchema(), "score": intSchema(),
+		"matched": arrSchema(strSchema()), "snippet": strSchema(), "hash": strSchema(),
+	}, "uid", "path")
+	return objSchema(map[string]any{
+		"query": strSchema(), "total": intSchema(), "returned": intSchema(), "results": arrSchema(item),
+	}, "results")
+}
+
+func modulesOutput() map[string]any {
+	mod := objSchema(map[string]any{
+		"path": strSchema(), "name": strSchema(), "requests": intSchema(), "dirs": intSchema(),
+	}, "path", "name")
+	return objSchema(map[string]any{
+		"project": strSchema(), "moduleTotal": intSchema(), "matched": intSchema(),
+		"total": intSchema(), "modules": arrSchema(mod),
+	}, "modules")
+}
+
+func envsOutput() map[string]any {
+	v := objSchema(map[string]any{
+		"name": strSchema(), "value": strSchema(), "secret": boolSchema(),
+		"enabled": boolSchema(), "keptSecret": boolSchema(), "hash": strSchema(),
+	}, "name")
+	env := objSchema(map[string]any{
+		"name": strSchema(), "default": boolSchema(), "hash": strSchema(),
+		"vars": map[string]any{"type": "object", "additionalProperties": v},
+	}, "name", "vars")
+	return objSchema(map[string]any{
+		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
+		"offset": intSchema(), "envs": arrSchema(env),
+	}, "envs")
+}
+
+// docDetailOutput 文档单条/写操作的结果（create_doc / update_doc / get_doc）。
+func docDetailOutput(withContent bool) map[string]any {
+	props := map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(),
+		"path": strSchema(), "size": intSchema(), "hash": strSchema(),
+		"planned": strSchema(), // dryRun 时 create/overwrite/update
+	}
+	required := []string{"uid", "path"}
+	if withContent {
+		props["content"] = strSchema()
+	}
+	return objSchema(props, required...)
+}
+
+// docDeleteOutput delete_doc 的结果（只带身份与路径，避免暴露内容）。
+func docDeleteOutput() map[string]any {
+	return objSchema(map[string]any{
+		"uid": strSchema(), "path": strSchema(), "deleted": boolSchema(), "trash": boolSchema(), "dryRun": boolSchema(),
+	}, "uid")
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1214,13 +1215,49 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 // 等于把「能写哪里」交给调用方 —— 现在白名单外一律拒绝。
 func (s *Service) CreateProject(root, name, dirName string) (Project, error) {
 	if strings.TrimSpace(root) == "" {
-		return s.reg.CreateProject(name, dirName)
+		p, err := s.reg.CreateProject(name, dirName)
+		if err != nil {
+			return Project{}, classifyCreateProjectErr(err)
+		}
+		return p, nil
 	}
 	al, err := s.reg.allowFor(root, true)
 	if err != nil {
-		return Project{}, err
+		return Project{}, classifyCreateProjectErr(err)
 	}
-	return s.reg.CreateProjectIn(al.Path, name, dirName)
+	// root 必须是「工作目录」，不能是已有项目目录本身：
+	// 否则会在项目里再套一个项目，扫描只认顶层子目录，新项目随后就「找不到」。
+	absRoot, aerr := filepath.Abs(root)
+	if aerr != nil {
+		absRoot = root
+	}
+	absRoot = filepath.Clean(absRoot)
+	if _, serr := os.Stat(filepath.Join(absRoot, "opencollection.yml")); serr == nil {
+		return Project{}, withInvalid(fmt.Errorf("root %s 本身是项目目录，不能在其中新建项目；请传它的父级工作目录（list_workspaces 里可写的那个）", absRoot))
+	}
+	p, err := s.reg.CreateProjectIn(al.Path, name, dirName)
+	if err != nil {
+		return Project{}, classifyCreateProjectErr(err)
+	}
+	return p, nil
+}
+
+// classifyCreateProjectErr 给 create_project 的错误映射稳定错误码（评审反馈：此前一律 [INTERNAL]）。
+func classifyCreateProjectErr(err error) error {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "不在 MCP 授权"):
+		return coded(CodeAuth, err)
+	case strings.Contains(msg, "只读授权"):
+		return coded(CodeReadOnly, err)
+	case strings.Contains(msg, "项目已存在"):
+		return coded(CodeConflict, err)
+	case strings.Contains(msg, "缺少 name"), strings.Contains(msg, "非法字符"), strings.Contains(msg, "目录名"),
+		strings.Contains(msg, "本身是项目目录"):
+		return withInvalid(err)
+	default:
+		return coded(CodeIO, err)
+	}
 }
 
 // DocsOf 读取请求的说明文档原文（仅 docs 字段）：

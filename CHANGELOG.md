@@ -23,6 +23,8 @@ prod:
   - 列表类工具返回 `structuredContent` + `outputSchema`（文本不变）。
   - `send_request` 默认**不再**保存响应示例（显式 `saveExample=true` 才存）。
   - 工具描述瘦身：总字符 6135 → 3799，并加预算回归测试；`list_envs` 支持分页。
+  - 结构化输出补全：`create_doc`/`update_doc`/`get_doc`/`delete_doc` 也返回 `structuredContent`（uid/path/size/hash 等），`outputSchema` 的数组元素写明具体字段与 required（不再只有 `items:{type:"object"}`）；`create_doc` 建完可直接取 uid/path/hash。
+  - 复测修正：`create_doc` 的 dryRun 只输出计划（不再同时打印「已创建」）；`create_project` 的 `root` 必须是工作目录（指向项目目录时 `[INVALID]` 并提示父级），白名单外 `[AUTH]`、重名 `[CONFLICT]`（不传 root 时若默认可写目录本身是项目也会 `[INVALID]` 提示改父级）；`list_docs` 带 hash 由「逐篇重扫」改为单次扫描（30 篇实测 168ms → 24ms）。
 - 已知限制：**导出**（Markdown / HTML）仍不打包图片；冲突时手动选择「采用服务器版本」的说明文档，其图片要等下一轮同步才会本地化。
 
 ## 2026-10-28  0.1.3-dev
