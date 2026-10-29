@@ -52,6 +52,25 @@ func (a *App) CreateDoc(name, folder string) (*collection.DocEntry, error) {
 	return c.CreateDoc(name, "", folder)
 }
 
+// CreateDocEx 新建文档（MCP create_doc）：冲突策略由调用方决定（默认 error 在 MCP 侧）。
+// 前端「新建文档」仍走 CreateDoc（重名自动 -2，历史行为）。
+func (a *App) CreateDocEx(name, uid, folder, onConflict string) (*collection.DocEntry, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateDocEx(name, uid, folder, onConflict)
+}
+
+// PlanCreateDoc 只做校验/冲突判定，不落盘（MCP create_doc 的 dryRun）。
+func (a *App) PlanCreateDoc(name, uid, folder, onConflict string) (*collection.DocEntry, string, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, "", err
+	}
+	return c.PlanCreateDoc(name, uid, folder, onConflict)
+}
+
 // SaveDoc 保存文档。
 func (a *App) SaveDoc(d *collection.DocEntry) error {
 	c, err := a.requireCollection()

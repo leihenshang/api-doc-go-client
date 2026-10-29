@@ -27,14 +27,14 @@ func TestDocCRUD(t *testing.T) {
 	}
 
 	// 列表：默认全量；query 命中名称/路径
-	all, err := svc.ListDocs("demo", "")
-	if err != nil || len(all) != 1 || all[0].UID != d.UID {
-		t.Fatalf("ListDocs 异常: %+v %v", all, err)
+	all, total, err := svc.ListDocs("demo", "", 0, 0, false)
+	if err != nil || len(all) != 1 || total != 1 || all[0].UID != d.UID {
+		t.Fatalf("ListDocs 异常: %+v total=%d %v", all, total, err)
 	}
-	if hit, err := svc.ListDocs("demo", "接入"); err != nil || len(hit) != 1 {
+	if hit, _, err := svc.ListDocs("demo", "接入", 0, 0, false); err != nil || len(hit) != 1 {
 		t.Fatalf("按名称过滤应命中 1 篇: %+v %v", hit, err)
 	}
-	if miss, err := svc.ListDocs("demo", "不存在的关键词"); err != nil || len(miss) != 0 {
+	if miss, _, err := svc.ListDocs("demo", "不存在的关键词", 0, 0, false); err != nil || len(miss) != 0 {
 		t.Fatalf("不匹配时应为空: %+v %v", miss, err)
 	}
 
@@ -91,7 +91,7 @@ func TestDocCRUD(t *testing.T) {
 	if err := svc.DeleteDoc("demo", d.UID); err != nil {
 		t.Fatalf("DeleteDoc: %v", err)
 	}
-	if left, err := svc.ListDocs("demo", ""); err != nil || len(left) != 0 {
+	if left, _, err := svc.ListDocs("demo", "", 0, 0, false); err != nil || len(left) != 0 {
 		t.Fatalf("删除后应为空: %+v %v", left, err)
 	}
 }

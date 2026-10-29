@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "confirm": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "confirm"
+  ],
+  "type": "object"
+}

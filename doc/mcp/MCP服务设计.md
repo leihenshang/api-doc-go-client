@@ -66,11 +66,13 @@ Claude Desktop 配置：
 - **懒加载**：首次访问某项目才 `OpenCollection` 并起该项目的 fsnotify 监听；`refresh=true` 重新扫描。
 - 读操作前 `ReloadCollection`（重扫 + 重建索引），因为扫描与索引是「打开时快照」。
 
-## 三、工具清单（30 个）
+## 三、工具清单（36 个）
+
+> 约定：失败文本统一 `失败: [CODE] 说明`；列表类工具（list_* / search_* / get_project_modules）另外返回 `structuredContent`（声明 `outputSchema`）；文档写工具支持 `dryRun`；容器删除进 `.trash`。
 
 名称/描述/风险级别/读写标记的**单一事实源是 `meta.go`**（T1）：`Risk`（low/medium/high）、`Write`（落盘）、
 `NetEgress`（真实外发）、`EnvWrite`（触碰 `*.secrets.yml`）、`InReadOnly`（只读模式仍注册）。
-`ValidateMetas` 锁定「正式工具恒 30 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
+`ValidateMetas` 锁定「正式工具恒 36 个 + 风险标记自洽」，`assertRegistered` 在装配期双向核对「注册集合 == meta 表在该模式下应有的集合」。
 风险分级是 T2 授权与 T3 审计的判定依据：**low = 10 个只读工具；medium = `send_request`（网络外发）；high = 16 个落盘写工具**（请求 5 + 文档 3 + 响应示例 3 + 环境 5）。
 
 | 工具 | 风险 | 作用 | 关键入参 |
@@ -82,7 +84,7 @@ Claude Desktop 配置：
 | `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例）；`docs` 段可分段/大纲 | `project?`、`uid`、`query?`、`includeBody?`、`maxBodyBytes?`、`sections?`、`docsStartLine?`、`docsMaxLines?`、`docsOutline?` |
 | `search_requests` | low | 搜索（可跨项目，支持整词/字段限定/片段） | `query`、`project?`、`limit?`、`exactMatch?`、`fields?`、`includeHash?` |
 | `get_doc_template` | low | 接口说明（docs）的 Markdown 分节结构契约（对齐前端 buildApiDoc） | — |
-| `list_docs` | low | 文档条目清单（集合树里的独立 .md；名称/路径/字节数） | `project?`、`query?` |
+| `list_docs` | low | 文档条目清单（名称/路径/字节数/hash；默认带 hash） | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` |
 | `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`）；支持 `outline` 大纲与 `startLine`/`maxLines` 分段 | `project?`、`uid`、`startLine?`、`maxLines?`、`outline?` |
 | `list_envs` | low | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
 | `send_request` | medium | 发送并可选保存示例（唯一网络外发工具，只读模式也注册） | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
@@ -91,10 +93,16 @@ Claude Desktop 配置：
 | `create_project` | high | 新建项目（目录 + manifest，只能在白名单内的可写目录里建） | `name`、`dirName?`、`root?`（留空 = 第一个可写目录） |
 | `update_request` | high | 局部修改（含 params/settings/respDoc）/ 移动模块 | `project?`、`uid`、各可选字段、`ifMatch?` |
 | `delete_request` | high | 移除请求（进 `.trash`） | `project?`、`uid` |
-| `create_doc` | high | 新建文档（可挂在任意分组目录，可带正文） | `project?`、`name`、`folder?`、`content?` |
+| `create_doc` | high | 新建文档；冲突默认报错（可 suffix/overwrite），支持 uid 幂等 | `project?`、`name`、`folder?`、`content?`、`uid?`、`onConflict?` |
 | `update_doc` | high | 改正文 / 改名 / 移动分组（局部更新） | `project?`、`uid`、`content?`、`name?`、`folder?`、`ifMatch?` |
 | `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
 | `save_doc_image` | high | 保存图片（base64，PNG/JPEG/GIF/WebP，≤5MB，内容寻址去重）到项目 `assets/`，返回 `/doc-assets/<sha256>` | `project?`、`data`、`name?` |
+| `get_docs` | low | 批量读文档（1–10，按 uid 分组） | `project?`、`uids`、`startLine?`、`maxLines?`、`outline?` |
+| `rename_module` | high | 改模块显示名（目录/uid 不变） | `project?`、`path`、`name` |
+| `delete_module` | high | 删除模块（进 `.trash`，可递归） | `project?`、`path`、`recursive?` |
+| `rename_project` | high | 改项目显示名（清单 info.name） | `project`、`name` |
+| `delete_project` | high | 删除项目（confirm 二次确认，目录移入授权根 `.trash`） | `project`、`confirm` |
+| `prune_empty_modules` | high | 清理空模块目录 | `project?` |
 | `save_response_example` | high | 手工存一条响应示例（不发送请求；contentType 空则按 body 推断） | `project?`、`uid`、`name?`、`status?`、`headers?`、`body?`、`contentType?` |
 | `update_response_example` | high | 局部更新示例（改名同步改文件名与 path；body 变则 size 跟着变） | `project?`、`uid`、`exampleUid`、`name?`、`status?`、`headers?`、`body?`、`contentType?` |
 | `delete_response_example` | high | 删除示例（进 `.trash`，不动请求本身） | `project?`、`uid`、`exampleUid` |
@@ -179,7 +187,7 @@ status/headers/body/contentType 直接落盘；`UpdateResponseExample` 按 UID �
 
 ## 七、交互式授权与调用审计（T2 / T3）
 
-**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（30 个业务 handler 零改动）——
+**guard 装饰链**：所有工具在注册处被 `runGuarded` 统一包住（36 个业务 handler 零改动）——
 `recover（panic 转工具级错误）→ 风险授权（非 low 才走）→ 业务 → 收尾恰好一条审计`。
 拒绝/异常一律 `isError: true` 的工具级错误，AI 能读到并纠正，不是协议级 error。
 
@@ -243,8 +251,8 @@ status/headers/body/contentType 直接落盘；`UpdateResponseExample` 按 UID �
 cmd/mcpserver/main.go       flag（-allow/-allow-writable/-root/-http/-readonly/-require-consent…）+ 传输选择（stdio / HTTP）；
                             stdio 形态也装配 mcpaudit（落配置目录）与 -require-consent 的 DenyAuthorizer（T2/T3）
 internal/mcp/server.go      装配：NewServer / ServeStdio / ServeHTTP（唯一 import SDK 的入口层；透传 Authorizer/Auditor/Transport）
-internal/mcp/meta.go        30 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
-internal/mcp/tools.go       30 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
+internal/mcp/meta.go        36 个工具的元数据单一事实源（name/description/risk/write/netEgress/envWrite/InReadOnly，T1；ValidateMetas 自检）
+internal/mcp/tools.go       36 个工具的注册（meta 驱动 + assertRegistered 双向核对）与 guard 装饰器 runGuarded（recover + 授权 T2 + 审计 T3）
 internal/mcp/doctpl.go      get_doc_template 的 docs 结构契约文案（对齐前端 lib/genDocs.ts，变更需两侧同步）
 internal/mcp/authz_args.go  授权弹窗的入参脱敏 summarizeArgs（白名单键 + 敏感值掩码，T2）
 internal/mcp/service.go     语义实现（不 import SDK，可单测/复用）

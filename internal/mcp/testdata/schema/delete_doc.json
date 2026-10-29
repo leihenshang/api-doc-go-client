@@ -1,5 +1,8 @@
 {
   "properties": {
+    "dryRun": {
+      "type": "boolean"
+    },
     "project": {
       "type": "string"
     },

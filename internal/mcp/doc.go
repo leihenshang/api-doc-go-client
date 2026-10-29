@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	errNeedDocName = errors.New("缺少 name：创建文档必须给名称")
-	errNeedDocUID  = errors.New("缺少 uid：请先用 list_docs 找到目标文档")
+	errNeedDocName = coded(CodeInvalid, errors.New("缺少 name：创建文档必须给名称"))
+	errNeedDocUID  = coded(CodeInvalid, errors.New("缺少 uid：请先用 list_docs 找到目标文档"))
 )
 
 // DocItem 文档条目元信息（不含正文），list_docs 的一行。
@@ -32,6 +32,8 @@ type DocItem struct {
 	Icon string `json:"icon,omitempty"`
 	Seq  int    `json:"seq,omitempty"`
 	Size int    `json:"size"` // 正文字节数：AI 可据此判断要不要 get_doc 取全文
+	// Hash 文档文件当前 hash（默认返回）：可直接回传 update_doc.ifMatch，省一次 get_doc。
+	Hash string `json:"hash,omitempty"`
 }
 
 // DocDetail 文档详情：正文 + 磁盘 hash。
@@ -40,17 +42,22 @@ type DocDetail struct {
 	DocItem
 	Content string `json:"content"`
 	Hash    string `json:"hash,omitempty"`
+	// Planned dryRun 时的动作（create / overwrite / update）；正常写入为空。
+	Planned string `json:"planned,omitempty"`
+	// PrevContent 仅 dryRun 更新时用于计算「改动行」预览（不序列化给客户端）。
+	PrevContent string `json:"-"`
 }
 
 // ListDocs 列出项目里的文档条目（按路径排序）；query 对名称/路径做大小写不敏感的子串过滤。
-func (s *Service) ListDocs(project, query string) ([]DocItem, error) {
+// limit/offset 分页（limit<=0 用默认 200，上限 1000）；includeHash 默认由调用方传 true。
+func (s *Service) ListDocs(project, query string, limit, offset int, includeHash bool) ([]DocItem, int, error) {
 	a, _, err := s.resolve(project)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	docs, err := a.ListDocs()
 	if err != nil {
-		return nil, fmt.Errorf("列不出文档: %w", err)
+		return nil, 0, coded(CodeIO, fmt.Errorf("列不出文档: %w", err))
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
 	out := make([]DocItem, 0, len(docs))
@@ -63,7 +70,30 @@ func (s *Service) ListDocs(project, query string) ([]DocItem, error) {
 		out = append(out, docItem(d))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	total := len(out)
+	if offset >= total {
+		return []DocItem{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	page := out[offset:end]
+	if includeHash {
+		for i := range page {
+			page[i].Hash = a.DocFileHash(page[i].UID)
+		}
+	}
+	return page, total, nil
 }
 
 // GetDoc 读单篇文档（含正文）。
@@ -78,7 +108,7 @@ func (s *Service) GetDoc(project, uid string) (*DocDetail, error) {
 	}
 	d, err := a.ReadDoc(uid)
 	if err != nil {
-		return nil, fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err)
+		return nil, withNotFound(fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err))
 	}
 	return &DocDetail{DocItem: docItem(d), Content: d.Content, Hash: a.DocFileHash(uid)}, nil
 }
@@ -86,9 +116,15 @@ func (s *Service) GetDoc(project, uid string) (*DocDetail, error) {
 // CreateDocInput create_doc 的入参。
 type CreateDocInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	Name    string `json:"name" jsonschema:"文档名（不含 .md 后缀，不能带路径分隔符）"`
+	Name    string `json:"name" jsonschema:"文档显示名（不含 .md 后缀，不能带路径分隔符）；name 允许重复，身份以 uid/path 为准"`
 	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（相对集合根，如 docs 或 用户/说明）；留空 = 集合根目录"`
 	Content string `json:"content,omitempty" jsonschema:"Markdown 正文；留空则创建空文档，之后可用 update_doc 写入"`
+	// UID 可选：批量导入/幂等创建时传固定 uid；已存在时按 onConflict 处理。
+	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
+	// OnConflict 同名路径/同 uid 的冲突策略：error（默认）| suffix | overwrite。
+	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有条目的 uid/path 并覆盖正文）"`
+	// DryRun 只做校验与冲突判定，返回将发生的变化，不落盘。
+	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回将创建/覆盖的路径与冲突判断，不写盘"`
 }
 
 // CreateDoc 新建文档条目；content 非空时一并写入。
@@ -101,9 +137,27 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 	if name == "" {
 		return nil, errNeedDocName
 	}
-	d, err := a.CreateDoc(name, strings.TrimSpace(in.Folder))
+	mode, verr := collection.NormalizeDocConflict(in.OnConflict)
+	if verr != nil {
+		return nil, withInvalid(verr)
+	}
+	if in.DryRun {
+		d, action, derr := a.PlanCreateDoc(name, strings.TrimSpace(in.UID), strings.TrimSpace(in.Folder), mode)
+		if derr != nil {
+			if errors.Is(derr, collection.ErrDocConflict) {
+				return nil, coded(CodeConflict, derr)
+			}
+			return nil, withInvalid(derr)
+		}
+		d.Content = in.Content
+		return &DocDetail{DocItem: docItem(d), Content: in.Content, Planned: action}, nil
+	}
+	d, err := a.CreateDocEx(name, strings.TrimSpace(in.UID), strings.TrimSpace(in.Folder), mode)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, collection.ErrDocConflict) {
+			return nil, coded(CodeConflict, err)
+		}
+		return nil, withInvalid(err)
 	}
 	// CreateDoc 落盘的是空正文；有内容时再存一次（不传 ifMatch：刚创建的文件不存在并发问题）
 	if in.Content != "" {
@@ -125,6 +179,8 @@ type UpdateDocInput struct {
 	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文的局部替换：[{old,new,replaceAll}]，与 content 互斥；任一 old 找不到则整单拒绝、不落盘"`
 	Folder   *string     `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
 	IfMatch  string      `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的完整 hash；磁盘在此期间被外部改动则拒绝写入并返回当前 hash"`
+	// DryRun 只计算新正文/校验 ifMatch，返回预览，不落盘。
+	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回改动预览与 ifMatch 校验结果，不写盘"`
 }
 
 // UpdateDoc 局部更新文档：正文（带 ifMatch 校验）/ 改名 / 移动可任意组合。
@@ -142,11 +198,32 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	}
 	d, err := a.ReadDoc(uid)
 	if err != nil {
-		return nil, fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err)
+		return nil, withNotFound(fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err))
 	}
 	// 正文：整篇覆盖（content）与局部替换（replaces）互斥；两者都走 ifMatch 校验。
 	if in.Content != nil && len(in.Replaces) > 0 {
 		return nil, errors.New("content 与 replaces 互斥：整篇覆盖用 content，局部替换用 replaces（不要同时传）")
+	}
+	if in.DryRun {
+		// 只算新正文 + 校验 ifMatch，不写盘（也不改名/移动）
+		next := d.Content
+		if in.Content != nil {
+			next = *in.Content
+		} else if len(in.Replaces) > 0 {
+			content, rerr := applyReplaces(d.Content, in.Replaces)
+			if rerr != nil {
+				return nil, rerr
+			}
+			next = content
+		}
+		if want := strings.TrimSpace(in.IfMatch); want != "" {
+			if cur := a.DocFileHash(uid); cur != "" && !strings.HasPrefix(cur, want) {
+				return nil, conflictError("文档", uid, cur)
+			}
+		}
+		out := *d
+		out.Content = next
+		return &DocDetail{DocItem: docItem(&out), Content: next, Hash: a.DocFileHash(uid), Planned: "update", PrevContent: d.Content}, nil
 	}
 	if in.Content != nil {
 		d.Content = *in.Content
@@ -201,7 +278,10 @@ func (s *Service) DeleteDoc(project, uid string) error {
 	if uid == "" {
 		return errNeedDocUID
 	}
-	return a.DeleteDoc(uid)
+	if err := a.DeleteDoc(uid); err != nil {
+		return withNotFound(err)
+	}
+	return nil
 }
 
 // docBrief 把集合层的 DocEntry 投影成 MCP 返回结构（正文只算长度，列表里不带全文）。

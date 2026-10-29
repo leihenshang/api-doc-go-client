@@ -73,7 +73,7 @@ func NormalizeSearchFields(fields []string) (map[string]bool, error) {
 			}
 		}
 		if !ok {
-			return nil, fmt.Errorf("fields 含未知取值 %q；可选值：%s", raw, strings.Join(searchFieldNames, "/"))
+			return nil, withInvalid(fmt.Errorf("fields 含未知取值 %q；可选值：%s", raw, strings.Join(searchFieldNames, "/")))
 		}
 		out[f] = true
 	}

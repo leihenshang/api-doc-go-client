@@ -1,5 +1,17 @@
 {
   "properties": {
+    "includeHash": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "offset": {
+      "type": "integer"
+    },
     "project": {
       "type": "string"
     },

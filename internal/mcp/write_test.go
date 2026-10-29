@@ -183,8 +183,16 @@ func TestSendRequestAndSaveExample(t *testing.T) {
 	if out.Saved {
 		t.Error("save_example=false 时不应落盘")
 	}
-	// 默认落盘为响应示例
-	out, err = svc.SendRequest(SendRequestInput{Project: "demo", UID: r.UID, ExampleName: "200 成功"})
+	// 默认不落盘（评审 T7）：不传 saveExample 时 Saved=false
+	out, err = svc.SendRequest(SendRequestInput{Project: "demo", UID: r.UID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Saved {
+		t.Errorf("默认不应保存示例: %+v", out)
+	}
+	// 显式 saveExample=true 才落盘为响应示例
+	out, err = svc.SendRequest(SendRequestInput{Project: "demo", UID: r.UID, ExampleName: "200 成功", SaveExample: boolPtr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}

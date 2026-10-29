@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// 本文件是 29 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
+// 本文件是 36 个 MCP Tool 的**单一事实源**：名称、风险级别、副作用标记、只读模式注册位、
 // 注册描述。tools.go 的注册、T2 的交互授权、T3 的审计、文档生成都读这张表，
 // 不允许在别处再硬编码一份工具风险/读写分类。
 //
@@ -38,8 +38,10 @@ type ToolMeta struct {
 
 	Description string // 与注册到 mcp.Tool.Description 的文案一致（注册直接读这里）
 	Since       string // 引入版本
-	Deprecated  bool   // 是否废弃（预留，当前全 false）
-	AliasOf     string // 非空 = 别名项，指向正式 Tool（当前无任何别名）
+	// Output 可选 outputSchema（仅列表类工具声明；详情类不声明，避免响应 payload 翻倍）。
+	Output     any
+	Deprecated bool   // 是否废弃（预留，当前全 false）
+	AliasOf    string // 非空 = 别名项，指向正式 Tool（当前无任何别名）
 }
 
 // NeedsConsent 非低风险即需交互确认（T2 默认对 medium/high 弹窗）。
@@ -48,7 +50,7 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 30 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 36 个（ValidateMetas 锁定）。
 var toolMetas = []ToolMeta{
 	// ---- 12 个只读工具（只读模式也注册）----
 	{
@@ -60,50 +62,54 @@ var toolMetas = []ToolMeta{
 		Description: "选定默认工作目录：选定后其余工具的 project 参数即可省略。workspace 传 list_workspaces 返回的工作目录 path，或一个项目标识（名称/路径/uid）；不在白名单内会直接拒绝。",
 	},
 	{
-		Name: "list_projects", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Name: "list_projects", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("projects"),
 		Description: "列出所有项目（集合）。project = 包含 opencollection.yml 的目录，一个项目一个集合。范围仅限客户端授权的 MCP 工作目录（见 list_workspaces）。返回名称、路径、uid、请求数/模块数/环境列表。",
 	},
 	{
-		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
+		Name: "get_project_modules", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("modules"),
 		Description: "获取某个项目的目录（模块）结构与每个模块下的请求数。query 可对模块名与请求名/方法/路径做模糊过滤；include_requests=true 时附带请求清单。带 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求），汇总行始终给出模块总数；传 onlyMatched=false 可看全部模块。",
 	},
 	{
 		Name: "get_request_detail", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "获取某个接口的详情：请求（method/url/params/body/auth/settings/grpc）、headers、概述（summary）、说明文档（docs）、响应字段文档（respDoc：返回类型/字段表/样例，样例按 include_body 裁剪）以及已保存的响应示例。请求体字段表格在 body.fields（字段名/类型/必填/示例值/说明，手工生成，可为空）。query 可在示例名/文档名里再筛一遍；include_body=true 时返回示例的响应体（按 maxBodyBytes 裁剪）。sections 只取指定分段（overview/docs/bodyFields/respDoc/examples），可把单次响应压到 3000 字符内；不传 = 全量；说明文档很长时用 docsOutline=true 看标题大纲，或 docsStartLine+docsMaxLines 分段读取（与 get_doc 同口径）。返回的 hash 是**完整值**，可直接传给 update_request.ifMatch 做冲突保护。",
+		Description: "接口详情：请求/headers/概述/说明/响应字段/示例。sections 可只取分段（overview/docs/bodyFields/respDoc/examples）；说明长时用 docsOutline 或 docsStartLine+docsMaxLines；hash 完整可直接回传 ifMatch。",
 	},
 	{
 		Name: "get_request_details", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
 		Description: "批量获取多个接口的详情（一次 1–10 个 uid，超出直接报错）：参数与 get_request_detail 相同（sections/include_body/maxBodyBytes/query 对每个卡片生效），结果按 uid 分组，单个 uid 失败不影响其它。用于一次取多张卡片，省掉逐个调用的往返。",
 	},
 	{
-		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "搜索接口：按名称/URL/方法/路径/header/说明/请求体/响应字段/请求体字段表打分排序（分数越高越相关，matched 列出命中字段，snippet 给出命中行±1，可先判断相关性再取详情）。exactMatch=true 走整词匹配（词边界，不切词、不做子序列兜底），适合长标识符；fields 限定搜索范围（name/uri/docs/respDoc/bodyFields/header/body），不传 = 全部；includeHash=true 时每条附完整 hash（可直接回传 ifMatch），默认不带以省体积。project 省略时在所有已加载项目里搜。",
+		Name: "search_requests", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("results"),
+		Description: "搜索接口（名称/URL/方法/header/说明/请求体/响应字段/字段表打分）：exactMatch 整词、fields 限定、includeHash 附 hash；snippet 给命中行。",
 	},
 	{
-		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
+		Name: "search_docs", Risk: RiskLow, InReadOnly: true, Since: "0.4.0", Output: listOutput("docs"),
 		Description: "搜索文档条目（集合树里独立的 .md）正文：按行匹配，返回每篇文档的 uid/路径/命中行号/片段（每篇最多 5 处，其余用 get_doc 读全文）。pattern 必填；exactMatch=true 走整词匹配；project 省略时在所有已加载项目里搜。用于定位文档内容，避免逐篇 get_doc 全文拉回；命中行号（L<n>）可作为 get_doc 的 startLine 继续精读。",
 	},
 	{
-		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Description: "列出项目的全部环境与其中的变量（敏感变量的值只回掩码 ••••••，拿不到真实密钥）。query 可对环境名与变量名做模糊过滤。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
+		Name: "list_envs", Risk: RiskLow, InReadOnly: true, Since: "0.1.0", Output: listOutput("envs"),
+		Description: "列出环境与变量（敏感值只回掩码）。query 过滤环境/变量名；limit（默认 200）/offset 分页，首行给总数。环境即 environments/<env>.yml，请求里用 {{变量名}} 引用这些变量。每个环境带一个 hash，写操作时作为 if_match 传回即可避免覆盖期间的其它改动。",
 	},
 	{
 		Name: "get_doc_template", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
 		Description: "返回「接口说明（docs）」的分节结构契约：与客户端一键「生成接口文档」的 Markdown 骨架逐节对齐（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注，含列名与 {{host}} 掩码规则）。写 docs 前先取本模板，保证客户端展示与导出渲染一致。无需项目上下文。",
 	},
 	{
-		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Description: "列出项目里的文档条目（集合树里独立的 .md，可挂在任意分组目录下）。注意与接口自带的说明区分：接口说明是 request.docs（见 get_request_detail），不在这里。query 可按文档名/路径模糊过滤。返回每篇文档的 uid/名称/路径/字节数；读正文用 get_doc。",
+		Name: "list_docs", Risk: RiskLow, InReadOnly: true, Since: "0.2.0", Output: listOutput("docs"),
+		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：接口自带的说明是 request.docs，不在这里。",
+	},
+	{
+		Name: "get_docs", Risk: RiskLow, InReadOnly: true, Since: "0.6.0",
+		Description: "批量读文档：一次 1–10 个 uid，按 uid 分组；单条失败不影响其他。支持与 get_doc 相同的 startLine/maxLines/outline。",
 	},
 	{
 		Name: "get_doc", Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的**完整 hash**：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动（不传 = 最后写者赢，不匹配时返回明确错误与当前 hash，不会静默覆盖）。uid 来自 list_docs / search_docs。默认返回全文；长文档先 outline=true 看标题大纲（带行号），再用 startLine+maxLines 分段读取（默认 100 行、上限 500），search_docs 的 L<行号> 可直接作为 startLine；区间读取的行号仅供阅读，写回时不要带。",
+		Description: "读文档正文+完整 hash（可回传 update_doc.ifMatch 防覆盖）。默认全文；长文先 outline=true 看大纲，再 startLine+maxLines 分段（行号仅供阅读）。",
 	},
 
-	// ---- 12 个集合写工具（只读模式不注册）：请求 5 + 文档 4（含图片）+ 响应示例 3 ----
+	// ---- 17 个集合写工具（只读模式不注册）：请求 5 + 文档 9（含图片与容器）+ 响应示例 3 ----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。概述用 summary（纯文本一句话），请求体字段表格用 bodyFields（与 body 相互独立，传了只覆盖表格）；三者互不影响。同名会在分组内自动加序号。",
+		Description: "新建接口：给 method/url/…，或 curl，或 copyFromUid；可同时写 summary/bodyFields/docs/respDoc/settings；同名自动加序号。",
 	},
 	{
 		Name: "create_module", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -115,7 +121,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "update_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
-		Description: "修改已有接口（只改传入的字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc 都是整字段覆盖语义（不传不动；params 传空数组即清空）。respDoc 按子项合并：可只写 params 字段表，样例/响应头/状态码缺省保留原值（gRPC 拒绝）；settings 仅单请求级，不碰全局配置；docs 结构先取 get_doc_template。概述用 summary、请求体字段表格用 bodyFields，各自独立设置：body 整份覆盖不会清掉表格与概述（body.fields/body.descs 传 null 保留原值，显式传空数组/空对象才清空），bodyFields 不传=不动、传空数组=清空；summary 不传=不动、传空串=清空。folder 可移动模块。长文档只想改局部时用 replaces（[{old,new,replaceAll}]，作用于 docs，与 docs 互斥；old 找不到会整单拒绝、不落盘）。ifMatch 传详情里的完整 hash：不匹配时返回明确错误 + 当前 hash、不写入任何内容；不传则最后写者赢。成功响应会附落盘确认：能按行定位改动时给「第 N–M 行 ±1 行」片段，定位不到时回落前 5 行。改名会自动同步文件名。",
+		Description: "改接口（只改传入字段）：name/method/url/params/headers/body/auth/docs/settings/respDoc/summary/bodyFields 各自覆盖，不传不动；body 与 bodyFields 独立；docs 与 replaces 互斥（old 缺失整单拒绝）；ifMatch=完整 hash 防覆盖；folder 移动模块；成功附改动行确认。",
 	},
 	{
 		Name: "delete_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
@@ -123,27 +129,47 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "create_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
-		Description: "新建文档条目（集合树里独立的 .md，可挂在任意分组目录下：folder 留空=集合根）。content 可一次给 Markdown 正文，留空则先建空文档。注意与接口说明区分：接口说明走 create_request/update_request 的 docs 字段。",
+		Description: "新建文档（独立 .md；folder 留空=docs/）。身份=uid/path（name 可重复）；同名/同 uid 默认 [CONFLICT]，onConflict=suffix/overwrite 放宽；uid 可幂等；dryRun 只演练。",
 	},
 	{
 		Name: "update_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
-		Description: "修改已有文档（只改传入的字段）：content 覆盖正文（传空串=清空）、name 改显示名（文件名不变）、folder 移动到别的分组目录（传空串=移到集合根）。长文档只想改局部时用 replaces（[{old,new,replaceAll}]，作用于正文，与 content 互斥；old 找不到会整单拒绝、不落盘）。ifMatch 传 get_doc 返回的完整 hash：不匹配时返回明确错误 + 当前 hash、不写入任何内容；不传则最后写者赢。成功响应会附落盘确认：能按行定位改动时给「第 N–M 行 ±1 行」片段，定位不到时回落前 5 行。",
+		Description: "改文档：content 覆盖（空串清空）/ name 显示名 / folder 移动 / replaces 局部替换（与 content 互斥，old 缺失整单拒绝）；ifMatch 防覆盖；成功附改动行；dryRun 只预览。",
 	},
 	{
 		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
-		Description: "移除文档条目。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
+		Description: "移除文档（移入集合 .trash，可人工找回）；dryRun=true 只返回目标路径、不删。",
 	},
 	{
 		Name: "save_doc_image", Risk: RiskHigh, Write: true, Since: "0.5.0",
-		Description: "把一张图片保存到项目本地 assets/（内容寻址、同图自动去重），返回可直接写进 Markdown 的 URL（/doc-assets/<sha256>）。data 传图片的 base64（可带 data:image/...;base64, 前缀）；只接受 PNG / JPEG / GIF / WebP，单张 ≤5MB。用法：先 save_doc_image 拿 URL，再用 create_doc / update_doc（或 update_request.docs）写入 ![说明](URL)。图片只落本地集合，不会上传服务端。",
+		Description: "保存图片到项目 assets/（base64；PNG/JPEG/GIF/WebP≤5MB，同图去重），返回 /doc-assets/<sha256>，可直接写进 Markdown。",
+	},
+	{
+		Name: "rename_module", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Description: "改模块显示名（只改 folder.yml；path 是目录名，改名后路径不变）。path 用 get_project_modules 返回的值，如 api/user。",
+	},
+	{
+		Name: "delete_module", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Description: "删除模块：recursive=true 连子模块/请求/文档整棵移入集合 .trash（可找回）；false（默认）只允许空模块，非空会拒绝。",
+	},
+	{
+		Name: "rename_project", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Description: "改项目显示名（opencollection.yml 的 info.name；目录不变）。project 必须显式指定。",
+	},
+	{
+		Name: "delete_project", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Description: "删除项目：confirm 必须等于项目显示名或目录名（防误删）；目录移入授权根下 .trash/<名>-<时间戳>，可人工移回，list_projects 立即刷新。",
+	},
+	{
+		Name: "prune_empty_modules", Risk: RiskHigh, Write: true, Since: "0.6.0",
+		Description: "清理空模块目录（只有 folder.yml、没有请求/文档/子模块），返回删除数量；集合根与 assets/environments/examples 不动。",
 	},
 	{
 		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
-		Description: "手工保存一条响应示例（不发送请求，适合把外部文档/日志里的响应片段留成示例）：落到该请求的 examples/ 目录（examples/<模块>/<请求名>/<示例名>.yml）。name 省略=「响应示例」，status 省略=200，contentType 省略时按 body 首字符推断（{ / [ → application/json，其余 text/plain）；size 按 body 字节数记录。重名自动加 (1)(2)。返回示例 uid/path/name —— 改它用 update_response_example，删它用 delete_response_example。",
+		Description: "手工存一条响应示例（不发请求）：name/status/headers/body/contentType；重名自动加 (1)；返回示例 uid/path。",
 	},
 	{
 		Name: "update_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
-		Description: "修改已保存的响应示例（只改传入的字段）：name 改名会同步把磁盘文件名改成「规范化名.yml」（与新建示例同一套命名规则，显示名与文件名同值；含非法字符/过长会报错且不动任何文件，写成功后才会删旧文件）；status/headers/body/contentType 不传则不动（传空数组可清空响应头，status 传 0 即清零），body 变化时 size 自动跟着改；重名自动加 (1)(2)。exampleUid 来自 get_request_detail 示例行里的 uid=…。",
+		Description: "改响应示例：name/status/headers/body/contentType 局部更新（不传不动）；改名同步文件名。",
 	},
 	{
 		Name: "delete_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
@@ -165,7 +191,7 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "set_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
-		Description: "新增或更新某环境里的一个变量（按变量名 upsert，只改这一条，其它变量与顺序都不动）。强烈建议先 list_envs 拿到该环境的 hash 再带 ifMatch 写入（环境是整份重写，不带校验会覆盖期间的其它改动）。secret=true 时值落盘进 .secrets.yml，之后对外只回掩码；若把掩码原样传回表示「密钥不变」，不会覆盖真值（掩码被改写成 •••• / ????? 这类占位也认）；对已存在的敏感变量传空值会被拒绝，避免误清空密钥。enabled=false 可停用某变量（不参与 {{name}} 解析）。",
+		Description: "写单个环境变量（upsert）：name/value/secret/enabled；敏感值传掩码=不改；ifMatch 用 list_envs 的 hash 防覆盖。",
 	},
 	{
 		Name: "delete_env_var", Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
@@ -175,7 +201,7 @@ var toolMetas = []ToolMeta{
 	// ---- 唯一的网络外发工具（只读模式也注册，但强制不落盘）----
 	{
 		Name: "send_request", Risk: RiskMedium, NetEgress: true, InReadOnly: true, Since: "0.1.0",
-		Description: "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 true：把响应存成该请求的响应示例（examples/*.yml，客户端可回看/删除）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例）。",
+		Description: "发送请求并返回状态码/耗时/大小/响应体（响应体按 maxBodyBytes 裁剪）。saveExample 默认 false（探测请求不落盘）；需要留存时显式 saveExample=true，响应存成该请求的响应示例（examples/*.yml）。可以给 uid 发已保存的请求，也可以给 method+url 发临时请求（临时请求不落盘、不存示例）。",
 	},
 }
 
@@ -221,7 +247,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 30
+	const expectTools = 36
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}
@@ -260,4 +286,19 @@ func ValidateMetas() error {
 		seen[m.Name] = true
 	}
 	return nil
+}
+
+// listOutput 列表类工具的 outputSchema（宽松：数组元素不锁字段，避免与内部结构强耦合）。
+func listOutput(key string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"project":  map[string]any{"type": "string"},
+			"total":    map[string]any{"type": "integer"},
+			"returned": map[string]any{"type": "integer"},
+			"offset":   map[string]any{"type": "integer"},
+			key:        map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+		},
+		"required": []string{key},
+	}
 }

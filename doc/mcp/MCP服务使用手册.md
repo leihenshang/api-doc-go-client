@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **30 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **36 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -17,9 +17,9 @@
 | 查询 | `get_request_details` | 批量详情：一次 1–10 个 uid，参数同 `get_request_detail`，按 uid 分组返回 |
 | 查询 | `search_requests` | 搜索（`exactMatch` 整词、`fields` 限定范围，每条带 `snippet` 命中行） |
 | 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处） |
-| 查询 | `list_envs` | 有哪些环境与变量（**敏感值只回掩码**，每个环境带 `hash`） |
+| 查询 | `list_envs` | 环境与变量（**敏感值只回掩码**，每个环境带 `hash`）；`limit`/`offset` 分页 |
 | 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
-| 查询 | `list_docs` / `get_doc` | 集合里的**文档条目**（独立 .md）：列清单 / 读正文（带 `hash` 供冲突保护） |
+| 查询 | `list_docs` / `get_doc` / `get_docs` | 文档条目：列清单（分页 + `hash`）/ 读正文（分段/大纲）/ 批量读 1–10 篇 |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc） |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest） |
@@ -27,6 +27,9 @@
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
 | 写 | `save_doc_image` | 保存图片（base64）到项目 `assets/`，返回可写进 Markdown 的 `/doc-assets/<sha256>`（与客户端编辑器同款） |
+| 写 | `rename_module` / `delete_module` | 模块改名（显示名）/ 删除（空模块或 `recursive` 整棵，进 `.trash`） |
+| 写 | `rename_project` / `delete_project` | 项目改名（显示名）/ 删除（必须 `confirm`，目录移入授权根 `.trash` 可恢复） |
+| 写 | `prune_empty_modules` | 清理空模块目录 |
 | 写 | `save_response_example` / `update_response_example` / `delete_response_example` | 响应示例的手工新增（不发送请求）/ 局部更新（改名·状态码·响应体）/ 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
@@ -178,7 +181,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
   留空 = 第一个可写授权目录；白名单外一律拒绝）。建完 `list_projects` 立刻可见。
 
 ### 4.7 `send_request`
-`project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 true）、
+`project?` +（`uid` 或 `method`+`url`）、`env?`（留空 = 第一个环境）、`saveExample?`（默认 false；要留存示例时显式传 true）、
 `exampleName?`（默认 `"{状态码} 响应"`）、`includeBody?`（不传 = 返回体）、`maxBodyBytes?`。
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
@@ -234,7 +237,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `list_envs` | `project?`、`query?` | 列出环境与变量；`query` 对环境名与变量名都过滤；每个环境带 `hash` |
+| `list_envs` | `project?`、`query?`、`limit?`、`offset?` | 列出环境与变量；`query` 对环境名与变量名都过滤；每个环境带 `hash` |
 | `create_env` | `project?`、`name` ✅、`vars[]?` | 新建环境（重名报错，不覆盖）。每条变量 `{name,value,secret,enabled}`，**`enabled` 不传 = 启用** |
 | `rename_env` | `project?`、`name` ✅、`newName` ✅、`ifMatch?` | 两个文件一起搬，旧文件进 `.trash`；目标名被占用报错；**只改大小写（`dev`→`DEV`）被拒绝** |
 | `delete_env` | `project?`、`name` ✅ | 删环境（两个文件进 `.trash`）；环境不存在报错 |
@@ -281,9 +284,10 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `list_docs` | `project?`、`query?` | 列清单（名称/路径/字节数）；`query` 按名称与路径模糊过滤 |
+| `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`） |
+| `get_docs` | `project?`、`uids` ✅（1–10）、`startLine?`、`maxLines?`、`outline?` | 批量读：按 uid 分组，单条失败不影响其他；失败行内带错误码 |
 | `get_doc` | `project?`、`uid` ✅、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
-| `create_doc` | `project?`、`name` ✅、`folder?`、`content?` | `folder` 留空 = 集合根；`content` 可一次给全文，留空先建空文档 |
+| `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
 | `update_doc` | `project?`、`uid` ✅、`content?`、`replaces?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换（与 `content` 互斥，`old` 找不到整单拒绝）、`name` 改显示名、`folder` 换分组；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
@@ -336,6 +340,38 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 > 图片先落本地集合（`assets/`，与离线附件同一目录）；**同步时随文档一起走**：推送会自动上传缺失图片并把正文换成服务端 URL（同一张图只传一次，映射存 `.sync.json` 的 `assetUrls`），拉取会自动下载服务端图片到本地并改写回 `/doc-assets/…`。外链图片原样保留。注意：同步后的图片在服务端走 `/uploads` 公开静态路径（与 Web 编辑器一致），敏感截图请勿入库。
 > 仍未覆盖：导出 Markdown/HTML 不打包图片；手动「采用服务器版本」的冲突文档要等下一轮同步才把图片本地化。
 
+### 4.12.1 dryRun（文档写工具）
+
+`create_doc` / `update_doc` / `delete_doc` 支持 `dryRun:true`：
+
+- `create_doc`：只做校验与冲突判定，返回将创建/覆盖的 uid 与 path（冲突仍是 `[CONFLICT]`）；
+- `update_doc`：返回改动预览（行级定位）并校验 `ifMatch`，不改正文、不改名/移动；
+- `delete_doc`：只返回将移入 `.trash` 的路径。
+
+脚本化批量写之前可以先用它干跑一遍，避免「写一半才发现冲突」。
+
+### 4.12.2 结构化输出（列表类工具）
+
+`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
+在文本结果之外还会返回 **`structuredContent`**（并声明 `outputSchema`），字段与文本一一对应
+（如 `{project,total,returned,offset,docs[]}`）。文本输出保持不变，旧客户端不受影响；
+详情类工具**不做**结构化（避免响应体积翻倍）。
+
+### 4.12.3 错误码（所有工具统一）
+
+失败结果的文本统一为 `失败: [CODE] 说明`，调用方可按前缀分流（不必匹配中文）：
+
+| 码 | 含义 |
+|---|---|
+| `[NOT_FOUND]` | 项目 / 文档 / 接口 / 示例 / 变量不存在（含 uid 拼错） |
+| `[CONFLICT]` | 同名冲突、`ifMatch` 不匹配（文档创建默认就是这条） |
+| `[INVALID]` | 参数缺失/取值非法（含 SDK 的 inputSchema 校验失败） |
+| `[READONLY]` | 工作目录是只读授权 |
+| `[AUTH]` | 目录不在 MCP 白名单 |
+| `[LIMIT]` | 批量/分页超过上限（如一次 >10 个 uid） |
+| `[IO]` | 读写磁盘失败 |
+| `[INTERNAL]` | 其它内部错误 |
+
 ### 4.13 响应示例工具：`save_response_example` / `update_response_example` / `delete_response_example`
 
 响应示例 = 集合里的 `examples/<模块>/<请求名>/<示例名>.yml`（纯文本、可 git diff、不参与目录树扫描）。
@@ -377,6 +413,18 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 命名与落盘规则：示例名 → 文件名走同一套 `sanitize` 规则（与请求/文档一致），所以**改名 = 换文件**；
 同一个请求下的示例按保存序号 `seq` 排「新 → 旧」。示例挂在**请求**下，移动/改名请求会让示例目录跟着走。
+
+### 4.14 容器级工具：`rename_module` / `delete_module` / `rename_project` / `delete_project` / `prune_empty_modules`
+
+`create_project` / `create_module` 是对称面：容器级创建此前没有回收路径，这组工具补齐。
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `rename_module` | `project?`、`path` ✅、`name` ✅ | 只改 `folder.yml` 的显示名；**目录与 uid 不变**（`path` 仍是原目录名） |
+| `delete_module` | `project?`、`path` ✅、`recursive?` | 默认只允许空模块；`recursive=true` 连同子模块/请求/文档整棵移入集合 `.trash`（回收站可恢复） |
+| `rename_project` | `project` ✅、`name` ✅ | 改 `opencollection.yml` 的 `info.name`；目录不变 |
+| `delete_project` | `project` ✅、`confirm` ✅ | `confirm` 必须等于项目名或目录名；目录移入**授权根**下 `.trash/<目录名>-<时间戳>`，可手动移回 |
+| `prune_empty_modules` | `project?` | 自底向上删除「只有 folder.yml、没有请求/文档/子模块」的目录；`assets`/`environments`/`examples` 不动 |
 
 ## 五、典型工作流（可以直接对 AI 这么说）
 
@@ -439,6 +487,12 @@ mcpserver.exe -allow-writable D:\collections -http 0.0.0.0:8189 -http-token my-s
 
 > ⚠️ mirrored 模式下**别用 `ip route show default` 的结果** —— 那拿到的是路由器地址（实测本机是
 > `192.168.31.1`），不是 Windows 宿主，连不上。
+
+### 8.2.1 白名单路径重复段
+
+现象：项目路径出现 `…\dns项目\dns项目`（同一个名字套两层）。
+这是**授权目录配置**问题，不是工具缺陷：白名单指到项目目录本身，同时项目目录里还有同名子目录/清单时，
+拼接路径就会重复。把 `-allow-writable` / 设置里的白名单改到**上一级**（如 `…\lx_dns`）即可。
 
 先探通再谈业务：`curl http://127.0.0.1:8189/healthz` → `{"ok":true,...}`（不需要令牌）。
 
@@ -584,7 +638,7 @@ printf '%s\n' \
  | mcpserver.exe -allow-writable D:\collections
 ```
 
-**默认约定回顾**：示例默认保存、响应体裁剪 8192 字节、列表 50/200 条、敏感值只回掩码（掩码回传 = 不改，`.`/`?` 不算掩码）、
+**默认约定回顾**：`send_request` 默认**不保存**示例（显式 `saveExample=true` 才留）、响应体裁剪 8192 字节、列表 50/200 条、敏感值只回掩码（掩码回传 = 不改，`.`/`?` 不算掩码）、
 省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、示例改名与新建同一套命名规则、图片只落本地 `<集合>/assets/`（正文引用 `/doc-assets/<sha256>`）、授权目录（`-allow-writable`/`-allow`）下含
 `opencollection.yml` 的子目录 = 项目、`project` 三种写法（uid / 名称 / 路径）、
 内嵌服务风险工具默认弹窗确认（拒绝 / 允许 15 分钟 / 始终允许，60s 超时按拒绝）、每次调用都写审计。

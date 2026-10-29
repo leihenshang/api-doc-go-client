@@ -93,14 +93,21 @@ type SetEnvVarInput struct {
 
 // ListEnvs 列出项目全部环境及其变量（敏感值掩码）。
 // query 为空即不过滤；非空时按「环境名 / 变量名」子串匹配（忽略大小写与全角空格）。
+// ListEnvs 兼容旧调用：不分页（等同 ListEnvsPage(0,0)）。
 func (s *Service) ListEnvs(project, query string) ([]EnvEntry, error) {
+	envs, _, err := s.ListEnvsPage(project, query, 0, 0)
+	return envs, err
+}
+
+// ListEnvsPage 列出环境（limit/offset 分页；limit<=0 默认 200，上限 1000），返回过滤后总数。
+func (s *Service) ListEnvsPage(project, query string, limit, offset int) ([]EnvEntry, int, error) {
 	a, _, err := s.resolve(project)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	envs, err := a.ListEnvs()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	def := defaultEnvName(envs)
 	q := normalize(query)
@@ -129,7 +136,24 @@ func (s *Service) ListEnvs(project, query string) ([]EnvEntry, error) {
 			Hash:    hashOf(a, env.Name),
 		})
 	}
-	return out, nil
+	total := len(out)
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return []EnvEntry{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return out[offset:end], total, nil
 }
 
 // CreateEnv 新建环境（可同时写入初始变量）。重名直接报错，不覆盖已有环境。

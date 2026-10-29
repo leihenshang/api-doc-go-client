@@ -81,10 +81,23 @@ type ProjectApp interface {
 	// SaveDocImage 保存一张 Markdown 图片（base64，可带 data URL 前缀），
 	// 返回到可直接写进正文的 URL（/doc-assets/<sha256>）。
 	SaveDocImage(dataBase64 string) (string, error)
+	// ---- 模块 / 集合级维护（容器工具）----
+	FolderUIDByPath(dir string) (string, bool)
+	RenameFolder(uid, name string) error
+	DeleteFolder(uid string) error
+	DeleteFolderTree(uid string) error
+	RenameCollection(name string) error
+	PruneEmptyFolders() (int, error)
+	// CloseProject 释放该实例的集合句柄（delete_project 前调用）。
+	CloseProject()
 	ListDocs() ([]*collection.DocEntry, error)
 	// ReadDoc 读单篇文档（含正文）；uid 不存在时返回错误。
 	ReadDoc(uid string) (*collection.DocEntry, error)
 	CreateDoc(name, folder string) (*collection.DocEntry, error)
+	// CreateDocEx 新建文档：uid 可选（幂等），onConflict = error|suffix|overwrite。
+	CreateDocEx(name, uid, folder, onConflict string) (*collection.DocEntry, error)
+	// PlanCreateDoc 只做校验/冲突判定，不落盘（create_doc dryRun）。
+	PlanCreateDoc(name, uid, folder, onConflict string) (*collection.DocEntry, string, error)
 	SaveDoc(d *collection.DocEntry) error
 	// SaveDocExpectHash 带并发写保护地保存文档（expectHash 为空则不校验）。
 	SaveDocExpectHash(d *collection.DocEntry, expectHash string) error

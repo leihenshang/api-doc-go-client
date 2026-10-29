@@ -171,7 +171,7 @@ func NormalizeDetailSections(sections []string) (map[string]bool, error) {
 			}
 		}
 		if !ok {
-			return nil, fmt.Errorf("sections 含未知取值 %q；可选值：%s", raw, strings.Join(detailSectionNames, "/"))
+			return nil, withInvalid(fmt.Errorf("sections 含未知取值 %q；可选值：%s", raw, strings.Join(detailSectionNames, "/")))
 		}
 		out[s] = true
 	}
@@ -381,12 +381,12 @@ func min(a, b int) int {
 //
 // 排序：环境按名字（与服务端一致），变量按名字 —— map 的迭代顺序随机，
 // 不排序的话同一份配置每次输出顺序都不同，AI 会以为内容在变。
-func renderEnvs(project string, envs []EnvEntry) string {
+func renderEnvs(project string, envs []EnvEntry, total, offset int) string {
 	if len(envs) == 0 {
 		return fmt.Sprintf("项目 %s 还没有任何环境。用 create_env 新建（请求里以 {{变量名}} 引用其中的变量）。", project)
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "项目 %s 共 %d 个环境：\n", project, len(envs))
+	fmt.Fprintf(&sb, "项目 %s 共 %d 个环境（本次返回 %d 个，offset %d）：\n", project, total, len(envs), offset)
 	for _, env := range envs {
 		tag := ""
 		if env.Default {
@@ -470,17 +470,28 @@ func renderWorkspaceSelected(it WorkspaceItem, selected string) string {
 }
 
 // renderDocs list_docs 的结果：一篇文档一行（名称 · 路径 · 字节数）+ 下一层的 uid。
-func renderDocs(project string, docs []DocItem) string {
-	if len(docs) == 0 {
+func renderDocs(project string, docs []DocItem, total, offset int) string {
+	if total == 0 {
 		return fmt.Sprintf("项目 %s 里没有文档条目。用 create_doc 新建。"+
 			"（文档是集合树里独立的 Markdown 文件；接口自带的说明走 request.docs，不在这里）", project)
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "项目 %s 共 %d 篇文档：\n", project, len(docs))
+	fmt.Fprintf(&sb, "项目 %s 共 %d 篇文档（本次返回 %d 篇，offset %d）：\n", project, total, len(docs), offset)
 	for _, d := range docs {
-		fmt.Fprintf(&sb, "\n- %s · %s · %d 字节\n  uid %s\n", d.Name, d.Path, d.Size, d.UID)
+		fmt.Fprintf(&sb, "\n- %s · %s · %d 字节", d.Name, d.Path, d.Size)
+		if d.Hash != "" {
+			fmt.Fprintf(&sb, " · hash %s", d.Hash)
+		}
+		fmt.Fprintf(&sb, "\n  uid %s\n", d.UID)
 	}
-	sb.WriteString("\n用 get_doc 读正文（返回的 hash 可回传给 update_doc.ifMatch）。")
+	if offset+len(docs) < total {
+		fmt.Fprintf(&sb, "\n还有 %d 篇：用 offset=%d 继续取。", total-offset-len(docs), offset+len(docs))
+	}
+	if len(docs) > 0 && docs[0].Hash != "" {
+		sb.WriteString("\n用 get_doc 读正文（列表里的 hash 可直接回传 update_doc.ifMatch）。")
+	} else {
+		sb.WriteString("\n用 get_doc 读正文；需要并发保护时再 get_doc 取 hash（或 list_docs 带 includeHash=true）。")
+	}
 	return sb.String()
 }
 

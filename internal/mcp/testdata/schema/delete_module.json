@@ -1,0 +1,17 @@
+{
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "recursive": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
+}
