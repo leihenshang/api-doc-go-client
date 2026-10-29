@@ -46,6 +46,10 @@ export function CloseCollection(arg1) {
   return window['go']['app']['App']['CloseCollection'](arg1);
 }
 
+export function CloseProject() {
+  return window['go']['app']['App']['CloseProject']();
+}
+
 export function ConflictDetail(arg1) {
   return window['go']['app']['App']['ConflictDetail'](arg1);
 }
@@ -58,6 +62,10 @@ export function CreateDoc(arg1, arg2) {
   return window['go']['app']['App']['CreateDoc'](arg1, arg2);
 }
 
+export function CreateDocEx(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['CreateDocEx'](arg1, arg2, arg3, arg4);
+}
+
 export function CreateFolder(arg1, arg2) {
   return window['go']['app']['App']['CreateFolder'](arg1, arg2);
 }
@@ -68,6 +76,10 @@ export function CreateRequest(arg1, arg2, arg3) {
 
 export function CreateRequestFromDraft(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateRequestFromDraft'](arg1, arg2, arg3);
+}
+
+export function CreateRequestFromDraftEx(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['CreateRequestFromDraftEx'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function DeleteCookie(arg1, arg2, arg3) {
@@ -106,8 +118,16 @@ export function DeleteResponseExample(arg1, arg2) {
   return window['go']['app']['App']['DeleteResponseExample'](arg1, arg2);
 }
 
+export function DocAssetHandler() {
+  return window['go']['app']['App']['DocAssetHandler']();
+}
+
 export function DocFileHash(arg1) {
   return window['go']['app']['App']['DocFileHash'](arg1);
+}
+
+export function DocHashes() {
+  return window['go']['app']['App']['DocHashes']();
 }
 
 export function EnvFileHash(arg1) {
@@ -124,6 +144,14 @@ export function ExportMCPAudit(arg1) {
 
 export function ExportRunReport(arg1, arg2) {
   return window['go']['app']['App']['ExportRunReport'](arg1, arg2);
+}
+
+export function FileHash(arg1) {
+  return window['go']['app']['App']['FileHash'](arg1);
+}
+
+export function FolderUIDByPath(arg1) {
+  return window['go']['app']['App']['FolderUIDByPath'](arg1);
 }
 
 export function GenerateCode(arg1, arg2, arg3) {
@@ -302,8 +330,28 @@ export function PickGrpcProtoFiles() {
   return window['go']['app']['App']['PickGrpcProtoFiles']();
 }
 
+export function PlanCreateDoc(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['PlanCreateDoc'](arg1, arg2, arg3, arg4);
+}
+
+export function PlanCreateRequest(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['PlanCreateRequest'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function PlanResponseExampleRaw(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['PlanResponseExampleRaw'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function PlanUpdateResponseExample(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['PlanUpdateResponseExample'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function PreviewTrashFor(arg1, arg2) {
   return window['go']['app']['App']['PreviewTrashFor'](arg1, arg2);
+}
+
+export function PruneEmptyFolders() {
+  return window['go']['app']['App']['PruneEmptyFolders']();
 }
 
 export function Quit() {
@@ -340,6 +388,10 @@ export function RemoveGrpcProto(arg1) {
 
 export function RemoveMCPGrant(arg1, arg2) {
   return window['go']['app']['App']['RemoveMCPGrant'](arg1, arg2);
+}
+
+export function RenameCollection(arg1) {
+  return window['go']['app']['App']['RenameCollection'](arg1);
 }
 
 export function RenameDoc(arg1, arg2) {
@@ -402,12 +454,16 @@ export function SaveDoc(arg1) {
   return window['go']['app']['App']['SaveDoc'](arg1);
 }
 
+export function SaveDocExpectHash(arg1, arg2) {
+  return window['go']['app']['App']['SaveDocExpectHash'](arg1, arg2);
+}
+
 export function SaveDocImage(arg1) {
   return window['go']['app']['App']['SaveDocImage'](arg1);
 }
 
-export function SaveDocExpectHash(arg1, arg2) {
-  return window['go']['app']['App']['SaveDocExpectHash'](arg1, arg2);
+export function SaveDocImageInfo(arg1) {
+  return window['go']['app']['App']['SaveDocImageInfo'](arg1);
 }
 
 export function SaveEnv(arg1) {
