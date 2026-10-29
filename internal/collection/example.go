@@ -164,6 +164,77 @@ func (c *Collection) SaveResponseExample(reqUID, name string, req ExampleRequest
 	return ex, nil
 }
 
+// PlanResponseExample 只计算「新建示例」的落点（uid 新建、重名加 (1)），不写盘。
+func (c *Collection) PlanResponseExample(reqUID, name string, req ExampleRequest, res ExampleResponse) (*ResponseExample, error) {
+	if !validEntryName(name) {
+		return nil, fmt.Errorf("名称含非法字符或为空")
+	}
+	base := sanitizeFileName(name)
+	if err := checkExampleName(base); err != nil {
+		return nil, err
+	}
+	r, err := c.ReadRequest(reqUID)
+	if err != nil {
+		return nil, fmt.Errorf("定位请求: %w", err)
+	}
+	relDir := exampleDir(r.Path)
+	fullDir := filepath.Join(c.Dir, filepath.FromSlash(relDir))
+	unique, err := uniqueExampleName(fullDir, base)
+	if err != nil {
+		return nil, err
+	}
+	return &ResponseExample{
+		UID: uuid.NewString(), Name: unique, RequestUID: reqUID,
+		Path: path.Join(relDir, unique+".yml"), Seq: c.nextExampleSeq(relDir),
+		CreatedAt: time.Now().UnixMilli(), Request: req, Response: res,
+	}, nil
+}
+
+// PlanResponseExampleFile 只计算 Upsert 的最终落点（重名改名/换目录），不写盘。
+func (c *Collection) PlanResponseExampleFile(ex *ResponseExample) error {
+	exampleSaveMu.Lock()
+	defer exampleSaveMu.Unlock()
+	_, _, err := c.planExampleFile(ex)
+	return err
+}
+
+// planExampleFile 计算落点并回填 ex.Name/ex.Path；返回 stale（旧路径）与是否原地重写。
+func (c *Collection) planExampleFile(ex *ResponseExample) (stale string, inPlace bool, err error) {
+	existing, _ := c.ListAllResponseExamples()
+	for _, old := range existing {
+		if old.UID != ex.UID {
+			continue
+		}
+		if old.Path != ex.Path {
+			stale = old.Path
+		} else {
+			inPlace = true
+		}
+		break
+	}
+	for _, old := range existing {
+		if old.UID != ex.UID && old.Path == ex.Path {
+			base := sanitizeFileName(ex.Name)
+			if err := checkExampleName(base); err != nil {
+				return "", false, err
+			}
+			unique, uerr := uniqueExampleName(filepath.Dir(filepath.Join(c.Dir, filepath.FromSlash(ex.Path))), base)
+			if uerr != nil {
+				return "", false, uerr
+			}
+			ex.Name = unique
+			ex.Path = path.Join(path.Dir(ex.Path), unique+".yml")
+			break
+		}
+	}
+	if !inPlace {
+		if err := checkExampleName(exampleBaseOf(ex.Path)); err != nil {
+			return "", false, err
+		}
+	}
+	return stale, inPlace, nil
+}
+
 // nextExampleSeq 同请求内的下一个保存序号（目录不存在或读取失败时从 1 开始）。
 func (c *Collection) nextExampleSeq(relDir string) int {
 	existing, err := c.listExamples(relDir)
@@ -306,45 +377,9 @@ func (c *Collection) ListAllResponseExamples() ([]*ResponseExample, error) {
 func (c *Collection) UpsertResponseExampleFile(ex *ResponseExample) (string, error) {
 	exampleSaveMu.Lock()
 	defer exampleSaveMu.Unlock()
-	existing, _ := c.ListAllResponseExamples()
-	// 同 UID 的现有落点：stale = 换了路径的旧文件（写成功后删）；
-	// inPlace = 「原地重写同一路径」—— 这种调用不该受长度上限约束，
-	// 否则历史遗留 / 外部同步来的超长名示例连「只改状态码」都做不到。
-	stale, inPlace := "", false
-	for _, old := range existing {
-		if old.UID != ex.UID {
-			continue
-		}
-		if old.Path != ex.Path {
-			stale = old.Path
-		} else {
-			inPlace = true
-		}
-		break
-	}
-	// 文件名冲突：换名，并同步改显示名（文件名与示例名同源）
-	for _, old := range existing {
-		if old.UID != ex.UID && old.Path == ex.Path {
-			base := sanitizeFileName(ex.Name)
-			// 长度上限：先去重再写，超限时直接报错（不动旧文件，见下面的先写后删）
-			if err := checkExampleName(base); err != nil {
-				return "", err
-			}
-			unique, uerr := uniqueExampleName(filepath.Dir(filepath.Join(c.Dir, filepath.FromSlash(ex.Path))), base)
-			if uerr != nil {
-				return "", uerr
-			}
-			ex.Name = unique
-			ex.Path = path.Join(path.Dir(ex.Path), unique+".yml")
-			break
-		}
-	}
-	// 落点变了（新建 / 改名 / 换目录）才检查长度：超限时不动旧文件、直接报错。
-	// 原地重写不检查 —— 已存在的名字是什么就写什么，长度问题不该让用户改不动它。
-	if !inPlace {
-		if err := checkExampleName(exampleBaseOf(ex.Path)); err != nil {
-			return "", err
-		}
+	stale, _, err := c.planExampleFile(ex)
+	if err != nil {
+		return "", err
 	}
 	full := filepath.Join(c.Dir, filepath.FromSlash(ex.Path))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {

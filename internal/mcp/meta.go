@@ -408,7 +408,7 @@ func docDetailOutput(withContent bool) map[string]any {
 func requestDetailOutput() map[string]any {
 	return objSchema(map[string]any{
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(),
-		"path": strSchema(), "method": strSchema(), "url": strSchema(),
+		"path": strSchema(), "method": strSchema(), "url": strSchema(), "planned": strSchema(),
 	}, "uid", "path")
 }
 
@@ -500,7 +500,7 @@ func envVarDeleteOutput() map[string]any {
 func exampleWriteOutput() map[string]any {
 	return objSchema(map[string]any{
 		"project": strSchema(), "requestUid": strSchema(), "uid": strSchema(),
-		"name": strSchema(), "path": strSchema(), "status": intSchema(),
+		"name": strSchema(), "path": strSchema(), "status": intSchema(), "planned": strSchema(),
 	}, "uid")
 }
 

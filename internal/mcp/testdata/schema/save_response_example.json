@@ -6,6 +6,9 @@
     "contentType": {
       "type": "string"
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "headers": {
       "items": {
         "properties": {

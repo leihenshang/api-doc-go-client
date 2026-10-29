@@ -160,6 +160,9 @@
         "string"
       ]
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "folder": {
       "type": [
         "null",

@@ -129,6 +129,78 @@ func (a *App) SaveResponseExampleRaw(reqUID, name string, status int, headers []
 	return c.SaveResponseExample(r.UID, name, req, res)
 }
 
+// PlanResponseExampleRaw 与 SaveResponseExampleRaw 同参，但只计算落点（uuid/重名 (1)），不写盘。
+func (a *App) PlanResponseExampleRaw(reqUID, name string, status int, headers []collection.KV, body, contentType string) (*collection.ResponseExample, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	r, err := c.ReadRequest(strings.TrimSpace(reqUID))
+	if err != nil {
+		return nil, fmt.Errorf("定位请求: %w", err)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "响应示例"
+	}
+	ct := strings.TrimSpace(contentType)
+	if ct == "" {
+		ct = inferContentType(body)
+	}
+	req := collection.ExampleRequest{Method: strings.ToUpper(r.Method), URL: r.URL, Headers: r.Headers, Body: r.Body}
+	res := collection.ExampleResponse{Status: status, Size: len(body), ContentType: ct, Headers: headers, Body: body}
+	return c.PlanResponseExample(r.UID, name, req, res)
+}
+
+// PlanUpdateResponseExample 与 UpdateResponseExample 同参，但只计算改后的 name/path，不写盘。
+func (a *App) PlanUpdateResponseExample(reqUID, exampleUID string, name *string, status *int,
+	headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	examples, err := c.ListResponseExamples(strings.TrimSpace(reqUID))
+	if err != nil {
+		return nil, err
+	}
+	var ex *collection.ResponseExample
+	for _, it := range examples {
+		if it.UID == strings.TrimSpace(exampleUID) {
+			cp := *it
+			ex = &cp
+			break
+		}
+	}
+	if ex == nil {
+		return nil, errExampleNotFound
+	}
+	if name != nil {
+		if n := strings.TrimSpace(*name); n != "" {
+			base := collection.SanitizeFileName(n)
+			if base != ex.Name {
+				ex.Name = base
+				ex.Path = path.Join(path.Dir(ex.Path), base+".yml")
+			}
+		}
+	}
+	if status != nil {
+		ex.Response.Status = *status
+	}
+	if headers != nil {
+		ex.Response.Headers = *headers
+	}
+	if body != nil {
+		ex.Response.Body = *body
+		ex.Response.Size = len(*body)
+	}
+	if contentType != nil {
+		ex.Response.ContentType = strings.TrimSpace(*contentType)
+	}
+	if err := c.PlanResponseExampleFile(ex); err != nil {
+		return nil, err
+	}
+	return ex, nil
+}
+
 // inferContentType 按响应体首字符粗判媒体类型（只给 body 时的兜底，不做严格 JSON 校验）。
 func inferContentType(body string) string {
 	s := strings.TrimLeft(body, " \t\r\n")

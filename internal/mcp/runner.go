@@ -59,6 +59,8 @@ type ProjectApp interface {
 	CreateRequestFromDraft(folder, name string, r *collection.Request) (*collection.Request, error)
 	// CreateRequestFromDraftEx 按 uid/onConflict 落盘草稿（默认 error，防重复同步产生 -2 副本）。
 	CreateRequestFromDraftEx(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error)
+	// PlanCreateRequest 同参但只做冲突判定/身份分配，不写盘（dryRun）。
+	PlanCreateRequest(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error)
 	ParseCurl(curl string) (*collection.Request, error)
 	SearchIndex(query string, limit int) ([]index.Node, error)
 	SendRequest(r *collection.Request, envName string) (*runner.Result, error)
@@ -75,6 +77,11 @@ type ProjectApp interface {
 	SaveResponseExample(r *collection.Request, name string, res *runner.Result) (*collection.ResponseExample, error)
 	// SaveResponseExampleRaw 用原始字段保存一条示例（不发送请求）；contentType 为空时按 body 推断。
 	SaveResponseExampleRaw(reqUID, name string, status int, headers []collection.KV, body, contentType string) (*collection.ResponseExample, error)
+	// PlanResponseExampleRaw 同参但只计算落点，不写盘（dryRun）。
+	PlanResponseExampleRaw(reqUID, name string, status int, headers []collection.KV, body, contentType string) (*collection.ResponseExample, error)
+	// PlanUpdateResponseExample 同参但只计算改后落点，不写盘（dryRun）。
+	PlanUpdateResponseExample(reqUID, exampleUID string, name *string, status *int,
+		headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error)
 	// UpdateResponseExample 局部更新示例（指针为 nil 的字段不动）；改名会同步改文件名与 path。
 	UpdateResponseExample(reqUID, exampleUID string, name *string, status *int,
 		headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error)
