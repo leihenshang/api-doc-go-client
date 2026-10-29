@@ -287,8 +287,8 @@ func renderDetail(d *RequestDetail, sections map[string]bool, docsView LineView)
 			// （工具结果是一段文本，没有结构化字段可回引），漏了就没法定位「已存在」的示例。
 			fmt.Fprintf(&sb, "\n已保存的响应示例（%d 个）：\n", len(d.Examples))
 			for _, e := range d.Examples {
-				fmt.Fprintf(&sb, "  - %s：%d · %d ms · %d 字节（%s，uid=%s）\n",
-					e.Name, e.Status, e.TimeMS, e.BodyBytes, e.Path, e.UID)
+				fmt.Fprintf(&sb, "  - %s：%d · %d ms · %d 字节（%s，uid=%s，hash=%s）\n",
+					e.Name, e.Status, e.TimeMS, e.BodyBytes, e.Path, e.UID, e.Hash)
 				if e.WithBody != "" {
 					fmt.Fprintf(&sb, "    %s\n", e.WithBody)
 				}

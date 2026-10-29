@@ -702,7 +702,7 @@ func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*Re
 				continue
 			}
 			item := ExampleItem{
-				UID: ex.UID, Name: ex.Name, Path: ex.Path, CreatedAt: ex.CreatedAt,
+				UID: ex.UID, Name: ex.Name, Path: ex.Path, Hash: a.FileHash(ex.Path), CreatedAt: ex.CreatedAt,
 				Status: ex.Response.Status, TimeMS: ex.Response.TimeMS, BodyBytes: len(ex.Response.Body),
 			}
 			if opts.IncludeBody {

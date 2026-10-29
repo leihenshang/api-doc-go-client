@@ -222,3 +222,43 @@ func TestDeleteResponseExampleTool(t *testing.T) {
 		t.Error("缺 exampleUid 应报错")
 	}
 }
+
+// delete_response_example.ifMatch：hash 不符 → [CONFLICT] 且不删；相符才移入 .trash。
+func TestDeleteResponseExampleIfMatch(t *testing.T) {
+	_, svc := setup(t)
+	r, err := svc.CreateRequest(CreateRequestInput{
+		Project: "demo", Folder: "api", Name: "ex-ifmatch", Method: "GET", URL: "http://127.0.0.1/x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, err := svc.SaveResponseExample(SaveResponseExampleInput{
+		Project: "demo", UID: r.UID, Name: "并发样例", Status: 200, Body: `{"ok":true}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := svc.GetRequestDetail("demo", r.UID, DetailOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := ""
+	for _, e := range d.Examples {
+		if e.UID == ex.UID {
+			hash = e.Hash
+		}
+	}
+	if hash == "" {
+		t.Fatalf("详情应带示例 hash：%+v", d.Examples)
+	}
+
+	if err := svc.DeleteResponseExample("demo", r.UID, ex.UID, "deadbeef"); err == nil || CodeOf(err) != CodeConflict {
+		t.Errorf("ifMatch 不符应 [CONFLICT]：%v", err)
+	}
+	if d2, _ := svc.GetRequestDetail("demo", r.UID, DetailOptions{}); len(d2.Examples) != 1 {
+		t.Errorf("冲突时不应删除：%+v", d2.Examples)
+	}
+	if err := svc.DeleteResponseExample("demo", r.UID, ex.UID, hash[:12]); err != nil {
+		t.Errorf("短 hash 前缀应可删：%v", err)
+	}
+}
