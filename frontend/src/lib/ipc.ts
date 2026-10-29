@@ -424,6 +424,8 @@ export const api = {
   saveDoc: (d: DocEntry) => call<null>('SaveDoc', d),
   /** B19：带期望哈希保存（磁盘 hash 不一致返回 [conflict] 前缀错误） */
   saveDocExpectHash: (d: DocEntry, expectHash: string) => call<null>('SaveDocExpectHash', d, expectHash),
+  /** 文档图片：base64（可带 data URL 前缀）→ /doc-assets/<sha256>（Markdown 编辑器上传用） */
+  saveDocImage: (dataBase64: string) => call<string>('SaveDocImage', dataBase64),
   /** B19：文档文件当前磁盘 hash（文档不进索引，单独取；空串 = 取不到） */
   docFileHash: (uid: string) => call<string | null>('DocFileHash', uid),
   deleteDoc: (uid: string) => call<null>('DeleteDoc', uid),

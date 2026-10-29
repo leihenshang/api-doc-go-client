@@ -5,6 +5,7 @@
 // tab.doc 传入，编辑经 update:doc 回写 store（标脏），保存由父组件走
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
 // 文档改名只在左侧树上进行（树的右键/悬停菜单），编辑器内不再放标题框。
+import { uploadMdImages } from '@/lib/md-image'
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
 import { MdEditor } from 'md-editor-v3'
@@ -45,6 +46,7 @@ function onSave(): void {
         :theme="isDark ? 'dark' : 'light'"
         class="md-edit"
         :readonly="readonly"
+        :on-upload-img="uploadMdImages"
         @update:model-value="onContent"
         @on-save="onSave"
       />

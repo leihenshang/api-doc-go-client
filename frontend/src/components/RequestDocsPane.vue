@@ -11,6 +11,7 @@ import { isDark } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
+import { uploadMdImages } from '@/lib/md-image'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { computed, ref } from 'vue'
@@ -141,7 +142,7 @@ const mdPreviewTheme = computed(() => (isDark.value ? 'github' : 'default'))
       </template>
     </div>
     <md-editor v-if="editing" v-model="docs" :language="mdLanguage" :theme="mdTheme"
-      :preview-theme="mdPreviewTheme" class="md-edit" />
+      :preview-theme="mdPreviewTheme" :on-upload-img="uploadMdImages" class="md-edit" />
     <template v-else>
       <md-preview v-if="hasDoc" :model-value="docs" :language="mdLanguage" :theme="mdTheme"
         :preview-theme="mdPreviewTheme" class="md-preview" />

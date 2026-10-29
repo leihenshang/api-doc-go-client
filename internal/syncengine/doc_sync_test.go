@@ -75,7 +75,7 @@ func TestCollectDocOpsTombstone(t *testing.T) {
 		t.Fatalf("delete doc: %v", err)
 	}
 	b := newPushBatch(8)
-	e.collectDocOps(b)
+	e.collectDocOps(b, nil)
 	var deletes int
 	for _, op := range b.ops {
 		if op.Op == "delete" && op.Type == "doc" && op.UID == a.UID {
@@ -110,7 +110,7 @@ func TestCollectDocOpsEmptyGuard(t *testing.T) {
 		"uid-a": "h1", "uid-b": "h2",
 	}}}
 	b := newPushBatch(8)
-	e.collectDocOps(b)
+	e.collectDocOps(b, nil)
 	for _, op := range b.ops {
 		if op.Op == "delete" {
 			t.Fatalf("扫空异常场景不应产生任何删除 op，got %+v", op)

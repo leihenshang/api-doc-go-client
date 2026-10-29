@@ -318,7 +318,8 @@ func (a *App) runSyncFor(c *collection.Collection, token string, wait bool) (*sy
 	// （内容寻址已存在即跳过；失败不影响本轮结果，也不报错刷屏）
 	if err == nil && rep != nil {
 		if n, aerr := syncDocAssets(c, b.ServerURL, tok); aerr == nil && n > 0 {
-			rep.Assets = n
+			// 引擎在拉取时已本地化的图片也计入 Assets：这里累加，别把前者的计数盖掉
+			rep.Assets += n
 		}
 	}
 

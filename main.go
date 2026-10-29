@@ -49,9 +49,14 @@ func main() {
 		// 窗口整体透明（alpha 0）：外壳圆角由 CSS 裁出（styles/base.css 的 --app-radius-window），
 		// 圆角以外的像素要透出桌面；任何不透明底色都会把圆角顶成直角。
 		BackgroundColour: &options.RGBA{},
-		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        core.Startup,
-		OnDomReady:       core.DomReady,
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+			// dist 里没有 /doc-assets/<sha256>（Markdown 图片），交给 App 的只读路由；
+			// 其余未命中路径仍返回 404（与未设 Handler 时一致）。
+			Handler: core.DocAssetHandler(),
+		},
+		OnStartup:  core.Startup,
+		OnDomReady: core.DomReady,
 		// Alt+F4 / 系统关闭先拦截：前端确认未保存改动后再放行（见 app.OnBeforeClose）
 		OnBeforeClose: core.OnBeforeClose,
 		// 单实例：从系统应用列表再次启动时不再开第二个窗口，而是唤醒当前进程并显示窗口。

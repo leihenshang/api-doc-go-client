@@ -215,6 +215,8 @@ export function RunSyncForRoot(arg1:string):Promise<syncengine.Report>;
 
 export function SaveDoc(arg1:collection.DocEntry):Promise<void>;
 
+export function SaveDocImage(arg1:string):Promise<string>;
+
 export function SaveDocExpectHash(arg1:collection.DocEntry,arg2:string):Promise<void>;
 
 export function SaveEnv(arg1:collection.Env):Promise<void>;

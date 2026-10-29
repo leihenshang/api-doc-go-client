@@ -2,6 +2,7 @@
 // 「生成接口文档」结果弹窗：先展示生成的 Markdown（预览/编辑两态，可编辑、可复制），
 // 完成后再选择落点——完全覆盖 / 放到已有文档下方 / 下载。真正的写盘由父级（RequestEditor）执行，
 // 本组件只回传「当前文本 + 所选动作」，避免编辑态与请求模型双写。
+import { uploadMdImages } from '@/lib/md-image'
 import { message } from '@/lib/notice'
 import { isDark } from '@/lib/theme'
 import { MdEditor, MdPreview } from 'md-editor-v3'
@@ -66,7 +67,7 @@ function pick(modeKind: 'overwrite' | 'append' | 'download'): void {
             </div>
             <div v-if="mode === 'edit'" class="gen-pane" data-testid="docs.genEditor">
                 <md-editor v-model="draft" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"
-                    class="md-edit" />
+                    :on-upload-img="uploadMdImages" class="md-edit" />
             </div>
             <div v-else class="gen-pane" data-testid="docs.genPreview">
                 <md-preview :model-value="draft" :language="mdLanguage" :theme="mdTheme" :preview-theme="mdPreviewTheme"

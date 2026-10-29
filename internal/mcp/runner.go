@@ -78,6 +78,9 @@ type ProjectApp interface {
 		headers *[]collection.KV, body, contentType *string) (*collection.ResponseExample, error)
 	// DeleteResponseExample 删除示例（文件移入 .trash）。
 	DeleteResponseExample(reqUID, exampleUID string) error
+	// SaveDocImage 保存一张 Markdown 图片（base64，可带 data URL 前缀），
+	// 返回到可直接写进正文的 URL（/doc-assets/<sha256>）。
+	SaveDocImage(dataBase64 string) (string, error)
 	ListDocs() ([]*collection.DocEntry, error)
 	// ReadDoc 读单篇文档（含正文）；uid 不存在时返回错误。
 	ReadDoc(uid string) (*collection.DocEntry, error)

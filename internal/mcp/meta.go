@@ -48,7 +48,7 @@ func (m ToolMeta) NeedsConsent() bool { return m.Risk != RiskLow }
 // Mutable 是否落盘修改集合（T2 可据此区分「纯外发 medium」与「落盘写 high」的文案）。
 func (m ToolMeta) Mutable() bool { return m.Write }
 
-// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 29 个（ValidateMetas 锁定）。
+// toolMetas 全部正式工具，按代码注册顺序排列；正式工具恒为 30 个（ValidateMetas 锁定）。
 var toolMetas = []ToolMeta{
 	// ---- 12 个只读工具（只读模式也注册）----
 	{
@@ -100,7 +100,7 @@ var toolMetas = []ToolMeta{
 		Description: "读取一篇文档的正文（Markdown 原文）与元信息，并返回该文件的**完整 hash**：把 hash 作为 update_doc.ifMatch 传回即可避免覆盖期间的外部改动（不传 = 最后写者赢，不匹配时返回明确错误与当前 hash，不会静默覆盖）。uid 来自 list_docs / search_docs。默认返回全文；长文档先 outline=true 看标题大纲（带行号），再用 startLine+maxLines 分段读取（默认 100 行、上限 500），search_docs 的 L<行号> 可直接作为 startLine；区间读取的行号仅供阅读，写回时不要带。",
 	},
 
-	// ---- 11 个集合写工具（只读模式不注册）：请求 5 + 文档 3 + 响应示例 3 ----
+	// ---- 12 个集合写工具（只读模式不注册）：请求 5 + 文档 4（含图片）+ 响应示例 3 ----
 	{
 		Name: "create_request", Risk: RiskHigh, Write: true, Since: "0.1.0",
 		Description: "创建接口请求。来源三选一：直接给 method/url/headers/params/body（完整形态，支持 form/multipart 行）；给 curl（自动解析）；给 copyFromUid（复制已有请求）。还能同时写入 settings（单请求超时/重定向等，不碰全局）、respDoc（响应字段：可只写 params 字段表，样例/响应头缺省不动；gRPC 拒绝）与 docs（结构先取 get_doc_template）。概述用 summary（纯文本一句话），请求体字段表格用 bodyFields（与 body 相互独立，传了只覆盖表格）；三者互不影响。同名会在分组内自动加序号。",
@@ -132,6 +132,10 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "delete_doc", Risk: RiskHigh, Write: true, Since: "0.2.0",
 		Description: "移除文档条目。文件会移入集合的 .trash 目录（可人工找回），不会真正删除。",
+	},
+	{
+		Name: "save_doc_image", Risk: RiskHigh, Write: true, Since: "0.5.0",
+		Description: "把一张图片保存到项目本地 assets/（内容寻址、同图自动去重），返回可直接写进 Markdown 的 URL（/doc-assets/<sha256>）。data 传图片的 base64（可带 data:image/...;base64, 前缀）；只接受 PNG / JPEG / GIF / WebP，单张 ≤5MB。用法：先 save_doc_image 拿 URL，再用 create_doc / update_doc（或 update_request.docs）写入 ![说明](URL)。图片只落本地集合，不会上传服务端。",
 	},
 	{
 		Name: "save_response_example", Risk: RiskHigh, Write: true, Since: "0.3.0",
@@ -217,7 +221,7 @@ func NamesForMode(readOnly bool) []string {
 // ValidateMetas 完整性自检：name 唯一非空、数量正确、风险级别合法、无别名正式项、
 // 描述与版本齐备。供 RegisterTools 装配期与测试调用。
 func ValidateMetas() error {
-	const expectTools = 29
+	const expectTools = 30
 	if len(toolMetas) != expectTools {
 		return fmt.Errorf("mcp meta: 期望 %d 个正式工具，实际 %d 个", expectTools, len(toolMetas))
 	}

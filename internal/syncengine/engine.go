@@ -395,11 +395,11 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 	case "group":
 		err = e.applyGroup(it.UID, p)
 	case "api":
-		err = e.applyAPI(it.UID, p)
+		err = e.applyAPI(it.UID, p, rep)
 	case "doc":
 		// 文档不进索引，本地 dirty 只能靠 DocHashes 判断：覆盖前先把本地版本留底（P0）
 		e.snapshotDocIfDirty(rep, it.UID, p)
-		err = e.applyDoc(it.UID, p)
+		err = e.applyDoc(it.UID, p, rep)
 		if err == nil {
 			e.rememberDocHash(it.UID)
 		}
@@ -473,7 +473,7 @@ func (e *Engine) applyGroup(uid string, p Payload) error {
 	return nil
 }
 
-func (e *Engine) applyAPI(uid string, p Payload) error {
+func (e *Engine) applyAPI(uid string, p Payload, rep *Report) error {
 	r, err := e.Coll.ReadRequest(uid)
 	if err != nil {
 		// 新建：用服务端 uid 落盘
@@ -495,6 +495,8 @@ func (e *Engine) applyAPI(uid string, p Payload) error {
 		}
 		created.URL = p.URL
 		applyExtra(created, p.Extra)
+		// 服务端 docs 里的 /uploads/* 换成本地 /doc-assets/*（图片下载落 assets/）
+		created.Docs = e.localizeContent(created.Docs, rep)
 		return e.Coll.SaveRequest(created)
 	}
 	// 更新：改名 / 移动 / 内容
@@ -525,6 +527,7 @@ func (e *Engine) applyAPI(uid string, p Payload) error {
 		r.URL = p.URL
 	}
 	applyExtra(r, p.Extra)
+	r.Docs = e.localizeContent(r.Docs, rep)
 	return e.Coll.SaveRequest(r)
 }
 
@@ -534,7 +537,9 @@ func applyExtra(r *collection.Request, extra string) {
 }
 
 // applyDoc 文档条目（B13）：docs/*.md 落盘。
-func (e *Engine) applyDoc(uid string, p Payload) error {
+func (e *Engine) applyDoc(uid string, p Payload, rep *Report) error {
+	// 服务端正文里的图片换成本地 assets 引用（失败只记 Report，不阻断正文落盘）
+	p.Content = e.localizeContent(p.Content, rep)
 	d, err := e.Coll.ReadDoc(uid)
 	if err != nil {
 		// 新建
@@ -1116,11 +1121,11 @@ func (e *Engine) pushDirty(rep *Report) error {
 		case "folder":
 			e.addFolderOp(b, n)
 		case "request":
-			e.addRequestOp(b, n)
+			e.addRequestOp(b, n, rep)
 		}
 	}
 	b.collectTombstoneOps(pendingDel, e.Bind.DocHashes)
-	e.collectDocOps(b)
+	e.collectDocOps(b, rep)
 	e.collectExampleOps(b)
 	e.collectVarOps(b)
 	e.collectFieldMappingOps(b)
@@ -1220,17 +1225,20 @@ func (e *Engine) addFolderOp(b *pushBatch, n index.Node) {
 
 // addRequestOp 请求：extra 聚合请求头 / 请求参数（query + JSON 体展平）/ 说明，
 // 口径见 collection.SyncExtra（与服务端 Bruno 导入一致）。读取失败则跳过本条。
-func (e *Engine) addRequestOp(b *pushBatch, n index.Node) {
+func (e *Engine) addRequestOp(b *pushBatch, n index.Node, rep *Report) {
 	req, err := e.Coll.ReadRequest(n.UID)
 	if err != nil {
 		return
 	}
+	// 正文里的本地图片换回服务端 URL（首次会自动上传，映射存 Bind.AssetURLs）
+	remote := *req
+	remote.Docs = e.serverizeContent(req.Docs, rep)
 	op := Op{OpID: newOpID(), Op: "upsert", Type: "api", UID: n.UID, BaseRev: n.BaseRev}
 	op.Payload, _ = json.Marshal(Payload{
 		Name:   req.Name,
 		Method: req.Method,
 		URL:    req.URL,
-		Extra:  collection.SyncExtra(req),
+		Extra:  collection.SyncExtra(&remote),
 	})
 	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
 }
@@ -1289,7 +1297,7 @@ func (b *pushBatch) collectTombstoneOps(pendingDel []collection.PendingDelete, d
 // collectDocOps 文档条目（B13/J11）：按内容 hash 做脏检测只推变化项；本地已删→ tombstone。
 // 安全红线（审核 C#1）：清单读不出或本地意外扫空时，绝不产生删除 op——
 // 「不确定就当已删」会把远端整仓文档删掉，与「删除必进 .trash、覆盖必先留底」原则相悖。
-func (e *Engine) collectDocOps(b *pushBatch) {
+func (e *Engine) collectDocOps(b *pushBatch, rep *Report) {
 	docs, err := e.Coll.ListDocs()
 	if err != nil {
 		return // 扫描任何一步失败 ≠ 本地全删了：本轮不推文档，交下一轮重试
@@ -1304,7 +1312,8 @@ func (e *Engine) collectDocOps(b *pushBatch) {
 		if prev, seen := e.Bind.DocHashes[d.UID]; seen && prev == h && h != "" {
 			continue // 内容未变化，跳过
 		}
-		p := Payload{Name: d.Name, Content: d.Content, Icon: d.Icon}
+		// 本地 /doc-assets/<hash> → 服务端 URL（首次上传，映射存 Bind.AssetURLs）
+		p := Payload{Name: d.Name, Content: e.serverizeContent(d.Content, rep), Icon: d.Icon}
 		// J11-2.1：目录归属 = 服务端分组。根级与 docs/ 默认位都算未分组（空串），
 		// 与「旧集合 docs/*.md 挂根」的既有行为一致。
 		if dir := parentDir(d.Path); dir != "" && dir != "docs" {

@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **29 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **30 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -26,6 +26,7 @@
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
+| 写 | `save_doc_image` | 保存图片（base64）到项目 `assets/`，返回可写进 Markdown 的 `/doc-assets/<sha256>`（与客户端编辑器同款） |
 | 写 | `save_response_example` / `update_response_example` / `delete_response_example` | 响应示例的手工新增（不发送请求）/ 局部更新（改名·状态码·响应体）/ 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
@@ -315,6 +316,26 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 > 接口自带说明（`docs` 段）同样可能很长：`get_request_detail` 支持 `docsOutline` / `docsStartLine` + `docsMaxLines`，口径与 `get_doc` 完全一致（`sections=["docs"]` 时最省体积）。
 
+### 4.12.1 图片：`save_doc_image`
+
+客户端 Markdown 编辑器里的「选图 / 粘贴图片」与本工具走同一条链路：校验（PNG / JPEG / GIF / WebP，≤5MB，**按文件头嗅探**）→ 按 sha256 存到 `<集合>/assets/<sha256>`（同图自动去重）→ 返回 `/doc-assets/<sha256>`。
+
+```json
+// 传纯 base64 或 data URL 均可
+{"project":"shop","data":"iVBORw0KGgoAAAANSUhEUg…","name":"示意图"}
+```
+
+返回：
+
+```
+已保存图片：/doc-assets/9f2c…（64 位）
+可直接写进 Markdown：![示意图](/doc-assets/9f2c…)
+```
+
+> 用法：先 `save_doc_image` 拿到 URL，再 `create_doc` / `update_doc`（或 `update_request.docs`）把 `![…](URL)` 写进正文。
+> 图片先落本地集合（`assets/`，与离线附件同一目录）；**同步时随文档一起走**：推送会自动上传缺失图片并把正文换成服务端 URL（同一张图只传一次，映射存 `.sync.json` 的 `assetUrls`），拉取会自动下载服务端图片到本地并改写回 `/doc-assets/…`。外链图片原样保留。注意：同步后的图片在服务端走 `/uploads` 公开静态路径（与 Web 编辑器一致），敏感截图请勿入库。
+> 仍未覆盖：导出 Markdown/HTML 不打包图片；手动「采用服务器版本」的冲突文档要等下一轮同步才把图片本地化。
+
 ### 4.13 响应示例工具：`save_response_example` / `update_response_example` / `delete_response_example`
 
 响应示例 = 集合里的 `examples/<模块>/<请求名>/<示例名>.yml`（纯文本、可 git diff、不参与目录树扫描）。
@@ -564,6 +585,6 @@ printf '%s\n' \
 ```
 
 **默认约定回顾**：示例默认保存、响应体裁剪 8192 字节、列表 50/200 条、敏感值只回掩码（掩码回传 = 不改，`.`/`?` 不算掩码）、
-省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、示例改名与新建同一套命名规则、授权目录（`-allow-writable`/`-allow`）下含
+省略 `enabled` 即启用、写操作建议带 `ifMatch`、删除进 `.trash`、示例改名与新建同一套命名规则、图片只落本地 `<集合>/assets/`（正文引用 `/doc-assets/<sha256>`）、授权目录（`-allow-writable`/`-allow`）下含
 `opencollection.yml` 的子目录 = 项目、`project` 三种写法（uid / 名称 / 路径）、
 内嵌服务风险工具默认弹窗确认（拒绝 / 允许 15 分钟 / 始终允许，60s 超时按拒绝）、每次调用都写审计。
