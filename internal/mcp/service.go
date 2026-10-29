@@ -1322,15 +1322,29 @@ func (s *Service) hashOf(a ProjectApp, uid string) (string, error) {
 }
 
 // DeleteRequest 移除请求（进 .trash，可恢复）。
-func (s *Service) DeleteRequest(project, uid string) error {
+func (s *Service) DeleteRequest(project, uid, ifMatch string) error {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}
-	if err := a.DeleteRequest(strings.TrimSpace(uid)); err != nil {
+	uid = strings.TrimSpace(uid)
+	r, err := a.ReadRequest(uid)
+	if err != nil {
+		return withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w", uid, err))
+	}
+	if !hashPrefixMatch(a.FileHash(r.Path), ifMatch) {
+		return coded(CodeConflict, fmt.Errorf("请求 %s 已被他人修改（当前 path=%s），请重新读取后再删", uid, r.Path))
+	}
+	if err := a.DeleteRequest(uid); err != nil {
 		return withNotFound(err)
 	}
 	return nil
+}
+
+// hashPrefixMatch 空的 expect 不校验；否则要求完整相等或 actual 以 expect 为前缀（12 位短 hash 也可）。
+func hashPrefixMatch(actual, expect string) bool {
+	expect = strings.TrimSpace(expect)
+	return expect == "" || actual == expect || strings.HasPrefix(actual, expect)
 }
 
 // SendRequestInput send_request 的入参。
@@ -1481,7 +1495,7 @@ func (s *Service) UpdateResponseExample(in UpdateResponseExampleInput) (*collect
 }
 
 // DeleteResponseExample 删除一条响应示例（文件移入 .trash，可人工找回）。
-func (s *Service) DeleteResponseExample(project, reqUID, exampleUID string) error {
+func (s *Service) DeleteResponseExample(project, reqUID, exampleUID, ifMatch string) error {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
@@ -1493,6 +1507,23 @@ func (s *Service) DeleteResponseExample(project, reqUID, exampleUID string) erro
 	exUID := strings.TrimSpace(exampleUID)
 	if exUID == "" {
 		return fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+	}
+	exs, err := a.ListResponseExamples(uid)
+	if err != nil {
+		return coded(CodeIO, err)
+	}
+	var target *collection.ResponseExample
+	for _, ex := range exs {
+		if ex.UID == exUID {
+			target = ex
+			break
+		}
+	}
+	if target == nil {
+		return withNotFound(fmt.Errorf("响应示例 %s 不存在（请求 %s）", exUID, uid))
+	}
+	if !hashPrefixMatch(a.FileHash(target.Path), ifMatch) {
+		return coded(CodeConflict, fmt.Errorf("响应示例 %s 已被他人修改，请重新读取后再删", exUID))
 	}
 	return a.DeleteResponseExample(uid, exUID)
 }

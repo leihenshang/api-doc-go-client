@@ -186,7 +186,7 @@ func TestDeleteResponseExampleTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.DeleteResponseExample("demo", r.UID, gone.UID); err != nil {
+	if err := svc.DeleteResponseExample("demo", r.UID, gone.UID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "demo", gone.Path)); !os.IsNotExist(err) {
@@ -211,14 +211,14 @@ func TestDeleteResponseExampleTool(t *testing.T) {
 		t.Fatalf("详情里应只剩 1 条示例: %+v", d.Examples)
 	}
 	// 再删一次应报错（示例已不存在）
-	if err := svc.DeleteResponseExample("demo", r.UID, gone.UID); err == nil {
+	if err := svc.DeleteResponseExample("demo", r.UID, gone.UID, ""); err == nil {
 		t.Error("删除不存在的示例应报错")
 	}
 	// 缺 uid / exampleUid
-	if err := svc.DeleteResponseExample("demo", "", gone.UID); err == nil {
+	if err := svc.DeleteResponseExample("demo", "", gone.UID, ""); err == nil {
 		t.Error("缺 uid 应报错")
 	}
-	if err := svc.DeleteResponseExample("demo", r.UID, ""); err == nil {
+	if err := svc.DeleteResponseExample("demo", r.UID, "", ""); err == nil {
 		t.Error("缺 exampleUid 应报错")
 	}
 }

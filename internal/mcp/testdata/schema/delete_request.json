@@ -3,6 +3,9 @@
     "dryRun": {
       "type": "boolean"
     },
+    "ifMatch": {
+      "type": "string"
+    },
     "project": {
       "type": "string"
     },
