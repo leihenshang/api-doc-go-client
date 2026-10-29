@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"api-doc-go-client/internal/collection"
 	"api-doc-go-client/internal/mcpaudit"
 	"api-doc-go-client/internal/mcpauth"
 
@@ -832,6 +833,14 @@ func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, i
 	})
 }
 
+// requestDetailData 接口写操作的结构化输出（与 requestDetailOutput 对齐）。
+func requestDetailData(project string, r *collection.Request) map[string]any {
+	return map[string]any{
+		"project": project, "uid": r.UID, "name": r.Name,
+		"path": r.Path, "method": r.Method, "url": r.URL,
+	}
+}
+
 // docDetailData 文档详情/写操作的结构化输出（与 outputSchema 对齐）。
 func docDetailData(project string, d *DocDetail, withContent bool) map[string]any {
 	m := map[string]any{
@@ -1024,13 +1033,13 @@ func (ts *toolSet) createProject(ctx context.Context, req *mcp.CallToolRequest, 
 type createRequestArg = CreateRequestInput
 
 func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, in createRequestArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		r, err := ts.svc.CreateRequest(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), nil
+		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), requestDetailData(in.Project, r), nil
 	})
 }
 
@@ -1038,7 +1047,7 @@ func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, 
 type updateArg = UpdateRequestInput
 
 func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, in updateArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		// 动说明文档前先留旧文本：成功响应要给「改动行 ±1」的落盘确认（取不到旧文本则回落前 5 行）
 		oldDocs := ""
@@ -1050,15 +1059,16 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 		r, err := ts.svc.UpdateRequest(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := requestDetailData(in.Project, r)
 		out := fmt.Sprintf("已更新 [%s] %s（uid=%s，路径 %s）", r.Method, r.Name, r.UID, r.Path)
 		if touched {
 			if kind, body := changePreview(oldDocs, r.Docs); body != "" {
 				out += "\n落盘确认（说明文档" + kind + "）：\n" + body
 			}
 		}
-		return out, nil
+		return out, data, nil
 	})
 }
 
@@ -1069,12 +1079,20 @@ type deleteIn struct {
 }
 
 func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
-			return "", err
+		// 删除后文件已进 .trash：先读一次拿身份信息，结构化输出才拿得到 path/name
+		r, err := ts.svc.ReadRequest(in.Project, in.UID)
+		if err != nil {
+			return "", nil, err
 		}
-		return fmt.Sprintf("已移除请求 %s（文件已移入 .trash，可人工找回）", in.UID), nil
+		if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
+			return "", nil, err
+		}
+		data := requestDetailData(in.Project, r)
+		data["deleted"] = true
+		data["trash"] = true
+		return fmt.Sprintf("已移除请求 %s（文件已移入 .trash，可人工找回）", in.UID), data, nil
 	})
 }
 

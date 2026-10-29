@@ -85,6 +85,7 @@ func TestStructuredListTools(t *testing.T) {
 		"get_project_modules": true, "search_requests": true, "search_docs": true,
 		// 写/单条读也补：调用方拿 uid/path/hash 无需二次查询
 		"create_doc": true, "update_doc": true, "delete_doc": true, "get_doc": true,
+		"create_request": true, "update_request": true, "delete_request": true,
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil

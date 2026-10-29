@@ -839,6 +839,10 @@ type CreateRequestInput struct {
 	Docs        string                      `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	Curl        string                      `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
 	CopyFromUID string                      `json:"copyFromUid,omitempty"` // 复制已有请求；grpc 源不支持 respDoc
+	// UID 可选：指定 uid 做幂等导入（批量同步时固定身份）
+	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
+	// OnConflict 同路径或同 uid 已存在时的策略（与 create_doc 一致，默认 error）
+	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有 uid/path 并覆盖内容）"`
 }
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
@@ -859,7 +863,32 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if name == "" {
 		return nil, errNeedName
 	}
-	return a.CreateRequestFromDraft(strings.TrimSpace(in.Folder), name, draft)
+	r, err := a.CreateRequestFromDraftEx(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+	if err != nil {
+		switch {
+		case errors.Is(err, collection.ErrRequestConflict):
+			return nil, coded(CodeConflict, err)
+		case strings.Contains(err.Error(), "onConflict"), strings.Contains(err.Error(), "名称含非法字符"),
+			strings.Contains(err.Error(), "请求内容为空"):
+			return nil, withInvalid(err)
+		default:
+			return nil, coded(CodeIO, err)
+		}
+	}
+	return r, nil
+}
+
+// ReadRequest 读接口原文（delete_request 的结构化输出要在删除前拿到 path/name）。
+func (s *Service) ReadRequest(project, uid string) (*collection.Request, error) {
+	a, _, err := s.resolve(project)
+	if err != nil {
+		return nil, err
+	}
+	r, err := a.ReadRequest(strings.TrimSpace(uid))
+	if err != nil {
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w", uid, err))
+	}
+	return r, nil
 }
 
 // resolveCreateDraft 造出 create_request 的草稿底稿：cURL 导入 / 复制已有请求 / 空白三种来源。

@@ -121,3 +121,24 @@ func TestTruncateNoteMentionsRealParams(t *testing.T) {
 		t.Error("未截断时不应有提示")
 	}
 }
+
+// 评审 P0-1：sections 的驼峰取值（bodyFields/respDoc）必须可用，且大小写无关。
+func TestNormalizeDetailSectionsCamelCase(t *testing.T) {
+	for _, in := range [][]string{{"bodyFields"}, {"respDoc"}, {"BODYFIELDS"}, {"bodyfields", "respdoc"}} {
+		sel, err := NormalizeDetailSections(in)
+		if err != nil {
+			t.Fatalf("%v 应被接受：%v", in, err)
+		}
+		if len(sel) == 0 {
+			t.Fatalf("%v 归一后为空", in)
+		}
+		for _, k := range []string{"bodyFields", "respDoc"} {
+			if strings.Contains(strings.ToLower(strings.Join(in, ",")), strings.ToLower(k)) && !sel[k] {
+				t.Errorf("%v 应归一为 %q，实际 %v", in, k, sel)
+			}
+		}
+	}
+	if _, err := NormalizeDetailSections([]string{"bogus"}); err == nil {
+		t.Errorf("未知取值应报错")
+	}
+}
