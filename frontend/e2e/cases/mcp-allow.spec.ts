@@ -91,3 +91,42 @@ test('[I7] 打开 MCP 设置不显示未保存提示（空列表归一）', asyn
   await openMcpSettings(page)
   await expect(hint).toHaveCount(0)
 })
+
+/**
+ * 「一键复制示例」的 mcpServers 服务名必须是 api-doc-go（与使用手册/设计文档一致），
+ * 不能是内部简称 apidoc —— 用户会把这段 JSON 直接粘进 AI 工具。
+ */
+test('[I8] MCP 配置示例：服务名为 api-doc-go', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await openMcpSettings(page)
+
+  // 需要服务处于运行态才会显示「一键复制示例」：没启用就先启用（随机端口避免占用默认 8189）
+  if (!(await page.getByTestId('settings.mcpCopyExample').isVisible().catch(() => false))) {
+    const enabled = page.getByTestId('settings.mcpEnabled')
+    if (!(await enabled.getAttribute('class') ?? '').includes('--checked')) {
+      await enabled.click()
+    }
+    await page.getByTestId('settings.mcpPort').locator('input').fill(String(12000 + Math.floor(Math.random() * 30000)))
+    // 空白名单时服务不会真的监听（安全默认）：授权当前工作区，运行态才会出现「一键复制示例」
+    const allow = page.getByTestId('settings.mcpAllowCheck').first()
+    if (!(await allow.getAttribute('class') ?? '').includes('--checked')) {
+      await allow.click()
+    }
+    await saveSettings(page)
+    await openMcpSettings(page)
+  }
+  await expect(page.getByTestId('settings.mcpCopyExample')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('settings.mcpCopyExample').click()
+
+  const text = await page.evaluate(() => navigator.clipboard.readText())
+  const cfg = JSON.parse(text) as {
+    mcpServers: Record<string, { type: string; url: string; headers: { Authorization: string } }>
+  }
+  expect(Object.keys(cfg.mcpServers)).toEqual(['api-doc-go'])
+  const entry = cfg.mcpServers['api-doc-go']
+  expect(entry.type).toBe('http')
+  expect(entry.url).toContain('/mcp')
+  expect(entry.headers.Authorization).toMatch(/^Bearer [0-9a-f]{32}$/)
+})

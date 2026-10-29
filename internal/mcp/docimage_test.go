@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	appmcp "api-doc-go-client/internal/mcp"
+
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

@@ -14,6 +14,7 @@ prod:
 - 新增文档图片只读路由 `/doc-assets/<sha256>`：桌面壳 `AssetServer` 与 devserver 共用同一处理器，`Content-Type` 只认文件头嗅探、带 `nosniff` 与长缓存；只接受 64 位 hex 文件名，防路径穿越。
 - MCP 新增 `save_doc_image`（工具数 29 → 30）：传图片 base64，返回可直接写进 Markdown 的 URL，AI 可为文档或接口说明配图；同样走文件头校验与 5MB 上限。
 - 同步支持图片：推送前自动把正文里的 `/doc-assets/<sha256>` 换回服务端 URL（首次按需上传，映射存 `.sync.json`，改文字不重复上传）；拉取后自动下载 `/uploads/*`、`/api/file/<hash>` 到本地 `assets/` 并改写成本地引用。文档条目与接口说明（`request.docs`）都覆盖，外链图片原样保留。注意：按服务端现有约定，同步后的图片位于 `/uploads` 公开静态路径（与 Web 编辑器一致），敏感截图请勿入库。
+- MCP「一键复制示例」的服务名从 `apidoc` 改为 `api-doc-go`（与使用手册 / 设计文档一致），粘进 AI 工具的配置别名不变。
 - 已知限制：**导出**（Markdown / HTML）仍不打包图片；冲突时手动选择「采用服务器版本」的说明文档，其图片要等下一轮同步才会本地化。
 
 ## 2026-10-28  0.1.3-dev
