@@ -312,19 +312,27 @@ type DocHit struct {
 
 // SaveImage 把一张 base64 图片存进项目本地 assets/，返回可直接写进 Markdown 的 URL。
 // 只在可写项目上允许（resolveWrite），与其他写工具一致受只读模式/授权链约束。
-func (s *Service) SaveImage(project, dataBase64 string) (string, error) {
+// ImageResult save_doc_image 的结构化结果。
+type ImageResult struct {
+	URL     string
+	SHA256  string
+	Size    int
+	Deduped bool
+}
+
+func (s *Service) SaveImage(project, dataBase64 string) (ImageResult, error) {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
-		return "", err
+		return ImageResult{}, err
 	}
 	if strings.TrimSpace(dataBase64) == "" {
-		return "", errors.New("data 不能为空：传图片的 base64（可带 data:image/...;base64, 前缀）")
+		return ImageResult{}, errors.New("data 不能为空：传图片的 base64（可带 data:image/...;base64, 前缀）")
 	}
-	url, err := a.SaveDocImage(dataBase64)
+	url, info, err := a.SaveDocImageInfo(dataBase64)
 	if err != nil {
-		return "", err
+		return ImageResult{}, err
 	}
-	return url, nil
+	return ImageResult{URL: url, SHA256: info.Hash, Size: info.Size, Deduped: info.Deduped}, nil
 }
 
 // SearchDocs 在文档正文里逐行搜索（不读请求的 docs 字段，那是接口说明）。

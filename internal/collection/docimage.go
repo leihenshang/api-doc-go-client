@@ -58,22 +58,40 @@ func ValidAssetHash(hash string) bool {
 func DocAssetURL(hash string) string { return DocAssetURLPrefix + hash }
 
 // SaveDocImage 校验类型与大小后按内容寻址落盘，返回 sha256。
-func (c *Collection) SaveDocImage(data []byte) (string, error) {
+// DocImageInfo 保存结果：内容寻址 hash、字节数、是否命中已有附件（同图去重）。
+type DocImageInfo struct {
+	Hash    string
+	Size    int
+	Deduped bool
+}
+
+// SaveDocImageInfo 保存（或命中）内容寻址图片，返回 hash/size/deduped。
+func (c *Collection) SaveDocImageInfo(data []byte) (DocImageInfo, error) {
 	if len(data) == 0 {
-		return "", fmt.Errorf("图片内容为空")
+		return DocImageInfo{}, fmt.Errorf("图片内容为空")
 	}
 	if len(data) > MaxDocImageBytes {
-		return "", fmt.Errorf("图片过大：%d 字节（上限 %d MB）", len(data), MaxDocImageBytes>>20)
+		return DocImageInfo{}, fmt.Errorf("图片过大：%d 字节（上限 %d MB）", len(data), MaxDocImageBytes>>20)
 	}
 	if SniffImageMime(data) == "" {
-		return "", fmt.Errorf("不支持的图片类型：只接受 PNG / JPEG / GIF / WebP")
+		return DocImageInfo{}, fmt.Errorf("不支持的图片类型：只接受 PNG / JPEG / GIF / WebP")
 	}
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
+	_, statErr := os.Stat(c.AssetPath(hash))
+	deduped := statErr == nil
 	if _, err := c.SaveAsset(hash, data); err != nil {
+		return DocImageInfo{}, err
+	}
+	return DocImageInfo{Hash: hash, Size: len(data), Deduped: deduped}, nil
+}
+
+func (c *Collection) SaveDocImage(data []byte) (string, error) {
+	info, err := c.SaveDocImageInfo(data)
+	if err != nil {
 		return "", err
 	}
-	return hash, nil
+	return info.Hash, nil
 }
 
 // ReadDocAsset 读取本地附件并返回嗅探出的图片类型；不是白名单位图按「不存在」处理。

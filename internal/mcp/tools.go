@@ -821,7 +821,7 @@ type saveImageIn struct {
 func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, in saveImageIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		url, err := ts.svc.SaveImage(in.Project, in.Data)
+		res, err := ts.svc.SaveImage(in.Project, in.Data)
 		if err != nil {
 			return "", nil, err
 		}
@@ -829,8 +829,16 @@ func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, i
 		if name == "" {
 			name = "图片"
 		}
-		data := map[string]any{"url": url, "name": name}
-		return fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：![%s](%s)", url, name, url), data, nil
+		markdown := fmt.Sprintf("![%s](%s)", name, res.URL)
+		data := map[string]any{
+			"url": res.URL, "sha256": res.SHA256, "size": res.Size,
+			"deduped": res.Deduped, "markdown": markdown, "name": name,
+		}
+		text := fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：%s", res.URL, markdown)
+		if res.Deduped {
+			text += "\n（已存在相同图片，命中内容寻址缓存，未重复写盘）"
+		}
+		return text, data, nil
 	})
 }
 
@@ -878,7 +886,7 @@ type getDocsIn struct {
 
 // getDocs 批量取文档详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
 func (ts *toolSet) getDocs(_ context.Context, req *mcp.CallToolRequest, in getDocsIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		uids := make([]string, 0, len(in.UIDs))
 		seen := make(map[string]bool, len(in.UIDs))
@@ -891,28 +899,34 @@ func (ts *toolSet) getDocs(_ context.Context, req *mcp.CallToolRequest, in getDo
 			uids = append(uids, u)
 		}
 		if len(uids) == 0 {
-			return "", withInvalid(errors.New("uids 不能为空：一次传 1–10 个文档 uid（从 list_docs 取）"))
+			return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个文档 uid（从 list_docs 取）"))
 		}
 		if len(uids) > maxBatchDocs {
-			return "", withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDocs, len(uids)))
+			return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDocs, len(uids)))
 		}
 		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "批量文档（%d 篇，项目 %s）：", len(uids), in.Project)
 		ok := 0
+		items := make([]map[string]any, 0, len(uids))
 		for _, uid := range uids {
 			d, derr := ts.svc.GetDoc(in.Project, uid)
 			sb.WriteString("\n")
 			if derr != nil {
 				fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
+				items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
 				continue
 			}
 			ok++
 			fmt.Fprintf(&sb, "===== %s =====\n", uid)
 			sb.WriteString(renderDocDetail(d, view))
+			items = append(items, docDetailData(in.Project, d, true))
 		}
 		fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
-		return sb.String(), nil
+		data := map[string]any{
+			"project": in.Project, "total": len(uids), "returned": ok, "docs": items,
+		}
+		return sb.String(), data, nil
 	})
 }
 
@@ -1449,11 +1463,19 @@ func (ts *toolSet) wrap(fn func() (string, error)) (*mcp.CallToolResult, any, er
 		// 未分类错误统一补 [INTERNAL]：调用方可按 [CODE] 前缀稳定分流，不必匹配中文散文
 		err = coded(CodeOf(err), err)
 		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
+			IsError:           true,
+			Content:           []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
+			StructuredContent: errorData(err),
 		}, nil, nil
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+}
+
+// errorData 错误态的结构化体：{error:{code,message}}，让调用方不必解析文本前缀。
+func errorData(err error) map[string]any {
+	code := CodeOf(err)
+	msg := strings.TrimPrefix(err.Error(), "["+code+"] ")
+	return map[string]any{"error": map[string]any{"code": code, "message": msg}}
 }
 
 // wrapData 与 wrap 相同，但额外返回 structuredContent（仅列表类工具使用）。
@@ -1463,8 +1485,9 @@ func (ts *toolSet) wrapData(fn func() (string, any, error)) (*mcp.CallToolResult
 	if err != nil {
 		err = coded(CodeOf(err), err)
 		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
+			IsError:           true,
+			Content:           []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
+			StructuredContent: errorData(err),
 		}, nil, nil
 	}
 	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}

@@ -353,18 +353,18 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **29 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 7 个"纯详情/会话"类）：
+共 **30 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 6 个"纯详情/会话"类）：
 
 - **列表/搜索（6）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
-- **文档（4）**：`get_doc`（含 `content`）/ `create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc`
+- **文档（5）**：`get_doc`（含 `content`）/ `get_docs`（批量，单篇失败只在该条带 `error`）/ `create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc`
 - **接口（3）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（+`deleted/trash/dryRun`）
 - **容器（7）**：`create_module` / `rename_module` / `delete_module` / `create_project` / `rename_project` / `delete_project`（`trashPath`）/ `prune_empty_modules`（`count`）
 - **环境（5）**：`create_env` / `rename_env` / `delete_env` / `set_env_var`（含 `hash` / `keptSecret`）/ `delete_env_var`
 - **响应示例（3）**：`save_response_example` / `update_response_example` / `delete_response_example`
-- **图片（1）**：`save_doc_image`（`url`）
+- **图片（1）**：`save_doc_image`（`url/sha256/size/deduped/markdown`）
 
 `outputSchema` 的数组元素与结果对象都写明**具体字段与 `required`**（可直接生成类型/做字段校验）。
-未结构化的 7 个是纯详情/会话工具（`list_workspaces`、`use_workspace`、`get_doc_template`、`get_request_detail(s)`、`send_request`、`get_docs`），
+未结构化的 6 个是纯详情/会话工具（`list_workspaces`、`use_workspace`、`get_doc_template`、`get_request_detail(s)`、`send_request`），
 它们仍以文本为主，避免大正文重复一倍。文本输出保持不变，旧客户端不受影响。
 
 ### 4.12.3 写操作契约（统一）
@@ -377,7 +377,8 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `ifMatch`（并发保护） | `update_doc` / `update_request` / `set_env_var` / `rename_env` / `delete_doc` / `delete_request` / `delete_response_example` / `delete_env` / `delete_env_var` | 传读取时拿到的 hash，完整值或 12 位前缀均可（响应示例的 hash 见 `get_request_detail` 的 `examples[].hash=`）；不传 = 最后写者赢 |
 ### 4.12.3 错误码（所有工具统一）
 
-失败结果的文本统一为 `失败: [CODE] 说明`，调用方可按前缀分流（不必匹配中文）：
+失败结果的文本统一为 `失败: [CODE] 说明`，并同时返回
+`structuredContent = {"error":{"code":"...","message":"..."}}`（错误码直接取字段，不必匹配文本前缀）：
 
 | 码 | 含义 |
 |---|---|

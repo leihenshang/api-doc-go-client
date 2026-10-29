@@ -23,6 +23,7 @@ prod:
   - 列表类工具返回 `structuredContent` + `outputSchema`（文本不变）。
   - `send_request` 默认**不再**保存响应示例（显式 `saveExample=true` 才存）。
   - 工具描述瘦身：总字符 6135 → 3799，并加预算回归测试；`list_envs` 支持分页。
+  - 文档类实测补齐：`get_docs` 返回 `structuredContent`（含 `docs[].error`）；`save_doc_image` 返回 `{url,sha256,size,deduped,markdown}`；所有工具失败时补 `structuredContent={error:{code,message}}`（结构化覆盖 30/36）。
   - `ifMatch` 收口：`delete_doc` / `delete_request` / `delete_response_example` 也支持并发校验（完整 hash 或 12 位前缀，不一致 `[CONFLICT]` 且不删除）；`get_request_detail` 的响应示例行补 `hash=`。
   - 统一写契约（破坏性）：权限码 `[AUTH]` → `[FORBIDDEN]`；结构化输出扩到 **29/36**（容器/环境/响应示例/图片全部补 `outputSchema` + `structuredContent`）；`dryRun` 覆盖全部破坏性删除（request/module/project/env/env_var/response_example），`delete_env` 新增 `ifMatch` 并发保护；创建类统一默认 `[CONFLICT]`（仅 create_doc/create_request 支持 suffix/overwrite；`create_module`/`create_env` 重名已补 `[CONFLICT]`）。
   - 第四轮实测修复：`get_request_detail(s)` 的 `sections` 支持 `bodyFields`/`respDoc`（大小写不敏感，此前恒定 `[INVALID]`）；`create_request` 新增 `uid` 与 `onConflict`（默认 error，不再静默加 `-2`），并返回 `structuredContent`（连同 `update_request`/`delete_request`，结构化工具 6 → 13）；`list_docs` 描述写明只含 .md 文档、接口请求用 `get_project_modules`。

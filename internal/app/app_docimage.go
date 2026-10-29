@@ -37,6 +37,23 @@ func (a *App) SaveDocImage(dataBase64 string) (string, error) {
 	return collection.DocAssetURL(hash), nil
 }
 
+// SaveDocImageInfo 保存或命中内容寻址图片，返回访问 URL 与 hash/size/deduped。
+func (a *App) SaveDocImageInfo(dataBase64 string) (string, collection.DocImageInfo, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return "", collection.DocImageInfo{}, err
+	}
+	data, err := decodeImageBase64(dataBase64)
+	if err != nil {
+		return "", collection.DocImageInfo{}, err
+	}
+	info, err := c.SaveDocImageInfo(data)
+	if err != nil {
+		return "", collection.DocImageInfo{}, err
+	}
+	return collection.DocAssetURL(info.Hash), info, nil
+}
+
 // decodeImageBase64 兼容纯 base64 与 data URL；先按编码后长度挡一次，避免超大 payload 占内存。
 func decodeImageBase64(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
