@@ -270,6 +270,24 @@ func (c *Collection) DocFileHash(uid string) string {
 	return c.FileHashOf(d.Path)
 }
 
+// DocHashes 一次扫描 + 逐文件读取，返回 uid → 文件 hash（列表批量取 hash 用）。
+// 逐个调 DocFileHash 会各自触发一次 scan，28 篇就会扫 28 遍（实测 168ms）；
+// 这里只扫一次，把「列清单 + 带 hash」压回个位数毫秒级。
+func (c *Collection) DocHashes() (map[string]string, error) {
+	docs, err := c.ListDocs()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(docs))
+	for _, d := range docs {
+		if d.UID == "" {
+			continue
+		}
+		out[d.UID] = c.FileHashOf(d.Path)
+	}
+	return out, nil
+}
+
 // SaveDocChecked 带期望哈希的文档保存（B19，与 SaveRequest 的 ExpectHash 同语义）：
 // expectHash 非空且与磁盘 hash 不一致时拒写，错误以 conflictMarker 开头，
 // 前端据此展示「重新加载 / 另存为副本」而不是普通保存失败。

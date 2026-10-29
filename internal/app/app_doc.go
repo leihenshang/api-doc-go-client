@@ -99,6 +99,15 @@ func (a *App) DocFileHash(uid string) string {
 	return c.DocFileHash(uid)
 }
 
+// DocHashes 一次扫描取全部文档 hash（MCP list_docs 批量用，避免逐篇重扫）。
+func (a *App) DocHashes() (map[string]string, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.DocHashes()
+}
+
 // DeleteDoc 删除文档。
 func (a *App) DeleteDoc(uid string) error {
 	c, err := a.requireCollection()

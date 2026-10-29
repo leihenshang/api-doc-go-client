@@ -94,3 +94,23 @@ func TestPruneEmptyFolders(t *testing.T) {
 		t.Errorf("assets 不应被清理：%v", err)
 	}
 }
+
+// DocHashes 与逐篇 DocFileHash 必须同值（优化后行为不变）。
+func TestDocHashesMatchesPerDoc(t *testing.T) {
+	c := newTestCollection(t)
+	for _, n := range []string{"甲", "乙"} {
+		if _, err := c.CreateDocEx(n, "", "docs", DocConflictError); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docs, _ := c.ListDocs()
+	hashes, err := c.DocHashes()
+	if err != nil || len(hashes) != len(docs) {
+		t.Fatalf("DocHashes 数量不符：%d vs %d err=%v", len(hashes), len(docs), err)
+	}
+	for _, d := range docs {
+		if hashes[d.UID] == "" || hashes[d.UID] != c.DocFileHash(d.UID) {
+			t.Errorf("%s hash 不一致：%q vs %q", d.UID, hashes[d.UID], c.DocFileHash(d.UID))
+		}
+	}
+}

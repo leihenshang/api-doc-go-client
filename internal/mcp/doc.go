@@ -89,8 +89,10 @@ func (s *Service) ListDocs(project, query string, limit, offset int, includeHash
 	}
 	page := out[offset:end]
 	if includeHash {
-		for i := range page {
-			page[i].Hash = a.DocFileHash(page[i].UID)
+		if hashes, herr := a.DocHashes(); herr == nil {
+			for i := range page {
+				page[i].Hash = hashes[page[i].UID]
+			}
 		}
 	}
 	return page, total, nil

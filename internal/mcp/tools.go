@@ -799,14 +799,14 @@ type getDocIn struct {
 }
 
 func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		d, err := ts.svc.GetDoc(in.Project, in.UID)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
-		return renderDocDetail(d, view), nil
+		return renderDocDetail(d, view), docDetailData(in.Project, d, true), nil
 	})
 }
 
@@ -830,6 +830,23 @@ func (ts *toolSet) saveDocImage(ctx context.Context, req *mcp.CallToolRequest, i
 		}
 		return fmt.Sprintf("已保存图片：%s\n可直接写进 Markdown：![%s](%s)", url, name, url), nil
 	})
+}
+
+// docDetailData 文档详情/写操作的结构化输出（与 outputSchema 对齐）。
+func docDetailData(project string, d *DocDetail, withContent bool) map[string]any {
+	m := map[string]any{
+		"project": project, "uid": d.UID, "name": d.Name, "path": d.Path, "size": d.Size,
+	}
+	if d.Hash != "" {
+		m["hash"] = d.Hash
+	}
+	if d.Planned != "" {
+		m["planned"] = d.Planned
+	}
+	if withContent {
+		m["content"] = d.Content
+	}
+	return m
 }
 
 // getDocsIn get_docs（批量）的入参。
@@ -1065,24 +1082,30 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 type createDocArg = CreateDocInput
 
 func (ts *toolSet) createDoc(_ context.Context, req *mcp.CallToolRequest, in createDocArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		d, err := ts.svc.CreateDoc(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		out := fmt.Sprintf("已创建文档 %s（uid=%s，路径 %s，项目 %s，%d 字节）",
-			d.Name, d.UID, d.Path, in.Project, d.Size)
+		data := docDetailData(in.Project, d, false)
 		if in.DryRun {
 			action := "创建"
 			if d.Planned == "overwrite" {
 				action = "覆盖（复用已有 uid/path）"
 			}
-			out = fmt.Sprintf("（dryRun：未落盘）将%s %s（uid=%s，项目 %s）\n", action, d.Path, d.UID, in.Project) + out
-		} else if strings.EqualFold(strings.TrimSpace(in.OnConflict), "overwrite") {
+			out := fmt.Sprintf("（dryRun：未落盘）将%s %s（uid=%s，项目 %s）", action, d.Path, d.UID, in.Project)
+			if prev := previewFirstLines(in.Content, 3); prev != "" {
+				out += "\n正文预览（前 3 行）：\n" + prev
+			}
+			return out, data, nil
+		}
+		out := fmt.Sprintf("已创建文档 %s（uid=%s，路径 %s，项目 %s，%d 字节）",
+			d.Name, d.UID, d.Path, in.Project, d.Size)
+		if strings.EqualFold(strings.TrimSpace(in.OnConflict), "overwrite") {
 			out = "已复用同路径文档并覆盖正文（onConflict=overwrite）\n" + out
 		}
-		return out, nil
+		return out, data, nil
 	})
 }
 
@@ -1090,7 +1113,7 @@ func (ts *toolSet) createDoc(_ context.Context, req *mcp.CallToolRequest, in cre
 type updateDocArg = UpdateDocInput
 
 func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in updateDocArg) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		// 动正文前先留旧文本：成功响应要给「改动行 ±1」的落盘确认
 		oldContent := ""
@@ -1102,14 +1125,15 @@ func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in upd
 		}
 		d, err := ts.svc.UpdateDoc(in)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
+		data := docDetailData(in.Project, d, false)
 		if in.DryRun {
 			out := fmt.Sprintf("（dryRun：未落盘）将更新文档 %s（uid=%s，路径 %s）", d.Name, d.UID, d.Path)
 			if kind, body := changePreview(d.PrevContent, d.Content); body != "" {
 				out += "\n改动预览（正文" + kind + "）：\n" + body
 			}
-			return out, nil
+			return out, data, nil
 		}
 		out := fmt.Sprintf("已更新文档 %s（uid=%s，路径 %s，%d 字节）", d.Name, d.UID, d.Path, d.Size)
 		if touched {
@@ -1117,7 +1141,7 @@ func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in upd
 				out += "\n落盘确认（正文" + kind + "）：\n" + body
 			}
 		}
-		return out, nil
+		return out, data, nil
 	})
 }
 
@@ -1129,19 +1153,23 @@ type deleteDocIn struct {
 }
 
 func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in deleteDocIn) (*mcp.CallToolResult, any, error) {
-	return ts.wrap(func() (string, error) {
+	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
+		// 先读一次拿 path（删除后文件已进 .trash，拿不到原路径）
+		d, err := ts.svc.GetDoc(in.Project, in.UID)
+		if err != nil {
+			return "", nil, err
+		}
+		data := map[string]any{
+			"uid": d.UID, "path": d.Path, "deleted": !in.DryRun, "trash": true, "dryRun": in.DryRun,
+		}
 		if in.DryRun {
-			d, err := ts.svc.GetDoc(in.Project, in.UID)
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("（dryRun：未落盘）将把 %s（uid=%s）移入集合 .trash，可人工找回", d.Path, d.UID), nil
+			return fmt.Sprintf("（dryRun：未落盘）将把 %s（uid=%s）移入集合 .trash，可人工找回", d.Path, d.UID), data, nil
 		}
 		if err := ts.svc.DeleteDoc(in.Project, in.UID); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", in.UID), nil
+		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", in.UID), data, nil
 	})
 }
 
