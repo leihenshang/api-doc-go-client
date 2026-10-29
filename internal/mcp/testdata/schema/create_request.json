@@ -169,6 +169,9 @@
     "docs": {
       "type": "string"
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "folder": {
       "type": "string"
     },

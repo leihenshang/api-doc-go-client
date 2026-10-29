@@ -12,6 +12,9 @@
         "string"
       ]
     },
+    "dryRun": {
+      "type": "boolean"
+    },
     "exampleUid": {
       "type": "string"
     },

@@ -23,6 +23,7 @@ prod:
   - 列表类工具返回 `structuredContent` + `outputSchema`（文本不变）。
   - `send_request` 默认**不再**保存响应示例（显式 `saveExample=true` 才存）。
   - 工具描述瘦身：总字符 6135 → 3799，并加预算回归测试；`list_envs` 支持分页。
+  - `dryRun` 全量对齐：`create_request` / `update_request` / `save_response_example` / `update_response_example` 也支持 dryRun（返回 planned 与落点，不写盘）。
   - v3 接口类实测修复：`search_requests` 结果新增 `weakMatch`（弱匹配提示）；新增 `delete_requests`（批量，强制每条 `ifMatch`，支持 `dryRun`）与 `delete_request.confirmName`；空结果统一返回 `[]`（不再 `null`）；create/update/send 校验 `method`（非法 `[INVALID]`）；`get_request_detail`/`get_request_details`/`send_request` 补 `structuredContent`（结构化覆盖 34/37）；工具数 36 → 37。
   - 文档类实测补齐：`get_docs` 返回 `structuredContent`（含 `docs[].error`）；`save_doc_image` 返回 `{url,sha256,size,deduped,markdown}`；所有工具失败时补 `structuredContent={error:{code,message}}`（结构化覆盖 30/36）。
   - `ifMatch` 收口：`delete_doc` / `delete_request` / `delete_response_example` 也支持并发校验（完整 hash 或 12 位前缀，不一致 `[CONFLICT]` 且不删除）；`get_request_detail` 的响应示例行补 `hash=`。

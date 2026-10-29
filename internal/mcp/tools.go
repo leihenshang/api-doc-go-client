@@ -1118,7 +1118,13 @@ func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		if err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), requestDetailData(in.Project, r), nil
+		data := requestDetailData(in.Project, r)
+		if in.DryRun {
+			data["planned"] = "create"
+			return fmt.Sprintf("（dryRun：未落盘）将创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）",
+				r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
+		}
+		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
 	})
 }
 
@@ -1142,6 +1148,10 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 		}
 		data := requestDetailData(in.Project, r)
 		out := fmt.Sprintf("已更新 [%s] %s（uid=%s，路径 %s）", r.Method, r.Name, r.UID, r.Path)
+		if in.DryRun {
+			data["planned"] = "update"
+			out = fmt.Sprintf("（dryRun：未落盘）将更新 [%s] %s（uid=%s，路径 %s）", r.Method, r.Name, r.UID, r.Path)
+		}
 		if touched {
 			if kind, body := changePreview(oldDocs, r.Docs); body != "" {
 				out += "\n落盘确认（说明文档" + kind + "）：\n" + body
@@ -1338,6 +1348,11 @@ func (ts *toolSet) saveResponseExample(_ context.Context, req *mcp.CallToolReque
 			return "", nil, err
 		}
 		data := exampleData(in.Project, in.UID, ex)
+		if in.DryRun {
+			data["planned"] = "create"
+			return fmt.Sprintf("（dryRun：未落盘）将保存响应示例 %s（路径 %s，状态码 %d，%d 字节）",
+				ex.Name, ex.Path, ex.Response.Status, len(ex.Response.Body)), data, nil
+		}
 		return fmt.Sprintf("已保存响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节，项目 %s）",
 			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body), in.Project), data, nil
 	})
@@ -1354,6 +1369,11 @@ func (ts *toolSet) updateResponseExample(_ context.Context, req *mcp.CallToolReq
 			return "", nil, err
 		}
 		data := exampleData(in.Project, in.UID, ex)
+		if in.DryRun {
+			data["planned"] = "update"
+			return fmt.Sprintf("（dryRun：未落盘）将更新响应示例 %s（路径 %s，状态码 %d，%d 字节）",
+				ex.Name, ex.Path, ex.Response.Status, len(ex.Response.Body)), data, nil
+		}
 		return fmt.Sprintf("已更新响应示例 %s（uid=%s，路径 %s，状态码 %d，%d 字节）",
 			ex.Name, ex.UID, ex.Path, ex.Response.Status, len(ex.Response.Body)), data, nil
 	})

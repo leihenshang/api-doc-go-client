@@ -844,6 +844,8 @@ type CreateRequestInput struct {
 	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
 	// OnConflict 同路径或同 uid 已存在时的策略（与 create_doc 一致，默认 error）
 	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有 uid/path 并覆盖内容）"`
+	// DryRun 只做校验与冲突判定，返回将创建的 uid/path，不落盘。
+	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将创建的 uid/path 与冲突判定），不写盘"`
 }
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
@@ -869,7 +871,12 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if name == "" {
 		return nil, errNeedName
 	}
-	r, err := a.CreateRequestFromDraftEx(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+	var r *collection.Request
+	if in.DryRun {
+		r, err = a.PlanCreateRequest(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+	} else {
+		r, err = a.CreateRequestFromDraftEx(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, collection.ErrRequestConflict):
@@ -1038,7 +1045,9 @@ type UpdateRequestInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid"`
 	// Section 节点守卫：限定本次调用只改某一个节点（见 validateSection）。
-	Section    string                      `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
+	Section string `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
+	// DryRun 只校验参数与 ifMatch，不落盘、不移动目录
+	DryRun     bool                        `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验参数与 ifMatch），不落盘"`
 	Name       *string                     `json:"name,omitempty"`
 	Method     *string                     `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL        *string                     `json:"url,omitempty"`
@@ -1186,6 +1195,10 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 		}
 	}
 	r.ExpectHash = hash
+	if in.DryRun {
+		// dryRun：只校验参数与 ifMatch，不写盘、也不移动目录
+		return r, nil
+	}
 	// 移动模块要在保存后做（路径/seq 由集合层分配）
 	if err := a.SaveRequest(r); err != nil {
 		if strings.Contains(err.Error(), "[conflict]") {
@@ -1529,6 +1542,7 @@ type SaveResponseExampleInput struct {
 	Headers     []collection.KV `json:"headers,omitempty" jsonschema:"响应头行（name/value/enabled）"`
 	Body        string          `json:"body,omitempty" jsonschema:"响应体原文；落盘的 size 按它的字节数记录"`
 	ContentType string          `json:"contentType,omitempty" jsonschema:"响应媒体类型；省略则按 body 首字符推断（{ 或 [ → application/json，其余 text/plain）"`
+	DryRun      bool            `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验请求/名称并给出落点），不写盘"`
 }
 
 // SaveResponseExample 手动保存一条响应示例（不发送请求）。
@@ -1549,6 +1563,9 @@ func (s *Service) SaveResponseExample(in SaveResponseExampleInput) (*collection.
 	if status == 0 {
 		status = 200 // 省略 = 最常见的那一种，而不是「状态码 0」这种不存在的响应
 	}
+	if in.DryRun {
+		return a.PlanResponseExampleRaw(uid, name, status, in.Headers, in.Body, in.ContentType)
+	}
 	return a.SaveResponseExampleRaw(uid, name, status, in.Headers, in.Body, in.ContentType)
 }
 
@@ -1565,6 +1582,7 @@ type UpdateResponseExampleInput struct {
 	Headers     *[]collection.KV `json:"headers,omitempty" jsonschema:"响应头；不传不动，传空数组即清空"`
 	Body        *string          `json:"body,omitempty" jsonschema:"响应体原文；不传不动（改了会同步更新 size 字节数）"`
 	ContentType *string          `json:"contentType,omitempty" jsonschema:"响应媒体类型；不传不动"`
+	DryRun      bool             `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验并给出改后落点），不写盘"`
 }
 
 // UpdateResponseExample 局部更新一条已保存的响应示例。
@@ -1580,6 +1598,9 @@ func (s *Service) UpdateResponseExample(in UpdateResponseExampleInput) (*collect
 	exUID := strings.TrimSpace(in.ExampleUID)
 	if exUID == "" {
 		return nil, fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+	}
+	if in.DryRun {
+		return a.PlanUpdateResponseExample(uid, exUID, in.Name, in.Status, in.Headers, in.Body, in.ContentType)
 	}
 	return a.UpdateResponseExample(uid, exUID, in.Name, in.Status, in.Headers, in.Body, in.ContentType)
 }

@@ -34,11 +34,8 @@ func NormalizeRequestConflict(v string) (string, error) {
 	}
 }
 
-// CreateRequestFromDraftEx 按 uid/onConflict 落盘草稿：
-//   - error（默认）：同 uid 或同路径已存在 → ErrRequestConflict（带已有 uid/path）
-//   - suffix：同路径已存在 → 追加 -2、-3…（同 uid 视为冲突，不能复制身份）
-//   - overwrite：同 uid 或同路径已存在 → 复用其 uid/path/seq 覆盖内容
-func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request, uid, onConflict string) (*Request, error) {
+// PlanCreateRequest 只做冲突判定与身份/路径分配，不写盘（dryRun）。
+func (c *Collection) PlanCreateRequest(folder, name string, src *Request, uid, onConflict string) (*Request, error) {
 	mode, err := NormalizeRequestConflict(onConflict)
 	if err != nil {
 		return nil, err
@@ -52,7 +49,6 @@ func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request,
 	if err != nil {
 		return nil, err
 	}
-
 	var old *Request
 	if uid != "" {
 		old = res.reqs[uid]
@@ -61,7 +57,6 @@ func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request,
 		return nil, fmt.Errorf("%w：uid=%s（path=%s）。如确需并存请传 onConflict=suffix，覆盖已有内容请传 onConflict=overwrite",
 			ErrRequestConflict, old.UID, old.Path)
 	}
-
 	base := sanitizeFileName(name)
 	rel := joinRel(folder, base+".yml")
 	for i := 2; old == nil; i++ {
@@ -82,22 +77,29 @@ func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request,
 		}
 		rel = joinRel(folder, fmt.Sprintf("%s-%d.yml", base, i))
 	}
-
 	if old != nil {
 		next.UID, next.Path, next.Seq, next.Name = old.UID, old.Path, old.Seq, name
-		if err := c.SaveRequest(next); err != nil {
-			return nil, err
-		}
 		return next, nil
-	}
-
-	if err := c.ensureDir(folder); err != nil {
-		return nil, err
 	}
 	if uid == "" {
 		uid = uuid.NewString()
 	}
 	next.UID, next.Name, next.Path, next.Seq = uid, name, rel, c.nextSeq(folder)
+	return next, nil
+}
+
+// CreateRequestFromDraftEx 按 uid/onConflict 落盘草稿：
+//   - error（默认）：同 uid 或同路径已存在 → ErrRequestConflict（带已有 uid/path）
+//   - suffix：同路径已存在 → 追加 -2、-3…（同 uid 视为冲突，不能复制身份）
+//   - overwrite：同 uid 或同路径已存在 → 复用其 uid/path/seq 覆盖内容
+func (c *Collection) CreateRequestFromDraftEx(folder, name string, src *Request, uid, onConflict string) (*Request, error) {
+	next, err := c.PlanCreateRequest(folder, name, src, uid, onConflict)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureDir(folder); err != nil {
+		return nil, err
+	}
 	if err := c.SaveRequest(next); err != nil {
 		return nil, err
 	}

@@ -156,3 +156,69 @@ func TestDeleteRequestConfirmAndBatch(t *testing.T) {
 		t.Fatalf("应只剩 1 条")
 	}
 }
+
+// dryRun 收口：create_request / update_request / save+update_response_example 都不落盘。
+func TestDryRunWriteTools(t *testing.T) {
+	cs := connectSelf(t)
+
+	// create_request dryRun：不产生文件，结构化带 planned
+	res := callV3(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "干跑请求", "method": "GET", "url": "/dry", "folder": "_dry", "dryRun": true,
+	})
+	if res.IsError {
+		t.Fatalf("create dryRun 失败：%v", res.Content)
+	}
+	sc := scOf(t, res)
+	if sc["planned"] != "create" || sc["path"] == "" {
+		t.Fatalf("create dryRun 结构化不符：%v", sc)
+	}
+	sr := callV3(t, cs, "search_requests", map[string]any{"project": "demo", "query": "干跑请求"})
+	if len(scOf(t, sr)["results"].([]any)) != 0 {
+		t.Fatalf("create dryRun 不应落盘")
+	}
+
+	// 真实创建后 update_request dryRun：url 不变
+	cr := callV3(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "待改请求", "method": "GET", "url": "/before", "folder": "_dry",
+	})
+	uid := scOf(t, cr)["uid"].(string)
+	ur := callV3(t, cs, "update_request", map[string]any{
+		"project": "demo", "uid": uid, "url": "/after", "dryRun": true,
+	})
+	if ur.IsError || scOf(t, ur)["planned"] != "update" {
+		t.Fatalf("update dryRun 不符：%v", ur.Content)
+	}
+	d := callV3(t, cs, "get_request_detail", map[string]any{"project": "demo", "uid": uid})
+	if scOf(t, d)["url"] != "/before" {
+		t.Fatalf("update dryRun 不应写入：%v", scOf(t, d))
+	}
+
+	// save_response_example dryRun：示例数不变
+	before := len(scOf(t, callV3(t, cs, "get_request_detail", map[string]any{"project": "demo", "uid": uid}))["examples"].([]any))
+	sr = callV3(t, cs, "save_response_example", map[string]any{
+		"project": "demo", "uid": uid, "name": "干跑示例", "body": `{"x":1}`, "dryRun": true,
+	})
+	if sr.IsError || scOf(t, sr)["planned"] != "create" || scOf(t, sr)["path"] == "" {
+		t.Fatalf("save example dryRun 不符：%v", sr.Content)
+	}
+	after := len(scOf(t, callV3(t, cs, "get_request_detail", map[string]any{"project": "demo", "uid": uid}))["examples"].([]any))
+	if after != before {
+		t.Fatalf("save example dryRun 不应落盘：%d → %d", before, after)
+	}
+
+	// 真实保存后 update dryRun：状态码不变
+	sa := callV3(t, cs, "save_response_example", map[string]any{
+		"project": "demo", "uid": uid, "name": "示例", "status": 200, "body": `{"x":1}`,
+	})
+	exUID := scOf(t, sa)["uid"].(string)
+	uu := callV3(t, cs, "update_response_example", map[string]any{
+		"project": "demo", "uid": uid, "exampleUid": exUID, "status": 500, "dryRun": true,
+	})
+	if uu.IsError || scOf(t, uu)["planned"] != "update" {
+		t.Fatalf("update example dryRun 不符：%v", uu.Content)
+	}
+	exs := scOf(t, callV3(t, cs, "get_request_detail", map[string]any{"project": "demo", "uid": uid}))["examples"].([]any)
+	if exs[0].(map[string]any)["status"].(float64) != 200 {
+		t.Fatalf("update example dryRun 不应写入：%v", exs)
+	}
+}
