@@ -12,7 +12,7 @@ prod:
 
 - MCP 工具精简（39 → 35，破坏性契约变更）：`get_request_details` 并入 `get_request_detail`（`uid` 单个 / `uids` 批量 1–10），`get_docs` 并入 `get_doc`，`prune_empty_modules` 并入 `delete_module`（`pruneEmpty=true`），`get_doc_template` 迁移为 MCP resource `apidoc://doc-template`。旧工具名不再注册。
 - MCP 设置新增「启用的工具组」（集合与接口 / 文档 / 环境变量 / 响应示例 / 发送请求）：不用的组不注册，减少 AI 工具列表体积；工具总览、工作目录与项目列表（`session`）恒开。
-- MCP 工具描述瘦身（约 9500 → 2200 字），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。
+- MCP 工具描述瘦身（9507 → 1713 字，预算上限 3200），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。
 - 修复：`rename_project` / `delete_project` 的 `project` 改为真正必填（此前可省略并回落到默认项目，与参数说明矛盾）；入参校验错误的多参数列表不再夹带 `["..."]` 标点；显式 `fileName` 非法时直接报错（不再静默改成 `untitled`）；`import_collection` 的格式/内容错误统一回 `[INVALID]`，不再误判为 `[IO]`。
 
 ## 2026-10-29  0.1.4-dev

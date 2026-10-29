@@ -104,7 +104,7 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | 问题 5：数量注释漂移 | 已完成 | 重写 `meta.go`，注释不再写死数量；`meta_test.go` 锁定 35 个基线 |
 | 问题 6：显式 `fileName` 静默改名 | 已完成 | `validEntryName` 校验，不合法直接报错 |
 | 问题 7：`create_project.root` 说明过期 | 已完成 | 参数说明改为「必须是授权且可写的工作目录」 |
-| A 档：`Brief` + 描述瘦身 | 已完成 | 描述 9507 → 约 2200 字；`list_tools` 只回 `Brief`；预算测试上限 3200 |
+| A 档：`Brief` + 描述瘦身 | 已完成 | 描述 9507 → 1713 字；`list_tools` 只回 `Brief`；预算测试上限 3200 |
 | B 档：4 项合并 | 已完成 | 39 → 35；schema 快照、手册、设计文档同步 |
 | C 档：工具组开关 | 已完成 | `config.ToolGroups` → `app.MCPRequest.Groups` → `meta.Group` 注册过滤；设置页 5 个组 + i18n；`TestToolGroupRegistration` |
 
