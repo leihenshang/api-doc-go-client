@@ -152,7 +152,8 @@ function mcpExample(): string {
   return JSON.stringify(
     {
       mcpServers: {
-        apidoc: {
+        // 服务名与文档保持一致：api-doc-go（含连字符，JSON key 需引号）
+        'api-doc-go': {
           type: 'http',
           url,
           headers: { Authorization: `Bearer ${token}` },
