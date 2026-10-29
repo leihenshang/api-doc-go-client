@@ -98,7 +98,7 @@ var toolMetas = []ToolMeta{
 		Description: "列出项目里的文档条目（集合树里独立的 .md）。query 按名称/路径过滤；limit（默认 200，最大 1000）/offset 分页，首行给总数；默认带 hash（可直接回传 update_doc.ifMatch，大项目可 includeHash=false 省读盘）。读正文用 get_doc。注意：只含文档条目（.md）；接口请求请用 get_project_modules，接口自带的说明是 request.docs，也不在这里。",
 	},
 	{
-		Name: "get_docs", Risk: RiskLow, InReadOnly: true, Since: "0.6.0",
+		Name: "get_docs", Risk: RiskLow, InReadOnly: true, Since: "0.6.0", Output: docsBatchOutput(),
 		Description: "批量读文档：一次 1–10 个 uid，按 uid 分组；单条失败不影响其他。支持与 get_doc 相同的 startLine/maxLines/outline。",
 	},
 	{
@@ -501,7 +501,22 @@ func exampleDeleteOutput() map[string]any {
 
 // imageOutput save_doc_image 的结果。
 func imageOutput() map[string]any {
-	return objSchema(map[string]any{"url": strSchema(), "name": strSchema()}, "url")
+	return objSchema(map[string]any{
+		"url": strSchema(), "sha256": strSchema(), "size": intSchema(),
+		"deduped": boolSchema(), "markdown": strSchema(), "name": strSchema(),
+	}, "url", "sha256")
+}
+
+// docsBatchOutput get_docs 的结果（单篇失败不影响其他：error 只在失败条目出现）。
+func docsBatchOutput() map[string]any {
+	item := objSchema(map[string]any{
+		"uid": strSchema(), "name": strSchema(), "path": strSchema(),
+		"size": intSchema(), "hash": strSchema(), "content": strSchema(), "error": strSchema(),
+	}, "uid", "path")
+	return objSchema(map[string]any{
+		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
+		"docs": arrSchema(item),
+	}, "docs")
 }
 
 // docDeleteOutput delete_doc 的结果（只带身份与路径，避免暴露内容）。

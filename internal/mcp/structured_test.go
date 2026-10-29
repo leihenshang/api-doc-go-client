@@ -93,6 +93,7 @@ func TestStructuredListTools(t *testing.T) {
 		"save_response_example": true, "update_response_example": true, "delete_response_example": true,
 		"create_env": true, "rename_env": true, "delete_env": true,
 		"set_env_var": true, "delete_env_var": true,
+		"get_docs": true,
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil
@@ -101,4 +102,94 @@ func TestStructuredListTools(t *testing.T) {
 		}
 	}
 	_ = strings.TrimSpace
+}
+
+// get_docs：批量结构化（单篇失败只在该条带 error，其它照常返回）。
+func TestStructuredGetDocs(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "批量结构", "folder": "docs", "content": "# 批量",
+	}))
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "get_docs", Arguments: map[string]any{
+		"project": "demo", "uids": []string{uid, "00000000-0000-0000-0000-000000000000"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("批量读取不应整体失败：%v", res.Content)
+	}
+	sc, ok := res.StructuredContent.(map[string]any)
+	if !ok || sc["total"].(float64) != 2 || sc["returned"].(float64) != 1 {
+		t.Fatalf("get_docs 结构化计数不符：%v", res.StructuredContent)
+	}
+	docs, _ := sc["docs"].([]any)
+	if len(docs) != 2 {
+		t.Fatalf("docs 应含 2 条：%v", docs)
+	}
+	hit := false
+	failed := false
+	for _, d := range docs {
+		m := d.(map[string]any)
+		if m["uid"] == uid && m["content"] == "# 批量" && len(m["hash"].(string)) == 64 {
+			hit = true
+		}
+		if m["uid"] == "00000000-0000-0000-0000-000000000000" && strings.Contains(m["error"].(string), "[NOT_FOUND]") {
+			failed = true
+		}
+	}
+	if !hit || !failed {
+		t.Errorf("get_docs 条目不符：%v", docs)
+	}
+}
+
+// save_doc_image：结构化去重标记。
+func TestStructuredSaveDocImage(t *testing.T) {
+	cs := connectSelf(t)
+	call := func() map[string]any {
+		res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "save_doc_image", Arguments: map[string]any{
+			"project": "demo", "data": sdTestPNG, "name": "结构图",
+		}})
+		if err != nil || res.IsError {
+			t.Fatalf("save_doc_image 失败：%v %v", err, res.Content)
+		}
+		sc, ok := res.StructuredContent.(map[string]any)
+		if !ok {
+			t.Fatalf("应返回 structuredContent，实际 %T", res.StructuredContent)
+		}
+		return sc
+	}
+	first := call()
+	second := call()
+	if first["sha256"] != second["sha256"] || len(first["sha256"].(string)) != 64 {
+		t.Errorf("sha256 应稳定：%v vs %v", first["sha256"], second["sha256"])
+	}
+	if second["deduped"] != true {
+		t.Errorf("同图二次保存应 deduped=true：%v", second)
+	}
+	if first["markdown"] != "![结构图]("+first["url"].(string)+")" {
+		t.Errorf("markdown 片段不符：%v", first)
+	}
+}
+
+// 错误态也带 structuredContent：{error:{code,message}}。
+func TestStructuredErrorResult(t *testing.T) {
+	cs := connectSelf(t)
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "get_doc", Arguments: map[string]any{
+		"project": "demo", "uid": "00000000-0000-0000-0000-000000000000",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("应失败")
+	}
+	sc, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("错误态应带 structuredContent，实际 %T", res.StructuredContent)
+	}
+	e, _ := sc["error"].(map[string]any)
+	if e["code"] != "NOT_FOUND" || e["message"] == "" {
+		t.Errorf("错误结构不符：%v", sc)
+	}
 }

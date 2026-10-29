@@ -83,6 +83,8 @@ type ProjectApp interface {
 	// SaveDocImage 保存一张 Markdown 图片（base64，可带 data URL 前缀），
 	// 返回到可直接写进正文的 URL（/doc-assets/<sha256>）。
 	SaveDocImage(dataBase64 string) (string, error)
+	// SaveDocImageInfo 同 SaveDocImage，但返回 hash/size/是否命中已有附件。
+	SaveDocImageInfo(dataBase64 string) (string, collection.DocImageInfo, error)
 	// ---- 模块 / 集合级维护（容器工具）----
 	FolderUIDByPath(dir string) (string, bool)
 	RenameFolder(uid, name string) error
