@@ -63,6 +63,42 @@ const originsText = computed({
   },
 })
 
+// ---------- MCP 工具组 ----------
+// 可配置的组（session 恒开，不出现）；空数组在配置里表示「全部启用」，因此 UI 上
+// 空 = 全勾，取消到只剩一个时禁止再取消，避免空数组语义反转。
+const MCP_GROUP_VALUES = ['collection', 'docs', 'env', 'example', 'network'] as const
+
+const mcpGroups = computed(() => [
+  { value: 'collection', label: t('settings.mcpGroupCollection') },
+  { value: 'docs', label: t('settings.mcpGroupDocs') },
+  { value: 'env', label: t('settings.mcpGroupEnv') },
+  { value: 'example', label: t('settings.mcpGroupExample') },
+  { value: 'network', label: t('settings.mcpGroupNetwork') },
+])
+
+/** 表单当前启用的组；空数组按「全部启用」解释。 */
+const enabledGroups = computed<string[]>(() => {
+  const cur = form.value.mcp.toolGroups ?? []
+  return cur.length ? cur : [...MCP_GROUP_VALUES]
+})
+
+function groupChecked(v: string): boolean {
+  return enabledGroups.value.includes(v)
+}
+
+/** 勾选/取消一个工具组：至少保留一个，最后一项在界面上也是 disabled。 */
+function setGroup(v: string, on: boolean): void {
+  const cur = new Set(enabledGroups.value)
+  if (on) {
+    cur.add(v)
+  } else {
+    if (cur.size <= 1) return
+    cur.delete(v)
+  }
+  form.value.mcp.toolGroups = MCP_GROUP_VALUES.filter((x) => cur.has(x))
+  void applyNow()
+}
+
 /** 端口用文本输入承载，落盘时转成数字；非法输入按 0 处理。 */
 const portText = computed({
   get: () => String(form.value.mcp.port),
@@ -217,6 +253,7 @@ watch(
         ...settings.form.mcp,
         allowOrigins: [...(settings.form.mcp?.allowOrigins ?? [])],
         allow: (settings.form.mcp?.allow ?? []).map((a) => ({ ...a })),
+        toolGroups: [...(settings.form.mcp?.toolGroups ?? [])],
       },
     }
     // 每次打开回到指定分区：默认界面，状态栏点 MCP 时可直达 MCP 分区
@@ -303,6 +340,7 @@ function snapshot(s: Settings): string {
       // 空列表在 Go 侧是 null：比较前统一成 []，否则「一打开就 dirty」
       allowOrigins: m.allowOrigins ?? [],
       allow: m.allow ?? [],
+      toolGroups: m.toolGroups ?? [],
     },
   })
 }
@@ -320,7 +358,8 @@ const mcpDirty = computed(() => {
     a.readOnly !== b.readOnly ||
     a.enabled !== b.enabled ||
     JSON.stringify(a.allowOrigins ?? []) !== JSON.stringify(b.allowOrigins ?? []) ||
-    JSON.stringify(a.allow ?? []) !== JSON.stringify(b.allow ?? [])
+    JSON.stringify(a.allow ?? []) !== JSON.stringify(b.allow ?? []) ||
+    JSON.stringify(a.toolGroups ?? []) !== JSON.stringify(b.toolGroups ?? [])
   )
 })
 
@@ -504,6 +543,23 @@ function close(): void {
                 data-testid="settings.mcpReadOnly"
                 @update:checked="(v: boolean) => { form.mcp.readOnly = v; void applyNow() }">
                 {{ t('settings.mcpReadOnly') }}
+              </n-checkbox>
+            </div>
+          </div>
+
+          <!-- 工具组：不用的组不注册，缩小 tools/list 体积；session（工具总览/工作目录/项目列表）恒开 -->
+          <div class="block">
+            <div class="row">
+              <span class="lbl">{{ t('settings.mcpGroups') }}</span>
+              <span class="sp" />
+              <span class="muted">{{ t('settings.mcpGroupsHint') }}</span>
+            </div>
+            <div class="row">
+              <n-checkbox v-for="g in mcpGroups" :key="g.value" :checked="groupChecked(g.value)"
+                :disabled="!form.mcp.enabled || (groupChecked(g.value) && enabledGroups.length <= 1)"
+                :data-testid="`settings.mcpGroup.${g.value}`"
+                @update:checked="(v: boolean) => setGroup(g.value, v)">
+                {{ g.label }}
               </n-checkbox>
             </div>
           </div>

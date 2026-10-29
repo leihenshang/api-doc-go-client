@@ -1,12 +1,19 @@
 # api-doc-go-client 更新日志
 
 dev:
-当前版本 0.1.4-dev
+当前版本 0.1.5-dev
 prod:
 当前版本 0.1.0
 
 > 版本口径：`prod` 与 `wails.json` 的 `info.productVersion` 一致（发布时抬升）；
 > `dev` 为开发线版本，每新增一条日期条目 patch +1。维护规则见 `AGENTS.md`。
+
+## 2026-10-30  0.1.5-dev
+
+- MCP 工具精简（39 → 35，破坏性契约变更）：`get_request_details` 并入 `get_request_detail`（`uid` 单个 / `uids` 批量 1–10），`get_docs` 并入 `get_doc`，`prune_empty_modules` 并入 `delete_module`（`pruneEmpty=true`），`get_doc_template` 迁移为 MCP resource `apidoc://doc-template`。旧工具名不再注册。
+- MCP 设置新增「启用的工具组」（集合与接口 / 文档 / 环境变量 / 响应示例 / 发送请求）：不用的组不注册，减少 AI 工具列表体积；工具总览、工作目录与项目列表（`session`）恒开。
+- MCP 工具描述瘦身（约 9500 → 2200 字），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。
+- 修复：`rename_project` / `delete_project` 的 `project` 改为真正必填（此前可省略并回落到默认项目，与参数说明矛盾）；入参校验错误的多参数列表不再夹带 `["..."]` 标点；显式 `fileName` 非法时直接报错（不再静默改成 `untitled`）；`import_collection` 的格式/内容错误统一回 `[INVALID]`，不再误判为 `[IO]`。
 
 ## 2026-10-29  0.1.4-dev
 
@@ -32,6 +39,11 @@ prod:
   - 结构化输出补全：`create_doc`/`update_doc`/`get_doc`/`delete_doc` 也返回 `structuredContent`（uid/path/size/hash 等），`outputSchema` 的数组元素写明具体字段与 required（不再只有 `items:{type:"object"}`）；`create_doc` 建完可直接取 uid/path/hash。
   - 复测修正：`create_doc` 的 dryRun 只输出计划（不再同时打印「已创建」）；`create_project` 的 `root` 必须是工作目录（指向项目目录时 `[INVALID]` 并提示父级），白名单外 `[AUTH]`、重名 `[CONFLICT]`（不传 root 时若默认可写目录本身是项目也会 `[INVALID]` 提示改父级）；`list_docs` 带 hash 由「逐篇重扫」改为单次扫描（30 篇实测 168ms → 24ms）。
 - 已知限制：**导出**（Markdown / HTML）仍不打包图片；冲突时手动选择「采用服务器版本」的说明文档，其图片要等下一轮同步才会本地化。
+- MCP 新增 `list_tools`（工具数 37 → 38）：一次返回全部工具名 + 一句话用途 + 必填参数（可按 `filter` 关键词、`mode=read|write` 过滤），不必为「查有哪些工具」逐个拉完整 schema。
+- MCP 新增 `import_collection`（工具数 38 → 39）：把 Postman / OpenAPI / api-doc-go 集合的**正文**一次导入成多条请求（与客户端「导入」同源），`dryRun=true` 只解析并回报条数、不落盘，省掉逐个 `create_request` 的往返。
+- MCP `create_doc` / `create_request` 新增可选 `fileName`：中文显示名也能落 ASCII 文件名（不传仍按既有规则由 `name` 推导，不动老集合）。
+- MCP 参数可发现性：`update_request.folder`（把请求移到别的模块）、`create_request.folder`、`curl`、`copyFromUid` 此前在 schema 里没有说明，AI 基本无从得知「请求还能移动」，现补齐并写入手册。
+- MCP 报错更好懂：入参校验失败不再回英文 `validating … missing properties`，改为中文并点名参数与工具（如「缺少必填参数：name（工具 create_doc）」）；省略 `project` 时会说明默认目标**按会话保存、重连或服务重启后需重新 `use_workspace`**。
 
 ## 2026-10-28  0.1.3-dev
 

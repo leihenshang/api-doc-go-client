@@ -97,7 +97,12 @@ func (s *Service) resolveKey(project string) (string, error) {
 	if k := strings.TrimSpace(project); k != "" {
 		return k, nil
 	}
-	return "", fmt.Errorf("未指定 project：请先 use_workspace 选定默认工作目录（选定后本会话可省略 project），或每次显式传 project。%s", s.workspaceHint())
+	// 为什么把「会话/重启会失效」写进报错：默认目标按会话保存（见 tools.go 的 toolSet.sel），
+	// 客户端重连或 MCP 服务重启后就是新的会话，之前选定的目录自然不在了 —— 不说明的话
+	// 调用方只会觉得「刚才还好好的，怎么突然没指定 project」。
+	return "", fmt.Errorf("未指定 project：请先 use_workspace 选定默认工作目录（选定后本会话可省略 project）。"+
+		"默认目标按会话保存，客户端重连或 MCP 服务重启后需重新选定；不想依赖它也可以每次显式传 project。%s",
+		s.workspaceHint())
 }
 
 // workspaceHint 可用项目提示（拼进报错里，AI 能照着改）。
@@ -823,7 +828,7 @@ func (in RespDocInput) merge(base *collection.ResponseDoc) *collection.ResponseD
 // CreateRequestInput create_request 的入参。
 type CreateRequestInput struct {
 	Project     string                      `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	Folder      string                      `json:"folder,omitempty"`
+	Folder      string                      `json:"folder,omitempty" jsonschema:"目标模块路径（相对集合根，如 api/user）；留空 = 项目根；模块不存在会 [NOT_FOUND]（用 get_project_modules 看路径）"`
 	Name        string                      `json:"name"`
 	Method      string                      `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL         string                      `json:"url,omitempty"`
@@ -838,14 +843,17 @@ type CreateRequestInput struct {
 	RespDoc     *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并：可只写 params 字段表（补说明），sample/status/headers/type 不传不动；gRPC 请求不支持"`
 	Auth        *collection.Auth            `json:"auth,omitempty"`
 	Docs        string                      `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
-	Curl        string                      `json:"curl,omitempty"`        // 与 name/folder 互斥：走 ParseCurl 导入
-	CopyFromUID string                      `json:"copyFromUid,omitempty"` // 复制已有请求；grpc 源不支持 respDoc
+	Curl        string                      `json:"curl,omitempty" jsonschema:"用一条 curl 命令建请求（与手填字段互斥：给 curl 就不用逐个填 method/url/headers/body）"`
+	CopyFromUID string                      `json:"copyFromUid,omitempty" jsonschema:"复制已有请求（uid 来自 search_requests / get_project_modules），再叠加本次传入的字段；grpc 源不支持 respDoc"`
 	// UID 可选：指定 uid 做幂等导入（批量同步时固定身份）
 	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
 	// OnConflict 同路径或同 uid 已存在时的策略（与 create_doc 一致，默认 error）
 	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有 uid/path 并覆盖内容）"`
 	// DryRun 只做校验与冲突判定，返回将创建的 uid/path，不落盘。
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将创建的 uid/path 与冲突判定），不写盘"`
+	// FileName 可选：落盘文件名（不含 .yml）。留空 = 由 name slug 化推导 —— 中文 name
+	// 会得到中文文件名（集合是纯文本、文件即真相源）；要 ASCII 名（脚本/工具链友好）就在这里给。
+	FileName string `json:"fileName,omitempty" jsonschema:"可选：落盘文件名（不含 .yml）；留空 = 由 name 推导。中文 name 会落成中文文件名，需要 ASCII 名时显式传"`
 }
 
 // CreateRequest 创建请求（三种来源：手填参数 / cURL 导入 / 复制已有请求）。
@@ -871,11 +879,20 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if name == "" {
 		return nil, errNeedName
 	}
+	// fileName 只在显式给了才生效：默认仍由 name slug 化推导（中文名落中文文件是既有取舍）。
+	opts := collection.RequestCreateOpts{
+		Folder:     strings.TrimSpace(in.Folder),
+		Name:       name,
+		Src:        draft,
+		UID:        strings.TrimSpace(in.UID),
+		OnConflict: in.OnConflict,
+		FileName:   strings.TrimSpace(in.FileName),
+	}
 	var r *collection.Request
 	if in.DryRun {
-		r, err = a.PlanCreateRequest(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+		r, err = a.PlanCreateRequestWithOpts(opts)
 	} else {
-		r, err = a.CreateRequestFromDraftEx(strings.TrimSpace(in.Folder), name, draft, strings.TrimSpace(in.UID), in.OnConflict)
+		r, err = a.CreateRequestWithOpts(opts)
 	}
 	if err != nil {
 		switch {
@@ -889,6 +906,50 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 		}
 	}
 	return r, nil
+}
+
+// ImportCollectionInput import_collection 的入参。
+type ImportCollectionInput struct {
+	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Format  string `json:"format" jsonschema:"postman / openapi / apidocgo（本客户端导出的集合整包）；Bruno 目录导入请用客户端的导入功能，这里不支持"`
+	Text    string `json:"text" jsonschema:"集合文件的正文内容（不是文件路径：请先读出内容再传）"`
+	Parent  string `json:"parent,omitempty" jsonschema:"落在哪个模块下（相对集合根，如 api/user）；留空 = 项目根"`
+	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只解析并回报将导入的条数，不写盘"`
+}
+
+// ImportCollection 批量导入外部集合：一次落多条请求，省掉逐个 create_request 的往返。
+//
+// 与客户端「导入」同源（collection.ImportPostman / ImportOpenAPI / ImportBundle），
+// 只是入口从选文件变成传正文 —— MCP 侧拿不到本地文件选择对话框。
+func (s *Service) ImportCollection(in ImportCollectionInput) (*collection.ImportSummary, error) {
+	a, _, err := s.resolveWrite(in.Project)
+	if err != nil {
+		return nil, err
+	}
+	format := strings.ToLower(strings.TrimSpace(in.Format))
+	text := strings.TrimSpace(in.Text)
+	if format == "" {
+		return nil, withInvalid(errors.New("缺少 format：postman / openapi / apidocgo"))
+	}
+	if text == "" {
+		return nil, withInvalid(errors.New("缺少 text：请传集合文件的正文内容（不支持文件路径）"))
+	}
+	if in.DryRun {
+		sum, perr := a.ParseImport(format, text)
+		if perr != nil {
+			return nil, withInvalid(perr)
+		}
+		return sum, nil
+	}
+	sum, err := a.ImportCollection(strings.TrimSpace(in.Parent), format, text)
+	if err != nil {
+		// 格式不对 / 文件为空 / 版本过高由集合层包 ErrImportInvalid（调用方能修）；落盘失败才是 IO。
+		if errors.Is(err, collection.ErrImportInvalid) {
+			return nil, withInvalid(err)
+		}
+		return nil, coded(CodeIO, err)
+	}
+	return sum, nil
 }
 
 // ReadRequest 读接口原文（delete_request 的结构化输出要在删除前拿到 path/name）。
@@ -1062,7 +1123,7 @@ type UpdateRequestInput struct {
 	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	// Replaces 接口说明的局部替换：与 docs 互斥；old 找不到即整单拒绝（不落盘）。
 	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"接口说明的局部替换：[{old,new,replaceAll}]，与 docs 互斥；任一 old 找不到则整单拒绝、不落盘"`
-	Folder   *string     `json:"folder,omitempty"` // 移动到别的模块
+	Folder   *string     `json:"folder,omitempty" jsonschema:"移动请求到别的模块（相对集合根，如 api/user；传空串 = 移到项目根）；模块不存在会 [NOT_FOUND]。这是把请求挪到其它目录的唯一入口，不需要删了重建"` // 移动到别的模块
 	// IfMatch 冲突检测：传 get_request_detail / search_requests 返回的 hash，
 	// 若磁盘文件在此期间被外部改动则拒绝写入（不传 = 不做保护，行为同客户端「最后写者赢」）。
 	IfMatch string `json:"ifMatch,omitempty"`

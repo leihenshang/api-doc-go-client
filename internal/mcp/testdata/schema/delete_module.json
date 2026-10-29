@@ -9,12 +9,12 @@
     "project": {
       "type": "string"
     },
+    "pruneEmpty": {
+      "type": "boolean"
+    },
     "recursive": {
       "type": "boolean"
     }
   },
-  "required": [
-    "path"
-  ],
   "type": "object"
 }

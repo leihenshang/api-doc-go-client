@@ -32,10 +32,16 @@
     },
     "uid": {
       "type": "string"
+    },
+    "uids": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
     }
   },
-  "required": [
-    "uid"
-  ],
   "type": "object"
 }

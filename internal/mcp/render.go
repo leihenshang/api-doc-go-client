@@ -9,6 +9,72 @@ import (
 	"api-doc-go-client/internal/runner"
 )
 
+// renderImportSummary import_collection 的文本结果（条数 + 失败明细）。
+func renderImportSummary(project, format, parent string, sum *collection.ImportSummary, dryRun bool) string {
+	where := strings.TrimSpace(parent)
+	if where == "" {
+		where = "项目根"
+	}
+	head := "已导入"
+	if dryRun {
+		head = "（dryRun：未落盘）将导入"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s %d 条请求（format=%s，项目 %s，位置 %s）", head, sum.Imported, format, project, where)
+	if !dryRun && sum.Skipped > 0 {
+		fmt.Fprintf(&sb, "，跳过 %d 条（已存在同方法同地址）", sum.Skipped)
+	}
+	sb.WriteByte('\n')
+	if len(sum.Failures) > 0 {
+		fmt.Fprintf(&sb, "失败 %d 条：\n", len(sum.Failures))
+		for _, f := range sum.Failures {
+			sb.WriteString("- " + f + "\n")
+		}
+	}
+	if dryRun {
+		sb.WriteString("预演只解析了文件正文：实际导入时「已存在」的请求会被跳过，条数可能更少。\n")
+	}
+	return sb.String()
+}
+
+// renderToolCatalog list_tools 的文本输出：一行一个工具（名 + 读/写 + 必填 + 一句话）。
+//
+// 刻意不在这里贴完整 schema —— 那正是 list_tools 要省掉的东西；需要细节再单独取。
+func renderToolCatalog(items []toolCatalogItem, total int, filter, mode string, readOnly bool) string {
+	var sb strings.Builder
+	if filter != "" {
+		fmt.Fprintf(&sb, "共 %d 个可用工具，命中 %d 个（filter=%s）\n", total, len(items), filter)
+	} else {
+		fmt.Fprintf(&sb, "共 %d 个可用工具（本次返回 %d 个）\n", total, len(items))
+	}
+	if strings.EqualFold(strings.TrimSpace(mode), "write") {
+		sb.WriteString("（mode=write：只看会落盘改集合的工具）\n")
+	} else if strings.EqualFold(strings.TrimSpace(mode), "read") {
+		sb.WriteString("（mode=read：只看只读与会话类工具）\n")
+	}
+	if len(items) == 0 {
+		// 只读模式下写工具根本没注册：必须说清楚，否则调用方会误判成「没有写权限/没有这类工具」。
+		if readOnly && strings.EqualFold(strings.TrimSpace(mode), "write") {
+			sb.WriteString("当前 MCP 服务是只读模式：写工具未注册，因此没有可列出的写工具。\n")
+			return sb.String()
+		}
+		sb.WriteString("没有命中的工具：换个关键词或去掉 filter。\n")
+		return sb.String()
+	}
+	for _, it := range items {
+		kind := "读"
+		if it.Write {
+			kind = "写"
+		}
+		req := "无必填"
+		if len(it.Required) > 0 {
+			req = "必填：" + strings.Join(it.Required, "、")
+		}
+		fmt.Fprintf(&sb, "- %s [%s] %s｜%s\n", it.Name, kind, req, it.Description)
+	}
+	return sb.String()
+}
+
 // bodySummary 请求体的简短摘要（仅用于打分，不进输出）。
 func bodySummary(r *collection.Request) string {
 	switch r.Body.Type {
@@ -149,7 +215,7 @@ func renderSend(o *SendOutcome) string {
 	return sb.String()
 }
 
-// 详情分段的合法取值（get_request_detail / get_request_details 的 sections）。
+// 详情分段的合法取值（get_request_detail 的 sections，单个与批量共用）。
 // 不传 = 全量（与旧行为一致）；显式传时只渲染选中的段，便于把单次响应压到 3000 字符内。
 var detailSectionNames = []string{"overview", "docs", "bodyFields", "respDoc", "examples"}
 

@@ -66,6 +66,10 @@ export function CreateDocEx(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['CreateDocEx'](arg1, arg2, arg3, arg4);
 }
 
+export function CreateDocWithOpts(arg1) {
+  return window['go']['app']['App']['CreateDocWithOpts'](arg1);
+}
+
 export function CreateFolder(arg1, arg2) {
   return window['go']['app']['App']['CreateFolder'](arg1, arg2);
 }
@@ -80,6 +84,10 @@ export function CreateRequestFromDraft(arg1, arg2, arg3) {
 
 export function CreateRequestFromDraftEx(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['CreateRequestFromDraftEx'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function CreateRequestWithOpts(arg1) {
+  return window['go']['app']['App']['CreateRequestWithOpts'](arg1);
 }
 
 export function DeleteCookie(arg1, arg2, arg3) {
@@ -318,6 +326,10 @@ export function ParseCurl(arg1) {
   return window['go']['app']['App']['ParseCurl'](arg1);
 }
 
+export function ParseImport(arg1, arg2) {
+  return window['go']['app']['App']['ParseImport'](arg1, arg2);
+}
+
 export function PickDirectory() {
   return window['go']['app']['App']['PickDirectory']();
 }
@@ -334,8 +346,16 @@ export function PlanCreateDoc(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['PlanCreateDoc'](arg1, arg2, arg3, arg4);
 }
 
+export function PlanCreateDocWithOpts(arg1) {
+  return window['go']['app']['App']['PlanCreateDocWithOpts'](arg1);
+}
+
 export function PlanCreateRequest(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['PlanCreateRequest'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function PlanCreateRequestWithOpts(arg1) {
+  return window['go']['app']['App']['PlanCreateRequestWithOpts'](arg1);
 }
 
 export function PlanResponseExampleRaw(arg1, arg2, arg3, arg4, arg5, arg6) {

@@ -71,6 +71,24 @@ func (a *App) PlanCreateDoc(name, uid, folder, onConflict string) (*collection.D
 	return c.PlanCreateDoc(name, uid, folder, onConflict)
 }
 
+// CreateDocWithOpts 同 CreateDocEx，但可显式指定落盘文件名（MCP create_doc 的 fileName）。
+func (a *App) CreateDocWithOpts(o collection.CreateDocOpts) (*collection.DocEntry, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.CreateDocWithOpts(o)
+}
+
+// PlanCreateDocWithOpts 同 PlanCreateDoc，但可显式指定落盘文件名（MCP create_doc dryRun）。
+func (a *App) PlanCreateDocWithOpts(o collection.CreateDocOpts) (*collection.DocEntry, string, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, "", err
+	}
+	return c.PlanCreateDocWithOpts(o)
+}
+
 // SaveDoc 保存文档。
 func (a *App) SaveDoc(d *collection.DocEntry) error {
 	c, err := a.requireCollection()
@@ -317,6 +335,30 @@ func (a *App) PlanCreateRequest(folder, name string, r *collection.Request, uid,
 		return nil, err
 	}
 	return c.PlanCreateRequest(folder, name, r, uid, onConflict)
+}
+
+// CreateRequestWithOpts 同 CreateRequestFromDraftEx，但可显式指定落盘文件名（MCP create_request 的 fileName）。
+func (a *App) CreateRequestWithOpts(o collection.RequestCreateOpts) (*collection.Request, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkGrpcSavable(o.Src); err != nil {
+		return nil, err
+	}
+	return c.CreateRequestWithOpts(o)
+}
+
+// PlanCreateRequestWithOpts 同 PlanCreateRequest，但可显式指定落盘文件名（MCP dryRun）。
+func (a *App) PlanCreateRequestWithOpts(o collection.RequestCreateOpts) (*collection.Request, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkGrpcSavable(o.Src); err != nil {
+		return nil, err
+	}
+	return c.PlanCreateRequestWithOpts(o)
 }
 
 // ParseCurl 把一段 curl 命令解析成请求草稿（不落盘），供「导入 cURL」预览与新建 tab 预填。

@@ -7,7 +7,12 @@ package mcp
 // 约定：所有面向 MCP 的错误最终由 toolSet.wrap 输出为 `失败: [CODE] 说明`。
 // 未显式分类的错误统一 [INTERNAL]，不要把内部实现细节（sqlite/文件路径）当成契约。
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 const (
 	CodeNotFound  = "NOT_FOUND" // 项目/文档/接口/示例/变量不存在
@@ -59,3 +64,67 @@ func withInvalid(err error) error { return coded(CodeInvalid, err) }
 
 // withLimit 批量/分页上限。
 func withLimit(err error) error { return coded(CodeLimit, err) }
+
+// ---- SDK schema 校验错误的中文转述 ----
+//
+// 原文形如：
+//
+//	validating "arguments": validating root: required: missing properties: ["uid"]
+//	validating "arguments": validating root: unexpected additional properties ["uids"]
+//
+// 校验库只在「必填缺失 / 多余参数」两类里带参数名（嵌套的类型/枚举错误不带），
+// 拿不到参数名时如实附上精简后的原文，好过让调用方去猜 "validating root" 是什么。
+
+var (
+	schemaMissingRe = regexp.MustCompile(`missing properties: \[(.*?)\]`)
+	schemaExtraRe   = regexp.MustCompile(`unexpected additional properties \[(.*?)\]`)
+	schemaQuotedRe  = regexp.MustCompile(`"([^"]+)"`)
+)
+
+// humanizeSchemaError 把 SDK 的英文入参校验错误翻成中文（tool 为空时用「本工具」）。
+func humanizeSchemaError(tool, raw string) string {
+	if tool == "" {
+		tool = "本工具"
+	}
+	body := strings.TrimPrefix(raw, `validating "arguments": `)
+	body = strings.TrimPrefix(body, "validating root: ")
+	switch {
+	case schemaMissingRe.MatchString(body):
+		if m := schemaMissingRe.FindStringSubmatch(body); m != nil {
+			return fmt.Sprintf("缺少必填参数：%s（工具 %s）", quotedList(m[1]), tool)
+		}
+	case schemaExtraRe.MatchString(body):
+		if m := schemaExtraRe.FindStringSubmatch(body); m != nil {
+			return fmt.Sprintf("传入了 %s 不接受的参数：%s（请对照该工具的入参说明）", tool, quotedList(m[1]))
+		}
+	case strings.HasPrefix(body, "enum:"):
+		return fmt.Sprintf("参数取值不在允许范围内（工具 %s）：%s", tool, body)
+	case strings.Contains(body, "has type"):
+		return fmt.Sprintf("参数类型不对（工具 %s）：%s", tool, body)
+	}
+	return fmt.Sprintf("入参校验失败（工具 %s）：%s", tool, body)
+}
+
+// quotedList 把校验器输出的参数名列表转成「uid、name」。
+//
+// 校验库两种形态都出现过：JSON 风格 ["uid","name"] 与 Go %q 风格 ["uid" "name"]。
+// 直接从引号里取值，避免把 [ ] , 之类的标点带进中文报错。
+func quotedList(s string) string {
+	if m := schemaQuotedRe.FindAllStringSubmatch(s, -1); len(m) > 0 {
+		parts := make([]string, 0, len(m))
+		for _, g := range m {
+			if v := strings.TrimSpace(g[1]); v != "" {
+				parts = append(parts, v)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "、")
+		}
+	}
+	// 没有引号（非预期格式）：退化为按括号外空白/逗号切分，至少不把标点原样抛给调用方。
+	trimmed := strings.Trim(strings.TrimSpace(s), "[]")
+	fields := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t'
+	})
+	return strings.Join(fields, "、")
+}

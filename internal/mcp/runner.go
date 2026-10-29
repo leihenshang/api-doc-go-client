@@ -61,6 +61,10 @@ type ProjectApp interface {
 	CreateRequestFromDraftEx(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error)
 	// PlanCreateRequest 同参但只做冲突判定/身份分配，不写盘（dryRun）。
 	PlanCreateRequest(folder, name string, r *collection.Request, uid, onConflict string) (*collection.Request, error)
+	// CreateRequestWithOpts / PlanCreateRequestWithOpts 同上，但可显式指定落盘文件名
+	// （集合是纯文本、文件即真相源，显示名是中文时文件名也会是中文；需要 ASCII 名时用它）。
+	CreateRequestWithOpts(o collection.RequestCreateOpts) (*collection.Request, error)
+	PlanCreateRequestWithOpts(o collection.RequestCreateOpts) (*collection.Request, error)
 	ParseCurl(curl string) (*collection.Request, error)
 	SearchIndex(query string, limit int) ([]index.Node, error)
 	SendRequest(r *collection.Request, envName string) (*runner.Result, error)
@@ -92,6 +96,10 @@ type ProjectApp interface {
 	SaveDocImage(dataBase64 string) (string, error)
 	// SaveDocImageInfo 同 SaveDocImage，但返回 hash/size/是否命中已有附件。
 	SaveDocImageInfo(dataBase64 string) (string, collection.DocImageInfo, error)
+	// ImportCollection 批量导入（Postman / OpenAPI / api-doc-go 整包），一次落多条请求。
+	ImportCollection(parent, format, text string) (*collection.ImportSummary, error)
+	// ParseImport 同格式但只解析不落盘（import_collection 的 dryRun）。
+	ParseImport(format, text string) (*collection.ImportSummary, error)
 	// ---- 模块 / 集合级维护（容器工具）----
 	FolderUIDByPath(dir string) (string, bool)
 	RenameFolder(uid, name string) error
@@ -109,6 +117,9 @@ type ProjectApp interface {
 	CreateDocEx(name, uid, folder, onConflict string) (*collection.DocEntry, error)
 	// PlanCreateDoc 只做校验/冲突判定，不落盘（create_doc dryRun）。
 	PlanCreateDoc(name, uid, folder, onConflict string) (*collection.DocEntry, string, error)
+	// CreateDocWithOpts / PlanCreateDocWithOpts 同上，但可显式指定落盘文件名（fileName）。
+	CreateDocWithOpts(o collection.CreateDocOpts) (*collection.DocEntry, error)
+	PlanCreateDocWithOpts(o collection.CreateDocOpts) (*collection.DocEntry, string, error)
 	SaveDoc(d *collection.DocEntry) error
 	// SaveDocExpectHash 带并发写保护地保存文档（expectHash 为空则不校验）。
 	SaveDocExpectHash(d *collection.DocEntry, expectHash string) error

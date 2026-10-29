@@ -97,7 +97,7 @@ func TestModuleContainerTools(t *testing.T) {
 func TestPruneEmptyModulesTool(t *testing.T) {
 	_, cs := newSessionWithRoot(t)
 	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "空模块"})
-	out := mustCall(t, cs, "prune_empty_modules", map[string]any{"project": "demo"})
+	out := mustCall(t, cs, "delete_module", map[string]any{"project": "demo", "pruneEmpty": true})
 	if !strings.Contains(out, "已清理 1 个空模块目录") {
 		t.Errorf("清理数量不符：%s", out)
 	}
@@ -158,7 +158,7 @@ func TestGetDocsBatch(t *testing.T) {
 		"project": "demo", "name": "乙", "folder": "docs", "content": "# 乙",
 	}))
 
-	out := mustCall(t, cs, "get_docs", map[string]any{
+	out := mustCall(t, cs, "get_doc", map[string]any{
 		"project": "demo", "uids": []string{uid1, uid2, uid1},
 	})
 	if !strings.Contains(out, uid1) || !strings.Contains(out, uid2) || !strings.Contains(out, "成功 2 / 2") {
@@ -166,7 +166,7 @@ func TestGetDocsBatch(t *testing.T) {
 	}
 
 	// 混合假 uid：成功的仍返回，失败逐条标注
-	mixed := mustCall(t, cs, "get_docs", map[string]any{
+	mixed := mustCall(t, cs, "get_doc", map[string]any{
 		"project": "demo", "uids": []string{uid1, "00000000-0000-0000-0000-000000000000"},
 	})
 	if !strings.Contains(mixed, "成功 1 / 2") || !strings.Contains(mixed, "读取失败") {
@@ -178,7 +178,7 @@ func TestGetDocsBatch(t *testing.T) {
 	for i := range uids {
 		uids[i] = fmt.Sprintf("missing-%02d", i)
 	}
-	if out, isErr := callTool(t, cs, "get_docs", map[string]any{"project": "demo", "uids": uids}); !isErr || !strings.Contains(out, "[LIMIT]") {
+	if out, isErr := callTool(t, cs, "get_doc", map[string]any{"project": "demo", "uids": uids}); !isErr || !strings.Contains(out, "[LIMIT]") {
 		t.Errorf("超限应 [LIMIT]：%s", out)
 	}
 }

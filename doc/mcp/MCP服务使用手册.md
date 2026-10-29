@@ -6,30 +6,30 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **37 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **35 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
+| 查询 | `list_tools` | 工具总览：一次拿到全部工具名 + 一句话用途 + 必填参数（**不必逐个拉 schema**，省上下文）；`filter` 过滤、`mode=read|write` 分类 |
 | 查询 | `list_workspaces` / `use_workspace` | 看授权了哪些工作目录；选定**本会话**默认目标（之后 `project` 可省略） |
 | 查询 | `list_projects` | 有哪些项目（集合） |
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
-| 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例；`sections` 可只取分段；返回**完整** `hash` 供冲突保护 |
-| 查询 | `get_request_details` | 批量详情：一次 1–10 个 uid，参数同 `get_request_detail`，按 uid 分组返回 |
+| 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例；`uid` 取单个、`uids` 批量 1–10 个；`sections` 可只取分段；返回**完整** `hash` 供冲突保护 |
 | 查询 | `search_requests` | 搜索（`exactMatch` 整词、`fields` 限定范围，每条带 `snippet` 命中行） |
 | 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处） |
 | 查询 | `list_envs` | 环境与变量（**敏感值只回掩码**，每个环境带 `hash`）；`limit`/`offset` 分页 |
-| 查询 | `get_doc_template` | 接口说明（docs）的 Markdown 分节结构契约（对齐客户端「生成接口文档」） |
-| 查询 | `list_docs` / `get_doc` / `get_docs` | 文档条目：列清单（分页 + `hash`）/ 读正文（分段/大纲）/ 批量读 1–10 篇 |
+| 查询 | `list_docs` / `get_doc` | 文档条目：列清单（分页 + `hash`）/ 读正文（`uid` 单篇、`uids` 批量 1–10 篇，支持分段/大纲） |
+| 查询 | resource `apidoc://doc-template` | 接口说明（docs）的 Markdown 分节结构契约（原 `get_doc_template` 工具已迁移为 MCP resource） |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc；`uid` 幂等、`onConflict` 默认 error） |
+| 写 | `import_collection` | 批量导入：把 Postman / OpenAPI / api-doc-go 集合文件的**正文**一次导入成多条请求（省掉逐个 `create_request` 的往返）；`format` 必填，`parent` 指定落在哪个模块，`dryRun=true` 只解析并回报条数、不写盘 |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[FORBIDDEN]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
 | 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
 | 写 | `save_doc_image` | 保存图片（base64）到项目 `assets/`，返回可写进 Markdown 的 `/doc-assets/<sha256>`（与客户端编辑器同款） |
-| 写 | `rename_module` / `delete_module` | 模块改名（显示名）/ 删除（空模块或 `recursive` 整棵，进 `.trash`） |
+| 写 | `rename_module` / `delete_module` | 模块改名（显示名）/ 删除（空模块或 `recursive` 整棵，进 `.trash`；`pruneEmpty=true` 清理全部空模块） |
 | 写 | `rename_project` / `delete_project` | 项目改名（显示名）/ 删除（必须 `confirm`，目录移入授权根 `.trash` 可恢复） |
-| 写 | `prune_empty_modules` | 清理空模块目录 |
 | 写 | `save_response_example` / `update_response_example` / `delete_response_example` | 响应示例的手工新增（不发送请求）/ 局部更新（改名·状态码·响应体）/ 删除（进 `.trash`） |
 | 执行 | `send_request` | 发请求；默认把响应存成响应示例 |
 | 写 | `create_env` / `rename_env` / `delete_env` | 环境的新建 / 改名 / 删除（旧文件进 `.trash`） |
@@ -37,8 +37,8 @@
 
 各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
 
-工具按风险分三级（服务端元数据表锁定）：**low = 12 个只读工具**（随便用，无副作用）；**medium = `send_request`**
-（真实网络外发）；**high = 16 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
+工具按风险分三级（服务端元数据表锁定）：**low = 11 个只读工具**（随便用，无副作用）；**medium = `send_request`**
+（真实网络外发）；**high = 23 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
 **弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
 `-require-consent` 约束。
 
@@ -109,6 +109,10 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
    白名单为空 = 没有任何项目 —— 这是安全默认，不是故障。先用 `list_workspaces` 看授权了什么，
    再用 `use_workspace` 选定默认目标（之后各工具的 `project` 都可以省略）。这个默认目标是**按会话**的：
    同一次连接里选定即可，多个客户端（HTTP 下多个会话）互不影响。
+   **什么时候会失效**：客户端重连（HTTP 传输每次握手都是新的 `Mcp-Session-Id`）、MCP 服务重启
+   （改设置保存会重启内嵌服务）、客户端退出——都等于换了会话，之前选定的目标就没了。
+   那时省略 `project` 会报 `[INVALID] 未指定 project`，报错里会说明原因，重新 `use_workspace` 即可。
+   显式传 `project` **不会**清掉已选定的默认值。
 1. **一个项目 = 一个集合目录**，由授权目录扫描得到；目录变化后用 `list_projects` 的 `refresh: true` 重扫。
 2. **三种方式指定项目**（入参都叫 `project`）：**uid** → **目录名/集合名** → **路径**（绝对，或相对授权目录）。写错会报错并列出候选。
 3. **懒加载**：启动只扫目录（只读 manifest，不改动项目），第一次访问某项目才真正打开。因此
@@ -122,7 +126,37 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 > 下表「参数」列均为 JSON 字段名；标 ✅ 的是必填。`project?` 表示**可省略**：
 > 省略时用 `use_workspace` 选定的**本会话**默认工作目录（没选过则报错并提示）。
 
-### 4.0 `list_workspaces` / `use_workspace`
+### 4.0 `list_tools`（工具总览）
+
+不知道有哪些工具、或不想为「查一个参数」拉整份 schema 时先用它：一次拿到**全部工具名 + 一句话用途 +
+必填参数**，并按读/写标注（`[读]` / `[写]`）。
+
+| 参数 | 说明 |
+|---|---|
+| `filter?` | 按工具名或描述关键词过滤（大小写无关） |
+| `mode?` | `all`（默认）/ `read`（只读与会话类）/ `write`（会落盘改集合的） |
+
+返回同时带 `structuredContent`：`{total, returned, tools:[{name, description, risk, write, required}]}`，
+`required` 从入参结构体推导（与 `inputSchema` 的 `required` 同源）。要某个工具的完整入参再取它的 schema ——
+`create_request` / `update_request` 的 schema 最大（约 7–8KB），只问「有哪些工具」时别拉它们。
+
+### 4.0.1 工具组（按需注册）
+
+设置页「MCP 服务 → 启用的工具组」可以只注册用得上的部分，减少 `tools/list` 的体积：
+
+| 组 | 内容 |
+|---|---|
+| `session`（**恒开，不可关**） | `list_tools`、`list_workspaces`、`use_workspace`、`list_projects` |
+| `collection` | 模块/接口的查询、新建、修改、删除、移动、批量导入 |
+| `docs` | 文档条目与图片 |
+| `env` | 环境与变量 |
+| `example` | 响应示例 |
+| `network` | `send_request` |
+
+空列表 = 全部启用（旧配置默认）。组只影响**注册哪些工具**，不改变单次调用的权限判断
+（谁能写仍由只读模式与工作目录授权决定）。关闭某组后，`list_tools` 也不再列出该组工具。
+
+### 4.0.2 `list_workspaces` / `use_workspace`
 
 - `list_workspaces`：列出**授权的工作目录**（含只读/可写）、其中项目与当前默认目标；AI 拿不到项目时先看它。
 - `use_workspace`：选定默认工作目录（传工作目录 path，或项目标识：名称/路径/uid）。选定后其余工具的
@@ -138,15 +172,16 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 `onlyMatched?`（**默认 true**：带 query 时只返回有命中的模块——模块名命中，或其下有命中请求；传 false 可看全部模块，汇总行始终给出模块总数）。
 返回模块树 + 每模块请求数/子模块数；根目录下的请求归到 `(根目录)`。
 
-### 4.3 `get_request_detail`
-`project?`、`uid` ✅、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）、
+### 4.3 `get_request_detail`（单个 / 批量）
+`project?`、`uid?`（单个）或 `uids?`（批量 1–10 个，二选一）、`query?`（在示例名/文档名里再筛）、`includeBody?`、`maxBodyBytes?`（默认 8192）、
 `sections?`（只取指定分段：`overview`/`docs`/`bodyFields`/`respDoc`/`examples`；不传 = 全量；未知值报错）。
 返回 method/url/params/headers/body/auth/settings/grpc + **概述 `summary`** + 请求内 `docs` + **请求体字段表 `body.fields`**
 （5 列：字段名/必填/类型/示例值/说明，空表不出）+ **响应字段文档 `respDoc`**
 （返回类型/字段表全量；样例不传 includeBody 时只回前 2048 字节）+ 关联的 `docs/*.md` + **已保存响应示例列表**
 + **完整 `hash`**——改这个接口时把它作为 `update_request.ifMatch` 传入即可获得冲突保护。
 
-配套 `get_request_details`：`uids`（1–10 个，超出直接报错），其余参数与本节相同，结果按 `===== uid =====` 分组。
+批量：传 `uids`（1–10 个，超出直接报错），其余参数与本节相同，结果按 `===== uid =====` 分组。
+`uid` 与 `uids` 只能给一个。
 
 ### 4.4 `search_requests`
 `query` ✅（名称/URL/方法/路径/header/说明/请求体/响应字段/请求体字段表都能命中，中文按子串）、`project?`（省略 = 所有已加载项目）、
@@ -173,7 +208,26 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 **`summary`** 是 API 概述（纯文本一句话，与 `docs` 分列）；
 `settings` 只作用于**本请求**（超时/重定向/忽略证书/URL 编码），不碰全局配置；`respDoc` 写响应字段文档（**按子项合并**，
 只给 `params` 字段表时样例/响应头/状态码不动；gRPC 拒绝）；
-`docs` 结构先取 `get_doc_template`；`method` 仅接受 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC（其它值 `[INVALID]`）；返回落盘后的 `uid` 与 `path`。
+`docs` 结构先读 resource `apidoc://doc-template`；`method` 仅接受 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC（其它值 `[INVALID]`）；返回落盘后的 `uid` 与 `path`。
+
+**文件名**：默认由 `name` 推导（中文名 → 中文文件名，集合是纯文本、文件即真相源，这是有意的）。
+要 ASCII 文件名（脚本/工具链友好）就传 **`fileName`**（不含 `.yml`），例如 `{"name":"创建文档","fileName":"create-doc"}`
+→ 落 `create-doc.yml`，显示名仍是「创建文档」。`create_doc` 同样支持 `fileName`（不含 `.md`）。
+
+### 4.5.1 `import_collection`（批量导入）
+
+把外部集合**一次**导入成多条请求，省掉逐个 `create_request` 的往返（与客户端「导入」同源，区别是这里传正文、不弹选文件框）。
+
+| 参数 | 说明 |
+|---|---|
+| `project?` | 目标项目 |
+| `format` ✅ | `postman` / `openapi` / `apidocgo`（本客户端导出的集合整包）；Bruno 目录导入请用客户端的导入功能 |
+| `text` ✅ | 集合文件的**正文内容**（不支持文件路径：先读出内容再传） |
+| `parent?` | 落在哪个模块下（相对集合根），留空 = 项目根 |
+| `dryRun?` | `true` = 只解析并回报将导入的条数，**不写盘**（「已存在会跳过」只有真导入时才知道，故预演的 `skipped` 恒为 0） |
+
+Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存在「同方法同地址」的请求会跳过（`skipped`）。
+返回 `{imported, skipped, failures}`（`failures` 最多 10 条）。
 
 ### 4.6 `create_module` / `create_project`
 - `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
@@ -187,7 +241,9 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
 ### 4.8 `update_request`
-`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`summary`/`bodyFields`/`auth`/`docs`/`settings`/`respDoc`，`folder` 移动到别的模块。
+`project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`summary`/`bodyFields`/`auth`/`docs`/`settings`/`respDoc`，
+**`folder`（移动请求到别的模块，相对集合根，如 `api/user`；传空串 = 移回项目根）**——请求建错目录时用它挪，
+不需要删了重建；模块不存在会 `[NOT_FOUND]`，路径用 `get_project_modules` 给的值。
 **`body` / `respDoc` 都是「指针合并」语义（本版重点）**：入参里**为 `null`（不传）的子项 = 保留原值**，
 **显式空值 = 清空**。
 
@@ -264,8 +320,11 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 > 客户端第一次打开集合会自动建 `dev` 环境（含 `host=http://127.0.0.1:8080`），所以直接 `create_env("dev")` 会报已存在。
 
-### 4.11 `get_doc_template`
-无入参（不需要项目上下文）。返回接口说明（`docs` 字段）的 **Markdown 分节结构契约**：
+### 4.11 resource `apidoc://doc-template`（接口说明模板）
+
+原 `get_doc_template` 工具已迁移为 MCP **resource**（无参数、内容固定的静态文本，不该占工具位与一次调用往返）。
+客户端支持 resources 时直接读 `apidoc://doc-template`；不支持时按其协议能力说明会拿不到。
+内容是接口说明（`docs` 字段）的 **Markdown 分节结构契约**：
 固定小节顺序（简要描述 / 请求URI / 请求方式 / 请求头 / 请求参数表 / 请求体 / 请求示例 / 响应字段表 / 响应示例 / 备注）。
 表列：请求参数 / 请求体字段为「参数名 | 必选 | 类型 | 说明」，**响应字段表为「参数名 | 必选 | 类型 | 示例值 | 说明」（必选按 `respDoc.params[].required` 输出「是/否」；表为空则整节省略）**
 （示例值取自 `respDoc.params[].example`）；「请求体」一节在无请求体时整节省略（json 列类型 + 字段表，form/multipart 同理）；
@@ -280,14 +339,13 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 | | 载体 | 用什么工具 |
 |---|---|---|
-| 接口说明 `docs` | 存在**请求文件**的 frontmatter 里，跟着接口走 | `create_request` / `update_request` 的 `docs` 字段（结构取 `get_doc_template`） |
+| 接口说明 `docs` | 存在**请求文件**的 frontmatter 里，跟着接口走 | `create_request` / `update_request` 的 `docs` 字段（结构取 resource `apidoc://doc-template`） |
 | 文档条目 | 集合树里**独立的 `.md`**，有自己的 uid 与路径，可挂在任意分组目录下 | 本节这 5 个工具 |
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
-| `get_docs` | `project?`、`uids` ✅（1–10）、`startLine?`、`maxLines?`、`outline?` | 批量读：按 uid 分组，单条失败不影响其他；失败行内带错误码 |
-| `get_doc` | `project?`、`uid` ✅、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
+| `get_doc` | `project?`、`uid?` / `uids?`（二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个传 `uid`，批量传 `uids`（按 uid 分组，单条失败不影响其他）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
 | `update_doc` | `project?`、`uid` ✅、`content?`、`replaces?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换（与 `content` 互斥，`old` 找不到整单拒绝）、`name` 改显示名、`folder` 换分组；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
@@ -353,18 +411,17 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **34 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（37 个工具里除 3 个纯会话/模板类）：
+共 **31 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（35 个工具里除 4 个）：
 
-- **列表/搜索（6）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs`
-- **文档（5）**：`get_doc`（含 `content`）/ `get_docs`（批量，单篇失败只在该条带 `error`）/ `create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc`
-- **接口（3）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（+`deleted/trash/dryRun`）
-- **容器（7）**：`create_module` / `rename_module` / `delete_module` / `create_project` / `rename_project` / `delete_project`（`trashPath`）/ `prune_empty_modules`（`count`）
+- **列表/搜索（7）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs` / `list_tools`
+- **文档（4）**：`create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc` / `save_doc_image`（`url/sha256/size/deduped/markdown`）
+- **接口（6）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（+`deleted/trash/dryRun`）/ `delete_requests` / `import_collection`（`imported/skipped/failures/dryRun`）/ `send_request`
+- **容器（6）**：`create_module` / `rename_module` / `delete_module`（含 `pruneEmpty` 的 `count`）/ `create_project` / `rename_project` / `delete_project`（`trashPath`）
 - **环境（5）**：`create_env` / `rename_env` / `delete_env` / `set_env_var`（含 `hash` / `keptSecret`）/ `delete_env_var`
 - **响应示例（3）**：`save_response_example` / `update_response_example` / `delete_response_example`
-- **图片（1）**：`save_doc_image`（`url/sha256/size/deduped/markdown`）
 
 `outputSchema` 的数组元素与结果对象都写明**具体字段与 `required`**（可直接生成类型/做字段校验）。
-未结构化的 3 个是纯会话/模板类（`list_workspaces`、`use_workspace`、`get_doc_template`），
+未结构化的 4 个是会话类或"单条/批量双形态"工具（`list_workspaces`、`use_workspace`、`get_request_detail`、`get_doc`），
 它们仍以文本为主，避免大正文重复一倍。文本输出保持不变，旧客户端不受影响。
 
 ### 4.12.3 写操作契约（统一）
@@ -385,6 +442,11 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `[NOT_FOUND]` | 项目 / 文档 / 接口 / 示例 / 变量不存在（含 uid 拼错） |
 | `[CONFLICT]` | 同名冲突、`ifMatch` 不匹配（文档创建默认就是这条） |
 | `[INVALID]` | 参数缺失/取值非法（含 SDK 的 inputSchema 校验失败） |
+
+`[INVALID]` 里的 inputSchema 校验失败会**翻成中文并点名参数与工具**，例如
+`失败: [INVALID] 缺少必填参数：name（工具 create_doc）`——不会再出现英文的
+`validating "arguments": ... missing properties`（类型/枚举类校验的嵌套错误不带参数名，
+此时如实附上精简后的原文并标明工具名）。
 | `[READONLY]` | 工作目录是只读授权 |
 | `[FORBIDDEN]` | 目录不在 MCP 白名单 / 无写权限（原 `[AUTH]` 已更名为 `FORBIDDEN`，破坏性变更） |
 | `[LIMIT]` | 批量/分页超过上限（如一次 >10 个 uid） |
@@ -433,17 +495,16 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 命名与落盘规则：示例名 → 文件名走同一套 `sanitize` 规则（与请求/文档一致），所以**改名 = 换文件**；
 同一个请求下的示例按保存序号 `seq` 排「新 → 旧」。示例挂在**请求**下，移动/改名请求会让示例目录跟着走。
 
-### 4.14 容器级工具：`rename_module` / `delete_module` / `rename_project` / `delete_project` / `prune_empty_modules`
+### 4.14 容器级工具：`rename_module` / `delete_module` / `rename_project` / `delete_project`
 
 `create_project` / `create_module` 是对称面：容器级创建此前没有回收路径，这组工具补齐。
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `rename_module` | `project?`、`path` ✅、`name` ✅ | 只改 `folder.yml` 的显示名；**目录与 uid 不变**（`path` 仍是原目录名） |
-| `delete_module` | `project?`、`path` ✅、`recursive?` | 默认只允许空模块；`recursive=true` 连同子模块/请求/文档整棵移入集合 `.trash`（回收站可恢复） |
+| `delete_module` | `project?`、`path?`、`recursive?`、`pruneEmpty?` | 默认只允许空模块；`recursive=true` 连同子模块/请求/文档整棵移入集合 `.trash`（回收站可恢复）；`pruneEmpty=true` 时忽略 `path`，自底向上清理全部空模块（返回 `count`，`assets`/`environments`/`examples` 不动，不支持 `dryRun`） |
 | `rename_project` | `project` ✅、`name` ✅ | 改 `opencollection.yml` 的 `info.name`；目录不变 |
 | `delete_project` | `project` ✅、`confirm` ✅ | `confirm` 必须等于项目名或目录名；目录移入**授权根**下 `.trash/<目录名>-<时间戳>`，可手动移回 |
-| `prune_empty_modules` | `project?` | 自底向上删除「只有 folder.yml、没有请求/文档/子模块」的目录；`assets`/`environments`/`examples` 不动 |
 
 ## 五、典型工作流（可以直接对 AI 这么说）
 

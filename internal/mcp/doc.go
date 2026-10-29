@@ -127,6 +127,9 @@ type CreateDocInput struct {
 	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有条目的 uid/path 并覆盖正文）"`
 	// DryRun 只做校验与冲突判定，返回将发生的变化，不落盘。
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回将创建/覆盖的路径与冲突判断，不写盘"`
+	// FileName 可选：落盘文件名（不含 .md）。留空 = 由 name slug 化推导 —— 中文 name
+	// 会得到中文文件名（集合是纯文本、文件即真相源）；要 ASCII 名（脚本/工具链友好）就在这里给。
+	FileName string `json:"fileName,omitempty" jsonschema:"可选：落盘文件名（不含 .md）；留空 = 由 name 推导。中文 name 会落成中文文件名，需要 ASCII 名时显式传"`
 }
 
 // CreateDoc 新建文档条目；content 非空时一并写入。
@@ -143,8 +146,16 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 	if verr != nil {
 		return nil, withInvalid(verr)
 	}
+	// fileName 只在显式给了才生效：默认仍由 name slug 化推导（中文名落中文文件是既有取舍）。
+	opts := collection.CreateDocOpts{
+		Name:       name,
+		UID:        strings.TrimSpace(in.UID),
+		Folder:     strings.TrimSpace(in.Folder),
+		OnConflict: mode,
+		FileName:   strings.TrimSpace(in.FileName),
+	}
 	if in.DryRun {
-		d, action, derr := a.PlanCreateDoc(name, strings.TrimSpace(in.UID), strings.TrimSpace(in.Folder), mode)
+		d, action, derr := a.PlanCreateDocWithOpts(opts)
 		if derr != nil {
 			if errors.Is(derr, collection.ErrDocConflict) {
 				return nil, coded(CodeConflict, derr)
@@ -154,7 +165,7 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 		d.Content = in.Content
 		return &DocDetail{DocItem: docItem(d), Content: in.Content, Planned: action}, nil
 	}
-	d, err := a.CreateDocEx(name, strings.TrimSpace(in.UID), strings.TrimSpace(in.Folder), mode)
+	d, err := a.CreateDocWithOpts(opts)
 	if err != nil {
 		if errors.Is(err, collection.ErrDocConflict) {
 			return nil, coded(CodeConflict, err)

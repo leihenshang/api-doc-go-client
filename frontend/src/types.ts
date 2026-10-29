@@ -498,6 +498,11 @@ export interface MCPConfig {
   interactiveAuth?: boolean | null
   /** 「始终允许」持久授权（由授权弹窗 / 设置页维护） */
   grants?: MCPGrant[]
+  /**
+   * 启用的工具组（collection / docs / env / example / network）。
+   * 空/缺省 = 全部启用；session 组（工具总览、工作目录、项目列表）恒开，不可关闭。
+   */
+  toolGroups?: string[]
 }
 
 /** MCP 持久授权条目（config.MCP.grants）。 */
@@ -594,6 +599,8 @@ export interface MCPStatus {
   token: string
   readOnly: boolean
   origins: string[]
+  /** 生效的工具组（空/缺省 = 全部启用） */
+  groups?: string[]
   /** 生效的工作目录白名单（空 = 未授权任何目录） */
   allow?: MCPAllowDir[]
   /** 展示用：第一个授权目录（空 = 白名单为空） */

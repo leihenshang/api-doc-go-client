@@ -1,6 +1,9 @@
 {
   "properties": {
-    "project": {
+    "filter": {
+      "type": "string"
+    },
+    "mode": {
       "type": "string"
     }
   },

@@ -8,6 +8,7 @@
     }
   },
   "required": [
+    "project",
     "name"
   ],
   "type": "object"

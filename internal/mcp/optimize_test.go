@@ -162,7 +162,7 @@ func TestBatchRequestDetails(t *testing.T) {
 	uid2 := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
 		"project": "demo", "name": "批二", "method": "GET", "url": "/b",
 	}))
-	out, isErr := callTool(t, cs, "get_request_details", map[string]any{
+	out, isErr := callTool(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uids": []string{uid1, uid2}, "sections": []string{"overview"},
 	})
 	if isErr {
@@ -181,7 +181,7 @@ func TestBatchRequestDetails(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = "uid"
 	}
-	bad, isErr := callTool(t, cs, "get_request_details", map[string]any{"project": "demo", "uids": tooMany})
+	bad, isErr := callTool(t, cs, "get_request_detail", map[string]any{"project": "demo", "uids": tooMany})
 	if !isErr || !strings.Contains(bad, "最多 10 个") {
 		t.Errorf("超过 10 个应直接报错：%s", bad)
 	}

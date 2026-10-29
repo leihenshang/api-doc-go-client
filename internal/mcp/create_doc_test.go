@@ -126,7 +126,7 @@ func TestErrorCodes(t *testing.T) {
 		{"项目不存在", "list_docs", map[string]any{"project": "不存在项目"}, "[NOT_FOUND]"},
 		{"缺名称", "create_doc", map[string]any{"project": "demo"}, "[INVALID]"},
 		{"未知 sections", "get_request_detail", map[string]any{"project": "demo", "uid": "x", "sections": []string{"bogus"}}, "[INVALID]"},
-		{"批量超限", "get_request_details", map[string]any{
+		{"批量超限", "get_request_detail", map[string]any{
 			"project": "demo",
 			"uids":    []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"},
 		}, "[LIMIT]"},

@@ -118,20 +118,20 @@ func (c *Collection) ExportBundle() ([]byte, error) {
 func (c *Collection) ImportBundle(parent string, data []byte) (*ImportSummary, error) {
 	var b CollectionBundle
 	if err := json.Unmarshal(data, &b); err != nil {
-		return nil, fmt.Errorf("集合文件解析失败（应为 %s 的 JSON）: %w", BundleFormat, err)
+		return nil, invalidImport(fmt.Errorf("集合文件解析失败（应为 %s 的 JSON）: %w", BundleFormat, err))
 	}
 	if strings.TrimSpace(b.Format) != BundleFormat {
-		return nil, fmt.Errorf("不是 api-doc-go 集合文件：format = %q（期望 %q）", b.Format, BundleFormat)
+		return nil, invalidImport(fmt.Errorf("不是 api-doc-go 集合文件：format = %q（期望 %q）", b.Format, BundleFormat))
 	}
 	ver := b.Version
 	if ver <= 0 {
 		ver = 1 // 早期手写文件可能缺 version，按 1 处理
 	}
 	if ver > BundleVersion {
-		return nil, fmt.Errorf("集合文件版本 %d 高于当前客户端支持的 %d，请升级客户端后再导入", ver, BundleVersion)
+		return nil, invalidImport(fmt.Errorf("集合文件版本 %d 高于当前客户端支持的 %d，请升级客户端后再导入", ver, BundleVersion))
 	}
 	if len(b.Requests) == 0 && len(b.Docs) == 0 && len(b.Folders) == 0 {
-		return nil, fmt.Errorf("集合文件里没有内容（目录/请求/文档都为空）")
+		return nil, invalidImport(fmt.Errorf("集合文件里没有内容（目录/请求/文档都为空）"))
 	}
 
 	base := strings.TrimSpace(parent)

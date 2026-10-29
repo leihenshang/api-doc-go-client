@@ -96,8 +96,12 @@ func requestFingerprint(req app.MCPRequest) string {
 		addr = "127.0.0.1" // normalizeAddr 的兜底语义，指纹须一致
 	}
 	var sb strings.Builder
+	// groups 参与指纹：改工具组必须重启服务，否则 tools/list 还是旧集合。
 	fmt.Fprintf(&sb, "enabled=%t\naddr=%s\nport=%d\ntoken=%s\nreadonly=%t\ninteractive=%t\n",
 		req.Enabled, addr, req.Port, req.Token, req.ReadOnly, req.InteractiveAuth != nil && *req.InteractiveAuth)
+	for _, g := range NormalizeGroups(req.Groups) {
+		fmt.Fprintf(&sb, "group=%s\n", g)
+	}
 	for _, o := range req.AllowOrigins {
 		fmt.Fprintf(&sb, "origin=%s\n", o)
 	}
@@ -149,6 +153,7 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 		ReadOnly:  req.ReadOnly,
 		Origins:   req.AllowOrigins,
 		Allow:     req.Allow,
+		Groups:    NormalizeGroups(req.Groups),
 		CrossHost: !IsLoopbackAddr(req.Addr),
 	}
 	if len(allow) > 0 {
@@ -186,6 +191,7 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 	srv, svc, err := NewServer(Config{
 		Allow:      allow,
 		ReadOnly:   req.ReadOnly,
+		Groups:     req.Groups,
 		Logger:     b.logger,
 		NewApp:     b.newApp,
 		Authorizer: authz,
