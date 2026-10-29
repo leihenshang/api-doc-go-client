@@ -1106,6 +1106,7 @@ type deleteIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid" jsonschema:"要移除的接口 uid"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 search_requests 里该请求的 hash；不传 = 最后写者赢"`
 }
 
 func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
@@ -1117,7 +1118,7 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 			return "", nil, err
 		}
 		if !in.DryRun {
-			if err := ts.svc.DeleteRequest(in.Project, in.UID); err != nil {
+			if err := ts.svc.DeleteRequest(in.Project, in.UID, in.IfMatch); err != nil {
 				return "", nil, err
 			}
 		}
@@ -1204,6 +1205,7 @@ type deleteDocIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
 	UID     string `json:"uid" jsonschema:"要移除的文档 uid（list_docs 返回）"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只返回将移入 .trash 的路径，不实际删除"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_docs/get_doc 里该文档的 hash；不传 = 最后写者赢"`
 }
 
 func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in deleteDocIn) (*mcp.CallToolResult, any, error) {
@@ -1213,6 +1215,9 @@ func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in del
 		d, err := ts.svc.GetDoc(in.Project, in.UID)
 		if err != nil {
 			return "", nil, err
+		}
+		if !hashPrefixMatch(d.Hash, in.IfMatch) {
+			return "", nil, coded(CodeConflict, fmt.Errorf("文档 %s 已被他人修改（当前 hash %s），请重新读取后再删", d.UID, d.Hash))
 		}
 		data := map[string]any{
 			"uid": d.UID, "path": d.Path, "deleted": !in.DryRun, "trash": true, "dryRun": in.DryRun,
@@ -1267,13 +1272,14 @@ type deleteResponseExampleIn struct {
 	UID        string `json:"uid" jsonschema:"请求 uid（示例所属请求）"`
 	ExampleUID string `json:"exampleUid" jsonschema:"要删除的响应示例 uid（get_request_detail 返回的 examples[].uid）"`
 	DryRun     bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash"`
+	IfMatch    string `json:"ifMatch,omitempty" jsonschema:"并发保护：传示例文件当前 hash（可选）；不传 = 最后写者赢"`
 }
 
 func (ts *toolSet) deleteResponseExample(_ context.Context, req *mcp.CallToolRequest, in deleteResponseExampleIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		if !in.DryRun {
-			if err := ts.svc.DeleteResponseExample(in.Project, in.UID, in.ExampleUID); err != nil {
+			if err := ts.svc.DeleteResponseExample(in.Project, in.UID, in.ExampleUID, in.IfMatch); err != nil {
 				return "", nil, err
 			}
 		}

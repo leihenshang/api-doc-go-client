@@ -80,7 +80,18 @@ func TestCreateRequestConflictAndStructured(t *testing.T) {
 	if up.IsError || !ok || scUp["url"] != "/c" || scUp["uid"] != fixed {
 		t.Errorf("update_request 结构化不符：%v %v", up.Content, up.StructuredContent)
 	}
-	del := callRaw("delete_request", map[string]any{"project": "demo", "uid": fixed})
+	// delete_request 的 ifMatch
+	hash := ""
+	for _, it := range callRaw("search_requests", map[string]any{"project": "demo", "query": "固定接口"}).StructuredContent.(map[string]any)["results"].([]any) {
+		m := it.(map[string]any)
+		if m["uid"] == fixed {
+			hash, _ = m["hash"].(string)
+		}
+	}
+	if bad := callRaw("delete_request", map[string]any{"project": "demo", "uid": fixed, "ifMatch": "deadbeef"}); !bad.IsError || !strings.Contains(textOf(bad), "[CONFLICT]") {
+		t.Errorf("delete_request ifMatch 不符应 [CONFLICT]：%v", bad.Content)
+	}
+	del := callRaw("delete_request", map[string]any{"project": "demo", "uid": fixed, "ifMatch": hash})
 	scDel, ok := del.StructuredContent.(map[string]any)
 	if del.IsError || !ok || scDel["uid"] != fixed || scDel["deleted"] != true || scDel["path"] == "" {
 		t.Errorf("delete_request 结构化不符：%v %v", del.Content, del.StructuredContent)

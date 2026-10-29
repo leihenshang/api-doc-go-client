@@ -99,6 +99,15 @@ func (a *App) DocFileHash(uid string) string {
 	return c.DocFileHash(uid)
 }
 
+// FileHash 任意集合内相对路径的内容 hash（不存在返回空串），供 MCP 写前校验。
+func (a *App) FileHash(rel string) string {
+	c, err := a.requireCollection()
+	if err != nil {
+		return ""
+	}
+	return c.FileHashOf(rel)
+}
+
 // DocHashes 一次扫描取全部文档 hash（MCP list_docs 批量用，避免逐篇重扫）。
 func (a *App) DocHashes() (map[string]string, error) {
 	c, err := a.requireCollection()

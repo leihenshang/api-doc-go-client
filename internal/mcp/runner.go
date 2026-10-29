@@ -103,6 +103,8 @@ type ProjectApp interface {
 	SaveDoc(d *collection.DocEntry) error
 	// SaveDocExpectHash 带并发写保护地保存文档（expectHash 为空则不校验）。
 	SaveDocExpectHash(d *collection.DocEntry, expectHash string) error
+	// FileHash 集合内相对路径的内容哈希（不存在返回空串），供 ifMatch 写前校验。
+	FileHash(rel string) string
 	// DocFileHash 文档文件的当前磁盘哈希（不存在返回空串），供写前校验与 get_doc 回传。
 	DocFileHash(uid string) string
 	// DocHashes 一次扫描取全部文档 hash（列表批量用，避免逐篇重扫）。

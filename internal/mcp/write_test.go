@@ -102,7 +102,7 @@ func TestCreateModuleAndUpdateDelete(t *testing.T) {
 		t.Errorf("移动模块未生效: %s", up.Path)
 	}
 
-	if err := svc.DeleteRequest("demo", r.UID); err != nil {
+	if err := svc.DeleteRequest("demo", r.UID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "demo", up.Path)); !os.IsNotExist(err) {
@@ -118,7 +118,7 @@ func TestCreateModuleAndUpdateDelete(t *testing.T) {
 	if !found {
 		t.Errorf("删除应进 .trash: %+v", ents)
 	}
-	if err := svc.DeleteRequest("demo", "no-such-uid"); err == nil {
+	if err := svc.DeleteRequest("demo", "no-such-uid", ""); err == nil {
 		t.Error("删除不存在的请求应报错")
 	}
 }

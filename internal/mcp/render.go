@@ -95,6 +95,7 @@ type ExampleItem struct {
 	UID       string `json:"uid"`
 	Name      string `json:"name"`
 	Path      string `json:"path"`
+	Hash      string `json:"hash,omitempty"` // 文件 hash：delete_response_example.ifMatch 用
 	CreatedAt int64  `json:"createdAt"`
 	Status    int    `json:"status"`
 	TimeMS    int64  `json:"timeMs"`

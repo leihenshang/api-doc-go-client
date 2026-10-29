@@ -374,7 +374,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | `uid`（幂等身份） | `create_doc` / `create_request` | 给固定 uid：已存在时按 `onConflict` 处理，可做幂等导入 |
 | `onConflict` | `create_doc` / `create_request` | `error`（默认，返回 `[CONFLICT]` + 已有 uid/path）/ `suffix` / `overwrite`；其余创建工具一律默认报冲突，不再静默加序号 |
 | `dryRun`（只预演） | `create_doc` / `update_doc` / `delete_doc` / `delete_request` / `delete_module` / `delete_project` / `delete_env` / `delete_env_var` / `delete_response_example` | 返回将发生的动作与路径，不落盘 |
-| `ifMatch`（并发保护） | `update_doc` / `update_request` / `set_env_var` / `rename_env` / `delete_env` / `delete_env_var` | 传读取时拿到的 hash（环境可只传 12 位前缀） |
+| `ifMatch`（并发保护） | `update_doc` / `update_request` / `set_env_var` / `rename_env` / `delete_doc` / `delete_request` / `delete_response_example` / `delete_env` / `delete_env_var` | 传读取时拿到的 hash，完整值或 12 位前缀均可（响应示例的 hash 见 `get_request_detail` 的 `examples[].hash=`）；不传 = 最后写者赢 |
 ### 4.12.3 错误码（所有工具统一）
 
 失败结果的文本统一为 `失败: [CODE] 说明`，调用方可按前缀分流（不必匹配中文）：
