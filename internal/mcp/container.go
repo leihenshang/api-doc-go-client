@@ -28,7 +28,7 @@ func (s *Service) RenameModule(project, path, name string) error {
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a, path)))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, s.moduleCandidates(a, path)))
 	}
 	if err := a.RenameFolder(uid, name); err != nil {
 		return withInvalid(err)
@@ -48,7 +48,7 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a, path)))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, s.moduleCandidates(a, path)))
 	}
 	if dryRun {
 		return nil
@@ -67,10 +67,10 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 
 // moduleCandidates 模块候选（前 8 个路径）：NOT_FOUND 时直接给清单，省掉一次 get_project_modules。
 // 按与 query（调用方给的 path）的匹配强度排序：前缀/目录命中优先，其次包含。
-func moduleCandidates(a ProjectApp, query string) string {
+func (s *Service) moduleCandidates(a ProjectApp, query string) string {
 	const maxShown = 8
-	// 候选要准：刚 create_module 出来的模块可能还没进索引。
-	_, _ = a.ReloadCollection()
+	// 节流刷新：刚 create 的模块可能还没进索引，但连续 not found 时不必每次都全树重建。
+	s.reloadForCandidates(a)
 	nodes, err := a.SearchIndex("", 0)
 	if err != nil {
 		return "用 get_project_modules 查看路径"

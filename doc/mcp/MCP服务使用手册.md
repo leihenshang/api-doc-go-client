@@ -263,6 +263,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 
 **只加/改一行用 `patch`（避免先抄全表）**：`patch: {params?, headers?, bodyFields?}` 按 `name`
 （字段表按字段名）合并 —— 同名**只覆盖传入的子字段**、没有则追加；与对应的整表字段（`params` / `headers` / `bodyFields`）互斥。
+三个子表都是「不传 = 不动，显式传空数组 = 清空整表」，与 `params: []` 的整表覆盖语义一致。
 `enabled` 不传按 `true`、`required` 不传按 `false`，不必为了「加一行」编造这两个值。
 典型用法：`{"patch":{"bodyFields":[{"name":"id","type":"string","description":"用户ID"}]}}`；
 后续只想改说明再传 `{"patch":{"bodyFields":[{"name":"id","description":"新说明"}]}}`，类型/必填/示例都保留。

@@ -506,3 +506,28 @@ func TestAnchorHeadingNormalized(t *testing.T) {
 		t.Errorf("找不到标题时应列出文内标题：%s", text)
 	}
 }
+
+// patch 显式传空数组 = 清空该表（与整表覆盖一致）；不传 = 不动。
+func TestPatchEmptyArrayClears(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "patch 清空", "method": "GET", "url": "/pc",
+		"headers": []map[string]any{{"name": "X-Clear", "value": "1"}},
+		"params":  []map[string]any{{"name": "pclear", "value": "1"}},
+	}))
+
+	// 空数组：应清空；只传 params 时 headers 不受影响。
+	callStructured(t, cs, "update_request", map[string]any{
+		"project": "demo", "uid": uid,
+		"patch": map[string]any{"params": []any{}},
+	})
+	out := mustCall(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "uid": uid, "sections": []string{"overview"},
+	})
+	if strings.Contains(out, "pclear") {
+		t.Errorf("patch.params=[] 应清空参数表：%s", out)
+	}
+	if !strings.Contains(out, "X-Clear") {
+		t.Errorf("未传的 patch.headers 不该被动：%s", out)
+	}
+}

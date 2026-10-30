@@ -147,3 +147,24 @@ func TestToolSchemaContract(t *testing.T) {
 		}
 	}
 }
+
+// TestToolsListBudget 锁 tools/list 的**真实**体积（含描述文案）。
+//
+// 契约快照刻意剔除了 description，因此快照大小看不出文案成本；而每次会话开始
+// 客户端都会拉一遍 tools/list，这是固定开销。上限给 5% 余量，反弹会立刻变红。
+func TestToolsListBudget(t *testing.T) {
+	const maxBytes = 70000
+	cs := connectSelf(t)
+	res, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("tools/list 失败: %v", err)
+	}
+	raw, err := json.Marshal(res.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("tools/list 体积 = %d bytes（%d 个工具，上限 %d）", len(raw), len(res.Tools), maxBytes)
+	if len(raw) > maxBytes {
+		t.Errorf("tools/list 体积 %d 超过预算 %d：请压缩字段说明或合并工具", len(raw), maxBytes)
+	}
+}
