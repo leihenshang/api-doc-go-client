@@ -9,6 +9,15 @@
     "path": {
       "type": "string"
     },
+    "paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "project": {
       "type": "string"
     },

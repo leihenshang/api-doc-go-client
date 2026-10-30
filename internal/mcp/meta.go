@@ -609,7 +609,9 @@ func requestDetailOutput() map[string]any {
 
 // deleteRequestsOutput delete_requests（批量）的结果。
 func deleteRequestsOutput() map[string]any {
-	f := objSchema(map[string]any{"uid": strSchema(), "error": strSchema()}, "uid")
+	f := objSchema(map[string]any{
+		"index": intSchema(), "uid": strSchema(), "code": strSchema(), "error": strSchema(),
+	}, "uid")
 	return objSchema(map[string]any{
 		"project": strSchema(), "requested": intSchema(), "dryRun": boolSchema(),
 		"deleted": arrSchema(strSchema()), "failed": arrSchema(f),
@@ -627,7 +629,9 @@ func requestDeleteOutput() map[string]any {
 
 // batchUpdateOutput update_requests 的结果（成功 uid 列表 + 失败明细）。
 func batchUpdateOutput() map[string]any {
-	f := objSchema(map[string]any{"uid": strSchema(), "error": strSchema()}, "uid")
+	f := objSchema(map[string]any{
+		"index": intSchema(), "uid": strSchema(), "code": strSchema(), "error": strSchema(),
+	}, "uid")
 	return objSchema(map[string]any{
 		"project": strSchema(), "requested": intSchema(), "dryRun": boolSchema(),
 		"updated": arrSchema(strSchema()), "failed": arrSchema(f),

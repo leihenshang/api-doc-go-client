@@ -4,8 +4,11 @@ package mcp_test
 // 每个用例都从「AI 实际会怎么调」出发，断言的是调用方能看到的文本/结构化结果。
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // 详情里的「相关文档条目」必须带 uid，否则 AI 没法顺着读；docs 段要给出回写入口。
@@ -134,7 +137,9 @@ func TestBulkUpdateRequests(t *testing.T) {
 		"project": "demo",
 		"items": []map[string]any{
 			// 故意不传 enabled：默认应为 true（step 1 的回归点）
-			{"uid": u1, "summary": "第一张卡片", "paramsUpsert": []map[string]any{{"name": "page", "value": "1"}}},
+			{"uid": u1, "summary": "第一张卡片", "patch": map[string]any{
+				"params": []map[string]any{{"name": "page", "value": "1"}},
+			}},
 			{"uid": u2, "summary": "第二张卡片"},
 			{"uid": "00000000-0000-0000-0000-000000000000", "summary": "不存在"},
 		},
@@ -144,9 +149,9 @@ func TestBulkUpdateRequests(t *testing.T) {
 	if len(updated) != 2 || len(failed) != 1 {
 		t.Fatalf("批量结果不符：updated=%v failed=%v", updated, failed)
 	}
-	// 失败条目要带稳定错误码（不是只有一段中文）
-	if fm, _ := failed[0].(map[string]any); fm["code"] != "NOT_FOUND" {
-		t.Errorf("failed[].code 应为 NOT_FOUND：%v", failed[0])
+	// 失败条目要带稳定错误码与下标（不是只有一段中文）
+	if fm, _ := failed[0].(map[string]any); fm["code"] != "NOT_FOUND" || fm["index"] != float64(2) {
+		t.Errorf("failed[] 应带 code=NOT_FOUND 与 index=2：%v", failed[0])
 	}
 	out := mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": u1, "sections": []string{"overview"},
@@ -165,12 +170,14 @@ func TestUpsertSemantics(t *testing.T) {
 
 	mustCall(t, cs, "update_request", map[string]any{
 		"project": "demo", "uid": uid,
-		"bodyFieldsUpsert": []map[string]any{{"name": "id", "type": "string", "required": true, "description": "用户 ID"}},
+		"patch": map[string]any{"bodyFields": []map[string]any{
+			{"name": "id", "type": "string", "required": true, "description": "用户 ID"},
+		}},
 	})
 	// 第二次只传说明：行内字段级合并，type/required 必须保留（step 5 的回归点）
 	mustCall(t, cs, "update_request", map[string]any{
 		"project": "demo", "uid": uid,
-		"bodyFieldsUpsert": []map[string]any{{"name": "id", "description": "用户 ID（已改）"}},
+		"patch": map[string]any{"bodyFields": []map[string]any{{"name": "id", "description": "用户 ID（已改）"}}},
 	})
 	out := mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": uid, "sections": []string{"bodyFields"},
@@ -183,10 +190,12 @@ func TestUpsertSemantics(t *testing.T) {
 	}
 
 	mustCall(t, cs, "update_request", map[string]any{
-		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "a"}},
+		"project": "demo", "uid": uid,
+		"patch": map[string]any{"headers": []map[string]any{{"name": "X-Token", "value": "a"}}},
 	})
 	mustCall(t, cs, "update_request", map[string]any{
-		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "b"}},
+		"project": "demo", "uid": uid,
+		"patch": map[string]any{"headers": []map[string]any{{"name": "X-Token", "value": "b"}}},
 	})
 	out = mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": uid, "sections": []string{"overview"},
@@ -198,10 +207,10 @@ func TestUpsertSemantics(t *testing.T) {
 	// 整表覆盖与 upsert 互斥
 	if text, isErr := callTool(t, cs, "update_request", map[string]any{
 		"project": "demo", "uid": uid,
-		"params":       []map[string]any{{"name": "a", "value": "1", "enabled": true}},
-		"paramsUpsert": []map[string]any{{"name": "b", "value": "2", "enabled": true}},
+		"params": []map[string]any{{"name": "a", "value": "1", "enabled": true}},
+		"patch":  map[string]any{"params": []map[string]any{{"name": "b", "value": "2"}}},
 	}); !isErr || !strings.Contains(text, "互斥") {
-		t.Errorf("params 与 paramsUpsert 应互斥：%s", text)
+		t.Errorf("params 与 patch.params 应互斥：%s", text)
 	}
 }
 
@@ -309,5 +318,96 @@ func TestInsertAfterOccurrence(t *testing.T) {
 	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
 	if strings.Index(out, "乙") < strings.Index(out, "插在第二处") {
 		t.Errorf("occurrence=2 应插在第二处、乙之前：%s", out)
+	}
+}
+
+// get_doc 批量也支持按 paths（与 uids 二选一）。
+func TestBatchDocsByPaths(t *testing.T) {
+	cs := connectSelf(t)
+	sc := callStructured(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "甲文档", "fileName": "doc-a", "content": "# 甲",
+	})
+	p1, _ := sc["path"].(string)
+	sc = callStructured(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "乙文档", "fileName": "doc-b", "content": "# 乙",
+	})
+	p2, _ := sc["path"].(string)
+
+	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "paths": []string{p1, p2}})
+	if !strings.Contains(out, "甲文档") || !strings.Contains(out, "乙文档") || !strings.Contains(out, "成功 2 / 2") {
+		t.Errorf("按 paths 批量读取不符：%s", out)
+	}
+}
+
+// delete_requests：confirm 不匹配整批拒绝；条目支持 path。
+func TestDeleteRequestsConfirmAndPath(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "待删请求", "method": "GET", "url": "/del",
+	}))
+	sc := callStructured(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "uid": uid, "sections": []string{"overview"},
+	})
+	hash, _ := sc["hash"].(string)
+	reqPath, _ := sc["path"].(string)
+
+	if text, isErr := callTool(t, cs, "delete_requests", map[string]any{
+		"project": "demo", "confirm": "错的项目名",
+		"items": []map[string]any{{"uid": uid, "ifMatch": hash}}, "dryRun": true,
+	}); !isErr || !strings.Contains(text, "confirm") {
+		t.Errorf("confirm 不匹配应整批拒绝：%s", text)
+	}
+
+	out := mustCall(t, cs, "delete_requests", map[string]any{
+		"project": "demo", "confirm": "demo",
+		"items": []map[string]any{{"path": reqPath, "ifMatch": hash}}, "dryRun": true,
+	})
+	if !strings.Contains(out, "1/1") {
+		t.Errorf("按 path 的批量预演不符：%s", out)
+	}
+}
+
+// insertAfter.anchorHeading：插到该小节末尾、下一个同级标题之前。
+func TestInsertAfterHeading(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "标题插入",
+		"content": "## 附录\n\n旧内容\n\n## 其它\n\n别的内容",
+	}))
+	mustCall(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"insertAfter": map[string]any{"anchorHeading": "## 附录", "text": "新增一行"},
+	})
+	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
+	if !strings.Contains(out, "新增一行") {
+		t.Fatalf("anchorHeading 未插入：%s", out)
+	}
+	if strings.Index(out, "新增一行") > strings.Index(out, "## 其它") {
+		t.Errorf("应插在「## 其它」之前：%s", out)
+	}
+}
+
+// 静态 resource：模板 / 错误码 / 集合结构契约。
+func TestStaticResources(t *testing.T) {
+	cs := connectSelf(t)
+	res, err := cs.ListResources(context.Background(), &sdk.ListResourcesParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uris := map[string]bool{}
+	for _, r := range res.Resources {
+		uris[r.URI] = true
+	}
+	for _, u := range []string{"apidoc://doc-template", "apidoc://error-codes", "apidoc://collection-format"} {
+		if !uris[u] {
+			t.Errorf("缺少 resource %s：%v", u, uris)
+		}
+	}
+	rr, err := cs.ReadResource(context.Background(), &sdk.ReadResourceParams{URI: "apidoc://error-codes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rr.Contents) == 0 || !strings.Contains(rr.Contents[0].Text, "NOT_FOUND") {
+		t.Errorf("错误码 resource 内容不符：%+v", rr.Contents)
 	}
 }

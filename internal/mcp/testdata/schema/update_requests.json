@@ -161,47 +161,6 @@
               "array"
             ]
           },
-          "bodyFieldsUpsert": {
-            "items": {
-              "properties": {
-                "description": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                },
-                "example": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "required": {
-                  "type": [
-                    "null",
-                    "boolean"
-                  ]
-                },
-                "type": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                }
-              },
-              "required": [
-                "name"
-              ],
-              "type": "object"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
           "docs": {
             "type": [
               "null",
@@ -215,47 +174,6 @@
             ]
           },
           "headers": {
-            "items": {
-              "properties": {
-                "description": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                },
-                "enabled": {
-                  "type": [
-                    "null",
-                    "boolean"
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                },
-                "value": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                }
-              },
-              "required": [
-                "name"
-              ],
-              "type": "object"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "headersUpsert": {
             "items": {
               "properties": {
                 "description": {
@@ -352,45 +270,135 @@
               "array"
             ]
           },
-          "paramsUpsert": {
-            "items": {
-              "properties": {
-                "description": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
+          "patch": {
+            "properties": {
+              "bodyFields": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "example": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
                 },
-                "enabled": {
-                  "type": [
-                    "null",
-                    "boolean"
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                },
-                "value": {
-                  "type": [
-                    "null",
-                    "string"
-                  ]
-                }
+                "type": [
+                  "null",
+                  "array"
+                ]
               },
-              "required": [
-                "name"
-              ],
-              "type": "object"
+              "headers": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "enabled": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "value": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "params": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "enabled": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "value": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
             },
             "type": [
               "null",
-              "array"
+              "object"
             ]
           },
           "replaces": {
