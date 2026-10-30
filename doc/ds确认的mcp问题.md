@@ -166,6 +166,18 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | P-7 `get_doc_template` / `prune_empty_modules` 未恢复 | 设计取舍：前者迁移为 resource `apidoc://doc-template`，后者合并为 `delete_module(pruneEmpty=true)` | 不恢复（恢复会重新增大 `tools/list`） |
 | `inputSchema` 增长 40% | 存在：`update_requests.items[]` 内联了完整请求字段 | 记录为后续项：用 `$defs`/`$ref` 需手写 schema，本轮不做 |
 
+## 8. 低风险项收尾（2026-10-30）
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 错误分类漏网 15 处（此前落 `[INTERNAL]`） | 已完成 | `env.go` 4 处、`doc.go` 4 处、`service.go` 7 处；新增 `TestErrorCodesClassified`（6 个场景表驱动） |
+| `update_response_example` 示例不存在误报 `[IO]` | 已完成 | 新增 `listExamples`：先 `ReadRequest`（NOT_FOUND）再列示例（IO） |
+| `import_collection.text` 无上限 | 已完成 | `maxImportTextBytes = 10MB`，超限 `[LIMIT]`；`TestImportCollectionSizeLimit` |
+| `Brief` / `Description` 两套文案无约束 | 已完成 | `TestToolBriefAndDescriptionBudget`（Brief ≤ 40 字且不重复、Description ≤ 120 字） |
+| `send_request` 无地址限制（SSRF） | 未做 | 属行为变更，需先确认策略 |
+| `method` 缺 `enum` | 未做 | SDK tag 不支持，需手写整份 InputSchema |
+| `tools/list` 余量 1.9% | 观察 | 68,642 / 70,000；下次加字段前需先决定方案 |
+
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
 

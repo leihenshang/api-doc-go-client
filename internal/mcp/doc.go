@@ -319,7 +319,7 @@ func validateDocSection(sec string, in UpdateDocInput) error {
 	case "meta":
 		allowed = []string{"name", "folder"}
 	default:
-		return fmt.Errorf("不支持的 section %q：只支持 content（正文）/ meta（名称与目录），省略表示不限制", sec)
+		return withInvalid(fmt.Errorf("不支持的 section %q：只支持 content（正文）/ meta（名称与目录），省略表示不限制", sec))
 	}
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, f := range allowed {
@@ -332,8 +332,8 @@ func validateDocSection(sec string, in UpdateDocInput) error {
 		}
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（content / meta）",
-			sec, strings.Join(allowed, "/"), strings.Join(bad, "/"))
+		return withInvalid(fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（content / meta）",
+			sec, strings.Join(allowed, "/"), strings.Join(bad, "/")))
 	}
 	return nil
 }
@@ -557,7 +557,7 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 		if err := a.MoveDoc(uid, strings.TrimSpace(*in.Folder)); err != nil {
 			// 审核 L#10：正文已按声明顺序先写并校验，move 失败时把已完成步骤说清楚，避免调用方盲重试撞假冲突。
 			if changed {
-				return nil, fmt.Errorf("正文已写入成功，但移动到 %q 失败：%w（重试可只传 folder，不重复传 content）", *in.Folder, err)
+				return nil, coded(CodeOf(err), fmt.Errorf("正文已写入成功，但移动到 %q 失败：%w（重试可只传 folder，不重复传 content）", *in.Folder, err))
 			}
 			return nil, err
 		}
@@ -569,7 +569,7 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 		}
 		if err := a.RenameDoc(uid, name); err != nil {
 			if changed || in.Folder != nil {
-				return nil, fmt.Errorf("已完成的步骤保留在盘上，仅改名 %q 失败：%w（重试可只传 name）", name, err)
+				return nil, coded(CodeOf(err), fmt.Errorf("已完成的步骤保留在盘上，仅改名 %q 失败：%w（重试可只传 name）", name, err))
 			}
 			return nil, err
 		}

@@ -507,6 +507,61 @@ func TestAnchorHeadingNormalized(t *testing.T) {
 	}
 }
 
+// 业务错误必须自带稳定错误码：参数/找不到类不能落成 [INTERNAL]。
+func TestErrorCodesClassified(t *testing.T) {
+	cs := connectSelf(t)
+	reqUID := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "错误码请求", "method": "GET", "url": "/ec",
+	}))
+	docUID := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "错误码文档",
+	}))
+	mustCall(t, cs, "create_env", map[string]any{"project": "demo", "name": "ecenv"})
+
+	missing := "00000000-0000-0000-0000-000000000000"
+	cases := []struct {
+		label string
+		tool  string
+		args  map[string]any
+		want  string
+	}{
+		{"update_doc 非法 section", "update_doc",
+			map[string]any{"project": "demo", "uid": docUID, "section": "bogus"}, "[INVALID]"},
+		{"update_doc 越界字段", "update_doc",
+			map[string]any{"project": "demo", "uid": docUID, "section": "meta", "content": "x"}, "[INVALID]"},
+		{"set_env_var 非法变量名", "set_env_var",
+			map[string]any{"project": "demo", "env": "ecenv", "name": "1bad", "value": "v"}, "[INVALID]"},
+		{"delete_env_var 环境不存在", "delete_env_var",
+			map[string]any{"project": "demo", "env": "没这个环境", "name": "X"}, "[NOT_FOUND]"},
+		{"update_response_example 示例不存在", "update_response_example",
+			map[string]any{"project": "demo", "uid": reqUID, "exampleUid": missing, "name": "x"}, "[NOT_FOUND]"},
+		{"send_request 请求不存在", "send_request",
+			map[string]any{"project": "demo", "uid": missing}, "[NOT_FOUND]"},
+	}
+	for _, c := range cases {
+		text, isErr := callTool(t, cs, c.tool, c.args)
+		if !isErr {
+			t.Errorf("%s：应失败，实际成功", c.label)
+			continue
+		}
+		if !strings.Contains(text, c.want) {
+			t.Errorf("%s：期望 %s，实际 %s", c.label, c.want, text)
+		}
+	}
+}
+
+// import_collection 的正文超过上限应回 [LIMIT]，而不是吞进内存后 OOM/超时。
+func TestImportCollectionSizeLimit(t *testing.T) {
+	cs := connectSelf(t)
+	big := strings.Repeat("x", (10<<20)+16)
+	text, isErr := callTool(t, cs, "import_collection", map[string]any{
+		"project": "demo", "format": "apidocgo", "text": big,
+	})
+	if !isErr || !strings.Contains(text, "[LIMIT]") {
+		t.Errorf("超限正文应回 [LIMIT]：%s", text)
+	}
+}
+
 // section 的参数错误必须是 [INVALID]（不是服务故障 [INTERNAL]）。
 func TestSectionErrorsAreInvalid(t *testing.T) {
 	cs := connectSelf(t)

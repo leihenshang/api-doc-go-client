@@ -267,7 +267,7 @@ func (s *Service) DeleteEnv(project, name, ifMatch string, dryRun bool) error {
 		return err
 	}
 	if indexOfEnv(envs, clean) < 0 {
-		return fmt.Errorf("找不到环境 %q（用 list_envs 看现有环境）", clean)
+		return withNotFound(fmt.Errorf("找不到环境 %q（用 list_envs 看现有环境）", clean))
 	}
 	if ifMatch = strings.TrimSpace(ifMatch); ifMatch != "" {
 		cur, err := a.EnvFileHash(clean)
@@ -413,7 +413,7 @@ func (s *Service) DeleteEnvVar(project, envName, varName, ifMatch string) error 
 	}
 	idx := indexOfEnv(envs, clean)
 	if idx < 0 {
-		return fmt.Errorf("找不到环境 %q", clean)
+		return withNotFound(fmt.Errorf("找不到环境 %q", clean))
 	}
 	at := -1
 	for i := range envs[idx].Vars {
@@ -423,7 +423,7 @@ func (s *Service) DeleteEnvVar(project, envName, varName, ifMatch string) error 
 		}
 	}
 	if at < 0 {
-		return fmt.Errorf("环境 %q 里没有变量 %q（用 list_envs 看现有变量）", clean, name)
+		return withNotFound(fmt.Errorf("环境 %q 里没有变量 %q（用 list_envs 看现有变量）", clean, name))
 	}
 	envs[idx].Vars = append(envs[idx].Vars[:at], envs[idx].Vars[at+1:]...)
 	// 同样是「读整份 → 删一条 → 整份写回」，必须带并发校验（理由同 SetEnvVar）。
@@ -525,7 +525,7 @@ func checkVarName(name string) error {
 		return errNeedVarName
 	}
 	if !varNamePattern.MatchString(name) {
-		return fmt.Errorf("变量名 %q 不合法：只允许字母、数字与 _，且不能以数字开头（要能被 {{%s}} 引用）", name, name)
+		return withInvalid(fmt.Errorf("变量名 %q 不合法：只允许字母、数字与 _，且不能以数字开头（要能被 {{%s}} 引用）", name, name))
 	}
 	return nil
 }

@@ -39,6 +39,9 @@ prod:
 - `get_doc` / `get_request_detail` 补 `outputSchema`：此前成功态返回 `structuredContent` 却未声明；schema 覆盖单条/批量两种形态，`required` 只留 `project`。
 - `search_requests` 的 `weakMatch` 去掉 `omitempty`，结构化输出里恒出现（此前精确命中时字段缺失，调用方读不到 `false`）。
 - `list_tools` 的 `total` / `returned` 补 schema 说明：`total` 是当前模式注册的工具总数，不受 `filter` 影响。
+- 错误码补全（14 处，此前都落 `[INTERNAL]`）：`update_doc` 的 section 校验、环境系列的「找不到环境/变量」与「变量名不合法」、示例更新/删除的「示例不存在」、`create_request` 的 cURL 解析与复制源请求、`send_request` 的发送失败、`update_doc` 的部分成功提示。新增 `TestErrorCodesClassified` 表驱动防回归。
+- `import_collection` 的 `text` 增加 10MB 上限，超限回 `[LIMIT]`（此前整包一次性进内存解析）。
+- 新增 `TestToolBriefAndDescriptionBudget`：`Brief` ≤ 40 字且不重复、`Description` ≤ 120 字。
 
 ## 2026-10-29  0.1.4-dev
 

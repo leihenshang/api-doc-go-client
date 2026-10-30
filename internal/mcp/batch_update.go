@@ -15,6 +15,9 @@ import (
 	"strings"
 )
 
+// maxImportTextBytes import_collection 单次正文上限（整包一次性解析，防止超大输入拖垮进程）。
+const maxImportTextBytes = 10 << 20
+
 // maxBatchUpdate 与 delete_requests / get_request_detail 的批量上限保持一致。
 const maxBatchUpdate = 10
 
