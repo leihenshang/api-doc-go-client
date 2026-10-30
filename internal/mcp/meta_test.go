@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestValidateMetas 元数据表完整性：name 唯一、分组合法、Brief/描述齐备、风险自洽。
@@ -175,5 +177,29 @@ func TestToolDescriptionBudget(t *testing.T) {
 	t.Logf("工具描述总字符 = %d", total)
 	if total > 3200 {
 		t.Errorf("工具描述总字符 %d 超过预算 3200", total)
+	}
+}
+
+// TestToolBriefAndDescriptionBudget 锁两套文案的预算：Brief 走 list_tools，
+// Description 走 tools/list，任一膨胀都会直接变成客户端的固定开销。
+func TestToolBriefAndDescriptionBudget(t *testing.T) {
+	const maxBrief, maxDesc = 40, 120
+	seen := make(map[string]string, len(toolMetas))
+	for _, m := range toolMetas {
+		b := strings.TrimSpace(m.Brief)
+		if b == "" {
+			t.Errorf("%s: Brief 为空", m.Name)
+			continue
+		}
+		if n := utf8.RuneCountInString(b); n > maxBrief {
+			t.Errorf("%s: Brief %d 字超过 %d：%q", m.Name, n, maxBrief, b)
+		}
+		if prev, ok := seen[b]; ok {
+			t.Errorf("%s 与 %s 的 Brief 完全重复：%q", m.Name, prev, b)
+		}
+		seen[b] = m.Name
+		if n := utf8.RuneCountInString(m.Description); n > maxDesc {
+			t.Errorf("%s: Description %d 字超过 %d（细节放手册，描述只留做什么）", m.Name, n, maxDesc)
+		}
 	}
 }

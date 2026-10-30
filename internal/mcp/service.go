@@ -1162,7 +1162,7 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 type ImportCollectionInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Format  string `json:"format" jsonschema:"postman / openapi / apidocgo（本客户端导出的整包）；Bruno 目录请用客户端导入"`
-	Text    string `json:"text" jsonschema:"集合文件的正文内容（不是文件路径：请先读出内容再传）"`
+	Text    string `json:"text" jsonschema:"集合文件的正文内容（不是文件路径：请先读出内容再传）；上限 10MB"`
 	Parent  string `json:"parent,omitempty" jsonschema:"落在哪个模块下（相对集合根，如 api/user）；留空 = 项目根"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只解析并回报将导入的条数，不写盘"`
 }
@@ -1183,6 +1183,11 @@ func (s *Service) ImportCollection(in ImportCollectionInput) (*collection.Import
 	}
 	if text == "" {
 		return nil, withInvalid(errors.New("缺少 text：请传集合文件的正文内容（不支持文件路径）"))
+	}
+	// 上限保护：整包正文一次性进内存并全量解析，超大输入会拖垮进程。
+	if len(text) > maxImportTextBytes {
+		return nil, withLimit(fmt.Errorf("text 超过 %d MB（本次约 %d MB）：请拆分后分批导入",
+			maxImportTextBytes>>20, len(text)>>20))
 	}
 	if in.DryRun {
 		sum, perr := a.ParseImport(format, text)
@@ -1234,12 +1239,12 @@ func resolveCreateDraft(a ProjectApp, in CreateRequestInput) (*collection.Reques
 		// cURL 导入：URL/方法/头/体都从命令里解析
 		draft, err = a.ParseCurl(in.Curl)
 		if err != nil {
-			return nil, fmt.Errorf("解析 cURL 失败: %w", err)
+			return nil, withInvalid(fmt.Errorf("解析 cURL 失败: %w", err))
 		}
 	case strings.TrimSpace(in.CopyFromUID) != "":
 		draft, err = a.ReadRequest(strings.TrimSpace(in.CopyFromUID))
 		if err != nil {
-			return nil, fmt.Errorf("读取源请求 %s 失败: %w", in.CopyFromUID, err)
+			return nil, withNotFound(fmt.Errorf("读取源请求 %s 失败: %w", in.CopyFromUID, err))
 		}
 	default:
 		draft = &collection.Request{Method: strings.ToUpper(strings.TrimSpace(in.Method))}
@@ -1966,7 +1971,7 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 	if uid := strings.TrimSpace(in.UID); uid != "" {
 		req, err = a.ReadRequest(uid)
 		if err != nil {
-			return nil, fmt.Errorf("读取请求 %s 失败: %w", uid, err)
+			return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, err))
 		}
 	} else if strings.TrimSpace(in.URL) != "" {
 		// 临时请求：不落盘，直接组装发送
@@ -1990,7 +1995,7 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 		if strings.Contains(err.Error(), "不是 http/https") {
 			return nil, withInvalid(fmt.Errorf("URL 无法发送：%w", err))
 		}
-		return nil, fmt.Errorf("发送失败: %w", err)
+		return nil, coded(CodeIO, fmt.Errorf("发送失败: %w", err))
 	}
 	out := outcomeOf(res, in.MaxBodyBytes)
 	if in.IncludeBody != nil && !*in.IncludeBody {
@@ -2089,12 +2094,41 @@ func (s *Service) UpdateResponseExample(in UpdateResponseExampleInput) (*collect
 	}
 	exUID := strings.TrimSpace(in.ExampleUID)
 	if exUID == "" {
-		return nil, fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+		return nil, withInvalid(fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）"))
+	}
+	// 先自己确认示例存在：写接口层返回的是未归类的哨兵错误，会落成 [INTERNAL]。
+	exs, err := s.listExamples(a, uid)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for _, ex := range exs {
+		if ex.UID == exUID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, withNotFound(fmt.Errorf("响应示例 %s 不存在（请求 %s）", exUID, uid))
 	}
 	if in.DryRun {
 		return a.PlanUpdateResponseExample(uid, exUID, in.Name, in.Status, in.Headers, in.Body, in.ContentType)
 	}
 	return a.UpdateResponseExample(uid, exUID, in.Name, in.Status, in.Headers, in.Body, in.ContentType)
+}
+
+// listExamples 列某请求下的响应示例。
+//
+// 先确认请求存在：集合层的「条目不存在」若直接归到 [IO]，调用方会误以为磁盘故障。
+func (s *Service) listExamples(a ProjectApp, uid string) ([]*collection.ResponseExample, error) {
+	if _, err := a.ReadRequest(uid); err != nil {
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, err))
+	}
+	exs, err := a.ListResponseExamples(uid)
+	if err != nil {
+		return nil, coded(CodeIO, err)
+	}
+	return exs, nil
 }
 
 // DeleteResponseExample 删除一条响应示例（文件移入 .trash，可人工找回）。
@@ -2109,11 +2143,11 @@ func (s *Service) DeleteResponseExample(project, reqUID, exampleUID, ifMatch str
 	}
 	exUID := strings.TrimSpace(exampleUID)
 	if exUID == "" {
-		return fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）")
+		return withInvalid(fmt.Errorf("缺少 exampleUid：请先用 get_request_detail 查看该请求下的响应示例（examples[].uid）"))
 	}
-	exs, err := a.ListResponseExamples(uid)
-	if err != nil {
-		return coded(CodeIO, err)
+	exs, lerr := s.listExamples(a, uid)
+	if lerr != nil {
+		return lerr
 	}
 	var target *collection.ResponseExample
 	for _, ex := range exs {
