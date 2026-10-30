@@ -23,7 +23,7 @@ type UpdateRequestItem struct {
 	UID     string `json:"uid,omitempty" jsonschema:"要更新的接口 uid；与 path 二选一"`
 	Path    string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml 或 api/users）；与 uid 二选一"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"该接口当前 hash（search_requests / get_request_detail 返回）；不传 = 最后写者赢"`
-	Section string `json:"section,omitempty" jsonschema:"节点守卫（同 update_request）：request / docs；省略表示不限制"`
+	Section string `json:"section,omitempty" jsonschema:"节点守卫（同 update_request）：request / response / docs；省略 = 不限制"`
 
 	Name   *string `json:"name,omitempty"`
 	Method *string `json:"method,omitempty"`

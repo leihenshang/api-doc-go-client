@@ -153,6 +153,19 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | resource 只有中文标题 | 已完成 | 三个静态 resource 标题/描述补英文副标题 |
 | `tools/list` 体积无预算约束 | 已完成 | `TestToolsListBudget` 锁 70KB（当前 66.7KB）；字段说明压缩约 3,500 字 |
 
+## 7. dev 端点 v5 测评反馈核实（2026-10-30）
+
+| 外部反馈 | 结论 | 处理 |
+|---|---|---|
+| P-1 `section` 三套说法不一致 | 存在：`update_requests.items` 漏 `response`、错误提示漏 `docs` | 已统一为 `request / response / docs` |
+| P-2 `section` 越界报 `[INTERNAL]` | 存在：两处 `fmt.Errorf` 未包 `withInvalid` | 已改 `[INVALID]`；`TestSectionErrorsAreInvalid` |
+| P-3 3 个工具返回 `structuredContent` 却无 `outputSchema` | 部分存在：`get_doc` / `get_request_detail` 成功态确实如此（`requestDetailFullOutput` 已成死代码）；`use_workspace` 只在错误态有 sc（全局错误契约） | 前两个已挂 schema（双形态并集、required 只留 `project`）；`use_workspace` 成功态本就不返回 sc |
+| P-4 `weakMatch` 恒为 null | 存在：`omitempty` 让 `false` 被省略 | 已去掉 `omitempty` |
+| P-5 `list_tools.total` 不随过滤变化 | 设计如此（注释已写「当前模式注册总数」），但 schema 未说明 | 已给 `total` / `returned` 补 description |
+| P-6 `method` 缺 `enum` | 存在，但 SDK 的 `jsonschema` tag 只作 description（且禁止 `WORD=` 前缀），加 enum 必须手写整个 InputSchema | 不修：服务端已校验并回 `[INVALID]`，描述已列白名单 |
+| P-7 `get_doc_template` / `prune_empty_modules` 未恢复 | 设计取舍：前者迁移为 resource `apidoc://doc-template`，后者合并为 `delete_module(pruneEmpty=true)` | 不恢复（恢复会重新增大 `tools/list`） |
+| `inputSchema` 增长 40% | 存在：`update_requests.items[]` 内联了完整请求字段 | 记录为后续项：用 `$defs`/`$ref` 需手写 schema，本轮不做 |
+
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
 
