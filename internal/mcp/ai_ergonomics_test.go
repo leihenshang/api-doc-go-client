@@ -133,7 +133,8 @@ func TestBulkUpdateRequests(t *testing.T) {
 	sc := callStructured(t, cs, "update_requests", map[string]any{
 		"project": "demo",
 		"items": []map[string]any{
-			{"uid": u1, "summary": "第一张卡片", "paramsUpsert": []map[string]any{{"name": "page", "value": "1", "enabled": true}}},
+			// 故意不传 enabled：默认应为 true（step 1 的回归点）
+			{"uid": u1, "summary": "第一张卡片", "paramsUpsert": []map[string]any{{"name": "page", "value": "1"}}},
 			{"uid": u2, "summary": "第二张卡片"},
 			{"uid": "00000000-0000-0000-0000-000000000000", "summary": "不存在"},
 		},
@@ -142,6 +143,10 @@ func TestBulkUpdateRequests(t *testing.T) {
 	failed, _ := sc["failed"].([]any)
 	if len(updated) != 2 || len(failed) != 1 {
 		t.Fatalf("批量结果不符：updated=%v failed=%v", updated, failed)
+	}
+	// 失败条目要带稳定错误码（不是只有一段中文）
+	if fm, _ := failed[0].(map[string]any); fm["code"] != "NOT_FOUND" {
+		t.Errorf("failed[].code 应为 NOT_FOUND：%v", failed[0])
 	}
 	out := mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": u1, "sections": []string{"overview"},
@@ -162,9 +167,10 @@ func TestUpsertSemantics(t *testing.T) {
 		"project": "demo", "uid": uid,
 		"bodyFieldsUpsert": []map[string]any{{"name": "id", "type": "string", "required": true, "description": "用户 ID"}},
 	})
+	// 第二次只传说明：行内字段级合并，type/required 必须保留（step 5 的回归点）
 	mustCall(t, cs, "update_request", map[string]any{
 		"project": "demo", "uid": uid,
-		"bodyFieldsUpsert": []map[string]any{{"name": "id", "type": "string", "required": true, "description": "用户 ID（已改）"}},
+		"bodyFieldsUpsert": []map[string]any{{"name": "id", "description": "用户 ID（已改）"}},
 	})
 	out := mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": uid, "sections": []string{"bodyFields"},
@@ -172,12 +178,15 @@ func TestUpsertSemantics(t *testing.T) {
 	if strings.Count(out, "| id |") != 1 || !strings.Contains(out, "已改") {
 		t.Errorf("bodyFieldsUpsert 应同名覆盖：%s", out)
 	}
+	if !strings.Contains(out, "| id | 是 | string |") {
+		t.Errorf("只改说明不应清掉 type/required：%s", out)
+	}
 
 	mustCall(t, cs, "update_request", map[string]any{
-		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "a", "enabled": true}},
+		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "a"}},
 	})
 	mustCall(t, cs, "update_request", map[string]any{
-		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "b", "enabled": true}},
+		"project": "demo", "uid": uid, "headersUpsert": []map[string]any{{"name": "X-Token", "value": "b"}},
 	})
 	out = mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": uid, "sections": []string{"overview"},
@@ -209,7 +218,7 @@ func TestFieldHintOnCreate(t *testing.T) {
 	out = mustCall(t, cs, "create_request", map[string]any{
 		"project": "demo", "name": "有字段", "method": "POST", "url": "/hint2",
 		"body":       map[string]any{"type": "json", "raw": "{}"},
-		"bodyFields": []map[string]any{{"name": "id", "type": "string", "required": false}},
+		"bodyFields": []map[string]any{{"name": "id", "type": "string"}},
 	})
 	if strings.Contains(out, "body.fields 为空") {
 		t.Errorf("有字段表不应提醒：%s", out)
@@ -229,5 +238,76 @@ func TestListToolsCheatSheet(t *testing.T) {
 	filtered := mustCall(t, cs, "list_tools", map[string]any{"filter": "doc"})
 	if strings.Contains(filtered, "常见任务") {
 		t.Errorf("带 filter 不应输出速查：%s", filtered)
+	}
+}
+
+// 请求按 path 定位（详情/修改/删除），找不到时列候选。
+func TestRequestByPath(t *testing.T) {
+	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api"})
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "按路径", "method": "GET", "url": "/p", "folder": "api",
+	}))
+
+	out := mustCall(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "path": "api/按路径.yml",
+	})
+	if !strings.Contains(out, "按路径") {
+		t.Errorf("按 path 读不到详情：%s", out)
+	}
+	out = mustCall(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "path": "api/按路径",
+	})
+	if !strings.Contains(out, uid) {
+		t.Errorf("不带 .yml 也应命中：%s", out)
+	}
+
+	mustCall(t, cs, "update_request", map[string]any{
+		"project": "demo", "path": "api/按路径", "summary": "路径改的概述",
+	})
+	out = mustCall(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "uid": uid, "sections": []string{"overview"},
+	})
+	if !strings.Contains(out, "路径改的概述") {
+		t.Errorf("update_request 按 path 未生效：%s", out)
+	}
+
+	if text, isErr := callTool(t, cs, "delete_request", map[string]any{
+		"project": "demo", "path": "api/按路径", "dryRun": true,
+	}); isErr || !strings.Contains(text, "dryRun") {
+		t.Errorf("delete_request 按 path 预演失败：%s", text)
+	}
+
+	// 找不到 → [NOT_FOUND] + 候选
+	text, isErr := callTool(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "path": "api/nope.yml",
+	})
+	if !isErr || !strings.Contains(text, "[NOT_FOUND]") || !strings.Contains(text, "候选") {
+		t.Errorf("找不到请求应给候选：%s", text)
+	}
+}
+
+// insertAfter：anchor 多处时默认拒绝，occurrence 指定第几处可精确插入。
+func TestInsertAfterOccurrence(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "多标题", "content": "## 小节\n\n甲\n\n## 小节\n\n乙",
+	}))
+
+	text, isErr := callTool(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"insertAfter": map[string]any{"anchor": "## 小节", "text": "插在第二处"},
+	})
+	if !isErr || !strings.Contains(text, "occurrence") {
+		t.Errorf("未指定 occurrence 且多处命中应拒绝并提示 occurrence：%s", text)
+	}
+
+	mustCall(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"insertAfter": map[string]any{"anchor": "## 小节", "text": "插在第二处", "occurrence": 2},
+	})
+	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
+	if strings.Index(out, "乙") < strings.Index(out, "插在第二处") {
+		t.Errorf("occurrence=2 应插在第二处、乙之前：%s", out)
 	}
 }

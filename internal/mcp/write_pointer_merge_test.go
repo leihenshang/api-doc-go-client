@@ -19,11 +19,11 @@ func fullBody() *BodyInput {
 	return &BodyInput{
 		Type: strPtr("json"),
 		Raw:  strPtr(`{"uid":"u-1"}`),
-		Form: &[]collection.KV{{Name: "f1", Value: "v1", Enabled: true}},
+		Form: &[]KVInput{{Name: "f1", Value: strPtr("v1"), Enabled: boolPtr(true)}},
 		Descs: &map[string]string{
 			"uid": "用户ID",
 		},
-		Fields: &[]collection.BodyField{{Name: "uid", Type: "string", Required: true}},
+		Fields: &[]BodyFieldInput{{Name: "uid", Type: strPtr("string"), Required: boolPtr(true)}},
 	}
 }
 
@@ -73,9 +73,9 @@ func TestUpdateBodyOnlyFormKeepsRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nextForm := []collection.KV{
-		{Name: "a", Value: "1", Enabled: true},
-		{Name: "b", Value: "2", Enabled: true, Type: "file"},
+	nextForm := []KVInput{
+		{Name: "a", Value: strPtr("1"), Enabled: boolPtr(true)},
+		{Name: "b", Value: strPtr("2"), Enabled: boolPtr(true), Type: strPtr("file")},
 	}
 	up, err := svc.UpdateRequest(UpdateRequestInput{
 		Project: "demo", UID: r.UID,
@@ -105,7 +105,7 @@ func TestUpdateBodyExplicitEmptyClears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emptyForm := []collection.KV{}
+	emptyForm := []KVInput{}
 	emptyRaw := ""
 	up, err := svc.UpdateRequest(UpdateRequestInput{
 		Project: "demo", UID: r.UID,
@@ -125,7 +125,7 @@ func TestUpdateBodyExplicitEmptyClears(t *testing.T) {
 // TestUpdateRespDocOnlyParamsKeepsSample 只传 respDoc.params：sample/type/status/headers 不动。
 func TestUpdateRespDocOnlyParamsKeepsSample(t *testing.T) {
 	_, svc := setup(t)
-	status, headers := 201, []collection.KV{{Name: "X-Trace", Value: "t-1", Enabled: true}}
+	status, headers := 201, []KVInput{{Name: "X-Trace", Value: strPtr("t-1"), Enabled: boolPtr(true)}}
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "respdoc-params", Method: "GET", URL: "http://127.0.0.1/d",
 		RespDoc: &RespDocInput{
@@ -215,8 +215,8 @@ func TestCreateRequestBodyPointerMerge(t *testing.T) {
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "create-merge", Method: "POST", URL: "http://127.0.0.1/f",
 		BodyType:   "multipart",
-		Body:       &BodyInput{Form: &[]collection.KV{{Name: "file", Value: "/tmp/a.png", Enabled: true, Type: "file"}}},
-		BodyFields: []collection.BodyField{{Name: "file", Type: "file", Required: true}},
+		Body:       &BodyInput{Form: &[]KVInput{{Name: "file", Value: strPtr("/tmp/a.png"), Enabled: boolPtr(true), Type: strPtr("file")}}},
+		BodyFields: []BodyFieldInput{{Name: "file", Type: strPtr("file"), Required: boolPtr(true)}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestCreateRequestBodyPointerMerge(t *testing.T) {
 	// 只给 bodyType/bodyRaw 时，不应把 form 整份清空（旧实现是 Body{Type,Raw} 整份替换）
 	r2, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "create-raw", Method: "POST", URL: "http://127.0.0.1/g",
-		Body:    &BodyInput{Form: &[]collection.KV{{Name: "k", Value: "v", Enabled: true}}},
+		Body:    &BodyInput{Form: &[]KVInput{{Name: "k", Value: strPtr("v"), Enabled: boolPtr(true)}}},
 		BodyRaw: `{"k":"v"}`,
 	})
 	if err != nil {

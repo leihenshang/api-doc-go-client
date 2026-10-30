@@ -121,6 +121,17 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | AI 发现性与提示 | 已完成 | `list_tools` 常见任务速查 + 被关闭组提示；空字段表提醒 |
 | 自测 | 已完成 | 8190 dev 端口起 `cmd/mcpserver`，26 项探针全部 PASS |
 
+### 第三轮：入参与定位打磨（同日完成）
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| `enabled` / `required` 被迫必填 | 已完成 | 新增 `KVInput` / `BodyFieldInput`（指针 + 默认 true/false），schema 的 required 不再含这两个字段 |
+| `update_requests` schema 膨胀 | 已完成 | `items` 去掉批量场景低频的 `respDoc` / `auth` / `settings` |
+| 批量写审计看不出改了哪几条 | 已完成 | `summarizeArgs` 对 `items` 输出 `{count, uids}`（不展开字段与值）；单测覆盖 |
+| `insertAfter` anchor 必须唯一 | 已完成 | `InsertAfterOp.occurrence`（第 N 处）；不传仍要求唯一，防误插 |
+| upsert 是整行替换 | 已完成 | 三个 upsert 改为**行内字段级合并**（只改说明不清类型/示例） |
+| 请求只能按 uid 定位 | 已完成 | `get_request_detail` / `update_request` / `delete_request` 支持 `path`；`[NOT_FOUND]` 附请求/模块候选；批量失败带 `code` |
+
 ## 6. 处理顺序
 
 1. 修 `rename/delete_project` 的必填矛盾（唯一可能「按描述用就出错」的点）；

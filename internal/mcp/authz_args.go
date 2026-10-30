@@ -96,6 +96,24 @@ func summarizeArgs(tool string, req *mcp.CallToolRequest) string {
 		case "curl":
 			out[k] = "<已省略：cURL 可能内嵌凭据>"
 			continue
+		case "items":
+			// 批量更新：弹窗/审计只需知道「改哪几条」，不展示每条改了哪些字段（体积与敏感面都大）。
+			arr, ok := v.([]any)
+			if !ok {
+				continue
+			}
+			uids := make([]string, 0, len(arr))
+			for _, it := range arr {
+				m, ok := it.(map[string]any)
+				if !ok {
+					continue
+				}
+				if u, ok := m["uid"].(string); ok && strings.TrimSpace(u) != "" {
+					uids = append(uids, strings.TrimSpace(u))
+				}
+			}
+			out[k] = map[string]any{"count": len(arr), "uids": uids}
+			continue
 		case "headers", "params", "metadata":
 			if names := keyList(v); names != nil {
 				out[k] = map[string]any{"keys": names}

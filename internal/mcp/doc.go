@@ -278,10 +278,12 @@ type UpdateDocInput struct {
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回改动预览与 ifMatch 校验结果，不写盘"`
 }
 
-// InsertAfterOp 在 anchor 之后插入 text（anchor 必须唯一命中）。
+// InsertAfterOp 在 anchor 之后插入 text。
+// 默认要求 anchor 唯一（防误插）；长文档里同一小标题出现多次时，用 Occurrence 指定第几处。
 type InsertAfterOp struct {
-	Anchor string `json:"anchor" jsonschema:"定位用的原文片段（必须与正文完全一致且只出现一次）"`
-	Text   string `json:"text" jsonschema:"要插入的内容（Markdown）"`
+	Anchor     string `json:"anchor" jsonschema:"定位用的原文片段（必须与正文完全一致）"`
+	Text       string `json:"text" jsonschema:"要插入的内容（Markdown）"`
+	Occurrence int    `json:"occurrence,omitempty" jsonschema:"命中第几处（1 基）；不传 = 要求 anchor 只出现一次（防误插）；传 2 表示在第 2 处之后插入"`
 }
 
 // validateDocSection 节点守卫：section=content 只允许正文类字段，meta 只允许 name/folder。
@@ -367,30 +369,34 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 		}
 		return cur + sep + add, true, nil
 	case in.InsertAfter != nil:
-		anchor := in.InsertAfter.Anchor
-		if anchor == "" {
+		op := in.InsertAfter
+		if op.Anchor == "" {
 			return "", false, errors.New("insertAfter.anchor 不能为空")
 		}
-		i := strings.Index(cur, anchor)
-		if i < 0 {
-			return "", false, fmt.Errorf("insertAfter 未匹配到 anchor（未写入任何内容）：%s", clipRunes(anchor, 60))
+		if op.Occurrence <= 0 {
+			// 不传 occurrence：要求唯一，避免长文档里插错位置。
+			i := strings.Index(cur, op.Anchor)
+			if i < 0 {
+				return "", false, fmt.Errorf("insertAfter 未匹配到 anchor（未写入任何内容）：%s", clipRunes(op.Anchor, 60))
+			}
+			if strings.Contains(cur[i+len(op.Anchor):], op.Anchor) {
+				return "", false, fmt.Errorf("insertAfter.anchor 命中多处（未写入任何内容）：%s；请给更长/更唯一的片段，或传 occurrence 指定第几处",
+					clipRunes(op.Anchor, 60))
+			}
+			return insertAfterText(cur, i, op.Anchor, op.Text), true, nil
 		}
-		at := i + len(anchor)
-		if strings.Contains(cur[at:], anchor) {
-			return "", false, fmt.Errorf("insertAfter.anchor 命中多处（未写入任何内容）：%s；请给更长、更唯一的片段", clipRunes(anchor, 60))
+		// 指定第 N 处：逐次向后找，找不到时如实告知实际出现次数。
+		idx, from := -1, 0
+		for n := 0; n < op.Occurrence; n++ {
+			j := strings.Index(cur[from:], op.Anchor)
+			if j < 0 {
+				return "", false, fmt.Errorf("insertAfter.occurrence=%d 不存在（正文里只有 %d 处 anchor）：%s",
+					op.Occurrence, n, clipRunes(op.Anchor, 60))
+			}
+			idx = from + j
+			from = idx + len(op.Anchor)
 		}
-		rest := cur[at:]
-		prefix := "\n\n"
-		if strings.HasPrefix(rest, "\n\n") {
-			prefix = ""
-		} else if strings.HasPrefix(rest, "\n") {
-			prefix = "\n"
-		}
-		ins := in.InsertAfter.Text
-		if !strings.HasSuffix(ins, "\n") && !strings.HasPrefix(rest, "\n") {
-			ins += "\n"
-		}
-		return cur[:at] + prefix + ins + rest, true, nil
+		return insertAfterText(cur, idx, op.Anchor, op.Text), true, nil
 	}
 	return cur, false, nil
 }
@@ -399,6 +405,23 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 //
 // 顺序：先写正文（此时做 hash 校验），再移动、改名 —— 后两者只动路径与 frontmatter，
 // 不改文件内容，放在校验之后不会让 ifMatch 失效。
+// insertAfterText 在锚点（起点 i）之后插入 text，按前后换行自动补空行。
+func insertAfterText(cur string, i int, anchor, text string) string {
+	at := i + len(anchor)
+	rest := cur[at:]
+	prefix := "\n\n"
+	if strings.HasPrefix(rest, "\n\n") {
+		prefix = ""
+	} else if strings.HasPrefix(rest, "\n") {
+		prefix = "\n"
+	}
+	ins := text
+	if !strings.HasSuffix(ins, "\n") && !strings.HasPrefix(rest, "\n") {
+		ins += "\n"
+	}
+	return cur[:at] + prefix + ins + rest
+}
+
 func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	a, _, err := s.resolveWrite(in.Project)
 	if err != nil {

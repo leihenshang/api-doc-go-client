@@ -83,7 +83,7 @@ Claude Desktop 配置：
 | `use_workspace` | low | 选定**本会话**的默认工作目录（选定后可省略 `project`） | `workspace` |
 | `list_projects` | low | 项目列表（模糊过滤/刷新） | `project?`、`refresh?` |
 | `get_project_modules` | low | 模块结构 + 每模块请求数 | `project?`、`query?`、`includeRequests?` |
-| `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例）；`uid` 单个、`uids` 批量 1–10；`docs` 段可分段/大纲 | `project?`、`uid?` / `uids?`、`query?`、`includeBody?`、`maxBodyBytes?`、`sections?`、`docsStartLine?`、`docsMaxLines?`、`docsOutline?` |
+| `get_request_detail` | low | 接口详情（请求/headers/docs/respDoc/示例）；`uid`/`path` 单个、`uids` 批量 1–10；`docs` 段可分段/大纲 | `project?`、`uid?` / `path?` / `uids?`、`query?`、`includeBody?`、`maxBodyBytes?`、`sections?`、`docsStartLine?`、`docsMaxLines?`、`docsOutline?` |
 | `search_requests` | low | 搜索（可跨项目，支持整词/字段限定/片段） | `query`、`project?`、`limit?`、`exactMatch?`、`fields?`、`includeHash?` |
 | `search_docs` | low | 搜文档条目正文（命中行号 + 片段） | `project?`、`pattern`、`exactMatch?`、`limit?`、`includeHash?` |
 | resource `apidoc://doc-template` | — | 接口说明（docs）的 Markdown 分节结构契约（原 `get_doc_template` 工具） | — |
@@ -95,12 +95,12 @@ Claude Desktop 配置：
 | `create_module` | high | 创建模块（支持嵌套） | `project?`、`name`、`parent?` |
 | `create_project` | high | 新建项目（目录 + manifest，只能在白名单内的可写目录里建） | `name`、`dirName?`、`root?`（留空 = 第一个可写目录） |
 | `update_request` | high | 局部修改（含 params/settings/respDoc）/ upsert 一行 / 移动模块 | `project?`、`uid`、各可选字段、`paramsUpsert?`/`headersUpsert?`/`bodyFieldsUpsert?`、`ifMatch?` |
-| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它） | `project?`、`items[]`、`dryRun?` |
-| `delete_request` | high | 移除请求（进 `.trash`） | `project?`、`uid` |
+| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它；`failed[].code` 为稳定错误码） | `project?`、`items[]`（高频字段子集）、`dryRun?` |
+| `delete_request` | high | 移除请求（进 `.trash`）；`uid`/`path` 二选一 | `project?`、`uid?` / `path?`、`ifMatch?`、`confirmName?`、`dryRun?` |
 | `delete_requests` | high | 批量移除请求（1–10，每条强制 `ifMatch`） | `project?`、`items[]`、`dryRun?` |
 | `import_collection` | high | 批量导入 Postman / OpenAPI / api-doc-go 集合正文 | `project?`、`format`、`text`、`parent?`、`dryRun?` |
 | `create_doc` | high | 新建文档；冲突默认报错（可 suffix/overwrite），支持 uid 幂等与 `fileName` | `project?`、`name`、`folder?`、`content?`、`uid?`、`onConflict?`、`fileName?` |
-| `update_doc` | high | 改正文（覆盖/替换/追加/插入）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?`、`name?`、`folder?`、`section?`、`ifMatch?` |
+| `update_doc` | high | 改正文（覆盖/替换/追加/按 occurrence 插入）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?{anchor,text,occurrence}`、`name?`、`folder?`、`section?`、`ifMatch?` |
 | `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
 | `save_doc_image` | high | 保存图片（base64，PNG/JPEG/GIF/WebP，≤5MB，内容寻址去重）到项目 `assets/`，返回 `/doc-assets/<sha256>` | `project?`、`data`、`name?` |
 | `rename_module` | high | 改模块显示名（目录/uid 不变） | `project?`、`path`、`name` |

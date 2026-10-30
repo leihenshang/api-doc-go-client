@@ -15,6 +15,9 @@
     "maxBodyBytes": {
       "type": "integer"
     },
+    "path": {
+      "type": "string"
+    },
     "project": {
       "type": "string"
     },
