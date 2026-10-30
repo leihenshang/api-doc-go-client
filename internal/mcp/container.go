@@ -26,7 +26,7 @@ func (s *Service) RenameModule(project, path, name string) error {
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在（用 get_project_modules 查看路径）", path))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a)))
 	}
 	if err := a.RenameFolder(uid, name); err != nil {
 		return withInvalid(err)
@@ -46,7 +46,7 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在（用 get_project_modules 查看路径）", path))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a)))
 	}
 	if dryRun {
 		return nil
@@ -61,6 +61,34 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 		return withInvalid(fmt.Errorf("%w（模块内还有内容时请传 recursive=true）", err))
 	}
 	return nil
+}
+
+// moduleCandidates 模块候选（前 8 个路径）：NOT_FOUND 时直接给清单，省掉一次 get_project_modules。
+func moduleCandidates(a ProjectApp) string {
+	const maxShown = 8
+	nodes, err := a.SearchIndex("", 0)
+	if err != nil {
+		return "用 get_project_modules 查看路径"
+	}
+	parts := make([]string, 0, maxShown)
+	total := 0
+	for _, n := range nodes {
+		if n.Type != "folder" {
+			continue
+		}
+		total++
+		if len(parts) < maxShown {
+			parts = append(parts, n.Path)
+		}
+	}
+	if total == 0 {
+		return "项目里还没有模块（可用 create_module 新建）"
+	}
+	out := "候选：" + strings.Join(parts, "、")
+	if total > maxShown {
+		out += fmt.Sprintf(" 等 %d 个", total)
+	}
+	return out
 }
 
 // RenameProject 改项目显示名（opencollection.yml 的 info.name；目录不变）。

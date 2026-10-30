@@ -6,35 +6,6 @@
     "items": {
       "items": {
         "properties": {
-          "auth": {
-            "properties": {
-              "in": {
-                "type": "string"
-              },
-              "key": {
-                "type": "string"
-              },
-              "password": {
-                "type": "string"
-              },
-              "token": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string"
-              },
-              "username": {
-                "type": "string"
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "type": [
-              "null",
-              "object"
-            ]
-          },
           "body": {
             "properties": {
               "data": {
@@ -53,25 +24,35 @@
                 "items": {
                   "properties": {
                     "description": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     },
                     "example": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     },
                     "name": {
                       "type": "string"
                     },
                     "required": {
-                      "type": "boolean"
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
                     },
                     "type": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     }
                   },
                   "required": [
-                    "name",
-                    "type",
-                    "required"
+                    "name"
                   ],
                   "type": "object"
                 },
@@ -84,25 +65,35 @@
                 "items": {
                   "properties": {
                     "description": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     },
                     "enabled": {
-                      "type": "boolean"
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
                     },
                     "name": {
                       "type": "string"
                     },
                     "type": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     },
                     "value": {
-                      "type": "string"
+                      "type": [
+                        "null",
+                        "string"
+                      ]
                     }
                   },
                   "required": [
-                    "name",
-                    "value",
-                    "enabled"
+                    "name"
                   ],
                   "type": "object"
                 },
@@ -133,25 +124,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "example": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "required": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "type",
-                "required"
+                "name"
               ],
               "type": "object"
             },
@@ -164,25 +165,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "example": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "required": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "type",
-                "required"
+                "name"
               ],
               "type": "object"
             },
@@ -207,25 +218,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "enabled": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "value": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "value",
-                "enabled"
+                "name"
               ],
               "type": "object"
             },
@@ -238,25 +259,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "enabled": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "value": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "value",
-                "enabled"
+                "name"
               ],
               "type": "object"
             },
@@ -284,25 +315,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "enabled": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "value": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "value",
-                "enabled"
+                "name"
               ],
               "type": "object"
             },
@@ -315,25 +356,35 @@
             "items": {
               "properties": {
                 "description": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "enabled": {
-                  "type": "boolean"
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
                 },
                 "name": {
                   "type": "string"
                 },
                 "type": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "value": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "required": [
-                "name",
-                "value",
-                "enabled"
+                "name"
               ],
               "type": "object"
             },
@@ -366,136 +417,8 @@
               "array"
             ]
           },
-          "respDoc": {
-            "properties": {
-              "contentType": {
-                "type": [
-                  "null",
-                  "string"
-                ]
-              },
-              "headers": {
-                "items": {
-                  "properties": {
-                    "description": {
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "value": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "name",
-                    "value",
-                    "enabled"
-                  ],
-                  "type": "object"
-                },
-                "type": [
-                  "null",
-                  "array"
-                ]
-              },
-              "params": {
-                "items": {
-                  "properties": {
-                    "description": {
-                      "type": "string"
-                    },
-                    "example": {
-                      "type": "string"
-                    },
-                    "fieldName": {
-                      "type": "string"
-                    },
-                    "required": {
-                      "type": "boolean"
-                    },
-                    "type": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "fieldName",
-                    "type",
-                    "required",
-                    "description",
-                    "example"
-                  ],
-                  "type": "object"
-                },
-                "type": [
-                  "null",
-                  "array"
-                ]
-              },
-              "sample": {
-                "type": [
-                  "null",
-                  "string"
-                ]
-              },
-              "status": {
-                "type": [
-                  "null",
-                  "integer"
-                ]
-              },
-              "type": {
-                "type": [
-                  "null",
-                  "string"
-                ]
-              }
-            },
-            "type": [
-              "null",
-              "object"
-            ]
-          },
           "section": {
             "type": "string"
-          },
-          "settings": {
-            "properties": {
-              "encodeUrl": {
-                "type": [
-                  "null",
-                  "boolean"
-                ]
-              },
-              "followRedirects": {
-                "type": [
-                  "null",
-                  "boolean"
-                ]
-              },
-              "insecureSsl": {
-                "type": [
-                  "null",
-                  "boolean"
-                ]
-              },
-              "maxRedirects": {
-                "type": "integer"
-              },
-              "timeoutSec": {
-                "type": "integer"
-              }
-            },
-            "type": [
-              "null",
-              "object"
-            ]
           },
           "summary": {
             "type": [

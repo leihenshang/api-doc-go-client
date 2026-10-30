@@ -748,11 +748,12 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 	})
 }
 
-// getDetailIn get_request_detail 的入参（uid 单个 / uids 批量，二选一）。
+// getDetailIn get_request_detail 的入参（uid/path 单个 或 uids 批量，二选一）。
 type getDetailIn struct {
 	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID          string   `json:"uid,omitempty" jsonschema:"接口 uid（单个查询；与 uids 二选一）"`
-	UIDs         []string `json:"uids,omitempty" jsonschema:"接口 uid 列表，一次 1–10 个（批量；与 uid 二选一，超出直接报错）"`
+	UID          string   `json:"uid,omitempty" jsonschema:"接口 uid（单个查询；与 path/uids 三选一）"`
+	Path         string   `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml 或 api/users）；与 uid 二选一，批量请用 uids"`
+	UIDs         []string `json:"uids,omitempty" jsonschema:"接口 uid 列表，一次 1–10 个（批量；与 uid/path 二选一，超出直接报错）"`
 	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
 	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
 	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
@@ -766,8 +767,12 @@ type getDetailIn struct {
 func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolRequest, in getDetailIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if strings.TrimSpace(in.UID) != "" && len(in.UIDs) > 0 {
-			return "", nil, withInvalid(errors.New("uid 与 uids 只能给一个：单个用 uid，批量用 uids（1–10 个）"))
+		single := strings.TrimSpace(in.UID) != "" || strings.TrimSpace(in.Path) != ""
+		if single && len(in.UIDs) > 0 {
+			return "", nil, withInvalid(errors.New("uid/path 与 uids 只能给一组：单个用 uid 或 path，批量用 uids（1–10 个）"))
+		}
+		if strings.TrimSpace(in.UID) != "" && strings.TrimSpace(in.Path) != "" {
+			return "", nil, withInvalid(errors.New("uid 与 path 只能给一个：知道 uid 就用 uid，只有路径才用 path"))
 		}
 		if len(in.UIDs) > 0 {
 			return ts.batchRequestDetails(getDetailsIn{
@@ -775,14 +780,14 @@ func (ts *toolSet) getRequestDetail(ctx context.Context, req *mcp.CallToolReques
 				IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes,
 			})
 		}
-		if strings.TrimSpace(in.UID) == "" {
-			return "", nil, withInvalid(errors.New("缺少 uid 或 uids：单个查询传 uid，批量查询传 uids（1–10 个）"))
+		if !single {
+			return "", nil, withInvalid(errors.New("缺少 uid / path / uids：单个查询传 uid 或 path，批量查询传 uids（1–10 个）"))
 		}
 		sel, err := NormalizeDetailSections(in.Sections)
 		if err != nil {
 			return "", nil, err
 		}
-		d, err := ts.svc.GetRequestDetail(in.Project, in.UID, DetailOptions{
+		d, err := ts.svc.GetRequestDetailAt(in.Project, in.UID, in.Path, DetailOptions{
 			IncludeBody: in.IncludeBody, MaxBodyBytes: in.MaxBodyBytes, Query: in.Query, Sections: in.Sections,
 		})
 		if err != nil {
@@ -1416,7 +1421,8 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 // deleteIn delete_request 的入参。
 type deleteIn struct {
 	Project     string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID         string `json:"uid" jsonschema:"要移除的接口 uid"`
+	UID         string `json:"uid,omitempty" jsonschema:"要移除的接口 uid；与 path 二选一"`
+	Path        string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml）；与 uid 二选一"`
 	DryRun      bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
 	IfMatch     string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 search_requests 里该请求的 hash；不传 = 最后写者赢"`
 	ConfirmName string `json:"confirmName,omitempty" jsonschema:"二次确认：填请求名称；与磁盘上的 name 不一致直接拒绝（防误删）"`
@@ -1426,7 +1432,7 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		// 删除后文件已进 .trash：先读一次拿身份信息，结构化输出才拿得到 path/name
-		r, err := ts.svc.ReadRequest(in.Project, in.UID)
+		r, err := ts.svc.ReadRequestAt(in.Project, in.UID, in.Path)
 		if err != nil {
 			return "", nil, err
 		}
@@ -1434,7 +1440,7 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 			return "", nil, coded(CodeConflict, fmt.Errorf("confirmName 与请求名不一致（当前 name=%q），未删除", r.Name))
 		}
 		if !in.DryRun {
-			if err := ts.svc.DeleteRequest(in.Project, in.UID, in.IfMatch); err != nil {
+			if err := ts.svc.DeleteRequestAt(in.Project, in.UID, in.Path, in.IfMatch); err != nil {
 				return "", nil, err
 			}
 		}

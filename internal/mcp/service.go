@@ -664,6 +664,11 @@ type DetailOptions struct {
 
 // GetRequestDetail 接口详情：请求（含 headers/body/auth/grpc）+ 说明 + 已保存响应示例。
 func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*RequestDetail, error) {
+	return s.GetRequestDetailAt(project, uid, "", opts)
+}
+
+// GetRequestDetailAt 同 GetRequestDetail，但支持按 path 定位（uid 与 path 二选一）。
+func (s *Service) GetRequestDetailAt(project, uid, reqPath string, opts DetailOptions) (*RequestDetail, error) {
 	// 先校验分段取值：未知值直接报错（免得静默返回全量让 AI 以为筛选生效了）
 	if _, err := NormalizeDetailSections(opts.Sections); err != nil {
 		return nil, err
@@ -672,9 +677,14 @@ func (s *Service) GetRequestDetail(project, uid string, opts DetailOptions) (*Re
 	if err != nil {
 		return nil, err
 	}
+	uid, err = s.resolveRequestUID(a, uid, reqPath)
+	if err != nil {
+		return nil, err
+	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, err))
+		// 找不到时附候选：AI 常拿「用户说的接口名/路径」，直接给清单比让它再搜一次更省事。
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a)))
 	}
 	hash, _ := s.hashOf(a, r.UID)
 	d := &RequestDetail{
@@ -745,6 +755,178 @@ func matchDoc(name, path, reqName, query string) bool {
 	return strings.Contains(normalize(name), q) || strings.Contains(normalize(path), q) || isSubsequence(q, normalize(name))
 }
 
+// resolveRequestUID 把「uid 或 path」统一成 uid；两者都给时以 uid 为准。
+//
+// path 依次匹配：集合内相对路径（api/users.yml）、去掉 .yml 的路径（api/users）、
+// 不含目录时的纯文件名（users.yml）。找不到/歧义时报错并列出候选 —— 用户常说
+// 「改 /api/users 那个接口」，让调用方再搜一次不如直接给清单。
+func (s *Service) resolveRequestUID(a ProjectApp, uid, reqPath string) (string, error) {
+	if uid = strings.TrimSpace(uid); uid != "" {
+		return uid, nil
+	}
+	p := strings.TrimSpace(filepath.ToSlash(reqPath))
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	if p == "" {
+		return "", coded(CodeInvalid, errors.New("缺少 uid 或 path：请用 search_requests 找到目标接口（两者给一个即可）"))
+	}
+	nodes, err := a.SearchIndex("", 0)
+	if err != nil {
+		return "", coded(CodeIO, fmt.Errorf("列不出请求: %w", err))
+	}
+	var exact, loose []index.Node
+	for _, n := range nodes {
+		if n.Type != "request" {
+			continue
+		}
+		np := strings.TrimPrefix(filepath.ToSlash(n.Path), "/")
+		switch {
+		case np == p || strings.TrimSuffix(np, ".yml") == p:
+			exact = append(exact, n)
+		case !strings.Contains(p, "/") && filepath.Base(np) == p:
+			loose = append(loose, n)
+		}
+	}
+	hit := exact
+	if len(hit) == 0 {
+		hit = loose
+	}
+	switch len(hit) {
+	case 1:
+		return hit[0].UID, nil
+	case 0:
+		return "", withNotFound(fmt.Errorf("找不到请求 %q：%s", p, requestCandidates(a)))
+	default:
+		names := make([]string, 0, len(hit))
+		for _, n := range hit {
+			names = append(names, n.Path)
+		}
+		return "", coded(CodeConflict, fmt.Errorf("路径 %q 匹配到多个请求：%s；请传完整 path 或 uid", p, strings.Join(names, ", ")))
+	}
+}
+
+// requestCandidates 项目内请求候选（前 5 个：方法 + 名称 + 路径 + uid）。
+func requestCandidates(a ProjectApp) string {
+	const maxShown = 5
+	nodes, err := a.SearchIndex("", 0)
+	if err != nil {
+		return "（候选清单读取失败，请用 search_requests 查找）"
+	}
+	parts := make([]string, 0, maxShown)
+	total := 0
+	for _, n := range nodes {
+		if n.Type != "request" {
+			continue
+		}
+		total++
+		if len(parts) < maxShown {
+			parts = append(parts, fmt.Sprintf("%s %s（%s，uid=%s）", n.Method, n.Title, n.Path, n.UID))
+		}
+	}
+	if total == 0 {
+		return "项目里还没有请求（可用 create_request 新建）"
+	}
+	out := "候选：" + strings.Join(parts, "、")
+	if total > maxShown {
+		out += fmt.Sprintf(" 等 %d 个", total)
+	}
+	return out
+}
+
+// KVInput 参数 / 表单 / 头行的 MCP 入参（不直接复用 collection.KV）。
+//
+// 为什么不复用：collection.KV.Enabled 没有 omitempty，生成的 inputSchema 会把它标成
+// required —— AI 想「加一行 header」也必须记得编造 enabled:true，漏了就 [INVALID]。
+// 这里把 Enabled 改成指针（不传 = 启用）；Value/Type/Description 也用指针，
+// 让 upsert 能区分「不传 = 保留原值」与「传空串 = 清空」。
+type KVInput struct {
+	Name        string  `json:"name" jsonschema:"行名（参数名 / header 名 / 表单字段名）"`
+	Value       *string `json:"value,omitempty" jsonschema:"值；不传 = 保留原值（整表替换时按空串）"`
+	Type        *string `json:"type,omitempty" jsonschema:"类型（如 multipart 的文件行）；不传 = 保留原值"`
+	Description *string `json:"description,omitempty" jsonschema:"说明列；不传 = 保留原值"`
+	Enabled     *bool   `json:"enabled,omitempty" jsonschema:"是否启用；不传 = true（不会因为漏传而报错）"`
+}
+
+// toKV 转成落盘类型：未传的 Enabled 按 true，未传的字符串按空串。
+func (k KVInput) toKV() collection.KV {
+	enabled := true
+	if k.Enabled != nil {
+		enabled = *k.Enabled
+	}
+	out := collection.KV{Name: k.Name, Enabled: enabled}
+	if k.Value != nil {
+		out.Value = *k.Value
+	}
+	if k.Type != nil {
+		out.Type = *k.Type
+	}
+	if k.Description != nil {
+		out.Description = *k.Description
+	}
+	return out
+}
+
+// kvList 整表替换用：逐行转成落盘类型（保持顺序）。
+func kvList(in []KVInput) []collection.KV {
+	if in == nil {
+		return nil
+	}
+	out := make([]collection.KV, 0, len(in))
+	for _, k := range in {
+		out = append(out, k.toKV())
+	}
+	return out
+}
+
+// kvFromRows 反向投影（读侧/测试用：把落盘行转成入参行）。
+func kvFromRows(rows []collection.KV) []KVInput {
+	out := make([]KVInput, 0, len(rows))
+	for _, r := range rows {
+		v, t, d, en := r.Value, r.Type, r.Description, r.Enabled
+		out = append(out, KVInput{Name: r.Name, Value: &v, Type: &t, Description: &d, Enabled: &en})
+	}
+	return out
+}
+
+// BodyFieldInput 请求体字段表的 MCP 入参：Required 指针（不传 = 非必填）。
+type BodyFieldInput struct {
+	Name        string  `json:"name" jsonschema:"字段名"`
+	Type        *string `json:"type,omitempty" jsonschema:"字段类型（string/integer/boolean/object/array…）；不传 = string"`
+	Required    *bool   `json:"required,omitempty" jsonschema:"是否必填；不传 = false（upsert 时不传 = 保留原值）"`
+	Example     *string `json:"example,omitempty" jsonschema:"示例值；不传 = 保留原值"`
+	Description *string `json:"description,omitempty" jsonschema:"说明；不传 = 保留原值"`
+}
+
+// toField 转成落盘类型：未传的 Type 按 string、Required 按 false。
+func (f BodyFieldInput) toField() collection.BodyField {
+	out := collection.BodyField{Name: f.Name}
+	if f.Type != nil {
+		out.Type = *f.Type
+	}
+	if f.Required != nil {
+		out.Required = *f.Required
+	}
+	if f.Example != nil {
+		out.Example = *f.Example
+	}
+	if f.Description != nil {
+		out.Description = *f.Description
+	}
+	return out
+}
+
+// fieldList 整表替换用。
+func fieldList(in []BodyFieldInput) []collection.BodyField {
+	if in == nil {
+		return nil
+	}
+	out := make([]collection.BodyField, 0, len(in))
+	for _, f := range in {
+		out = append(out, f.toField())
+	}
+	return out
+}
+
 // BodyInput 请求体的**局部更新**入参（create_request / update_request 专用）。
 //
 // 为什么不直接复用 collection.Body：Body.Form 的 json tag 没有 omitempty，一旦出现在
@@ -752,12 +934,12 @@ func matchDoc(name, path, reqName, query string) bool {
 // 漏传就把整张表单清空了。这里全部改成指针：nil = 保留原值，显式空串 / 空数组 / 空对象 = 清空。
 // 该类型只活在入参侧，落盘格式（share 的 collection.Body）完全不变。
 type BodyInput struct {
-	Type   *string                 `json:"type,omitempty" jsonschema:"请求体类型：none/json/text/form/multipart；不传 = 保留原值，传空串 = 清空"`
-	Raw    *string                 `json:"raw,omitempty" jsonschema:"请求体原文（json/text）；不传 = 保留原值，传空串 = 清空"`
-	Data   *string                 `json:"data,omitempty" jsonschema:"Bruno 的 data 字段（第三方集合往返用）；不传 = 保留原值"`
-	Form   *[]collection.KV        `json:"form,omitempty" jsonschema:"form/multipart 表单行；不传 = 保留原行，传空数组 = 清空（与 raw 互不影响）"`
-	Descs  *map[string]string      `json:"descs,omitempty" jsonschema:"JSON 体「字段路径 → 备注」种子（老数据兼容）；不传 = 保留原值，传空对象 = 清空"`
-	Fields *[]collection.BodyField `json:"fields,omitempty" jsonschema:"请求体字段表格；不传 = 保留原值，传空数组 = 清空"`
+	Type   *string            `json:"type,omitempty" jsonschema:"请求体类型：none/json/text/form/multipart；不传 = 保留原值，传空串 = 清空"`
+	Raw    *string            `json:"raw,omitempty" jsonschema:"请求体原文（json/text）；不传 = 保留原值，传空串 = 清空"`
+	Data   *string            `json:"data,omitempty" jsonschema:"Bruno 的 data 字段（第三方集合往返用）；不传 = 保留原值"`
+	Form   *[]KVInput         `json:"form,omitempty" jsonschema:"form/multipart 表单行；不传 = 保留原行，传空数组 = 清空（与 raw 互不影响）"`
+	Descs  *map[string]string `json:"descs,omitempty" jsonschema:"JSON 体「字段路径 → 备注」种子（老数据兼容）；不传 = 保留原值，传空对象 = 清空"`
+	Fields *[]BodyFieldInput  `json:"fields,omitempty" jsonschema:"请求体字段表格；不传 = 保留原值，传空数组 = 清空"`
 }
 
 // merge 把入参合并到既有请求体上：nil 字段一律保留 base 的原值（显式零值才覆盖）。
@@ -773,13 +955,13 @@ func (in BodyInput) merge(base collection.Body) collection.Body {
 		out.Data = *in.Data
 	}
 	if in.Form != nil {
-		out.Form = *in.Form
+		out.Form = kvList(*in.Form)
 	}
 	if in.Descs != nil {
 		out.Descs = *in.Descs
 	}
 	if in.Fields != nil {
-		out.Fields = *in.Fields
+		out.Fields = fieldList(*in.Fields)
 	}
 	return out
 }
@@ -794,7 +976,7 @@ type RespDocInput struct {
 	Params      *[]collection.ResponseParam `json:"params,omitempty" jsonschema:"返回参数行；不传 = 保留，传空数组 = 清空"`
 	Sample      *string                     `json:"sample,omitempty" jsonschema:"响应样例原文；不传 = 保留，传空串 = 清空"`
 	Status      *int                        `json:"status,omitempty" jsonschema:"响应状态码快照；不传 = 保留，传 0 = 清零"`
-	Headers     *[]collection.KV            `json:"headers,omitempty" jsonschema:"响应头快照；不传 = 保留，传空数组 = 清空"`
+	Headers     *[]KVInput                  `json:"headers,omitempty" jsonschema:"响应头快照；不传 = 保留，传空数组 = 清空"`
 	ContentType *string                     `json:"contentType,omitempty" jsonschema:"响应媒体类型（json/text/xml/html/binary）；不传 = 保留，传空串 = 清空"`
 }
 
@@ -817,7 +999,7 @@ func (in RespDocInput) merge(base *collection.ResponseDoc) *collection.ResponseD
 		out.Status = *in.Status
 	}
 	if in.Headers != nil {
-		out.Headers = *in.Headers
+		out.Headers = kvList(*in.Headers)
 	}
 	if in.ContentType != nil {
 		out.ContentType = *in.ContentType
@@ -832,12 +1014,12 @@ type CreateRequestInput struct {
 	Name        string                      `json:"name"`
 	Method      string                      `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL         string                      `json:"url,omitempty"`
-	Headers     []collection.KV             `json:"headers,omitempty"`
-	Params      []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；行可带 description（说明列）与 type（multipart 文件行）"`
+	Headers     []KVInput                   `json:"headers,omitempty" jsonschema:"请求头（name/value/description/enabled；enabled 不传 = 启用）"`
+	Params      []KVInput                   `json:"params,omitempty" jsonschema:"请求参数表；行可带 description（说明列）与 type（multipart 文件行）"`
 	BodyType    string                      `json:"bodyType,omitempty" jsonschema:"请求体类型的快捷写法（等价 body.type）；omitempty 保证只覆盖 type 不动 form/fields"`
 	BodyRaw     string                      `json:"bodyRaw,omitempty" jsonschema:"请求体原文的快捷写法（等价 body.raw）；omitempty 保证只覆盖 raw 不动 form/fields"`
 	Body        *BodyInput                  `json:"body,omitempty" jsonschema:"请求体完整形态（form/multipart 用 form 行数组）；按子项合并：不传的子项保留原值，显式空值才清空"`
-	BodyFields  []collection.BodyField      `json:"bodyFields,omitempty" jsonschema:"请求体字段表格（字段名/类型/必填/示例值/说明）；与 body 相互独立，传了只覆盖表格"`
+	BodyFields  []BodyFieldInput            `json:"bodyFields,omitempty" jsonschema:"请求体字段表格（字段名/类型/必填/示例值/说明；required 不传 = 非必填）；与 body 相互独立，传了只覆盖表格"`
 	Summary     string                      `json:"summary,omitempty" jsonschema:"API 概述（纯文本一句话）；与 body 相互独立"`
 	Settings    *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
 	RespDoc     *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档；按子项合并：可只写 params 字段表（补说明），sample/status/headers/type 不传不动；gRPC 请求不支持"`
@@ -954,13 +1136,22 @@ func (s *Service) ImportCollection(in ImportCollectionInput) (*collection.Import
 
 // ReadRequest 读接口原文（delete_request 的结构化输出要在删除前拿到 path/name）。
 func (s *Service) ReadRequest(project, uid string) (*collection.Request, error) {
+	return s.ReadRequestAt(project, uid, "")
+}
+
+// ReadRequestAt 同 ReadRequest，但支持按 path 定位（uid 与 path 二选一）。
+func (s *Service) ReadRequestAt(project, uid, reqPath string) (*collection.Request, error) {
 	a, _, err := s.resolve(project)
 	if err != nil {
 		return nil, err
 	}
-	r, err := a.ReadRequest(strings.TrimSpace(uid))
+	uid, err = s.resolveRequestUID(a, uid, reqPath)
 	if err != nil {
-		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w", uid, err))
+		return nil, err
+	}
+	r, err := a.ReadRequest(uid)
+	if err != nil {
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a)))
 	}
 	return r, nil
 }
@@ -1001,10 +1192,10 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 		draft.URL = in.URL
 	}
 	if len(in.Headers) > 0 {
-		draft.Headers = in.Headers
+		draft.Headers = kvList(in.Headers)
 	}
 	if len(in.Params) > 0 {
-		draft.Params = in.Params
+		draft.Params = kvList(in.Params)
 	}
 	if in.BodyType != "" || in.BodyRaw != "" {
 		// 快捷字段只改报文类型/原文：不再整份替换 Body，否则 form/fields/descs 会被顺手清掉。
@@ -1021,7 +1212,7 @@ func applyCreateFields(draft *collection.Request, in CreateRequestInput) error {
 	}
 	// 字段表格与概述：与 body 相互独立，各自只在显式传入时覆盖（body 覆盖不再连带清掉它们）
 	if in.BodyFields != nil {
-		draft.Body.Fields = in.BodyFields
+		draft.Body.Fields = fieldList(in.BodyFields)
 	}
 	if in.Summary != "" {
 		draft.Summary = in.Summary
@@ -1104,24 +1295,25 @@ func applyReplaces(text string, ops []ReplaceOp) (string, error) {
 // UpdateRequestInput update_request 的入参（指针字段 = 只改传了的）。
 type UpdateRequestInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string `json:"uid"`
+	UID     string `json:"uid,omitempty" jsonschema:"请求 uid；与 path 二选一"`
+	Path    string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml 或 api/users）；与 uid 二选一"`
 	// Section 节点守卫：限定本次调用只改某一个节点（见 validateSection）。
 	Section string `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
 	// DryRun 只校验参数与 ifMatch，不落盘、不移动目录
-	DryRun bool            `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验参数与 ifMatch），不落盘"`
-	Name   *string         `json:"name,omitempty"`
-	Method *string         `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
-	URL    *string         `json:"url,omitempty"`
-	Params []collection.KV `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动。与 paramsUpsert 互斥"`
-	// ParamsUpsert 按 name 合并参数行：存在则整行替换，不存在则追加 —— 「只加/改一行」不必先抄全表。
-	ParamsUpsert []collection.KV         `json:"paramsUpsert,omitempty" jsonschema:"按 name 合并参数行（同名整行替换，没有则追加）；与 params 互斥"`
-	Headers      []collection.KV         `json:"headers,omitempty"`
-	Body         *BodyInput              `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
-	BodyFields   *[]collection.BodyField `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖。与 bodyFieldsUpsert 互斥"`
-	// BodyFieldsUpsert 按字段名合并：存在则整行替换，不存在则追加。
-	BodyFieldsUpsert []collection.BodyField `json:"bodyFieldsUpsert,omitempty" jsonschema:"按字段名合并请求体字段表（同名整行替换，没有则追加）；与 bodyFields 互斥"`
-	// HeadersUpsert 按 header 名合并：存在则整行替换，不存在则追加。
-	HeadersUpsert []collection.KV             `json:"headersUpsert,omitempty" jsonschema:"按 header 名合并（同名整行替换，没有则追加）；与 headers 互斥"`
+	DryRun bool      `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验参数与 ifMatch），不落盘"`
+	Name   *string   `json:"name,omitempty"`
+	Method *string   `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
+	URL    *string   `json:"url,omitempty"`
+	Params []KVInput `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动。与 paramsUpsert 互斥"`
+	// ParamsUpsert 按 name 合并参数行：存在则只覆盖传了的子字段，不存在则追加 —— 「只加/改一行」不必先抄全表。
+	ParamsUpsert []KVInput         `json:"paramsUpsert,omitempty" jsonschema:"按 name 合并参数行（同名只覆盖传入的子字段，没有则追加）；与 params 互斥"`
+	Headers      []KVInput         `json:"headers,omitempty"`
+	Body         *BodyInput        `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
+	BodyFields   *[]BodyFieldInput `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖。与 bodyFieldsUpsert 互斥"`
+	// BodyFieldsUpsert 按字段名合并：存在则只覆盖传了的子字段，不存在则追加。
+	BodyFieldsUpsert []BodyFieldInput `json:"bodyFieldsUpsert,omitempty" jsonschema:"按字段名合并请求体字段表（同名只覆盖传入的子字段，没有则追加）；与 bodyFields 互斥"`
+	// HeadersUpsert 按 header 名合并：存在则只覆盖传了的子字段，不存在则追加。
+	HeadersUpsert []KVInput                   `json:"headersUpsert,omitempty" jsonschema:"按 header 名合并（同名只覆盖传入的子字段，没有则追加）；与 headers 互斥"`
 	Summary       *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
 	Settings      *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
 	RespDoc       *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
@@ -1249,9 +1441,13 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	if err != nil {
 		return nil, err
 	}
-	r, err := a.ReadRequest(strings.TrimSpace(in.UID))
+	uid, err := s.resolveRequestUID(a, in.UID, in.Path)
 	if err != nil {
-		return nil, fmt.Errorf("读取请求 %s 失败: %w", in.UID, err)
+		return nil, err
+	}
+	r, err := a.ReadRequest(uid)
+	if err != nil {
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a)))
 	}
 	// 局部替换先算：old 找不到就整单拒绝（此时还没写盘）
 	if len(in.Replaces) > 0 {
@@ -1312,7 +1508,7 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		if len(in.HeadersUpsert) > 0 {
 			return withInvalid(errors.New("headers 与 headersUpsert 互斥：整表覆盖用 headers，只加/改一行用 headersUpsert"))
 		}
-		r.Headers = in.Headers
+		r.Headers = kvList(in.Headers)
 	}
 	if len(in.HeadersUpsert) > 0 {
 		r.Headers = upsertKV(r.Headers, in.HeadersUpsert)
@@ -1321,7 +1517,7 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		if len(in.ParamsUpsert) > 0 {
 			return withInvalid(errors.New("params 与 paramsUpsert 互斥：整表覆盖用 params，只加/改一行用 paramsUpsert"))
 		}
-		r.Params = in.Params
+		r.Params = kvList(in.Params)
 	}
 	if len(in.ParamsUpsert) > 0 {
 		r.Params = upsertKV(r.Params, in.ParamsUpsert)
@@ -1337,7 +1533,7 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		if len(in.BodyFieldsUpsert) > 0 {
 			return withInvalid(errors.New("bodyFields 与 bodyFieldsUpsert 互斥：整表覆盖用 bodyFields，只加/改一行用 bodyFieldsUpsert"))
 		}
-		r.Body.Fields = *in.BodyFields
+		r.Body.Fields = fieldList(*in.BodyFields)
 	}
 	if len(in.BodyFieldsUpsert) > 0 {
 		r.Body.Fields = upsertFields(r.Body.Fields, in.BodyFieldsUpsert)
@@ -1363,46 +1559,75 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 	return nil
 }
 
-// upsertKV 按 Name 合并行：同名整行替换，没有则追加（保持原顺序，新行落在末尾）。
+// upsertKV 按 Name 合并行：同名**只覆盖传入的子字段**（nil = 保留原值），没有则追加。
 // 空 name 的行跳过 —— 新建请求自带一行空占位参数，不该被"追加"出更多空行。
-func upsertKV(rows, add []collection.KV) []collection.KV {
+func upsertKV(rows []collection.KV, add []KVInput) []collection.KV {
 	out := append([]collection.KV(nil), rows...)
 	for _, a := range add {
-		if strings.TrimSpace(a.Name) == "" {
+		name := strings.TrimSpace(a.Name)
+		if name == "" {
 			continue
 		}
-		replaced := false
+		idx := -1
 		for i := range out {
-			if out[i].Name == a.Name {
-				out[i] = a
-				replaced = true
+			if out[i].Name == name {
+				idx = i
 				break
 			}
 		}
-		if !replaced {
-			out = append(out, a)
+		if idx < 0 {
+			out = append(out, a.toKV())
+			continue
+		}
+		out[idx].Name = name
+		if a.Value != nil {
+			out[idx].Value = *a.Value
+		}
+		if a.Type != nil {
+			out[idx].Type = *a.Type
+		}
+		if a.Description != nil {
+			out[idx].Description = *a.Description
+		}
+		if a.Enabled != nil {
+			out[idx].Enabled = *a.Enabled
 		}
 	}
 	return out
 }
 
-// upsertFields 按字段名合并请求体字段表；语义与 upsertKV 一致。
-func upsertFields(rows, add []collection.BodyField) []collection.BodyField {
+// upsertFields 按字段名合并请求体字段表：同名只覆盖传入的子字段（nil = 保留），没有则追加。
+// 「只改这一行的说明」不会顺带清掉类型/示例值。
+func upsertFields(rows []collection.BodyField, add []BodyFieldInput) []collection.BodyField {
 	out := append([]collection.BodyField(nil), rows...)
 	for _, a := range add {
-		if strings.TrimSpace(a.Name) == "" {
+		name := strings.TrimSpace(a.Name)
+		if name == "" {
 			continue
 		}
-		replaced := false
+		idx := -1
 		for i := range out {
-			if out[i].Name == a.Name {
-				out[i] = a
-				replaced = true
+			if out[i].Name == name {
+				idx = i
 				break
 			}
 		}
-		if !replaced {
-			out = append(out, a)
+		if idx < 0 {
+			out = append(out, a.toField())
+			continue
+		}
+		out[idx].Name = name
+		if a.Type != nil {
+			out[idx].Type = *a.Type
+		}
+		if a.Required != nil {
+			out[idx].Required = *a.Required
+		}
+		if a.Example != nil {
+			out[idx].Example = *a.Example
+		}
+		if a.Description != nil {
+			out[idx].Description = *a.Description
 		}
 	}
 	return out
@@ -1489,14 +1714,22 @@ func (s *Service) hashOf(a ProjectApp, uid string) (string, error) {
 
 // DeleteRequest 移除请求（进 .trash，可恢复）。
 func (s *Service) DeleteRequest(project, uid, ifMatch string) error {
+	return s.DeleteRequestAt(project, uid, "", ifMatch)
+}
+
+// DeleteRequestAt 同 DeleteRequest，但支持按 path 定位（uid 与 path 二选一）。
+func (s *Service) DeleteRequestAt(project, uid, reqPath, ifMatch string) error {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}
-	uid = strings.TrimSpace(uid)
+	uid, err = s.resolveRequestUID(a, uid, reqPath)
+	if err != nil {
+		return err
+	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w", uid, err))
+		return withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a)))
 	}
 	if !hashPrefixMatch(a.FileHash(r.Path), ifMatch) {
 		return coded(CodeConflict, fmt.Errorf("请求 %s 已被他人修改（当前 path=%s），请重新读取后再删", uid, r.Path))

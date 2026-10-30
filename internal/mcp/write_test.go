@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"api-doc-go-client/internal/collection"
 )
 
 func boolPtr(b bool) *bool    { return &b }
@@ -23,7 +21,7 @@ func TestCreateRequestVariants(t *testing.T) {
 	// 1) 手填参数
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "ping", Method: "get", URL: "http://127.0.0.1/ping",
-		Headers: []collection.KV{{Name: "X-Test", Value: "1", Enabled: true}},
+		Headers: []KVInput{{Name: "X-Test", Value: strPtr("1"), Enabled: boolPtr(true)}},
 		Docs:    "探活",
 	})
 	if err != nil {

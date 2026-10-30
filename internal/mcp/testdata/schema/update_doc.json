@@ -29,6 +29,9 @@
         "anchor": {
           "type": "string"
         },
+        "occurrence": {
+          "type": "integer"
+        },
         "text": {
           "type": "string"
         }

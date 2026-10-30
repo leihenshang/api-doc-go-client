@@ -32,9 +32,9 @@ func TestCreateRequestWithBodyFormSettingsRespDoc(t *testing.T) {
 	root, svc := setup(t)
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "upload", Method: "POST", URL: "http://127.0.0.1/up",
-		Body: &BodyInput{Type: strPtr("form"), Form: &[]collection.KV{
-			{Name: "caption", Value: "hi", Enabled: true},
-			{Name: "file", Value: "/tmp/a.png", Enabled: true, Type: "file"},
+		Body: &BodyInput{Type: strPtr("form"), Form: &[]KVInput{
+			{Name: "caption", Value: strPtr("hi"), Enabled: boolPtr(true)},
+			{Name: "file", Value: strPtr("/tmp/a.png"), Enabled: boolPtr(true), Type: strPtr("file")},
 		}},
 		Settings: &collection.RequestSettings{TimeoutSec: 15},
 		RespDoc:  sampleRespDoc(),
@@ -75,7 +75,7 @@ func TestUpdateRequestParamsSettingsRespDoc(t *testing.T) {
 	_, svc := setup(t)
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Name: "list", Method: "GET", URL: "http://127.0.0.1/list",
-		Params: []collection.KV{{Name: "old", Value: "1", Enabled: true}},
+		Params: []KVInput{{Name: "old", Value: strPtr("1"), Enabled: boolPtr(true)}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestUpdateRequestParamsSettingsRespDoc(t *testing.T) {
 	// params 整表覆盖 + settings + respDoc 一次写入
 	up, err := svc.UpdateRequest(UpdateRequestInput{
 		Project: "demo", UID: r.UID,
-		Params:   []collection.KV{{Name: "page", Value: "1", Enabled: true, Description: "页码"}},
+		Params:   []KVInput{{Name: "page", Value: strPtr("1"), Enabled: boolPtr(true), Description: strPtr("页码")}},
 		Settings: &collection.RequestSettings{FollowRedirects: boolPtr(false)},
 		RespDoc:  sampleRespDoc(),
 	})
@@ -112,7 +112,7 @@ func TestUpdateRequestParamsSettingsRespDoc(t *testing.T) {
 	}
 
 	// 空数组 = 清空
-	up3, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, Params: []collection.KV{}})
+	up3, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, Params: []KVInput{}})
 	if err != nil {
 		t.Fatal(err)
 	}

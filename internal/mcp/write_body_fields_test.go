@@ -8,15 +8,13 @@ package mcp_test
 import (
 	. "api-doc-go-client/internal/mcp" //nolint:revive // 历史测试文件：沿用未加前缀的调用写法
 	"testing"
-
-	"api-doc-go-client/internal/collection"
 )
 
 // sampleBodyFields 表格样例（含 required=false 与空 example/description 的行）。
-func sampleBodyFields() []collection.BodyField {
-	return []collection.BodyField{
-		{Name: "uid", Type: "string", Required: true, Example: "u-42", Description: "用户ID"},
-		{Name: "page", Type: "integer"},
+func sampleBodyFields() []BodyFieldInput {
+	return []BodyFieldInput{
+		{Name: "uid", Type: strPtr("string"), Required: boolPtr(true), Example: strPtr("u-42"), Description: strPtr("用户ID")},
+		{Name: "page", Type: strPtr("integer")},
 	}
 }
 
@@ -105,7 +103,7 @@ func TestUpdateRequestBodyOverwriteKeepsFieldsAndSummary(t *testing.T) {
 	}
 
 	// 显式空数组才清空表格。
-	empty := []collection.BodyField{}
+	empty := []BodyFieldInput{}
 	cleared, err := svc.UpdateRequest(UpdateRequestInput{Project: "demo", UID: r.UID, BodyFields: &empty})
 	if err != nil {
 		t.Fatal(err)

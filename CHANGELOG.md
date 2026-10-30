@@ -18,6 +18,10 @@ prod:
 - 文档工具可按 `path` 定位：`get_doc` / `update_doc` / `delete_doc` 的 `uid` 与 `path` 二选一（`docs/guide.md` 或 `docs/guide` 都认），找不到时列出候选；`update_doc` 新增 `append`（末尾追加）与 `insertAfter`（在某段后插入，anchor 必须唯一）并加 `section=content|meta` 守卫，长文档不必整篇重传。
 - `update_request` 新增 `paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert`：按名合并（同名整行替换、没有则追加），「加一行 header / 补一个字段」不必先抄全表。
 - AI 可发现性：`get_request_detail` 的「相关文档条目」补 `uid`、`docs` 段补回写入口；`search_docs` 新增 `includeHash`；`list_tools` 末尾附「常见任务 → 工具」速查与被关闭的工具组提示；请求体有类型但字段表为空时给出提醒。
+- MCP 入参更宽容：`enabled` / `required` 不再是必填（不传分别按 true / false），「加一行 header / 补一个字段」不再需要编造这两个值；`paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert` 改为按字段合并（只改说明不会清掉类型、示例值）。
+- 请求也能按 `path` 定位：`get_request_detail` / `update_request` / `delete_request` 的 `uid` 与 `path` 二选一（`api/users.yml` 或 `api/users`），找不到时列出候选（请求与模块的 `[NOT_FOUND]` 都覆盖）。
+- `update_doc.insertAfter` 新增 `occurrence`：长文档里同一小标题出现多次时，可指定第 N 处精确插入（不传仍要求唯一，防误插）。
+- `update_requests` 精简 `items`（去掉批量场景极少用的 `respDoc` / `auth` / `settings`），失败条目新增稳定 `code` 字段；批量写的审计摘要记录 uid 列表，排查时能看出改了哪几条。
 
 ## 2026-10-29  0.1.4-dev
 
