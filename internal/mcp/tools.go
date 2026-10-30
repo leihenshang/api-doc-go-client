@@ -305,11 +305,21 @@ func (ts *toolSet) auditOne(req *mcp.CallToolRequest, meta ToolMeta, start time.
 		Client:      ts.clientHint,
 		Tool:        meta.Name,
 		Risk:        string(meta.Risk),
+		Write:       meta.Write,
+		NetEgress:   meta.NetEgress,
+		EnvWrite:    meta.EnvWrite,
 		Project:     project,
 		ArgsSummary: argsSummary,
 		ResultOK:    kind == mcpaudit.KindOK,
 		ResultKind:  string(kind),
 		DurationMs:  time.Since(start).Milliseconds(),
+	}
+	// 只有真正走过授权判定的调用才有「批准」语义：low 风险不询问，approved 保持 nil（= 未询问）。
+	if ts.authz != nil && meta.Risk != RiskLow {
+		approved := az.Decision != mcpauth.DecisionDeny
+		ev.Approved = &approved
+		ev.GrantedBy = az.GrantedBy
+		ev.RequestID = az.RequestID
 	}
 	if kind == mcpaudit.KindPanic {
 		ev.ResultSummary = "panic recovered"

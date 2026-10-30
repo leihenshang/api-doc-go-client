@@ -44,6 +44,7 @@ prod:
 - 新增 `TestToolBriefAndDescriptionBudget`：`Brief` ≤ 40 字且不重复、`Description` ≤ 120 字。
 - 索引库改用 WAL + `synchronous=NORMAL`（索引是派生数据，可从集合重建；集合文件仍由 `writeFileAtomic` 的 fsync 保证）：实测单条写操作 316 → 148 ms，5 条批量 1.4 s → 240 ms。
 - 新增 `TestDocsToolCountsMatchMeta`：手册/设计文档里的工具总数、结构化工具数、low/high 风险数必须与 `meta` 表一致（这几轮的数字漂移全靠人工核对，容易漏）。
+- 审计补全：事件新增 `write` / `netEgress` / `envWrite`（此前只能靠 `risk` 猜是写盘还是外发），并落 `approved` / `grantedBy` / `requestId`——未走授权判定的调用 `approved` 保持 `nil`（未询问），拒绝时记 `approved=false`。新增 `TestAuditCapabilityFlags`、`TestAuditApprovalFields`。
 
 ## 2026-10-29  0.1.4-dev
 

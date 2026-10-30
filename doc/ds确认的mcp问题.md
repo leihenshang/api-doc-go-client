@@ -178,6 +178,25 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | `method` 缺 `enum` | 未做 | SDK tag 不支持，需手写整份 InputSchema |
 | `tools/list` 余量 1.9% | 观察 | 68,642 / 70,000；下次加字段前需先决定方案 |
 
+## 9. 全工具实测发现（2026-10-30，独立实例）
+
+覆盖 75 项：项目/模块/API 写读改移删、批量、导入、文档全流程、环境、示例、网络。
+
+| # | 现象 | 判断 | 建议 |
+|---|---|---|---|
+| T1 | `create_request` 的 `folder` 不存在时**自动建模块**（`folder=nope` → 生成 `nope/x.yml`），但描述写「模块不存在会 `[NOT_FOUND]`」 | 契约与行为矛盾 | 改描述为「不存在会自动创建」，或加 `createMissingFolder?=false` 严格开关 |
+| T2 | `create_module` 的 `name: "api/user"` → `[INTERNAL] 名称含非法字符或为空`；实际要用 `parent:"api"` + `name:"user"` | 易用性 + 错误码错 | `name` 含 `/` 时自动拆分；错误文案点名 `parent`；错误码改 `[INVALID]` |
+| T3 | `update_doc` 移动分组要求目标目录已存在 → `[INTERNAL] 分组不存在: docs/sub`；而同族的 `create_doc folder` 会自动建 | 与 T1 相反的不一致 + 错误码错 | 统一策略（建议都自动建），错误码改 `[NOT_FOUND]` |
+| T4 | `update_doc` 的 `replaces` 未命中 → `[INTERNAL] replaces[0] 未匹配到 old 片段` | 错误码错（用户传错片段） | 改 `[INVALID]` |
+| T5 | 新集合自带 `dev` 环境（`host=http://127.0.0.1:8080`），`create_env("dev")` → `[CONFLICT]` | 描述未提，AI 会困惑 | `create_env` 描述补「新集合自带 dev 环境」 |
+| T6 | 批量/dryRun 头部只说「已更新 0/1 条」「将删除 0/1 条」，失败条数要往下翻 `failed[]` | 提示不够显眼 | 头部补「（1 条未通过，见 failed[]）」 |
+| T7 | 环境写入 161–195 ms，请求写入 18–43 ms | 观察（写两个文件 + 两次 fsync） | 可评估合并 `*.yml` 与 `*.secrets.yml` 的落盘次数 |
+| T8 | `create_project` 首次 583 ms（含索引初始化与 RebuildIndex） | 观察 | 可接受（一次性） |
+
+**已验证正常**：`ifMatch` 冲突、`confirmName` 逐条校验、`onConflict=suffix/overwrite`、`curl`、`copyFromUid`、`replaces/append/insertAfter`（含标题归一化）、`patch` 空数组清空、批量部分失败隔离、`section` 守卫、导入错误码、敏感值掩码、`send_request`。
+
+**审计补全（本轮已修）**：`Event` 增加 `write` / `netEgress` / `envWrite`，并落 `approved` / `grantedBy` / `requestId`；未走授权的调用 `approved` 保持 `nil`（= 未询问），不再靠 `risk` 猜。
+
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
 

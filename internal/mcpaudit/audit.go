@@ -51,13 +51,18 @@ const (
 
 // Event 一条审计记录（落盘与实时事件同一 schema）。
 type Event struct {
-	TS            string `json:"ts"`
-	TSMs          int64  `json:"tsMs"`
-	SessionID     string `json:"sessionId,omitempty"`
-	Transport     string `json:"transport,omitempty"`
-	Client        string `json:"client,omitempty"`
-	Tool          string `json:"tool"`
-	Risk          string `json:"risk"`
+	TS        string `json:"ts"`
+	TSMs      int64  `json:"tsMs"`
+	SessionID string `json:"sessionId,omitempty"`
+	Transport string `json:"transport,omitempty"`
+	Client    string `json:"client,omitempty"`
+	Tool      string `json:"tool"`
+	Risk      string `json:"risk"`
+	// Write / NetEgress / EnvWrite 是 meta 表里的能力标记：光看 risk 区分不出
+	// 「写盘」和「外发」，事后审计需要这三个布尔。
+	Write         bool   `json:"write"`
+	NetEgress     bool   `json:"netEgress,omitempty"`
+	EnvWrite      bool   `json:"envWrite,omitempty"`
 	Project       string `json:"project,omitempty"`
 	RequestID     string `json:"requestId,omitempty"`
 	Approved      *bool  `json:"approved,omitempty"`
