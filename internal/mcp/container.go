@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"api-doc-go-client/internal/index"
 )
 
 // RenameModule 改模块显示名（只改 folder.yml 的 info.name，目录/uid 不变）。
@@ -26,7 +28,7 @@ func (s *Service) RenameModule(project, path, name string) error {
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a)))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a, path)))
 	}
 	if err := a.RenameFolder(uid, name); err != nil {
 		return withInvalid(err)
@@ -46,7 +48,7 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 	}
 	uid, ok := a.FolderUIDByPath(path)
 	if !ok {
-		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a)))
+		return withNotFound(fmt.Errorf("模块 %q 不存在：%s", path, moduleCandidates(a, path)))
 	}
 	if dryRun {
 		return nil
@@ -64,29 +66,33 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 }
 
 // moduleCandidates 模块候选（前 8 个路径）：NOT_FOUND 时直接给清单，省掉一次 get_project_modules。
-func moduleCandidates(a ProjectApp) string {
+// 按与 query（调用方给的 path）的匹配强度排序：前缀/目录命中优先，其次包含。
+func moduleCandidates(a ProjectApp, query string) string {
 	const maxShown = 8
 	nodes, err := a.SearchIndex("", 0)
 	if err != nil {
 		return "用 get_project_modules 查看路径"
 	}
-	parts := make([]string, 0, maxShown)
-	total := 0
+	folders := make([]index.Node, 0, len(nodes))
 	for _, n := range nodes {
-		if n.Type != "folder" {
-			continue
-		}
-		total++
-		if len(parts) < maxShown {
-			parts = append(parts, n.Path)
+		if n.Type == "folder" {
+			folders = append(folders, n)
 		}
 	}
-	if total == 0 {
+	if len(folders) == 0 {
 		return "项目里还没有模块（可用 create_module 新建）"
 	}
+	rankNodes(folders, query)
+	parts := make([]string, 0, maxShown)
+	for i, n := range folders {
+		if i >= maxShown {
+			break
+		}
+		parts = append(parts, n.Path)
+	}
 	out := "候选：" + strings.Join(parts, "、")
-	if total > maxShown {
-		out += fmt.Sprintf(" 等 %d 个", total)
+	if len(folders) > maxShown {
+		out += fmt.Sprintf(" 等 %d 个", len(folders))
 	}
 	return out
 }

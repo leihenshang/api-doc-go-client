@@ -87,20 +87,22 @@ Claude Desktop 配置：
 | `search_requests` | low | 搜索（可跨项目，支持整词/字段限定/片段） | `query`、`project?`、`limit?`、`exactMatch?`、`fields?`、`includeHash?` |
 | `search_docs` | low | 搜文档条目正文（命中行号 + 片段） | `project?`、`pattern`、`exactMatch?`、`limit?`、`includeHash?` |
 | resource `apidoc://doc-template` | — | 接口说明（docs）的 Markdown 分节结构契约（原 `get_doc_template` 工具） | — |
+| resource `apidoc://error-codes` | — | 错误码表与处理建议 | — |
+| resource `apidoc://collection-format` | — | 集合结构契约（请求 YAML 段、body.fields 唯一真源、.trash） | — |
 | `list_docs` | low | 文档条目清单（名称/路径/字节数/hash；默认带 hash） | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` |
-| `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`）；`uid`/`path` 单篇、`uids` 批量；支持 `outline` 大纲与 `startLine`/`maxLines` 分段 | `project?`、`uid?` / `path?` / `uids?`、`startLine?`、`maxLines?`、`outline?` |
+| `get_doc` | low | 读文档正文（Markdown 原文 + hash，供 `update_doc.ifMatch`）；`uid`/`path` 单篇、`uids`/`paths` 批量；支持 `outline` 大纲与 `startLine`/`maxLines` 分段 | `project?`、`uid?` / `path?` / `uids?` / `paths?`、`startLine?`、`maxLines?`、`outline?` |
 | `list_envs` | low | 环境与变量（敏感值掩码 + hash） | `project?`、`query?` |
 | `send_request` | medium | 发送并可选保存示例（唯一网络外发工具，只读模式也注册） | `project?`、`uid` 或 `method`+`url`、`env?`、`saveExample?`、`includeBody?`、`maxBodyBytes?` |
 | `create_request` | high | 创建请求（手填 / cURL / 复制；可带完整 body/settings/respDoc） | `project?`、`name`、`folder?` + (`method`+`url`+…) / `curl` / `copyFromUid` |
 | `create_module` | high | 创建模块（支持嵌套） | `project?`、`name`、`parent?` |
 | `create_project` | high | 新建项目（目录 + manifest，只能在白名单内的可写目录里建） | `name`、`dirName?`、`root?`（留空 = 第一个可写目录） |
-| `update_request` | high | 局部修改（含 params/settings/respDoc）/ upsert 一行 / 移动模块 | `project?`、`uid`、各可选字段、`paramsUpsert?`/`headersUpsert?`/`bodyFieldsUpsert?`、`ifMatch?` |
-| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它；`failed[].code` 为稳定错误码） | `project?`、`items[]`（高频字段子集）、`dryRun?` |
+| `update_request` | high | 局部修改（含 params/settings/respDoc）/ `patch` 行级合并 / 移动模块 | `project?`、`uid?`/`path?`、各可选字段、`patch?{params,headers,bodyFields}`、`ifMatch?` |
+| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它；`failed[].index/code`） | `project?`、`items[]`（高频字段子集 + `patch`）、`dryRun?` |
 | `delete_request` | high | 移除请求（进 `.trash`）；`uid`/`path` 二选一 | `project?`、`uid?` / `path?`、`ifMatch?`、`confirmName?`、`dryRun?` |
-| `delete_requests` | high | 批量移除请求（1–10，每条强制 `ifMatch`） | `project?`、`items[]`、`dryRun?` |
+| `delete_requests` | high | 批量移除请求（1–10，每条强制 `ifMatch`；`confirm` 可整批二次确认） | `project?`、`confirm?`、`items[]`（uid 或 path）、`dryRun?` |
 | `import_collection` | high | 批量导入 Postman / OpenAPI / api-doc-go 集合正文 | `project?`、`format`、`text`、`parent?`、`dryRun?` |
 | `create_doc` | high | 新建文档；冲突默认报错（可 suffix/overwrite），支持 uid 幂等与 `fileName` | `project?`、`name`、`folder?`、`content?`、`uid?`、`onConflict?`、`fileName?` |
-| `update_doc` | high | 改正文（覆盖/替换/追加/按 occurrence 插入）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?{anchor,text,occurrence}`、`name?`、`folder?`、`section?`、`ifMatch?` |
+| `update_doc` | high | 改正文（覆盖/替换/追加/按 occurrence 或标题插入）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?{anchor,anchorHeading,text,occurrence}`、`name?`、`folder?`、`section?`、`ifMatch?` |
 | `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
 | `save_doc_image` | high | 保存图片（base64，PNG/JPEG/GIF/WebP，≤5MB，内容寻址去重）到项目 `assets/`，返回 `/doc-assets/<sha256>` | `project?`、`data`、`name?` |
 | `rename_module` | high | 改模块显示名（目录/uid 不变） | `project?`、`path`、`name` |

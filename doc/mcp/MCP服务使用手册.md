@@ -19,12 +19,12 @@
 | 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处）；`includeHash=true` 时可直接拿到 `update_doc.ifMatch` |
 | 查询 | `list_envs` | 环境与变量（**敏感值只回掩码**，每个环境带 `hash`）；`limit`/`offset` 分页 |
 | 查询 | `list_docs` / `get_doc` | 文档条目：列清单（分页 + `hash`）/ 读正文（`uid` 或 `path` 单篇、`uids` 批量 1–10 篇，支持分段/大纲） |
-| 查询 | resource `apidoc://doc-template` | 接口说明（docs）的 Markdown 分节结构契约（原 `get_doc_template` 工具已迁移为 MCP resource） |
+| 查询 | resource `apidoc://doc-template` / `apidoc://error-codes` / `apidoc://collection-format` | 接口说明模板 / 错误码表 / 集合结构契约（原 `get_doc_template` 工具已迁移为 resource） |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc；`uid` 幂等、`onConflict` 默认 error） |
 | 写 | `import_collection` | 批量导入：把 Postman / OpenAPI / api-doc-go 集合文件的**正文**一次导入成多条请求（省掉逐个 `create_request` 的往返）；`format` 必填，`parent` 指定落在哪个模块，`dryRun=true` 只解析并回报条数、不写盘 |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[FORBIDDEN]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
-| 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立；`paramsUpsert`/`headersUpsert`/`bodyFieldsUpsert` 按名合并）/ 移动模块（支持 `ifMatch` 冲突保护） |
+| 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立；`patch` 按名合并一行）/ 移动模块（支持 `ifMatch` 冲突保护） |
 | 写 | `update_requests` | 批量改 1–10 个接口（每条 `uid` + 要改的字段）；单条失败不影响其它，`failed[]` 带 `code` 与 `uid`；`dryRun` 只校验 |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
@@ -261,11 +261,11 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 `bodyFields` 显式传了才覆盖表格（空数组 = 清空）；`summary` 传空串即清空概述。
 `params` 整表覆盖（传空数组 = 清空）；`settings` 仅单请求级，不碰全局配置。
 
-**只加/改一行用 upsert（避免先抄全表）**：`paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert` 按 `name`
+**只加/改一行用 `patch`（避免先抄全表）**：`patch: {params?, headers?, bodyFields?}` 按 `name`
 （字段表按字段名）合并 —— 同名**只覆盖传入的子字段**、没有则追加；与对应的整表字段（`params` / `headers` / `bodyFields`）互斥。
 `enabled` 不传按 `true`、`required` 不传按 `false`，不必为了「加一行」编造这两个值。
-典型用法：`{"bodyFieldsUpsert":[{"name":"id","type":"string","description":"用户ID"}]}`；
-后续只想改说明再传 `{"name":"id","description":"新说明"}`，类型/必填/示例都保留。
+典型用法：`{"patch":{"bodyFields":[{"name":"id","type":"string","description":"用户ID"}]}}`；
+后续只想改说明再传 `{"patch":{"bodyFields":[{"name":"id","description":"新说明"}]}}`，类型/必填/示例都保留。
 
 **批量**：`update_requests` 传 `items: [{uid, ...同上字段}]`（1–10 条），逐条应用；
 单条失败只出现在 `failed[]`（含 `uid` 与原因），不影响其它条目；`dryRun=true` 只校验。
@@ -297,6 +297,10 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 ### 4.9 `delete_request`
 `project?` + `uid` / `path`（二选一）；`ifMatch`、`confirmName`、`dryRun` 可选。文件**移入集合的 `.trash/`**（带时间戳），不会真正删除。
 误删恢复：把文件从 `.trash/` 挪回原位并 `list_projects(refresh: true)`。
+
+### 4.9.1 `delete_requests`（批量）
+`project?` + `items`（1–10 条，每条 `uid` 或 `path` + **必填 `ifMatch`**）+ `confirm?`（填项目显示名/目录名，不一致则整批拒绝）+ `dryRun?`。
+`failed[]` 带 `index` / `uid` / `code` / `error`，单条失败不影响其它条。
 
 ### 4.10 环境变量工具（6 个）
 
@@ -330,7 +334,13 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 
 > 客户端第一次打开集合会自动建 `dev` 环境（含 `host=http://127.0.0.1:8080`），所以直接 `create_env("dev")` 会报已存在。
 
-### 4.11 resource `apidoc://doc-template`（接口说明模板）
+### 4.11 resource：`apidoc://doc-template` / `apidoc://error-codes` / `apidoc://collection-format`
+
+三个静态 resource（无参数、内容固定）：
+
+- `apidoc://doc-template`：接口说明模板（见下）
+- `apidoc://error-codes`：错误码表（`NOT_FOUND` / `CONFLICT` / `INVALID` … 及处理建议）
+- `apidoc://collection-format`：集合结构契约（请求文件 YAML 段、`body.fields` 唯一真源、`.trash` 语义）
 
 原 `get_doc_template` 工具已迁移为 MCP **resource**（无参数、内容固定的静态文本，不该占工具位与一次调用往返）。
 客户端支持 resources 时直接读 `apidoc://doc-template`；不支持时按其协议能力说明会拿不到。
@@ -355,9 +365,9 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
-| `get_doc` | `project?`、`uid?` / `path?` / `uids?`（三选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选），批量传 `uids`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
+| `get_doc` | `project?`、`uid?` / `path?` / `uids?` / `paths?`（单篇或批量二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选）；批量传 `uids` 或 `paths`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
-| `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一；同一片段出现多次时用 `occurrence=N` 指定第 N 处）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
+| `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一、`occurrence=N` 指定第 N 处；也可用 `anchorHeading="## 附录"` 插到该小节末尾）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
 > 集合**根目录**下的 `.md`（含 `README.md`）即使没有 frontmatter 也会作为文档条目出现在 `list_docs` 里：

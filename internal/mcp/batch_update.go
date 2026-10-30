@@ -28,14 +28,12 @@ type UpdateRequestItem struct {
 	Method *string `json:"method,omitempty"`
 	URL    *string `json:"url,omitempty"`
 
-	Params        []KVInput `json:"params,omitempty" jsonschema:"参数表整表覆盖；与 paramsUpsert 互斥"`
-	ParamsUpsert  []KVInput `json:"paramsUpsert,omitempty" jsonschema:"按 name 合并参数行（同名只覆盖传入的子字段）"`
-	Headers       []KVInput `json:"headers,omitempty" jsonschema:"请求头整表覆盖；与 headersUpsert 互斥"`
-	HeadersUpsert []KVInput `json:"headersUpsert,omitempty" jsonschema:"按 header 名合并（同名只覆盖传入的子字段）"`
+	Params  []KVInput   `json:"params,omitempty" jsonschema:"参数表整表覆盖；与 patch.params 互斥"`
+	Patch   *PatchInput `json:"patch,omitempty" jsonschema:"行级合并：{params, headers, bodyFields}；与对应的整表字段互斥"`
+	Headers []KVInput   `json:"headers,omitempty" jsonschema:"请求头整表覆盖；与 patch.headers 互斥"`
 
-	Body             *BodyInput        `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值"`
-	BodyFields       *[]BodyFieldInput `json:"bodyFields,omitempty" jsonschema:"字段表整表覆盖；与 bodyFieldsUpsert 互斥"`
-	BodyFieldsUpsert []BodyFieldInput  `json:"bodyFieldsUpsert,omitempty" jsonschema:"按字段名合并（同名只覆盖传入的子字段）"`
+	Body       *BodyInput        `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值"`
+	BodyFields *[]BodyFieldInput `json:"bodyFields,omitempty" jsonschema:"字段表整表覆盖；与 patch.bodyFields 互斥"`
 
 	Summary  *string     `json:"summary,omitempty"`
 	Docs     *string     `json:"docs,omitempty" jsonschema:"接口说明整篇覆盖；与 replaces 互斥"`
@@ -52,6 +50,7 @@ type UpdateRequestsInput struct {
 
 // BatchUpdateFailure 单条失败的明细。
 type BatchUpdateFailure struct {
+	Index int    `json:"index"` // 对应 items 里的下标（0 基）：同批重复 uid 时靠它定位
 	UID   string `json:"uid"`
 	Code  string `json:"code"`  // 稳定错误码（NOT_FOUND / CONFLICT / INVALID …），便于调用方分流
 	Error string `json:"error"` // 去掉 `[CODE] ` 前缀后的说明
@@ -67,20 +66,26 @@ func (s *Service) UpdateRequests(in UpdateRequestsInput) ([]string, []BatchUpdat
 		return nil, nil, withLimit(fmt.Errorf("items 一次最多 %d 条（本次 %d 条）：请分批调用", maxBatchUpdate, len(in.Items)))
 	}
 	// 先确认项目可写：项目级错误应整体失败，而不是逐条报同一个错。
-	if _, _, err := s.resolveWrite(in.Project); err != nil {
+	a, _, err := s.resolveWrite(in.Project)
+	if err != nil {
 		return nil, nil, err
+	}
+	// 批量开始刷新一次索引，逐条不再重复 resolve / 刷新。
+	if _, rerr := a.ReloadCollection(); rerr != nil {
+		return nil, nil, coded(CodeIO, rerr)
 	}
 	updated := make([]string, 0, len(in.Items))
 	failed := make([]BatchUpdateFailure, 0)
-	for _, it := range in.Items {
+	for i, it := range in.Items {
 		uid := strings.TrimSpace(it.UID)
 		if uid == "" {
-			failed = append(failed, BatchUpdateFailure{UID: "", Code: CodeInvalid, Error: "缺少 uid"})
+			failed = append(failed, BatchUpdateFailure{Index: i, Code: CodeInvalid, Error: "缺少 uid"})
 			continue
 		}
-		if _, err := s.UpdateRequest(itemToInput(in.Project, uid, it, in.DryRun)); err != nil {
+		if _, err := s.updateRequestWithApp(a, itemToInput(in.Project, uid, it, in.DryRun)); err != nil {
 			code := CodeOf(err)
 			failed = append(failed, BatchUpdateFailure{
+				Index: i,
 				UID:   uid,
 				Code:  code,
 				Error: strings.TrimPrefix(err.Error(), "["+code+"] "),
@@ -89,30 +94,32 @@ func (s *Service) UpdateRequests(in UpdateRequestsInput) ([]string, []BatchUpdat
 		}
 		updated = append(updated, uid)
 	}
+	// 末尾再刷一次：让后续读（list/get）看到本批结果；dryRun 没有写盘，不需要。
+	if !in.DryRun {
+		_, _ = a.ReloadCollection()
+	}
 	return updated, failed, nil
 }
 
 // itemToInput 把批量子项摊平成单条 UpdateRequestInput（字段一一对应）。
 func itemToInput(project, uid string, it UpdateRequestItem, dryRun bool) UpdateRequestInput {
 	return UpdateRequestInput{
-		Project:          project,
-		UID:              uid,
-		IfMatch:          it.IfMatch,
-		Section:          it.Section,
-		Name:             it.Name,
-		Method:           it.Method,
-		URL:              it.URL,
-		Params:           it.Params,
-		ParamsUpsert:     it.ParamsUpsert,
-		Headers:          it.Headers,
-		HeadersUpsert:    it.HeadersUpsert,
-		Body:             it.Body,
-		BodyFields:       it.BodyFields,
-		BodyFieldsUpsert: it.BodyFieldsUpsert,
-		Summary:          it.Summary,
-		Docs:             it.Docs,
-		Replaces:         it.Replaces,
-		Folder:           it.Folder,
-		DryRun:           dryRun,
+		Project:    project,
+		UID:        uid,
+		IfMatch:    it.IfMatch,
+		Section:    it.Section,
+		Name:       it.Name,
+		Method:     it.Method,
+		URL:        it.URL,
+		Params:     it.Params,
+		Patch:      it.Patch,
+		Headers:    it.Headers,
+		Body:       it.Body,
+		BodyFields: it.BodyFields,
+		Summary:    it.Summary,
+		Docs:       it.Docs,
+		Replaces:   it.Replaces,
+		Folder:     it.Folder,
+		DryRun:     dryRun,
 	}
 }

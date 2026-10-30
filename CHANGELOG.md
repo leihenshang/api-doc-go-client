@@ -22,6 +22,12 @@ prod:
 - 请求也能按 `path` 定位：`get_request_detail` / `update_request` / `delete_request` 的 `uid` 与 `path` 二选一（`api/users.yml` 或 `api/users`），找不到时列出候选（请求与模块的 `[NOT_FOUND]` 都覆盖）。
 - `update_doc.insertAfter` 新增 `occurrence`：长文档里同一小标题出现多次时，可指定第 N 处精确插入（不传仍要求唯一，防误插）。
 - `update_requests` 精简 `items`（去掉批量场景极少用的 `respDoc` / `auth` / `settings`），失败条目新增稳定 `code` 字段；批量写的审计摘要记录 uid 列表，排查时能看出改了哪几条。
+- MCP 入参进一步收敛：`update_request` 的三个 `*Upsert` 字段合并为 `patch: {params, headers, bodyFields}`（行级合并语义不变，与整表字段互斥），`update_requests.items[]` 同步支持 `patch`。
+- 批量与路径一致性：`delete_requests` 支持 `path` 与整批 `confirm`，失败条目带 `index`/`code`；`get_doc` 批量新增 `paths`（与 `uids` 二选一）。
+- 长文档插入：`update_doc.insertAfter` 新增 `anchorHeading`，按 Markdown 标题定位到该小节末尾（下一个同级或更高级标题之前）。
+- 候选清单按相关度排序：`[NOT_FOUND]` 附带的请求/模块候选优先展示前缀或目录命中的项。
+- 新增两个静态 resource：`apidoc://error-codes`（错误码表）、`apidoc://collection-format`（集合结构契约）；`list_tools` 的速查同步提示。
+- 批量更新共享一次项目解析，并在开始/结束各刷新一次索引（减少逐条的重复 resolve）。
 
 ## 2026-10-29  0.1.4-dev
 

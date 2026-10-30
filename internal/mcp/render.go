@@ -102,10 +102,13 @@ func taskCheatSheet(readOnly bool, groups []string, filter string) string {
 	var sb strings.Builder
 	sb.WriteString("\n常见任务 → 工具：\n")
 	sb.WriteString("- 改接口字段/移动 → update_request（批量用 update_requests）\n")
+	sb.WriteString("- 只加/改一行参数、头、字段表 → update_request.patch（同名只覆盖传入的子字段）\n")
 	sb.WriteString("- 补/改接口说明 → update_request(section=docs)：整篇覆盖传 docs，局部改传 replaces\n")
 	sb.WriteString("- 改文档正文 → update_doc：整篇 content / 局部 replaces / 追加 append / 指定位置 insertAfter\n")
-	sb.WriteString("- 按路径读文档 → get_doc(path=docs/guide.md)；批量导入 → import_collection；发请求 → send_request\n")
-	sb.WriteString("接口说明模板：resource apidoc://doc-template（客户端支持 resources 时读取）。\n")
+	sb.WriteString("- 按路径读写 → get_request_detail(path=api/users.yml)、get_doc(path=docs/guide.md)\n")
+	sb.WriteString("- 批量导入 → import_collection；发请求 → send_request\n")
+	sb.WriteString("静态内容（客户端支持 resources 时读取）：apidoc://doc-template（接口说明模板）、" +
+		"apidoc://error-codes（错误码表）、apidoc://collection-format（集合结构契约）。\n")
 	if readOnly {
 		sb.WriteString("当前是只读模式：写工具未注册（在设置里关闭「只读模式」并保存后重启服务）。\n")
 	}

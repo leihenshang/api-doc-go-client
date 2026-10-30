@@ -132,6 +132,22 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | upsert 是整行替换 | 已完成 | 三个 upsert 改为**行内字段级合并**（只改说明不清类型/示例） |
 | 请求只能按 uid 定位 | 已完成 | `get_request_detail` / `update_request` / `delete_request` 支持 `path`；`[NOT_FOUND]` 附请求/模块候选；批量失败带 `code` |
 
+### 第四轮：批量、路径与静态内容（同日完成）
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 批量更新逐条重复 resolve | 已完成 | 共享一次 `resolveWrite` + 首尾各刷新一次索引 |
+| `update_request` 顶层字段过多 | 已完成 | 三个 `*Upsert` 合并为 `patch{params,headers,bodyFields}`（字节数未降，见下） |
+| `delete_requests` 缺确认与路径 | 已完成 | `confirm` 整批校验 + `items[].path` + `failed[].index/code` |
+| 候选按索引顺序 | 已完成 | `rankNodes` 按前缀/包含排序 |
+| `failed[]` 缺下标 | 已完成 | `index`（0 基） |
+| 只能按子串锚定插入 | 已完成 | `insertAfter.anchorHeading`（按标题定位小节末尾） |
+| 批量文档只认 uid | 已完成 | `get_doc.paths`（与 `uids` 二选一） |
+| resource 只有模板 | 已完成 | 新增 `apidoc://error-codes`、`apidoc://collection-format` |
+
+> 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
+> schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
+
 ## 6. 处理顺序
 
 1. 修 `rename/delete_project` 的必填矛盾（唯一可能「按描述用就出错」的点）；

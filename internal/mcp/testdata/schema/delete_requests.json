@@ -1,5 +1,8 @@
 {
   "properties": {
+    "confirm": {
+      "type": "string"
+    },
     "dryRun": {
       "type": "boolean"
     },
@@ -9,12 +12,14 @@
           "ifMatch": {
             "type": "string"
           },
+          "path": {
+            "type": "string"
+          },
           "uid": {
             "type": "string"
           }
         },
         "required": [
-          "uid",
           "ifMatch"
         ],
         "type": "object"

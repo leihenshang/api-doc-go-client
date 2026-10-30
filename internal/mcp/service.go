@@ -684,7 +684,7 @@ func (s *Service) GetRequestDetailAt(project, uid, reqPath string, opts DetailOp
 	r, err := a.ReadRequest(uid)
 	if err != nil {
 		// 找不到时附候选：AI 常拿「用户说的接口名/路径」，直接给清单比让它再搜一次更省事。
-		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a)))
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a, reqPath)))
 	}
 	hash, _ := s.hashOf(a, r.UID)
 	d := &RequestDetail{
@@ -795,7 +795,7 @@ func (s *Service) resolveRequestUID(a ProjectApp, uid, reqPath string) (string, 
 	case 1:
 		return hit[0].UID, nil
 	case 0:
-		return "", withNotFound(fmt.Errorf("找不到请求 %q：%s", p, requestCandidates(a)))
+		return "", withNotFound(fmt.Errorf("找不到请求 %q：%s", p, requestCandidates(a, p)))
 	default:
 		names := make([]string, 0, len(hit))
 		for _, n := range hit {
@@ -806,31 +806,55 @@ func (s *Service) resolveRequestUID(a ProjectApp, uid, reqPath string) (string, 
 }
 
 // requestCandidates 项目内请求候选（前 5 个：方法 + 名称 + 路径 + uid）。
-func requestCandidates(a ProjectApp) string {
+// 按与 query（调用方给的 path）的匹配强度排序：前缀/目录命中优先，其次包含，最后保持原顺序。
+func requestCandidates(a ProjectApp, query string) string {
 	const maxShown = 5
 	nodes, err := a.SearchIndex("", 0)
 	if err != nil {
 		return "（候选清单读取失败，请用 search_requests 查找）"
 	}
-	parts := make([]string, 0, maxShown)
-	total := 0
+	reqs := make([]index.Node, 0, len(nodes))
 	for _, n := range nodes {
-		if n.Type != "request" {
-			continue
-		}
-		total++
-		if len(parts) < maxShown {
-			parts = append(parts, fmt.Sprintf("%s %s（%s，uid=%s）", n.Method, n.Title, n.Path, n.UID))
+		if n.Type == "request" {
+			reqs = append(reqs, n)
 		}
 	}
-	if total == 0 {
+	if len(reqs) == 0 {
 		return "项目里还没有请求（可用 create_request 新建）"
 	}
+	rankNodes(reqs, query)
+	parts := make([]string, 0, maxShown)
+	for i, n := range reqs {
+		if i >= maxShown {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %s（%s，uid=%s）", n.Method, n.Title, n.Path, n.UID))
+	}
 	out := "候选：" + strings.Join(parts, "、")
-	if total > maxShown {
-		out += fmt.Sprintf(" 等 %d 个", total)
+	if len(reqs) > maxShown {
+		out += fmt.Sprintf(" 等 %d 个", len(reqs))
 	}
 	return out
+}
+
+// rankNodes 按路径与 query 的匹配强度做稳定排序（原地）：目录/前缀命中优先，其次包含。
+func rankNodes(nodes []index.Node, query string) {
+	q := strings.ToLower(strings.TrimSpace(filepath.ToSlash(query)))
+	if q == "" {
+		return
+	}
+	score := func(p string) int {
+		lp := strings.ToLower(filepath.ToSlash(p))
+		switch {
+		case strings.HasPrefix(lp, q), strings.Contains(lp, "/"+q):
+			return 2
+		case strings.Contains(lp, q):
+			return 1
+		default:
+			return 0
+		}
+	}
+	sort.SliceStable(nodes, func(i, j int) bool { return score(nodes[i].Path) > score(nodes[j].Path) })
 }
 
 // KVInput 参数 / 表单 / 头行的 MCP 入参（不直接复用 collection.KV）。
@@ -925,6 +949,14 @@ func fieldList(in []BodyFieldInput) []collection.BodyField {
 		out = append(out, f.toField())
 	}
 	return out
+}
+
+// PatchInput 行级合并入参（update_request.patch / update_requests.items[].patch）。
+// 同名只覆盖传入的子字段，没有则追加；与对应的整表字段互斥。
+type PatchInput struct {
+	Params     []KVInput        `json:"params,omitempty" jsonschema:"按 name 合并参数行（同名只覆盖传入的子字段，没有则追加）"`
+	Headers    []KVInput        `json:"headers,omitempty" jsonschema:"按 header 名合并（同名只覆盖传入的子字段，没有则追加）"`
+	BodyFields []BodyFieldInput `json:"bodyFields,omitempty" jsonschema:"按字段名合并（同名只覆盖传入的子字段，没有则追加）"`
 }
 
 // BodyInput 请求体的**局部更新**入参（create_request / update_request 专用）。
@@ -1151,7 +1183,7 @@ func (s *Service) ReadRequestAt(project, uid, reqPath string) (*collection.Reque
 	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a)))
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a, reqPath)))
 	}
 	return r, nil
 }
@@ -1304,21 +1336,17 @@ type UpdateRequestInput struct {
 	Name   *string   `json:"name,omitempty"`
 	Method *string   `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
 	URL    *string   `json:"url,omitempty"`
-	Params []KVInput `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动。与 paramsUpsert 互斥"`
-	// ParamsUpsert 按 name 合并参数行：存在则只覆盖传了的子字段，不存在则追加 —— 「只加/改一行」不必先抄全表。
-	ParamsUpsert []KVInput         `json:"paramsUpsert,omitempty" jsonschema:"按 name 合并参数行（同名只覆盖传入的子字段，没有则追加）；与 params 互斥"`
-	Headers      []KVInput         `json:"headers,omitempty"`
-	Body         *BodyInput        `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
-	BodyFields   *[]BodyFieldInput `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖。与 bodyFieldsUpsert 互斥"`
-	// BodyFieldsUpsert 按字段名合并：存在则只覆盖传了的子字段，不存在则追加。
-	BodyFieldsUpsert []BodyFieldInput `json:"bodyFieldsUpsert,omitempty" jsonschema:"按字段名合并请求体字段表（同名只覆盖传入的子字段，没有则追加）；与 bodyFields 互斥"`
-	// HeadersUpsert 按 header 名合并：存在则只覆盖传了的子字段，不存在则追加。
-	HeadersUpsert []KVInput                   `json:"headersUpsert,omitempty" jsonschema:"按 header 名合并（同名只覆盖传入的子字段，没有则追加）；与 headers 互斥"`
-	Summary       *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
-	Settings      *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc       *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
-	Auth          *collection.Auth            `json:"auth,omitempty"`
-	Docs          *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
+	Params []KVInput `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动。与 patch.params 互斥"`
+	// Patch 行级合并：只加/改一行时用它，不必先抄全表；与对应的整表字段互斥。
+	Patch      *PatchInput                 `json:"patch,omitempty" jsonschema:"行级合并：{params, headers, bodyFields}，同名只覆盖传入的子字段、没有则追加；与对应的整表字段互斥"`
+	Headers    []KVInput                   `json:"headers,omitempty" jsonschema:"请求头整表覆盖；与 patch.headers 互斥"`
+	Body       *BodyInput                  `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
+	BodyFields *[]BodyFieldInput           `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖。与 patch.bodyFields 互斥"`
+	Summary    *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
+	Settings   *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
+	RespDoc    *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
+	Auth       *collection.Auth            `json:"auth,omitempty"`
+	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	// Replaces 接口说明的局部替换：与 docs 互斥；old 找不到即整单拒绝（不落盘）。
 	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"接口说明的局部替换：[{old,new,replaceAll}]，与 docs 互斥；任一 old 找不到则整单拒绝、不落盘"`
 	Folder   *string     `json:"folder,omitempty" jsonschema:"移动请求到别的模块（相对集合根，如 api/user；传空串 = 移到项目根）；模块不存在会 [NOT_FOUND]。这是把请求挪到其它目录的唯一入口，不需要删了重建"` // 移动到别的模块
@@ -1352,23 +1380,17 @@ func validateSection(section string, in UpdateRequestInput) error {
 	if in.Params != nil {
 		present = append(present, "params")
 	}
-	if len(in.ParamsUpsert) > 0 {
-		present = append(present, "paramsUpsert")
+	if in.Patch != nil {
+		present = append(present, "patch")
 	}
 	if in.Headers != nil {
 		present = append(present, "headers")
-	}
-	if len(in.HeadersUpsert) > 0 {
-		present = append(present, "headersUpsert")
 	}
 	if in.Body != nil {
 		present = append(present, "body")
 	}
 	if in.BodyFields != nil {
 		present = append(present, "bodyFields")
-	}
-	if len(in.BodyFieldsUpsert) > 0 {
-		present = append(present, "bodyFieldsUpsert")
 	}
 	if in.Summary != nil {
 		present = append(present, "summary")
@@ -1394,8 +1416,8 @@ func validateSection(section string, in UpdateRequestInput) error {
 	var allowed []string
 	switch sec {
 	case sectionRequest:
-		allowed = []string{"name", "method", "url", "params", "paramsUpsert", "headers", "headersUpsert",
-			"body", "bodyFields", "bodyFieldsUpsert", "summary", "auth", "settings", "folder"}
+		allowed = []string{"name", "method", "url", "params", "patch", "headers",
+			"body", "bodyFields", "summary", "auth", "settings", "folder"}
 	case sectionResponse:
 		allowed = []string{"respDoc"}
 	case sectionDocs:
@@ -1422,6 +1444,18 @@ func validateSection(section string, in UpdateRequestInput) error {
 
 // UpdateRequest 局部更新；带冲突检测（磁盘被外部改过就拒写）。
 func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, error) {
+	a, _, err := s.resolveWrite(in.Project)
+	if err != nil {
+		return nil, err
+	}
+	return s.updateRequestWithApp(a, in)
+}
+
+// updateRequestWithApp 在已解析的项目实例上执行单条更新。
+//
+// 批量更新复用同一个 ProjectApp：resolveWrite 会做项目查找与加锁，逐条调用等于重复付出；
+// 批量入口自己负责开始/结束时各刷新一次索引。
+func (s *Service) updateRequestWithApp(a ProjectApp, in UpdateRequestInput) (*collection.Request, error) {
 	if in.Method != nil {
 		m, merr := normalizeMethod(*in.Method)
 		if merr != nil {
@@ -1437,17 +1471,13 @@ func (s *Service) UpdateRequest(in UpdateRequestInput) (*collection.Request, err
 	if len(in.Replaces) > 0 && in.Docs != nil {
 		return nil, withInvalid(errors.New("docs 与 replaces 互斥：整篇覆盖用 docs，局部替换用 replaces（不要同时传）"))
 	}
-	a, _, err := s.resolveWrite(in.Project)
-	if err != nil {
-		return nil, err
-	}
 	uid, err := s.resolveRequestUID(a, in.UID, in.Path)
 	if err != nil {
 		return nil, err
 	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a)))
+		return nil, withNotFound(fmt.Errorf("读取请求 %s 失败: %w；%s", uid, err, requestCandidates(a, in.Path)))
 	}
 	// 局部替换先算：old 找不到就整单拒绝（此时还没写盘）
 	if len(in.Replaces) > 0 {
@@ -1505,22 +1535,16 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		r.URL = strings.TrimSpace(*in.URL)
 	}
 	if in.Headers != nil {
-		if len(in.HeadersUpsert) > 0 {
-			return withInvalid(errors.New("headers 与 headersUpsert 互斥：整表覆盖用 headers，只加/改一行用 headersUpsert"))
+		if in.Patch != nil && len(in.Patch.Headers) > 0 {
+			return withInvalid(errors.New("headers 与 patch.headers 互斥：整表覆盖用 headers，只加/改一行用 patch"))
 		}
 		r.Headers = kvList(in.Headers)
 	}
-	if len(in.HeadersUpsert) > 0 {
-		r.Headers = upsertKV(r.Headers, in.HeadersUpsert)
-	}
 	if in.Params != nil {
-		if len(in.ParamsUpsert) > 0 {
-			return withInvalid(errors.New("params 与 paramsUpsert 互斥：整表覆盖用 params，只加/改一行用 paramsUpsert"))
+		if in.Patch != nil && len(in.Patch.Params) > 0 {
+			return withInvalid(errors.New("params 与 patch.params 互斥：整表覆盖用 params，只加/改一行用 patch"))
 		}
 		r.Params = kvList(in.Params)
-	}
-	if len(in.ParamsUpsert) > 0 {
-		r.Params = upsertKV(r.Params, in.ParamsUpsert)
 	}
 	if in.Body != nil {
 		// 按子项合并：nil = 保留原值，显式空（"" / [] / {}）= 清空。
@@ -1530,13 +1554,22 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 	}
 	// 字段表格单独覆盖：显式传入（含空数组=清空）才动，优先级高于 body.fields
 	if in.BodyFields != nil {
-		if len(in.BodyFieldsUpsert) > 0 {
-			return withInvalid(errors.New("bodyFields 与 bodyFieldsUpsert 互斥：整表覆盖用 bodyFields，只加/改一行用 bodyFieldsUpsert"))
+		if in.Patch != nil && len(in.Patch.BodyFields) > 0 {
+			return withInvalid(errors.New("bodyFields 与 patch.bodyFields 互斥：整表覆盖用 bodyFields，只加/改一行用 patch"))
 		}
 		r.Body.Fields = fieldList(*in.BodyFields)
 	}
-	if len(in.BodyFieldsUpsert) > 0 {
-		r.Body.Fields = upsertFields(r.Body.Fields, in.BodyFieldsUpsert)
+	// 行级合并：同名只覆盖传入的子字段，没有则追加。
+	if in.Patch != nil {
+		if len(in.Patch.Headers) > 0 {
+			r.Headers = upsertKV(r.Headers, in.Patch.Headers)
+		}
+		if len(in.Patch.Params) > 0 {
+			r.Params = upsertKV(r.Params, in.Patch.Params)
+		}
+		if len(in.Patch.BodyFields) > 0 {
+			r.Body.Fields = upsertFields(r.Body.Fields, in.Patch.BodyFields)
+		}
 	}
 	if in.Summary != nil {
 		r.Summary = *in.Summary
@@ -1729,7 +1762,7 @@ func (s *Service) DeleteRequestAt(project, uid, reqPath, ifMatch string) error {
 	}
 	r, err := a.ReadRequest(uid)
 	if err != nil {
-		return withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a)))
+		return withNotFound(fmt.Errorf("读取请求 %s 失败（用 search_requests 查可用 uid）: %w；%s", uid, err, requestCandidates(a, reqPath)))
 	}
 	if !hashPrefixMatch(a.FileHash(r.Path), ifMatch) {
 		return coded(CodeConflict, fmt.Errorf("请求 %s 已被他人修改（当前 path=%s），请重新读取后再删", uid, r.Path))
@@ -1757,48 +1790,66 @@ func normalizeMethod(m string) (string, error) {
 
 // DeleteRequestItem 批量删除的一条：uid + 必填 ifMatch（防误删）。
 type DeleteRequestItem struct {
-	UID     string `json:"uid"`
-	IfMatch string `json:"ifMatch"`
+	UID     string `json:"uid,omitempty"`  // 与 Path 二选一
+	Path    string `json:"path,omitempty"` // 请求文件路径（相对集合根）
+	IfMatch string `json:"ifMatch"`        // 必填：该请求当前 hash
 }
 
 // DeleteRequestFailure 单条失败（不影响其它条目）。
 type DeleteRequestFailure struct {
+	Index int    `json:"index"`
 	UID   string `json:"uid"`
+	Code  string `json:"code"`
 	Error string `json:"error"`
 }
 
 // DeleteRequests 批量删除（每条强制 ifMatch；dryRun 只校验不落盘）。
-func (s *Service) DeleteRequests(project string, items []DeleteRequestItem, dryRun bool) ([]string, []DeleteRequestFailure, error) {
+// confirm 非空时必须等于项目显示名 / 相对路径 / 目录名：整批删除比单条危险，给调用方一次显式确认点。
+func (s *Service) DeleteRequests(project, confirm string, items []DeleteRequestItem, dryRun bool) ([]string, []DeleteRequestFailure, error) {
 	if len(items) == 0 {
-		return nil, nil, withInvalid(errors.New("items 不能为空：每条给 {uid, ifMatch}（ifMatch 从 search_requests 的 results[].hash 取）"))
+		return nil, nil, withInvalid(errors.New("items 不能为空：每条给 {uid 或 path, ifMatch}（ifMatch 从 search_requests 的 results[].hash 取）"))
 	}
 	if len(items) > maxBatchDocs {
 		return nil, nil, withLimit(fmt.Errorf("items 一次最多 %d 条（本次 %d 条）：请分批调用", maxBatchDocs, len(items)))
 	}
-	a, _, err := s.resolveWrite(project)
+	a, e, err := s.resolveWrite(project)
 	if err != nil {
 		return nil, nil, err
 	}
+	if confirm = strings.TrimSpace(confirm); confirm != "" &&
+		confirm != e.Name && confirm != e.Path && confirm != filepath.Base(e.Dir) {
+		return nil, nil, coded(CodeConflict, fmt.Errorf("confirm 与项目名不一致（当前项目是 %q / %s），整批未删除", e.Name, e.Path))
+	}
 	var deleted []string
 	var failed []DeleteRequestFailure
-	for _, it := range items {
-		uid := strings.TrimSpace(it.UID)
-		if uid == "" || strings.TrimSpace(it.IfMatch) == "" {
-			failed = append(failed, DeleteRequestFailure{UID: uid, Error: "[INVALID] 每条都必须给 uid 与 ifMatch"})
+	for i, it := range items {
+		uid, uerr := s.resolveRequestUID(a, it.UID, it.Path)
+		if uerr != nil {
+			code := CodeOf(uerr)
+			failed = append(failed, DeleteRequestFailure{
+				Index: i, UID: strings.TrimSpace(it.UID), Code: code,
+				Error: strings.TrimPrefix(uerr.Error(), "["+code+"] "),
+			})
+			continue
+		}
+		if strings.TrimSpace(it.IfMatch) == "" {
+			failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeInvalid, Error: "每条都必须给 ifMatch（从 search_requests 的 results[].hash 取）"})
 			continue
 		}
 		r, rerr := a.ReadRequest(uid)
 		if rerr != nil {
-			failed = append(failed, DeleteRequestFailure{UID: uid, Error: withNotFound(fmt.Errorf("读取请求 %s 失败: %w", uid, rerr)).Error()})
+			failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeNotFound,
+				Error: fmt.Sprintf("读取请求 %s 失败: %v", uid, rerr)})
 			continue
 		}
 		if !hashPrefixMatch(a.FileHash(r.Path), it.IfMatch) {
-			failed = append(failed, DeleteRequestFailure{UID: uid, Error: fmt.Sprintf("[CONFLICT] 请求 %s 已被他人修改，本次未删除", uid)})
+			failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeConflict,
+				Error: fmt.Sprintf("请求 %s 已被他人修改，本次未删除", uid)})
 			continue
 		}
 		if !dryRun {
 			if derr := a.DeleteRequest(uid); derr != nil {
-				failed = append(failed, DeleteRequestFailure{UID: uid, Error: coded(CodeIO, derr).Error()})
+				failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeIO, Error: derr.Error()})
 				continue
 			}
 		}

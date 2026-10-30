@@ -170,6 +170,7 @@ func registerToolsWithOpts(server *mcp.Server, svc *Service, readOnly bool, grou
 		ts.registerSendTool(server, false)
 	}
 	ts.registerDocTemplateResource(server)
+	ts.registerStaticResources(server)
 	return ts.assertRegistered(server, readOnly)
 }
 
@@ -662,6 +663,93 @@ func (ts *toolSet) registerDocTemplateResource(server *mcp.Server) {
 	})
 }
 
+// errorCodesURI 错误码表的 resource 地址。
+const errorCodesURI = "apidoc://error-codes"
+
+// collectionFormatURI 集合结构契约的 resource 地址。
+const collectionFormatURI = "apidoc://collection-format"
+
+// registerStaticResources 注册静态说明类 resource：错误码表与集合结构契约。
+//
+// 这些内容无参数、很少变，放在 resource 里比占一个工具位更合适 ——
+// tools/list 的每个工具都会在会话开始时被拉一次，是固定成本。
+func (ts *toolSet) registerStaticResources(server *mcp.Server) {
+	server.AddResource(&mcp.Resource{
+		URI: errorCodesURI, Name: "error_codes", Title: "MCP 错误码表", MIMEType: "text/markdown",
+		Description: "工具失败时的 [CODE] 含义与处理建议（NOT_FOUND/CONFLICT/INVALID/READONLY/FORBIDDEN/LIMIT/IO/INTERNAL）。",
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return staticResource(req, errorCodesURI, errorCodeTable()), nil
+	})
+	server.AddResource(&mcp.Resource{
+		URI: collectionFormatURI, Name: "collection_format", Title: "集合结构契约", MIMEType: "text/markdown",
+		Description: "集合目录结构、请求文件 YAML 段、body.fields 为唯一真源、.trash 语义。",
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return staticResource(req, collectionFormatURI, collectionFormatDoc()), nil
+	})
+}
+
+// staticResource 构造 resource 读取结果（请求里没带 URI 时用 fallback）。
+func staticResource(req *mcp.ReadResourceRequest, fallback, text string) *mcp.ReadResourceResult {
+	uri := fallback
+	if req != nil && req.Params != nil && req.Params.URI != "" {
+		uri = req.Params.URI
+	}
+	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
+		URI: uri, MIMEType: "text/markdown", Text: text,
+	}}}
+}
+
+// errorCodeTable 错误码表（resource 正文）。
+func errorCodeTable() string {
+	return `# MCP 错误码
+
+失败统一返回 ` + "`失败: [CODE] 说明`" + `（工具级 isError，不是协议错误）。
+
+| 码 | 含义 | 典型触发 |
+|---|---|---|
+| NOT_FOUND | 项目/接口/文档/示例/变量不存在 | uid 拼错、path 不匹配 |
+| CONFLICT | 同名冲突或 ifMatch 不匹配 | 目标已存在、读后被外部改过 |
+| INVALID | 参数缺失或取值非法 | 缺必填、section 越界、method 非法 |
+| READONLY | 工作目录是只读授权 | 写工具落在只读目录 |
+| FORBIDDEN | 目录不在白名单或无写权限 | 未授权的工作目录 |
+| LIMIT | 批量或分页超限 | uids/items 超过 10 |
+| IO | 读写磁盘失败 | 权限、磁盘满 |
+| INTERNAL | 其它内部错误 | 未分类错误（panic 已 recover） |
+
+处理建议：NOT_FOUND 先看报错附带的候选；CONFLICT 重新读取拿新 hash 再重试；
+INVALID 按报错点名的字段改（不要整单重试）。
+`
+}
+
+// collectionFormatDoc 集合结构契约（resource 正文）。
+func collectionFormatDoc() string {
+	return `# 集合（项目）结构契约
+
+一个项目 = 一个含 ` + "`opencollection.yml`" + ` 的目录。
+请求是 YAML 文件（` + "`<name>.yml`" + `），文档条目是独立的 ` + "`.md`" + `。
+
+## 请求文件关键段
+
+- ` + "`meta`" + `：uid / name / seq（身份；改名只改显示名，不动文件名）
+- ` + "`http`" + `：method / url / headers / params / body
+- ` + "`body.type`" + `：none | json | text | form | multipart（空串与 none 都表示无请求体）
+- ` + "`body.fields`" + `：请求体字段表，**唯一真源**；` + "`body.descs`" + ` 只作首次生成文档的描述种子
+- ` + "`docs`" + `：接口说明（Markdown，随请求文件）
+- ` + "`respdoc`" + `：响应字段文档（类型/字段表/样例/状态码）
+- ` + "`settings`" + ` / ` + "`auth`" + ` / ` + "`grpc`" + `：单请求设置
+
+## 文档条目
+
+独立 ` + "`.md`" + `，带 frontmatter（uid/name），可挂在任意分组目录下；
+集合根目录的 README.md 也会作为条目出现（uid 由路径哈希生成）。
+
+## 删除与回收
+
+- 请求/文档/模块/示例：移入集合内 ` + "`.trash/`" + `（可人工找回）
+- 项目：移入授权根下 ` + "`.trash/<目录名>-<时间戳>`" + `
+`
+}
+
 // ---- 各工具的 handler（统一经 wrap 把 panic/错误转成工具结果） ----
 
 // listProjectsIn list_projects 的入参。
@@ -986,9 +1074,10 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 // getDocIn get_doc 的入参（uid/path 单篇 或 uids 批量，二选一）。
 type getDocIn struct {
 	Project string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；与 path/uids 三选一）"`
-	Path    string   `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide；与 uid 二选一，批量请用 uids）"`
-	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid/path 二选一，超出直接报错）"`
+	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；与 path/uids/paths 三选一）"`
+	Path    string   `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide）；与 uid 二选一，批量请用 paths"`
+	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid/path/paths 二选一，超出直接报错）"`
+	Paths   []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（批量；与 uids 二选一）"`
 	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
 	StartLine int  `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
 	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
@@ -999,20 +1088,24 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		single := strings.TrimSpace(in.UID) != "" || strings.TrimSpace(in.Path) != ""
-		if single && len(in.UIDs) > 0 {
-			return "", nil, withInvalid(errors.New("uid/path 与 uids 只能给一组：单篇用 uid 或 path，批量用 uids（1–10 篇）"))
+		batch := len(in.UIDs) > 0 || len(in.Paths) > 0
+		if single && batch {
+			return "", nil, withInvalid(errors.New("单篇（uid/path）与批量（uids/paths）只能给一组"))
 		}
 		if strings.TrimSpace(in.UID) != "" && strings.TrimSpace(in.Path) != "" {
 			return "", nil, withInvalid(errors.New("uid 与 path 只能给一个：知道 uid 就用 uid，只有路径才用 path"))
 		}
-		if len(in.UIDs) > 0 {
+		if len(in.UIDs) > 0 && len(in.Paths) > 0 {
+			return "", nil, withInvalid(errors.New("uids 与 paths 只能给一组：批量按 uid 或按路径"))
+		}
+		if batch {
 			return ts.batchDocs(getDocsIn{
-				Project: in.Project, UIDs: in.UIDs,
+				Project: in.Project, UIDs: in.UIDs, Paths: in.Paths,
 				StartLine: in.StartLine, MaxLines: in.MaxLines, Outline: in.Outline,
 			})
 		}
 		if !single {
-			return "", nil, withInvalid(errors.New("缺少 uid / path / uids：单篇传 uid 或 path，批量传 uids（1–10 篇）"))
+			return "", nil, withInvalid(errors.New("缺少 uid / path / uids / paths：单篇传 uid 或 path，批量传 uids 或 paths（1–10 篇）"))
 		}
 		d, err := ts.svc.GetDocAt(in.Project, in.UID, in.Path)
 		if err != nil {
@@ -1119,52 +1212,66 @@ func docDetailData(project string, d *DocDetail, withContent bool) map[string]an
 // getDocsIn get_docs（批量）的入参。
 type getDocsIn struct {
 	Project   string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UIDs      []string `json:"uids" jsonschema:"文档 uid 列表，一次 1–10 个（超出直接报错，请分批）"`
+	UIDs      []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（与 paths 二选一）"`
+	Paths     []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（与 uids 二选一）"`
 	StartLine int      `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
 	MaxLines  int      `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
 	Outline   bool     `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号）"`
 }
 
-// batchDocs 批量取文档详情：一次最多 10 个 uid，结果按 uid 分组；单个失败不影响其它。
-// 单篇与批量共用 get_doc 的入参，这里只做批处理（Project 已由调用方解析）。
+// batchDocs 批量取文档详情：一次最多 10 篇，结果按条目分组；单个失败不影响其它。
+// 支持按 uid 或 path 批量（两者互斥），单篇与批量共用 get_doc 的入参。
 func (ts *toolSet) batchDocs(in getDocsIn) (string, any, error) {
-	uids := make([]string, 0, len(in.UIDs))
-	seen := make(map[string]bool, len(in.UIDs))
+	type ref struct{ uid, path string }
+	refs := make([]ref, 0, len(in.UIDs)+len(in.Paths))
+	seen := make(map[string]bool, len(in.UIDs)+len(in.Paths))
 	for _, u := range in.UIDs {
 		u = strings.TrimSpace(u)
-		if u == "" || seen[u] {
+		if u == "" || seen["u:"+u] {
 			continue
 		}
-		seen[u] = true
-		uids = append(uids, u)
+		seen["u:"+u] = true
+		refs = append(refs, ref{uid: u})
 	}
-	if len(uids) == 0 {
-		return "", nil, withInvalid(errors.New("uids 不能为空：一次传 1–10 个文档 uid（从 list_docs 取）"))
+	for _, p := range in.Paths {
+		p = strings.TrimSpace(p)
+		if p == "" || seen["p:"+p] {
+			continue
+		}
+		seen["p:"+p] = true
+		refs = append(refs, ref{path: p})
 	}
-	if len(uids) > maxBatchDocs {
-		return "", nil, withLimit(fmt.Errorf("uids 一次最多 %d 个（本次 %d 个）：请分批调用", maxBatchDocs, len(uids)))
+	if len(refs) == 0 {
+		return "", nil, withInvalid(errors.New("uids / paths 不能为空：一次传 1–10 篇（uid 或 path 二选一，从 list_docs 取）"))
+	}
+	if len(refs) > maxBatchDocs {
+		return "", nil, withLimit(fmt.Errorf("批量一次最多 %d 篇（本次 %d 篇）：请分批调用", maxBatchDocs, len(refs)))
 	}
 	view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "批量文档（%d 篇，项目 %s）：", len(uids), in.Project)
+	fmt.Fprintf(&sb, "批量文档（%d 篇，项目 %s）：", len(refs), in.Project)
 	ok := 0
-	items := make([]map[string]any, 0, len(uids))
-	for _, uid := range uids {
-		d, derr := ts.svc.GetDoc(in.Project, uid)
+	items := make([]map[string]any, 0, len(refs))
+	for _, r := range refs {
+		label := r.uid
+		if label == "" {
+			label = r.path
+		}
+		d, derr := ts.svc.GetDocAt(in.Project, r.uid, r.path)
 		sb.WriteString("\n")
 		if derr != nil {
-			fmt.Fprintf(&sb, "===== uid %s 读取失败：%v =====\n", uid, derr)
-			items = append(items, map[string]any{"uid": uid, "error": derr.Error()})
+			fmt.Fprintf(&sb, "===== %s 读取失败：%v =====\n", label, derr)
+			items = append(items, map[string]any{"uid": r.uid, "path": r.path, "error": derr.Error()})
 			continue
 		}
 		ok++
-		fmt.Fprintf(&sb, "===== %s =====\n", uid)
+		fmt.Fprintf(&sb, "===== %s =====\n", label)
 		sb.WriteString(renderDocDetail(d, view))
 		items = append(items, docDetailData(in.Project, d, true))
 	}
-	fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(uids))
+	fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(refs))
 	data := map[string]any{
-		"project": in.Project, "total": len(uids), "returned": ok, "docs": items,
+		"project": in.Project, "total": len(refs), "returned": ok, "docs": items,
 	}
 	return sb.String(), data, nil
 }
@@ -1457,13 +1564,15 @@ func (ts *toolSet) deleteRequest(ctx context.Context, req *mcp.CallToolRequest, 
 
 // createDocArg create_doc 的入参（复用 service 结构，json/描述已写好）。
 type deleteRequestsItem struct {
-	UID     string `json:"uid" jsonschema:"要删除的请求 uid（search_requests 的 results[].uid）"`
+	UID     string `json:"uid,omitempty" jsonschema:"要删除的请求 uid（search_requests 的 results[].uid）；与 path 二选一"`
+	Path    string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml）；与 uid 二选一"`
 	IfMatch string `json:"ifMatch" jsonschema:"必填：该请求的 hash（search_requests 的 results[].hash，可传 12 位前缀）"`
 }
 
 type deleteRequestsIn struct {
 	Project string               `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
-	Items   []deleteRequestsItem `json:"items" jsonschema:"1–10 条；每条必须给 uid + ifMatch"`
+	Confirm string               `json:"confirm,omitempty" jsonschema:"可选二次确认：填项目显示名/目录名；不一致则整批拒绝（批量删除比单条危险）"`
+	Items   []deleteRequestsItem `json:"items" jsonschema:"1–10 条；每条必须给 uid 或 path + ifMatch"`
 	DryRun  bool                 `json:"dryRun,omitempty" jsonschema:"true = 只校验并列出将删除的条目，不落盘"`
 }
 
@@ -1472,9 +1581,9 @@ func (ts *toolSet) deleteRequests(ctx context.Context, req *mcp.CallToolRequest,
 		in.Project = ts.proj(req, in.Project)
 		items := make([]DeleteRequestItem, 0, len(in.Items))
 		for _, it := range in.Items {
-			items = append(items, DeleteRequestItem{UID: it.UID, IfMatch: it.IfMatch})
+			items = append(items, DeleteRequestItem{UID: it.UID, Path: it.Path, IfMatch: it.IfMatch})
 		}
-		deleted, failed, err := ts.svc.DeleteRequests(in.Project, items, in.DryRun)
+		deleted, failed, err := ts.svc.DeleteRequests(in.Project, in.Confirm, items, in.DryRun)
 		if err != nil {
 			return "", nil, err
 		}

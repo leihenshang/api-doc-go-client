@@ -29,6 +29,9 @@
         "anchor": {
           "type": "string"
         },
+        "anchorHeading": {
+          "type": "string"
+        },
         "occurrence": {
           "type": "integer"
         },
@@ -37,7 +40,6 @@
         }
       },
       "required": [
-        "anchor",
         "text"
       ],
       "type": [

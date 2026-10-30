@@ -281,9 +281,10 @@ type UpdateDocInput struct {
 // InsertAfterOp 在 anchor 之后插入 text。
 // 默认要求 anchor 唯一（防误插）；长文档里同一小标题出现多次时，用 Occurrence 指定第几处。
 type InsertAfterOp struct {
-	Anchor     string `json:"anchor" jsonschema:"定位用的原文片段（必须与正文完全一致）"`
-	Text       string `json:"text" jsonschema:"要插入的内容（Markdown）"`
-	Occurrence int    `json:"occurrence,omitempty" jsonschema:"命中第几处（1 基）；不传 = 要求 anchor 只出现一次（防误插）；传 2 表示在第 2 处之后插入"`
+	Anchor        string `json:"anchor,omitempty" jsonschema:"定位用的原文片段（必须与正文完全一致）；与 anchorHeading 二选一"`
+	Text          string `json:"text" jsonschema:"要插入的内容（Markdown）"`
+	Occurrence    int    `json:"occurrence,omitempty" jsonschema:"命中第几处（1 基）；不传 = 要求只出现一次（防误插）；传 2 表示第 2 处"`
+	AnchorHeading string `json:"anchorHeading,omitempty" jsonschema:"按 Markdown 标题定位（如 '## 附录'）：插到该小节末尾、下一个同级或更高级标题之前；与 anchor 二选一"`
 }
 
 // validateDocSection 节点守卫：section=content 只允许正文类字段，meta 只允许 name/folder。
@@ -370,8 +371,15 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 		return cur + sep + add, true, nil
 	case in.InsertAfter != nil:
 		op := in.InsertAfter
+		if strings.TrimSpace(op.AnchorHeading) != "" {
+			next, herr := insertAfterHeading(cur, op.AnchorHeading, op.Occurrence, op.Text)
+			if herr != nil {
+				return "", false, herr
+			}
+			return next, true, nil
+		}
 		if op.Anchor == "" {
-			return "", false, errors.New("insertAfter.anchor 不能为空")
+			return "", false, errors.New("insertAfter 需要 anchor 或 anchorHeading（二选一）")
 		}
 		if op.Occurrence <= 0 {
 			// 不传 occurrence：要求唯一，避免长文档里插错位置。
@@ -420,6 +428,64 @@ func insertAfterText(cur string, i int, anchor, text string) string {
 		ins += "\n"
 	}
 	return cur[:at] + prefix + ins + rest
+}
+
+// insertAfterHeading 在指定 Markdown 标题所在小节的末尾插入 text。
+// 小节范围：该标题行之后、下一个同级或更高级标题之前；occurrence 指定第几个同名标题（默认 1）。
+func insertAfterHeading(cur, heading string, occurrence int, text string) (string, error) {
+	norm := strings.ReplaceAll(cur, "\r\n", "\n")
+	lines := strings.Split(norm, "\n")
+	target := strings.TrimSpace(heading)
+	if occurrence <= 0 {
+		occurrence = 1
+	}
+	seen, start := 0, -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == target {
+			seen++
+			if seen == occurrence {
+				start = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return "", fmt.Errorf("insertAfter.anchorHeading 未匹配到标题（未写入任何内容）：%s", clipRunes(heading, 60))
+	}
+	level := headingLevel(target)
+	if level == 0 {
+		return "", fmt.Errorf("anchorHeading 必须是 Markdown 标题（以 # 开头）：%s", clipRunes(heading, 60))
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if lv := headingLevel(strings.TrimSpace(lines[i])); lv > 0 && lv <= level {
+			end = i
+			break
+		}
+	}
+	// 去掉小节末尾的空行，插入后统一补一个空行，保持 Markdown 段落结构。
+	for end > start+1 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	head := strings.Join(lines[:end], "\n")
+	tail := strings.Join(lines[end:], "\n")
+	out := head + "\n\n" + strings.TrimRight(text, "\n") + "\n"
+	if tail != "" {
+		out += "\n" + tail
+	}
+	return out, nil
+}
+
+// headingLevel 返回 Markdown 标题级别（1–6）；不是标题返回 0。
+func headingLevel(line string) int {
+	n := 0
+	for n < len(line) && line[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 || n >= len(line) || line[n] != ' ' {
+		return 0
+	}
+	return n
 }
 
 func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
