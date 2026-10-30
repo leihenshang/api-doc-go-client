@@ -69,6 +69,8 @@ func (s *Service) DeleteModule(project, path string, recursive, dryRun bool) err
 // 按与 query（调用方给的 path）的匹配强度排序：前缀/目录命中优先，其次包含。
 func moduleCandidates(a ProjectApp, query string) string {
 	const maxShown = 8
+	// 候选要准：刚 create_module 出来的模块可能还没进索引。
+	_, _ = a.ReloadCollection()
 	nodes, err := a.SearchIndex("", 0)
 	if err != nil {
 		return "用 get_project_modules 查看路径"
