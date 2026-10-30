@@ -39,6 +39,10 @@ var reserved = map[string]bool{
 
 var errNotFound = errors.New("条目不存在")
 
+// ErrInvalidEntryName 分组/文件名不合法（含路径分隔符、为空、以点开头或结尾）。
+// 导出给上层：MCP 要把它映射成 [INVALID]，而不是笼统的 [INTERNAL]。
+var ErrInvalidEntryName = errors.New("名称含非法字符或为空")
+
 // Collection 一个已打开的集合目录。
 type Collection struct {
 	Dir  string // 绝对路径
@@ -1700,7 +1704,7 @@ func (c *Collection) saveNewRequest(folder, name string, r *Request) (*Request, 
 // CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
 func (c *Collection) CreateFolder(parent, name string) error {
 	if !validEntryName(name) {
-		return fmt.Errorf("名称含非法字符或为空")
+		return fmt.Errorf("%w: %q（不能含路径分隔符，不能以点开头或结尾）", ErrInvalidEntryName, name)
 	}
 	base, err := c.resolveFolder(parent)
 	if err != nil {
@@ -1716,7 +1720,7 @@ func (c *Collection) CreateFolder(parent, name string) error {
 // RenameFolder 改分组显示名（目录名与 uid 保持不变，避免路径漂移）。
 func (c *Collection) RenameFolder(uid, name string) error {
 	if !validEntryName(name) {
-		return fmt.Errorf("名称含非法字符或为空")
+		return fmt.Errorf("%w: %q（不能含路径分隔符，不能以点开头或结尾）", ErrInvalidEntryName, name)
 	}
 	dir, err := c.findDir(uid)
 	if err != nil {

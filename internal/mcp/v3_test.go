@@ -30,6 +30,7 @@ func scOf(t *testing.T, res *sdk.CallToolResult) map[string]any {
 
 func TestSearchWeakMatchFlag(t *testing.T) {
 	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "_w"})
 	mustCall(t, cs, "create_request", map[string]any{
 		"project": "demo", "name": "_t_弱点", "method": "GET", "url": "/w1", "folder": "_w",
 	})
@@ -95,6 +96,7 @@ func TestMethodValidation(t *testing.T) {
 
 func TestDeleteRequestConfirmAndBatch(t *testing.T) {
 	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "_b"})
 	mk := func(name string) (uid, hash string) {
 		res := callV3(t, cs, "create_request", map[string]any{
 			"project": "demo", "name": name, "method": "GET", "url": "/b", "folder": "_b",
@@ -160,6 +162,7 @@ func TestDeleteRequestConfirmAndBatch(t *testing.T) {
 // dryRun 收口：create_request / update_request / save+update_response_example 都不落盘。
 func TestDryRunWriteTools(t *testing.T) {
 	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "_dry"})
 
 	// create_request dryRun：不产生文件，结构化带 planned
 	res := callV3(t, cs, "create_request", map[string]any{

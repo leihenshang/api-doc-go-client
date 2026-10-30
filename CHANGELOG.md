@@ -45,6 +45,10 @@ prod:
 - 索引库改用 WAL + `synchronous=NORMAL`（索引是派生数据，可从集合重建；集合文件仍由 `writeFileAtomic` 的 fsync 保证）：实测单条写操作 316 → 148 ms，5 条批量 1.4 s → 240 ms。
 - 新增 `TestDocsToolCountsMatchMeta`：手册/设计文档里的工具总数、结构化工具数、low/high 风险数必须与 `meta` 表一致（这几轮的数字漂移全靠人工核对，容易漏）。
 - 审计补全：事件新增 `write` / `netEgress` / `envWrite`（此前只能靠 `risk` 猜是写盘还是外发），并落 `approved` / `grantedBy` / `requestId`——未走授权判定的调用 `approved` 保持 `nil`（未询问），拒绝时记 `approved=false`。新增 `TestAuditCapabilityFlags`、`TestAuditApprovalFields`。
+- **行为变更**：`create_request` 的 `folder` 不存在时改为 `[NOT_FOUND]`（此前会静默建目录，导致 AI 以为写进了别的模块）；`update_doc` 的 `folder` 同样要求目标已存在，且校验前移到写正文之前（不再出现「正文已写、移动失败」）。
+- `create_module` 的 `name` 支持写完整路径（`api/user` 自动拆成 `parent` + 末段）；上级不存在回 `[NOT_FOUND]`，末段非法回 `[INVALID]`（不再笼统 `[INTERNAL]`）。
+- `replaces` 的 `old` 为空或未命中改为 `[INVALID]`。
+- `create_env` 描述补充「新集合自带 dev 环境」；批量更新/删除的结果头补「其中 N 条未通过（见 failed[]）」。
 
 ## 2026-10-29  0.1.4-dev
 
