@@ -434,7 +434,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **32 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 4 个）：
+共 **34 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 2 个会话类）：
 
 - **列表/搜索（7）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs` / `list_tools`
 - **文档（4）**：`create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc` / `save_doc_image`（`url/sha256/size/deduped/markdown`）
@@ -444,8 +444,9 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 - **响应示例（3）**：`save_response_example` / `update_response_example` / `delete_response_example`
 
 `outputSchema` 的数组元素与结果对象都写明**具体字段与 `required`**（可直接生成类型/做字段校验）。
-未结构化的 4 个是会话类或"单条/批量双形态"工具（`list_workspaces`、`use_workspace`、`get_request_detail`、`get_doc`），
-它们仍以文本为主，避免大正文重复一倍。文本输出保持不变，旧客户端不受影响。
+单条/批量双形态工具（`get_request_detail` / `get_doc`）的 schema 覆盖两种形态的并集，`required` 只留 `project`。
+未结构化的 2 个是会话类工具（`list_workspaces`、`use_workspace`）：成功态只回文本，避免大正文重复一倍。
+文本输出保持不变，旧客户端不受影响。
 
 ### 4.12.3 写操作契约（统一）
 

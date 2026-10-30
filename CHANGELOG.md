@@ -35,6 +35,10 @@ prod:
 - 错误路径的候选清单不再强制 `ReloadCollection`（索引由写路径与 fsnotify 维护），连续 not found 不会反复全树重建。
 - 静态 resource（doc-template / error-codes / collection-format）标题与描述补英文副标题，正文仍为中文 Markdown。
 - 字段说明合计压缩约 3,500 字；新增 `TestToolsListBudget` 锁定 `tools/list` 真实体积（当前 66.7KB，上限 70KB）。
+- 修复：`section` 的取值说明三处不一致（`update_requests.items` 漏 `response`、错误提示漏 `docs`）；`section` 非法值与越界字段统一回 `[INVALID]`（此前落到 `[INTERNAL]`）。
+- `get_doc` / `get_request_detail` 补 `outputSchema`：此前成功态返回 `structuredContent` 却未声明；schema 覆盖单条/批量两种形态，`required` 只留 `project`。
+- `search_requests` 的 `weakMatch` 去掉 `omitempty`，结构化输出里恒出现（此前精确命中时字段缺失，调用方读不到 `false`）。
+- `list_tools` 的 `total` / `returned` 补 schema 说明：`total` 是当前模式注册的工具总数，不受 `filter` 影响。
 
 ## 2026-10-29  0.1.4-dev
 

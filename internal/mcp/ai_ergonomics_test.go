@@ -507,6 +507,46 @@ func TestAnchorHeadingNormalized(t *testing.T) {
 	}
 }
 
+// section 的参数错误必须是 [INVALID]（不是服务故障 [INTERNAL]）。
+func TestSectionErrorsAreInvalid(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "section 校验", "method": "GET", "url": "/sec",
+	}))
+
+	text, isErr := callTool(t, cs, "update_request", map[string]any{
+		"project": "demo", "uid": uid, "section": "bogus", "summary": "x",
+	})
+	if !isErr || !strings.Contains(text, "[INVALID]") {
+		t.Errorf("非法 section 值应回 [INVALID]：%s", text)
+	}
+
+	text, isErr = callTool(t, cs, "update_request", map[string]any{
+		"project": "demo", "uid": uid, "section": "docs", "summary": "越界",
+	})
+	if !isErr || !strings.Contains(text, "[INVALID]") {
+		t.Errorf("section 越界字段应回 [INVALID]：%s", text)
+	}
+
+	// 三个节点都应被接受（描述里列的就是这三个），各传自己范围内的字段。
+	for _, c := range []struct {
+		sec  string
+		args map[string]any
+	}{
+		{"request", map[string]any{"summary": "节点 request"}},
+		{"response", map[string]any{"respDoc": map[string]any{"sample": "{\"ok\":true}"}}},
+		{"docs", map[string]any{"docs": "# 节点 docs"}},
+	} {
+		args := map[string]any{"project": "demo", "uid": uid, "section": c.sec}
+		for k, v := range c.args {
+			args[k] = v
+		}
+		if text, isErr := callTool(t, cs, "update_request", args); isErr {
+			t.Errorf("section=%s 应被接受：%s", c.sec, text)
+		}
+	}
+}
+
 // patch 显式传空数组 = 清空该表（与整表覆盖一致）；不传 = 不动。
 func TestPatchEmptyArrayClears(t *testing.T) {
 	cs := connectSelf(t)

@@ -1459,7 +1459,8 @@ func validateSection(section string, in UpdateRequestInput) error {
 	case sectionDocs:
 		allowed = []string{"docs", "replaces"}
 	default:
-		return fmt.Errorf("不支持的 section %q：只支持 request（请求本身）/ response（响应字段文档 respDoc）/ docs（接口说明），省略 section 表示不限制", section)
+		// 参数错不是服务故障：必须包 withInvalid，否则会被归到 [INTERNAL]。
+		return withInvalid(fmt.Errorf("不支持的 section %q：只支持 request（请求本身）/ response（响应字段文档 respDoc）/ docs（接口说明），省略 section 表示不限制", section))
 	}
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, f := range allowed {
@@ -1472,8 +1473,8 @@ func validateSection(section string, in UpdateRequestInput) error {
 		}
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（request / response / docs）",
-			sec, strings.Join(allowed, "/"), strings.Join(bad, "/"))
+		return withInvalid(fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（request / response / docs）",
+			sec, strings.Join(allowed, "/"), strings.Join(bad, "/")))
 	}
 	return nil
 }

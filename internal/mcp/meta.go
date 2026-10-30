@@ -130,8 +130,8 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_request_detail", Group: GroupCollection, Risk: RiskLow, InReadOnly: true, Since: "0.1.0",
-		Brief: "接口详情（单个或批量）",
-		// 详情类不声明 outputSchema：同一工具两种形态（单条 / 批量 items）无法用一份稳定 schema 表达。
+		Brief:       "接口详情（单个或批量）",
+		Output:      requestDetailFullOutput(),
 		Description: "取接口详情（请求、头、概述、说明、字段表、示例）：uid 取单个，uids 批量 1–10 个；sections 可只取分段，hash 可回传 ifMatch。",
 	},
 	{
@@ -156,8 +156,8 @@ var toolMetas = []ToolMeta{
 	},
 	{
 		Name: "get_doc", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
-		Brief: "读文档正文（单个或批量）",
-		// 同上：单篇 / 批量两种形态，不声明 outputSchema。
+		Brief:       "读文档正文（单个或批量）",
+		Output:      getDocOutput(),
 		Description: "读文档正文与完整 hash：uid 取单篇，uids 批量 1–10 篇；长文用 outline 或 startLine+maxLines。",
 	},
 
@@ -504,7 +504,10 @@ func toolsCatalogOutput() map[string]any {
 		"description": strSchema(), "required": arrSchema(strSchema()),
 	}, "name", "description")
 	return objSchema(map[string]any{
-		"total": intSchema(), "returned": intSchema(), "tools": arrSchema(item),
+		// total 是「当前模式注册的工具总数」，与 filter 无关；returned 才是过滤后条数。
+		"total":    map[string]any{"type": "integer", "description": "当前模式已注册的工具总数（不受 filter 影响）"},
+		"returned": map[string]any{"type": "integer", "description": "本次实际返回的条数（filter 之后）"},
+		"tools":    arrSchema(item),
 	}, "tools")
 }
 
@@ -735,18 +738,44 @@ func imageOutput() map[string]any {
 }
 
 // requestDetailOutput 的扩展版：详情（含 hash/示例/相关文档摘要）。
+// requestDetailFullOutput get_request_detail 的结果。
+//
+// 同一工具有两种形态：单条返回顶层字段，批量返回 {total,returned,items[]}。
+// 因此 required 只留两种形态都有的 project，items 元素用宽松对象（含 error）。
 func requestDetailFullOutput() map[string]any {
 	ex := objSchema(map[string]any{
 		"uid": strSchema(), "name": strSchema(), "path": strSchema(),
 		"hash": strSchema(), "status": intSchema(),
 	}, "uid", "path")
 	rel := objSchema(map[string]any{"uid": strSchema(), "name": strSchema(), "path": strSchema()}, "uid", "path")
+	item := objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
+		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "summary": strSchema(),
+		"error": strSchema(),
+	}, "project")
 	return objSchema(map[string]any{
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
 		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "summary": strSchema(),
 		"bodyFields": intSchema(), "params": intSchema(), "headers": intSchema(),
 		"examples": arrSchema(ex), "relatedDocs": arrSchema(rel),
-	}, "uid", "path")
+		// 批量形态
+		"total": intSchema(), "returned": intSchema(), "items": arrSchema(item),
+	}, "project")
+}
+
+// getDocOutput get_doc 的结果（单篇 / 批量两种形态，required 只留 project）。
+func getDocOutput() map[string]any {
+	item := objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "path": strSchema(),
+		"size": intSchema(), "hash": strSchema(), "planned": strSchema(),
+		"content": strSchema(), "error": strSchema(),
+	}, "project")
+	return objSchema(map[string]any{
+		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "path": strSchema(),
+		"size": intSchema(), "hash": strSchema(), "planned": strSchema(), "content": strSchema(),
+		// 批量形态
+		"total": intSchema(), "returned": intSchema(), "docs": arrSchema(item),
+	}, "project")
 }
 
 // sendRequestOutput send_request 的结果。

@@ -98,7 +98,8 @@ func TestStructuredListTools(t *testing.T) {
 		"create_env": true, "rename_env": true, "delete_env": true,
 		"set_env_var": true, "delete_env_var": true,
 		"delete_requests": true, "send_request": true,
-		// get_doc / get_request_detail 单条与批量共用同一工具（两种形态），不声明 outputSchema。
+		// 单条/批量双形态工具：schema 覆盖两种形态的并集，required 只留 project。
+		"get_doc": true, "get_request_detail": true,
 	}
 	for _, tool := range tools.Tools {
 		has := tool.OutputSchema != nil

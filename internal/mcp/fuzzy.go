@@ -21,7 +21,8 @@ type Match struct {
 	// Hash 磁盘内容哈希（来自索引）：传给 update_request 的 ifMatch 可获得冲突保护。
 	Hash string `json:"hash,omitempty"`
 	// WeakMatch 仅靠分词/有序子序列命中（没有原串子串命中）：删除前务必核对 name/path。
-	WeakMatch bool `json:"weakMatch,omitempty"`
+	// 不用 omitempty：结构化输出里布尔应恒定出现，缺字段会让调用方误以为「未知」。
+	WeakMatch bool `json:"weakMatch"`
 }
 
 // 命中方式对应的基础分：全串子串 > 分词累加 > 有序子序列（兜底）。
