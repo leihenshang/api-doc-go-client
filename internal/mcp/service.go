@@ -809,6 +809,8 @@ func (s *Service) resolveRequestUID(a ProjectApp, uid, reqPath string) (string, 
 // 按与 query（调用方给的 path）的匹配强度排序：前缀/目录命中优先，其次包含，最后保持原顺序。
 func requestCandidates(a ProjectApp, query string) string {
 	const maxShown = 5
+	// 候选要准：调用方刚建/改过的条目可能还没进索引，错误路径上多一次扫描可接受。
+	_, _ = a.ReloadCollection()
 	nodes, err := a.SearchIndex("", 0)
 	if err != nil {
 		return "（候选清单读取失败，请用 search_requests 查找）"
