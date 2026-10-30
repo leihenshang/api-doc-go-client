@@ -30,6 +30,11 @@ prod:
 - 批量更新共享一次项目解析，并在开始/结束各刷新一次索引（减少逐条的重复 resolve）。
 - 批量侧与单条对齐：`update_requests.items[]` 支持 `path`（成功条目回填解析后的 uid，失败条目带 `path`），`delete_requests.items[]` 支持逐条 `confirmName`（同名请求多时防「删错那一个」）。
 - `update_doc.insertAfter.anchorHeading` 改为归一化匹配（全角空格、连续空格、闭合式 `## 标题 ##`、尾部 `*` 都认），找不到时列出文内标题，避免盲重试。
+- `patch` 显式传空数组现在等于清空该表（此前被静默忽略），与 `params: []` 的整表覆盖语义一致；只传部分行时仍按名合并，不会丢其它行。
+- 写路径改用 `diskHashOf` 按文件直取 hash，批量更新不再逐条全树扫索引；`get_request_detail` 仍用索引 hash，保持「读后被外部改动」的冲突检测口径。
+- 错误路径的候选清单不再强制 `ReloadCollection`（索引由写路径与 fsnotify 维护），连续 not found 不会反复全树重建。
+- 静态 resource（doc-template / error-codes / collection-format）标题与描述补英文副标题，正文仍为中文 Markdown。
+- 字段说明合计压缩约 3,500 字；新增 `TestToolsListBudget` 锁定 `tools/list` 真实体积（当前 66.7KB，上限 70KB）。
 
 ## 2026-10-29  0.1.4-dev
 

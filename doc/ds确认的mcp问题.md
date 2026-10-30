@@ -147,6 +147,11 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | 批量更新只认 uid | 已完成 | `update_requests.items[].path`（成功条目回填解析后的 uid） |
 | 批量删除缺逐条确认 | 已完成 | `delete_requests.items[].confirmName`（不一致只拒绝该条） |
 | `anchorHeading` 只做精确匹配 | 已完成 | `normalizeHeading`（全角空格/连续空格/闭合 `##`/尾部 `*`）+ 找不到时列文内标题 |
+| `patch` 空数组被静默忽略 | 已完成 | 空数组 = 清空该表；部分行仍按名合并不丢行（`TestPatchEmptyArrayClears`） |
+| 批量更新逐条全树扫描索引 | 已完成 | 写路径改用 `diskHashOf`；`get_request_detail` 保持索引 hash 口径 |
+| 候选清单每次强制全树重建 | 已完成 | 去掉 `ReloadCollection`，索引由写路径与 fsnotify 维护 |
+| resource 只有中文标题 | 已完成 | 三个静态 resource 标题/描述补英文副标题 |
+| `tools/list` 体积无预算约束 | 已完成 | `TestToolsListBudget` 锁 70KB（当前 66.7KB）；字段说明压缩约 3,500 字 |
 
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。

@@ -44,7 +44,7 @@ type UpdateRequestItem struct {
 
 // UpdateRequestsInput update_requests 的入参。
 type UpdateRequestsInput struct {
-	Project string              `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string              `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Items   []UpdateRequestItem `json:"items" jsonschema:"1–10 条；每条给 uid + 要改的字段（语义同 update_request）"`
 	DryRun  bool                `json:"dryRun,omitempty" jsonschema:"true = 只校验并回报将改动哪些条目，不写盘"`
 }

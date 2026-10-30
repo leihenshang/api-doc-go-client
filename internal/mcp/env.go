@@ -73,14 +73,14 @@ type EnvVarIn struct {
 
 // CreateEnvInput create_env 的入参。
 type CreateEnvInput struct {
-	Project string     `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string     `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string     `json:"name" jsonschema:"环境名（文件名即环境名，只允许字母、数字、- 与 _）"`
 	Vars    []EnvVarIn `json:"vars,omitempty" jsonschema:"可选：建环境时一并写入的变量"`
 }
 
 // SetEnvVarInput set_env_var 的入参（按变量名 upsert）。
 type SetEnvVarInput struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Env     string `json:"env" jsonschema:"所属环境名（用 list_envs 看现有环境）"`
 	Name    string `json:"name" jsonschema:"变量名（[A-Za-z_][A-Za-z0-9_]*）"`
 	Value   string `json:"value" jsonschema:"变量值；若该变量是敏感值且这里传回掩码，则保持原密钥不变"`

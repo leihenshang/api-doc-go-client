@@ -242,6 +242,11 @@ func runGuarded(ts *toolSet, meta ToolMeta, ctx context.Context, req *mcp.CallTo
 	if res != nil && res.IsError {
 		kind = mcpaudit.KindBizError
 	}
+	// 写盘成功后失效候选缓存：否则紧跟着的 NOT_FOUND 可能给出写之前的旧清单
+	// （fsnotify 回写有延迟，候选的节流刷新会把它当成「刚刷过」而跳过）。
+	if meta.Write && err == nil && (res == nil || !res.IsError) && ts.svc != nil {
+		ts.svc.ResetCandidateCache()
+	}
 	return res, out, err
 }
 
@@ -552,7 +557,7 @@ func (ts *toolSet) listWorkspaces(_ context.Context, req *mcp.CallToolRequest, _
 
 // useWorkspaceIn use_workspace 的入参。
 type useWorkspaceIn struct {
-	Workspace string `json:"workspace" jsonschema:"工作目录 path（list_workspaces 返回）或项目标识（名称/路径/uid）；必须在客户端授权的白名单内"`
+	Workspace string `json:"workspace" jsonschema:"工作目录 path（list_workspaces）或项目名/路径/uid；须在授权白名单内"`
 }
 
 func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in useWorkspaceIn) (*mcp.CallToolResult, any, error) {
@@ -648,10 +653,11 @@ func (ts *toolSet) registerDocTemplateResource(server *mcp.Server) {
 	server.AddResource(&mcp.Resource{
 		URI:      docTemplateURI,
 		Name:     "doc_template",
-		Title:    "接口说明（docs）模板",
+		Title:    "接口说明（docs）模板 · Doc template",
 		MIMEType: "text/markdown",
 		Description: "接口说明的分节结构契约：与客户端「生成接口文档」的 Markdown 骨架逐节对齐" +
-			"（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注）。",
+			"（简要描述/请求URI/请求方式/请求头/请求参数表/请求示例/响应字段表/响应示例/备注）。" +
+			" Content is a Chinese Markdown document.",
 	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		uri := docTemplateURI
 		if req != nil && req.Params != nil && req.Params.URI != "" {
@@ -675,14 +681,16 @@ const collectionFormatURI = "apidoc://collection-format"
 // tools/list 的每个工具都会在会话开始时被拉一次，是固定成本。
 func (ts *toolSet) registerStaticResources(server *mcp.Server) {
 	server.AddResource(&mcp.Resource{
-		URI: errorCodesURI, Name: "error_codes", Title: "MCP 错误码表", MIMEType: "text/markdown",
-		Description: "工具失败时的 [CODE] 含义与处理建议（NOT_FOUND/CONFLICT/INVALID/READONLY/FORBIDDEN/LIMIT/IO/INTERNAL）。",
+		URI: errorCodesURI, Name: "error_codes", Title: "MCP 错误码表 · Error codes", MIMEType: "text/markdown",
+		Description: "工具失败时的 [CODE] 含义与处理建议（NOT_FOUND/CONFLICT/INVALID/READONLY/FORBIDDEN/LIMIT/IO/INTERNAL）。" +
+			" Content is a Chinese Markdown document.",
 	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		return staticResource(req, errorCodesURI, errorCodeTable()), nil
 	})
 	server.AddResource(&mcp.Resource{
-		URI: collectionFormatURI, Name: "collection_format", Title: "集合结构契约", MIMEType: "text/markdown",
-		Description: "集合目录结构、请求文件 YAML 段、body.fields 为唯一真源、.trash 语义。",
+		URI: collectionFormatURI, Name: "collection_format", Title: "集合结构契约 · Collection format", MIMEType: "text/markdown",
+		Description: "集合目录结构、请求文件 YAML 段、body.fields 为唯一真源、.trash 语义。" +
+			" Content is a Chinese Markdown document.",
 	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		return staticResource(req, collectionFormatURI, collectionFormatDoc()), nil
 	})
@@ -790,10 +798,10 @@ func (ts *toolSet) listProjects(ctx context.Context, req *mcp.CallToolRequest, i
 
 // getModulesIn get_project_modules 的入参。
 type getModulesIn struct {
-	Project         string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project         string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Query           string `json:"query,omitempty" jsonschema:"对模块名与请求名/方法/路径做模糊过滤"`
 	IncludeRequests bool   `json:"includeRequests,omitempty" jsonschema:"true = 附带每个模块下的请求清单"`
-	OnlyMatched     *bool  `json:"onlyMatched,omitempty" jsonschema:"有 query 时默认只返回有命中的模块（模块名命中，或其下有命中请求）；传 false 可看全部模块（汇总行始终给出模块总数）"`
+	OnlyMatched     *bool  `json:"onlyMatched,omitempty" jsonschema:"有 query 时默认只回命中模块；false = 全部（汇总行始终给总数）"`
 }
 
 func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolRequest, in getModulesIn) (*mcp.CallToolResult, any, error) {
@@ -838,16 +846,16 @@ func (ts *toolSet) getProjectModules(ctx context.Context, req *mcp.CallToolReque
 
 // getDetailIn get_request_detail 的入参（uid/path 单个 或 uids 批量，二选一）。
 type getDetailIn struct {
-	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project      string   `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID          string   `json:"uid,omitempty" jsonschema:"接口 uid（单个查询；与 path/uids 三选一）"`
-	Path         string   `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml 或 api/users）；与 uid 二选一，批量请用 uids"`
+	Path         string   `json:"path,omitempty" jsonschema:"请求文件路径（如 api/users.yml 或 api/users）；与 uid 二选一，批量用 uids"`
 	UIDs         []string `json:"uids,omitempty" jsonschema:"接口 uid 列表，一次 1–10 个（批量；与 uid/path 二选一，超出直接报错）"`
 	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
 	IncludeBody  bool     `json:"includeBody,omitempty" jsonschema:"true = 返回响应示例的响应体与请求体全文"`
 	MaxBodyBytes int      `json:"maxBodyBytes,omitempty" jsonschema:"响应体裁剪上限（字节），默认 8192"`
-	Sections     []string `json:"sections,omitempty" jsonschema:"只返回指定分段以控制体积：overview（请求本体/概述/参数/头/体）/ docs（说明文档与相关文档）/ bodyFields（请求体字段表）/ respDoc（响应字段与样例）/ examples（已保存响应示例）。不传 = 全量（旧行为）"`
+	Sections     []string `json:"sections,omitempty" jsonschema:"只回指定分段：overview / docs / bodyFields / respDoc / examples；不传 = 全量"`
 	// 说明文档可能很长：这三个参数只作用于 docs 段（与 get_doc 的 startLine/maxLines/outline 同口径）
-	DocsStartLine int  `json:"docsStartLine,omitempty" jsonschema:"说明文档从第几行开始（1 基）；与 docsMaxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
+	DocsStartLine int  `json:"docsStartLine,omitempty" jsonschema:"说明文档起始行（1 基）；与 docsMaxLines 分段读（行号仅供阅读）"`
 	DocsMaxLines  int  `json:"docsMaxLines,omitempty" jsonschema:"说明文档本次最多行数（默认 100，最大 500）"`
 	DocsOutline   bool `json:"docsOutline,omitempty" jsonschema:"true = 只返回说明文档的 Markdown 标题大纲（带行号）"`
 }
@@ -891,7 +899,7 @@ const maxBatchDetails = 10
 
 // getDetailsIn get_request_detail 批量模式的入参（对调用方不可见，由 getDetailIn 转换）。
 type getDetailsIn struct {
-	Project      string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project      string   `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UIDs         []string `json:"uids" jsonschema:"接口 uid 列表，一次 1–10 个（超出直接报错，请分批）"`
 	Sections     []string `json:"sections,omitempty" jsonschema:"同 get_request_detail：overview / docs / bodyFields / respDoc / examples；不传 = 全量"`
 	Query        string   `json:"query,omitempty" jsonschema:"在示例名/文档名里再筛一遍"`
@@ -950,7 +958,7 @@ type searchDocsIn struct {
 	Pattern     string `json:"pattern" jsonschema:"要搜索的文本（按行匹配，大小写不敏感）"`
 	ExactMatch  bool   `json:"exactMatch,omitempty" jsonschema:"true = 整词匹配（左右必须是词边界），默认子串匹配"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"返回文档数上限，默认 50，最大 200"`
-	IncludeHash bool   `json:"includeHash,omitempty" jsonschema:"true = 每条结果附文件 hash（可直接回传 update_doc.ifMatch）；默认 false 省一次读盘"`
+	IncludeHash bool   `json:"includeHash,omitempty" jsonschema:"true = 每条附文件 hash（可回传 update_doc.ifMatch）；默认省读盘"`
 }
 
 // searchDocs 在文档条目正文里搜索：返回 uid/路径/命中行号/片段，避免逐篇 get_doc 全文拉回。
@@ -994,9 +1002,9 @@ type searchArgs struct {
 	Query       string   `json:"query" jsonschema:"搜索关键词（名称/URL/方法/路径/header/说明/请求体片段）"`
 	Project     string   `json:"project,omitempty" jsonschema:"限定项目；省略则在所有已加载项目里搜"`
 	Limit       int      `json:"limit,omitempty" jsonschema:"返回条数上限，默认 50，最大 200"`
-	ExactMatch  bool     `json:"exactMatch,omitempty" jsonschema:"true = 只认整串出现（不切词、不做子序列兜底），长标识符搜索用它消掉误报"`
-	Fields      []string `json:"fields,omitempty" jsonschema:"限定搜索范围：name / uri（方法+URL+路径）/ docs / respDoc / bodyFields / header / body；不传 = 全部"`
-	IncludeHash bool     `json:"includeHash,omitempty" jsonschema:"true = 每条结果附完整 hash（可直接回传 update_request.ifMatch）；默认 false 省体积"`
+	ExactMatch  bool     `json:"exactMatch,omitempty" jsonschema:"true = 只认整串出现（不切词），长标识符搜索用它消误报"`
+	Fields      []string `json:"fields,omitempty" jsonschema:"搜索范围：name/uri/docs/respDoc/bodyFields/header/body；不传 = 全部"`
+	IncludeHash bool     `json:"includeHash,omitempty" jsonschema:"true = 每条附完整 hash（可回传 update_request.ifMatch）；默认省体积"`
 }
 
 func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest, in searchArgs) (*mcp.CallToolResult, any, error) {
@@ -1045,12 +1053,12 @@ func (ts *toolSet) searchRequests(ctx context.Context, req *mcp.CallToolRequest,
 
 // listDocsIn list_docs 的入参。
 type listDocsIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Query   string `json:"query,omitempty" jsonschema:"按文档名 / 路径模糊过滤；留空返回全部"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"返回条数上限（默认 200，最大 1000）"`
 	Offset  int    `json:"offset,omitempty" jsonschema:"跳过前 N 条（分页；返回首行会给出总数）"`
 	// IncludeHash 默认 true：列表直接带 hash，省掉「列表 → 每篇 get_doc」的 N 次往返。
-	IncludeHash *bool `json:"includeHash,omitempty" jsonschema:"默认 true：每条带文件 hash（可直接回传 update_doc.ifMatch）；大项目可传 false 省一次读盘"`
+	IncludeHash *bool `json:"includeHash,omitempty" jsonschema:"默认 true = 每条带 hash（可回传 ifMatch）；大项目可传 false 省读盘"`
 }
 
 func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in listDocsIn) (*mcp.CallToolResult, any, error) {
@@ -1073,13 +1081,13 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 
 // getDocIn get_doc 的入参（uid/path 单篇 或 uids 批量，二选一）。
 type getDocIn struct {
-	Project string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string   `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；与 path/uids/paths 三选一）"`
-	Path    string   `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide）；与 uid 二选一，批量请用 paths"`
-	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid/path/paths 二选一，超出直接报错）"`
+	Path    string   `json:"path,omitempty" jsonschema:"文档路径（如 docs/guide.md）；与 uid 二选一，批量用 paths"`
+	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10（与 uid/path/paths 二选一）"`
 	Paths   []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（批量；与 uids 二选一）"`
 	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
-	StartLine int  `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
+	StartLine int  `json:"startLine,omitempty" jsonschema:"起始行（1 基）；与 maxLines 分段读（行号仅供阅读）"`
 	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
 	Outline   bool `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号），先看结构再分段读取"`
 }
@@ -1118,8 +1126,8 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 
 // saveImageIn save_doc_image 的入参。
 type saveImageIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	Data    string `json:"data" jsonschema:"图片的 base64（可带 data:image/...;base64, 前缀）；只接受 PNG / JPEG / GIF / WebP，单张 ≤5MB"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
+	Data    string `json:"data" jsonschema:"图片 base64（可带 data: 前缀）；PNG/JPEG/GIF/WebP，单张 ≤5MB"`
 	Name    string `json:"name,omitempty" jsonschema:"图片说明（写进 Markdown 的 alt 文本），默认「图片」"`
 }
 
@@ -1211,10 +1219,10 @@ func docDetailData(project string, d *DocDetail, withContent bool) map[string]an
 
 // getDocsIn get_docs（批量）的入参。
 type getDocsIn struct {
-	Project   string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project   string   `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UIDs      []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（与 paths 二选一）"`
 	Paths     []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（与 uids 二选一）"`
-	StartLine int      `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
+	StartLine int      `json:"startLine,omitempty" jsonschema:"起始行（1 基）；与 maxLines 分段读（行号仅供阅读）"`
 	MaxLines  int      `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
 	Outline   bool     `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号）"`
 }
@@ -1301,8 +1309,8 @@ func (ts *toolSet) renameModule(_ context.Context, req *mcp.CallToolRequest, in 
 type deleteModuleIn struct {
 	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
 	Path       string `json:"path,omitempty" jsonschema:"模块相对路径，如 api/user（pruneEmpty=true 时可省略）"`
-	Recursive  bool   `json:"recursive,omitempty" jsonschema:"true = 连同子模块/请求/文档整棵删除（进 .trash）；false（默认）只允许空模块"`
-	PruneEmpty bool   `json:"pruneEmpty,omitempty" jsonschema:"true = 清理全部空模块（只有 folder.yml、无请求/文档/子模块），忽略 path；返回删除数量"`
+	Recursive  bool   `json:"recursive,omitempty" jsonschema:"true = 整棵删除（进 .trash）；false 只允许空模块"`
+	PruneEmpty bool   `json:"pruneEmpty,omitempty" jsonschema:"true = 清理全部空模块（忽略 path）；返回删除数量"`
 	DryRun     bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash（pruneEmpty 不支持预演）"`
 }
 
@@ -1382,7 +1390,7 @@ func (ts *toolSet) deleteProject(_ context.Context, req *mcp.CallToolRequest, in
 
 // createModuleIn create_module 的入参。
 type createModuleIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string `json:"name" jsonschema:"模块名"`
 	Parent  string `json:"parent,omitempty" jsonschema:"父模块路径；留空 = 项目根"`
 }
@@ -1527,7 +1535,7 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 
 // deleteIn delete_request 的入参。
 type deleteIn struct {
-	Project     string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project     string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID         string `json:"uid,omitempty" jsonschema:"要移除的接口 uid；与 path 二选一"`
 	Path        string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml）；与 uid 二选一"`
 	DryRun      bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演（返回将进 .trash 的路径），不落盘"`
@@ -1573,7 +1581,7 @@ type deleteRequestsItem struct {
 
 type deleteRequestsIn struct {
 	Project string               `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 默认工作目录"`
-	Confirm string               `json:"confirm,omitempty" jsonschema:"可选二次确认：填项目显示名/目录名；不一致则整批拒绝（批量删除比单条危险）"`
+	Confirm string               `json:"confirm,omitempty" jsonschema:"二次确认：填项目显示名/目录名；不一致整批拒绝"`
 	Items   []deleteRequestsItem `json:"items" jsonschema:"1–10 条；每条必须给 uid 或 path + ifMatch"`
 	DryRun  bool                 `json:"dryRun,omitempty" jsonschema:"true = 只校验并列出将删除的条目，不落盘"`
 }
@@ -1674,7 +1682,7 @@ func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in upd
 
 // deleteDocIn delete_doc 的入参（比 deleteIn 多一句说明：这条是文档不是接口）。
 type deleteDocIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID     string `json:"uid,omitempty" jsonschema:"要移除的文档 uid（list_docs 返回）；与 path 二选一"`
 	Path    string `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md）；与 uid 二选一"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只返回将移入 .trash 的路径，不实际删除"`
@@ -1751,7 +1759,7 @@ func (ts *toolSet) updateResponseExample(_ context.Context, req *mcp.CallToolReq
 
 // deleteResponseExampleIn delete_response_example 的入参。
 type deleteResponseExampleIn struct {
-	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project    string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID        string `json:"uid" jsonschema:"请求 uid（示例所属请求）"`
 	ExampleUID string `json:"exampleUid" jsonschema:"要删除的响应示例 uid（get_request_detail 返回的 examples[].uid）"`
 	DryRun     bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不移入 .trash"`
@@ -1781,7 +1789,7 @@ func (ts *toolSet) deleteResponseExample(_ context.Context, req *mcp.CallToolReq
 
 // listEnvsIn list_envs 的入参。
 type listEnvsIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Query   string `json:"query,omitempty" jsonschema:"按环境名 / 变量名模糊过滤；留空返回全部"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"返回环境条数上限（默认 200，最大 1000）"`
 	Offset  int    `json:"offset,omitempty" jsonschema:"跳过前 N 个环境（分页；首行给总数）"`
@@ -1803,9 +1811,9 @@ func (ts *toolSet) listEnvs(ctx context.Context, req *mcp.CallToolRequest, in li
 
 // renameEnvIn rename_env 的入参。
 type renameEnvIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string `json:"name" jsonschema:"当前环境名"`
-	NewName string `json:"newName" jsonschema:"新环境名（只允许字母、数字、- 与 _；不能与现有名重复，也不允许只改大小写）"`
+	NewName string `json:"newName" jsonschema:"新环境名（字母/数字/-/_；不能重名或只改大小写）"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不落盘"`
 }
@@ -1825,7 +1833,7 @@ func (ts *toolSet) renameEnv(ctx context.Context, req *mcp.CallToolRequest, in r
 
 // deleteEnvIn delete_env 的入参。
 type deleteEnvIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string `json:"name" jsonschema:"要删除的环境名"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只预演，不落盘"`
@@ -1890,7 +1898,7 @@ func (ts *toolSet) setEnvVar(ctx context.Context, req *mcp.CallToolRequest, in S
 
 // deleteEnvVarIn delete_env_var 的入参。
 type deleteEnvVarIn struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Env     string `json:"env" jsonschema:"所属环境名"`
 	Name    string `json:"name" jsonschema:"要删除的变量名"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_envs 里该环境的 hash；不传 = 最后写者赢"`

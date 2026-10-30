@@ -192,19 +192,19 @@ func docCandidates(docs []*collection.DocEntry) string {
 
 // CreateDocInput create_doc 的入参。
 type CreateDocInput struct {
-	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	Name    string `json:"name" jsonschema:"文档显示名（不含 .md 后缀，不能带路径分隔符）；name 允许重复，身份以 uid/path 为准"`
-	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（相对集合根，如 docs 或 用户/说明）；留空 = 集合根目录"`
-	Content string `json:"content,omitempty" jsonschema:"Markdown 正文；留空则创建空文档，之后可用 update_doc 写入"`
+	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
+	Name    string `json:"name" jsonschema:"文档显示名（不含 .md，不能带路径分隔符）；可重复，身份以 uid/path 为准"`
+	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（如 docs 或 用户/说明）；留空 = 集合根"`
+	Content string `json:"content,omitempty" jsonschema:"Markdown 正文；留空 = 空文档，之后用 update_doc 写入"`
 	// UID 可选：批量导入/幂等创建时传固定 uid；已存在时按 onConflict 处理。
 	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
 	// OnConflict 同名路径/同 uid 的冲突策略：error（默认）| suffix | overwrite。
-	OnConflict string `json:"onConflict,omitempty" jsonschema:"同名或同 uid 已存在时：error（默认，返回 [CONFLICT] 与已有 uid/path）/ suffix（自动加 -2）/ overwrite（复用已有条目的 uid/path 并覆盖正文）"`
+	OnConflict string `json:"onConflict,omitempty" jsonschema:"已存在时：error（默认，回 [CONFLICT] + 已有 uid/path）/ suffix（-2）/ overwrite（复用覆盖正文）"`
 	// DryRun 只做校验与冲突判定，返回将发生的变化，不落盘。
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回将创建/覆盖的路径与冲突判断，不写盘"`
 	// FileName 可选：落盘文件名（不含 .md）。留空 = 由 name slug 化推导 —— 中文 name
 	// 会得到中文文件名（集合是纯文本、文件即真相源）；要 ASCII 名（脚本/工具链友好）就在这里给。
-	FileName string `json:"fileName,omitempty" jsonschema:"可选：落盘文件名（不含 .md）；留空 = 由 name 推导。中文 name 会落成中文文件名，需要 ASCII 名时显式传"`
+	FileName string `json:"fileName,omitempty" jsonschema:"落盘文件名（不含 .md）；留空 = 由 name 推导；需要 ASCII 名时显式传"`
 }
 
 // CreateDoc 新建文档条目；content 非空时一并写入。
@@ -259,21 +259,21 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 
 // UpdateDocInput update_doc 的入参（指针字段 = 只改传了的）。
 type UpdateDocInput struct {
-	Project string  `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
+	Project string  `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	UID     string  `json:"uid,omitempty" jsonschema:"文档 uid（list_docs / get_doc 返回）；与 path 二选一"`
-	Path    string  `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide）；与 uid 二选一"`
+	Path    string  `json:"path,omitempty" jsonschema:"文档路径（如 docs/guide.md）；与 uid 二选一"`
 	Name    *string `json:"name,omitempty" jsonschema:"新的显示名（只改 frontmatter 的 name，文件名不变）"`
-	Content *string `json:"content,omitempty" jsonschema:"新的 Markdown 正文；传空串 = 清空正文；不传不动。与 replaces/append/insertAfter 互斥"`
+	Content *string `json:"content,omitempty" jsonschema:"新正文；空串 = 清空；不传不动；与 replaces/append/insertAfter 互斥"`
 	// Replaces 正文的局部替换：与 content 互斥；old 找不到即整单拒绝（不落盘）。
-	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文的局部替换：[{old,new,replaceAll}]，与 content/append/insertAfter 互斥；任一 old 找不到则整单拒绝、不落盘"`
+	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文替换 [{old,new,replaceAll}]；与 content/append/insertAfter 互斥；old 缺失即拒绝"`
 	// Append 在正文末尾追加一段：长文档分段写入时用它，避免整篇重传撞输出上限。
 	Append *string `json:"append,omitempty" jsonschema:"在正文末尾追加一段（自动补空行）；与 content/replaces/insertAfter 互斥"`
 	// InsertAfter 在某段原文之后插入：anchor 必须唯一命中，找不到或命中多处都整单拒绝。
 	InsertAfter *InsertAfterOp `json:"insertAfter,omitempty" jsonschema:"在某段原文之后插入（anchor 必须唯一命中）；与 content/replaces/append 互斥"`
 	Folder      *string        `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
 	// Section 节点守卫：只改正文或只改元信息时用它，防止顺手带上另一类字段。
-	Section string `json:"section,omitempty" jsonschema:"节点守卫：content（正文类：content/replaces/append/insertAfter）/ meta（name/folder）；省略表示不限制"`
-	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的完整 hash；磁盘在此期间被外部改动则拒绝写入并返回当前 hash"`
+	Section string `json:"section,omitempty" jsonschema:"节点守卫：content（正文类）/ meta（name/folder）；省略 = 不限制"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"get_doc 返回的完整 hash；磁盘被外部改动则拒绝写入并回当前 hash"`
 	// DryRun 只计算新正文/校验 ifMatch，返回预览，不落盘。
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回改动预览与 ifMatch 校验结果，不写盘"`
 }
@@ -284,7 +284,7 @@ type InsertAfterOp struct {
 	Anchor        string `json:"anchor,omitempty" jsonschema:"定位用的原文片段（必须与正文完全一致）；与 anchorHeading 二选一"`
 	Text          string `json:"text" jsonschema:"要插入的内容（Markdown）"`
 	Occurrence    int    `json:"occurrence,omitempty" jsonschema:"命中第几处（1 基）；不传 = 要求只出现一次（防误插）；传 2 表示第 2 处"`
-	AnchorHeading string `json:"anchorHeading,omitempty" jsonschema:"按 Markdown 标题定位（如 '## 附录'）：插到该小节末尾、下一个同级或更高级标题之前；与 anchor 二选一"`
+	AnchorHeading string `json:"anchorHeading,omitempty" jsonschema:"按标题插入（如 '## 附录'）：插到该小节末尾；与 anchor 二选一"`
 }
 
 // validateDocSection 节点守卫：section=content 只允许正文类字段，meta 只允许 name/folder。
