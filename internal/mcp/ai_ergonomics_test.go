@@ -696,3 +696,25 @@ func TestReplacesMissIsInvalid(t *testing.T) {
 		t.Errorf("replaces 未命中应回 [INVALID]：%s", text)
 	}
 }
+
+// create_doc：显式 folder 必须存在；不传 folder 时默认 docs/ 仍自动建（默认值不是调用方选的）。
+func TestCreateDocFolderMustExist(t *testing.T) {
+	cs := connectSelf(t)
+	// ① 不传 folder → docs/ 由工具兜底创建
+	mustCall(t, cs, "create_doc", map[string]any{"project": "demo", "name": "默认目录"})
+
+	// ② 显式不存在的目录 → [NOT_FOUND]
+	text, isErr := callTool(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "落错地方", "folder": "no-such",
+	})
+	if !isErr || !strings.Contains(text, "[NOT_FOUND]") {
+		t.Errorf("显式 folder 不存在应回 [NOT_FOUND]：%s", text)
+	}
+
+	// ③ 显式 docs（纯文档目录，没有 folder.yml）→ 应被接受
+	if text, isErr := callTool(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "显式文档目录", "folder": "docs",
+	}); isErr {
+		t.Errorf("已存在的纯文档目录应被接受：%s", text)
+	}
+}

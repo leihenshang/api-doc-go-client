@@ -194,7 +194,7 @@ func docCandidates(docs []*collection.DocEntry) string {
 type CreateDocInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string `json:"name" jsonschema:"文档显示名（不含 .md，不能带路径分隔符）；可重复，身份以 uid/path 为准"`
-	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（如 docs 或 用户/说明）；留空 = 集合根"`
+	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（如 docs 或 用户/说明，须已存在）；留空 = 默认 docs/（不存在会自动创建）"`
 	Content string `json:"content,omitempty" jsonschema:"Markdown 正文；留空 = 空文档，之后用 update_doc 写入"`
 	// UID 可选：批量导入/幂等创建时传固定 uid；已存在时按 onConflict 处理。
 	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`
@@ -220,6 +220,12 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 	mode, verr := collection.NormalizeDocConflict(in.OnConflict)
 	if verr != nil {
 		return nil, withInvalid(verr)
+	}
+	// 显式指定的目录必须已存在，但默认文档目录（docs）例外：不传与显式写 docs 等价，
+	// 都由集合层兜底创建（AI 习惯显式写 docs，不能因此报错）。
+	if folder := strings.TrimSpace(in.Folder); folder != "" &&
+		strings.Trim(folder, "/") != collection.DefaultDocFolder && !a.DirExists(folder) {
+		return nil, withNotFound(fmt.Errorf("分组 %q 不存在（用 list_docs 或 get_project_modules 查看现有路径）", folder))
 	}
 	// fileName 只在显式给了才生效：默认仍由 name slug 化推导（中文名落中文文件是既有取舍）。
 	opts := collection.CreateDocOpts{

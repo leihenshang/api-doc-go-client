@@ -185,7 +185,7 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "import_collection", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.7.0",
 		Brief:       "批量导入外部集合",
-		Description: "把 Postman/OpenAPI/api-doc-go 集合正文一次导入成多条请求；dryRun 只解析并回报条数。",
+		Description: "把 Postman/OpenAPI/api-doc-go 集合正文一次导入成多条请求；按集合文件结构自动建目录（唯一会建目录的工具）；dryRun 只解析并回报条数。",
 		Output:      importSummaryOutput(),
 	},
 	{

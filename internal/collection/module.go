@@ -42,6 +42,22 @@ func (c *Collection) FolderUIDByPath(dir string) (string, bool) {
 	return c.folderUID(clean)
 }
 
+// DirExists 集合内相对路径是否为已存在的目录。
+//
+// 与 FolderUIDByPath 的区别：后者只认带 folder.yml 的「模块」，纯文档目录
+// （如默认的 docs/）不算模块；create_doc 只要求目录真实存在，用这个。
+func (c *Collection) DirExists(rel string) bool {
+	clean, err := normalizeFolderPath(rel)
+	if err != nil {
+		return false
+	}
+	if clean == "" {
+		return true // 集合根
+	}
+	st, err := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(clean)))
+	return err == nil && st.IsDir()
+}
+
 // RenameCollection 改集合清单（opencollection.yml）里的显示名；目录与 uid 不变。
 func (c *Collection) RenameCollection(name string) error {
 	if !validEntryName(name) {

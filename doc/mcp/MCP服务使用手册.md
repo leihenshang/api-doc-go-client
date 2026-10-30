@@ -370,7 +370,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 |---|---|---|
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
 | `get_doc` | `project?`、`uid?` / `path?` / `uids?` / `paths?`（单篇或批量二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选）；批量传 `uids` 或 `paths`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
-| `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
+| `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入；`folder` 须为**已存在**的目录（否则 `[NOT_FOUND]`），留空或写 `docs` 时用默认目录（不存在会自动创建） |
 | `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一、`occurrence=N` 指定第 N 处；也可用 `anchorHeading="## 附录"` 插到该小节末尾，标题按归一化比较：全角空格、连续空格、闭合式 `## 附录 ##`、尾部 `*` 都认，找不到时列出文内标题）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 

@@ -102,6 +102,8 @@ type ProjectApp interface {
 	ParseImport(format, text string) (*collection.ImportSummary, error)
 	// ---- 模块 / 集合级维护（容器工具）----
 	FolderUIDByPath(dir string) (string, bool)
+	// DirExists 目录是否真实存在（不要求 folder.yml）：create_doc 校验用。
+	DirExists(rel string) bool
 	RenameFolder(uid, name string) error
 	DeleteFolder(uid string) error
 	DeleteFolderTree(uid string) error

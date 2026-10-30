@@ -18,6 +18,15 @@ func (a *App) FolderUIDByPath(dir string) (string, bool) {
 	return c.FolderUIDByPath(dir)
 }
 
+// DirExists 集合内相对路径是否为已存在的目录（不要求有 folder.yml）。
+func (a *App) DirExists(rel string) bool {
+	c, err := a.requireCollection()
+	if err != nil {
+		return false
+	}
+	return c.DirExists(rel)
+}
+
 // RenameCollection 改集合显示名（opencollection.yml 的 info.name）。
 func (a *App) RenameCollection(name string) error {
 	c, err := a.requireCollection()

@@ -209,6 +209,7 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | T6 | **修** | 批量更新/删除的头部补「其中 N 条未通过（见 failed[]）」 |
 | T7 | **仅分析** | `saveEnv` 每次写两个文件（`<name>.yml` + `<name>.secrets.yml`），各一次 `tmp.Sync()` + rename ⇒ **2 次 fsync**。即使没有 secret 变量也会写 secrets 文件。可优化点：secrets 内容未变时跳过写，预计省一半（160→80ms）；代价是「secrets 文件缺失时不自动补」，需权衡。本轮不改。 |
 | T8 | 不管 | — |
+| T9 | **统一规则** | `create_doc` 的 `folder` 也要求已存在（`[NOT_FOUND]`），但**默认目录 `docs/` 例外**：不传与显式写 `docs` 等价，都自动创建 —— 结论是「显式选目录必须存在，工具默认值兜底」。`DirExists` 只要求目录真实存在（不要求 `folder.yml`，否则纯文档目录会被误拒）。`import_collection` 保留自动建目录（结构由文件决定），描述已注明。`TestCreateDocFolderMustExist` |
 
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
