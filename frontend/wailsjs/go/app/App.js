@@ -126,6 +126,10 @@ export function DeleteResponseExample(arg1, arg2) {
   return window['go']['app']['App']['DeleteResponseExample'](arg1, arg2);
 }
 
+export function DirExists(arg1) {
+  return window['go']['app']['App']['DirExists'](arg1);
+}
+
 export function DocAssetHandler() {
   return window['go']['app']['App']['DocAssetHandler']();
 }

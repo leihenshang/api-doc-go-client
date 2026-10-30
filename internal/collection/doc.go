@@ -38,6 +38,10 @@ type docFront struct {
 // docsDir 文档条目目录（B13）。
 const docsDir = "docs"
 
+// DefaultDocFolder 文档的默认存放目录（create_doc 不传 folder 时落这里）。
+// 导出给 MCP：显式写 docs 与不传等价，都允许自动创建。
+const DefaultDocFolder = docsDir
+
 // docHiddenPath 该相对路径的 .md 是否会成为「看不见的文档条目」：子目录里的 README.md。
 // 扫描（scanExtAllowed）与所有写入口（CreateDoc / MoveDoc / RenameDoc）共用这一个判定，
 // 避免「写进去了却扫不出来」的两处规则漂移。根目录的 README.md 仍可见。

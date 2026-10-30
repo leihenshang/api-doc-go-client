@@ -78,6 +78,8 @@ export function DeleteRequest(arg1:string):Promise<void>;
 
 export function DeleteResponseExample(arg1:string,arg2:string):Promise<void>;
 
+export function DirExists(arg1:string):Promise<boolean>;
+
 export function DocAssetHandler():Promise<http.Handler>;
 
 export function DocFileHash(arg1:string):Promise<string>;
