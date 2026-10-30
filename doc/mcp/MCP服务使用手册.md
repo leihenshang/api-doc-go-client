@@ -267,8 +267,9 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 典型用法：`{"patch":{"bodyFields":[{"name":"id","type":"string","description":"用户ID"}]}}`；
 后续只想改说明再传 `{"patch":{"bodyFields":[{"name":"id","description":"新说明"}]}}`，类型/必填/示例都保留。
 
-**批量**：`update_requests` 传 `items: [{uid, ...同上字段}]`（1–10 条），逐条应用；
-单条失败只出现在 `failed[]`（含 `uid` 与原因），不影响其它条目；`dryRun=true` 只校验。
+**批量**：`update_requests` 传 `items: [{uid 或 path, ...同上字段}]`（1–10 条），逐条应用；
+单条失败只出现在 `failed[]`（含 `index` / `uid` / `path` / `code` / 原因），不影响其它条目；`dryRun=true` 只校验。
+按 `path` 定位时，成功条目的 `updated[]` 回填的是解析后的 uid。
 
 **长文档局部改 `replaces`**：`replaces: [{old, new, replaceAll?}]` 只改 `docs` 里出现的片段（与 `docs` 互斥）；
 任一 `old` 找不到即整单拒绝、不落盘。动过 `docs`/`replaces` 时，成功响应附落盘确认：
@@ -299,7 +300,8 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 误删恢复：把文件从 `.trash/` 挪回原位并 `list_projects(refresh: true)`。
 
 ### 4.9.1 `delete_requests`（批量）
-`project?` + `items`（1–10 条，每条 `uid` 或 `path` + **必填 `ifMatch`**）+ `confirm?`（填项目显示名/目录名，不一致则整批拒绝）+ `dryRun?`。
+`project?` + `items`（1–10 条，每条 `uid` 或 `path` + **必填 `ifMatch`** + 可选 `confirmName`）+ `confirm?`（填项目显示名/目录名，不一致则整批拒绝）+ `dryRun?`。
+`confirmName` 是逐条二次确认：非空时必须与该条请求的显示名一致，否则只拒绝这一条（同名请求较多时能防「删错那一个」）。
 `failed[]` 带 `index` / `uid` / `code` / `error`，单条失败不影响其它条。
 
 ### 4.10 环境变量工具（6 个）
@@ -367,7 +369,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
 | `get_doc` | `project?`、`uid?` / `path?` / `uids?` / `paths?`（单篇或批量二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选）；批量传 `uids` 或 `paths`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
-| `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一、`occurrence=N` 指定第 N 处；也可用 `anchorHeading="## 附录"` 插到该小节末尾）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
+| `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一、`occurrence=N` 指定第 N 处；也可用 `anchorHeading="## 附录"` 插到该小节末尾，标题按归一化比较：全角空格、连续空格、闭合式 `## 附录 ##`、尾部 `*` 都认，找不到时列出文内标题）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
 > 集合**根目录**下的 `.md`（含 `README.md`）即使没有 frontmatter 也会作为文档条目出现在 `list_docs` 里：
