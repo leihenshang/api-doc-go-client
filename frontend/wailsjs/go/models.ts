@@ -1539,6 +1539,9 @@ export namespace mcpaudit {
 	    client?: string;
 	    tool: string;
 	    risk: string;
+	    write: boolean;
+	    netEgress?: boolean;
+	    envWrite?: boolean;
 	    project?: string;
 	    requestId?: string;
 	    approved?: boolean;
@@ -1563,6 +1566,9 @@ export namespace mcpaudit {
 	        this.client = source["client"];
 	        this.tool = source["tool"];
 	        this.risk = source["risk"];
+	        this.write = source["write"];
+	        this.netEgress = source["netEgress"];
+	        this.envWrite = source["envWrite"];
 	        this.project = source["project"];
 	        this.requestId = source["requestId"];
 	        this.approved = source["approved"];
