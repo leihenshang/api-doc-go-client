@@ -6,6 +6,9 @@
     "ifMatch": {
       "type": "string"
     },
+    "path": {
+      "type": "string"
+    },
     "project": {
       "type": "string"
     },
@@ -13,8 +16,5 @@
       "type": "string"
     }
   },
-  "required": [
-    "uid"
-  ],
   "type": "object"
 }

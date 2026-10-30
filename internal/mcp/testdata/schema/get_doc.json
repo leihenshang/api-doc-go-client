@@ -6,6 +6,9 @@
     "outline": {
       "type": "boolean"
     },
+    "path": {
+      "type": "string"
+    },
     "project": {
       "type": "string"
     },

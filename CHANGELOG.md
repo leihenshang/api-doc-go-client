@@ -14,6 +14,10 @@ prod:
 - MCP 设置新增「启用的工具组」（集合与接口 / 文档 / 环境变量 / 响应示例 / 发送请求）：不用的组不注册，减少 AI 工具列表体积；工具总览、工作目录与项目列表（`session`）恒开。
 - MCP 工具描述瘦身（9507 → 1713 字，预算上限 3200），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。
 - 修复：`rename_project` / `delete_project` 的 `project` 改为真正必填（此前可省略并回落到默认项目，与参数说明矛盾）；入参校验错误的多参数列表不再夹带 `["..."]` 标点；显式 `fileName` 非法时直接报错（不再静默改成 `untitled`）；`import_collection` 的格式/内容错误统一回 `[INVALID]`，不再误判为 `[IO]`。
+- MCP 新增 `update_requests` 批量更新（工具数 35 → 36）：一次改 1–10 个接口（每条 `uid` + 要改的字段），单条失败不影响其它并逐条回报，`dryRun` 只校验；统一补说明/改字段不再需要 N 次往返与 N 次授权弹窗。
+- 文档工具可按 `path` 定位：`get_doc` / `update_doc` / `delete_doc` 的 `uid` 与 `path` 二选一（`docs/guide.md` 或 `docs/guide` 都认），找不到时列出候选；`update_doc` 新增 `append`（末尾追加）与 `insertAfter`（在某段后插入，anchor 必须唯一）并加 `section=content|meta` 守卫，长文档不必整篇重传。
+- `update_request` 新增 `paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert`：按名合并（同名整行替换、没有则追加），「加一行 header / 补一个字段」不必先抄全表。
+- AI 可发现性：`get_request_detail` 的「相关文档条目」补 `uid`、`docs` 段补回写入口；`search_docs` 新增 `includeHash`；`list_tools` 末尾附「常见任务 → 工具」速查与被关闭的工具组提示；请求体有类型但字段表为空时给出提醒。
 
 ## 2026-10-29  0.1.4-dev
 

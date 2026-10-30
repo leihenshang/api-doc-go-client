@@ -108,6 +108,19 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | B 档：4 项合并 | 已完成 | 39 → 35；schema 快照、手册、设计文档同步 |
 | C 档：工具组开关 | 已完成 | `config.ToolGroups` → `app.MCPRequest.Groups` → `meta.Group` 注册过滤；设置页 5 个组 + i18n；`TestToolGroupRegistration` |
 
+### 第二轮：AI 易用性（同日完成）
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| 详情「相关文档条目」缺 uid（断链） | 已完成 | `renderDetail` 文本补 `uid=`；docs 段补回写入口 |
+| 文档按 `path` 定位 | 已完成 | `get_doc` / `update_doc` / `delete_doc` 的 `uid`/`path` 二选一；找不到列候选 |
+| `search_docs` 拿不到 hash | 已完成 | 新增 `includeHash`（按项目批量取，不逐篇读盘） |
+| 批量更新 | 已完成 | 新增 `update_requests`（1–10 条，单条失败不影响其它）；工具数 35 → 36 |
+| 只能整表覆盖字段/参数/头 | 已完成 | `paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert`（按名合并，与整表字段互斥） |
+| 长文档只能整篇覆盖 | 已完成 | `update_doc.append` / `insertAfter`（anchor 必须唯一）+ `section=content|meta` 守卫 |
+| AI 发现性与提示 | 已完成 | `list_tools` 常见任务速查 + 被关闭组提示；空字段表提醒 |
+| 自测 | 已完成 | 8190 dev 端口起 `cmd/mcpserver`，26 项探针全部 PASS |
+
 ## 6. 处理顺序
 
 1. 修 `rename/delete_project` 的必填矛盾（唯一可能「按描述用就出错」的点）；

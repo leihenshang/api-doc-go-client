@@ -154,6 +154,37 @@
         "array"
       ]
     },
+    "bodyFieldsUpsert": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "docs": {
       "type": [
         "null",
@@ -200,6 +231,37 @@
         "array"
       ]
     },
+    "headersUpsert": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
     "ifMatch": {
       "type": "string"
     },
@@ -216,6 +278,37 @@
       ]
     },
     "params": {
+      "items": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "paramsUpsert": {
       "items": {
         "properties": {
           "description": {

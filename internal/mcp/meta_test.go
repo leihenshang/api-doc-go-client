@@ -18,7 +18,7 @@ func TestToolNamesStable(t *testing.T) {
 		"list_tools", "list_workspaces", "use_workspace", "list_projects",
 		"get_project_modules", "get_request_detail", "search_requests",
 		"search_docs", "list_docs", "get_doc", "list_envs",
-		"create_request", "import_collection", "create_module", "create_project",
+		"create_request", "update_requests", "import_collection", "create_module", "create_project",
 		"update_request", "delete_request", "delete_requests",
 		"rename_module", "delete_module", "rename_project", "delete_project",
 		"create_doc", "update_doc", "delete_doc", "save_doc_image",
@@ -27,8 +27,8 @@ func TestToolNamesStable(t *testing.T) {
 		"send_request",
 	}
 	got := ToolNames()
-	if len(got) != 35 {
-		t.Fatalf("正式工具数 = %d，期望 35", len(got))
+	if len(got) != 36 {
+		t.Fatalf("正式工具数 = %d，期望 36", len(got))
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("工具名基线漂移：\n got=%v\nwant=%v", got, want)
@@ -68,7 +68,7 @@ func TestRiskClassification(t *testing.T) {
 	}
 
 	writers := []string{
-		"create_request", "import_collection", "create_module", "create_project",
+		"create_request", "update_requests", "import_collection", "create_module", "create_project",
 		"update_request", "delete_request", "delete_requests",
 		"rename_module", "delete_module", "rename_project", "delete_project",
 		"create_doc", "update_doc", "delete_doc", "save_doc_image",
@@ -96,10 +96,10 @@ func TestRiskClassification(t *testing.T) {
 	}
 }
 
-// TestNamesForMode 只读模式 = 11 读 + send_request 共 12 个；全模式 35 个。
+// TestNamesForMode 只读模式 = 11 读 + send_request 共 12 个；全模式 36 个。
 func TestNamesForMode(t *testing.T) {
-	if got := NamesForMode(false, nil); len(got) != 35 {
-		t.Errorf("全模式工具数 = %d，期望 35", len(got))
+	if got := NamesForMode(false, nil); len(got) != 36 {
+		t.Errorf("全模式工具数 = %d，期望 36", len(got))
 	}
 	ro := NamesForMode(true, nil)
 	if len(ro) != 12 {
@@ -149,7 +149,7 @@ func TestGroupFiltering(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"docs"}) {
 		t.Errorf("NormalizeGroups 结果 = %v，期望 [docs]", got)
 	}
-	if all := NamesForMode(false, nil); len(all) != 35 {
+	if all := NamesForMode(false, nil); len(all) != 36 {
 		t.Errorf("空组应等价全开：%d", len(all))
 	}
 }

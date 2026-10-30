@@ -6,7 +6,7 @@
 ## 一、它能做什么
 
 把 api-doc-go 的**集合目录**（项目）接给 AI（Claude Desktop / Cursor / Cline 等），
-让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **35 个工具**：
+让 AI 查接口、读详情、建请求、跑请求、管理环境变量，并把响应留存成示例。共 **36 个工具**：
 
 | 类别 | 工具 | 一句话 |
 |---|---|---|
@@ -16,15 +16,16 @@
 | 查询 | `get_project_modules` | 某项目有哪些模块，每个模块下有哪些请求 |
 | 查询 | `get_request_detail` | 某接口的完整详情（含概述 `summary`、请求体字段表 `body.fields`）+ 响应字段文档（respDoc）+ 已保存的响应示例；`uid` 取单个、`uids` 批量 1–10 个；`sections` 可只取分段；返回**完整** `hash` 供冲突保护 |
 | 查询 | `search_requests` | 搜索（`exactMatch` 整词、`fields` 限定范围，每条带 `snippet` 命中行） |
-| 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处） |
+| 查询 | `search_docs` | 搜文档条目正文：命中行号 + 片段（每篇最多 5 处）；`includeHash=true` 时可直接拿到 `update_doc.ifMatch` |
 | 查询 | `list_envs` | 环境与变量（**敏感值只回掩码**，每个环境带 `hash`）；`limit`/`offset` 分页 |
-| 查询 | `list_docs` / `get_doc` | 文档条目：列清单（分页 + `hash`）/ 读正文（`uid` 单篇、`uids` 批量 1–10 篇，支持分段/大纲） |
+| 查询 | `list_docs` / `get_doc` | 文档条目：列清单（分页 + `hash`）/ 读正文（`uid` 或 `path` 单篇、`uids` 批量 1–10 篇，支持分段/大纲） |
 | 查询 | resource `apidoc://doc-template` | 接口说明（docs）的 Markdown 分节结构契约（原 `get_doc_template` 工具已迁移为 MCP resource） |
 | 写 | `create_request` | 新建请求（手填 / cURL 导入 / 复制现有；可带概述 `summary`、完整 body、字段表 `bodyFields`、settings/respDoc；`uid` 幂等、`onConflict` 默认 error） |
 | 写 | `import_collection` | 批量导入：把 Postman / OpenAPI / api-doc-go 集合文件的**正文**一次导入成多条请求（省掉逐个 `create_request` 的往返）；`format` 必填，`parent` 指定落在哪个模块，`dryRun=true` 只解析并回报条数、不写盘 |
 | 写 | `create_module` | 新建模块（目录，支持嵌套） |
 | 写 | `create_project` | 新建项目（集合目录 + manifest）；`root` 必须是**工作目录**（不能是项目目录本身），错误码区分 `[FORBIDDEN]`/`[READONLY]`/`[CONFLICT]`/`[INVALID]` |
-| 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立）/ 移动模块（支持 `ifMatch` 冲突保护） |
+| 写 | `update_request` | 改请求（params/settings/respDoc/概述/字段表均可局部更新；`body` 与 `bodyFields` 相互独立；`paramsUpsert`/`headersUpsert`/`bodyFieldsUpsert` 按名合并）/ 移动模块（支持 `ifMatch` 冲突保护） |
+| 写 | `update_requests` | 批量改 1–10 个接口（每条 `uid` + 要改的字段）；单条失败不影响其它，逐条回报；`dryRun` 只校验 |
 | 写 | `delete_request` | 移除请求（文件进 `.trash`，可找回） |
 | 写 | `create_doc` / `update_doc` / `delete_doc` | 文档条目的新建 / 改正文·改名·移动 / 删除（进 `.trash`） |
 | 写 | `save_doc_image` | 保存图片（base64）到项目 `assets/`，返回可写进 Markdown 的 `/doc-assets/<sha256>`（与客户端编辑器同款） |
@@ -38,7 +39,7 @@
 各工具的完整入参与示例见「四、工具详解」；参数速查见「十二、命令与参数速查」。
 
 工具按风险分三级（服务端元数据表锁定）：**low = 11 个只读工具**（随便用，无副作用）；**medium = `send_request`**
-（真实网络外发）；**high = 23 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
+（真实网络外发）；**high = 24 个写工具**（落盘修改集合/环境/示例）。客户端**内嵌服务**默认对 medium/high 的每次调用
 **弹窗要你确认**（见「六、风险操作确认与调用审计」）；独立 `mcpserver.exe` 默认不弹窗，靠 `-readonly` / 只读授权 /
 `-require-consent` 约束。
 
@@ -147,7 +148,7 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 | 组 | 内容 |
 |---|---|
 | `session`（**恒开，不可关**） | `list_tools`、`list_workspaces`、`use_workspace`、`list_projects` |
-| `collection` | 模块/接口的查询、新建、修改、删除、移动、批量导入 |
+| `collection` | 模块/接口的查询、新建、修改、批量修改、删除、移动、批量导入 |
 | `docs` | 文档条目与图片 |
 | `env` | 环境与变量 |
 | `example` | 响应示例 |
@@ -240,7 +241,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 `exampleName?`（默认 `"{状态码} 响应"`）、`includeBody?`（不传 = 返回体）、`maxBodyBytes?`。
 临时请求（给 `method`+`url`）**不落盘也不存示例**；存下的示例客户端响应面板「本次响应 ▾」能直接回看。
 
-### 4.8 `update_request`
+### 4.8 `update_request` / `update_requests`
 `project?`、`uid` ✅，以及**只改传入的** `name`/`url`/`method`/`params`/`headers`/`body`/`summary`/`bodyFields`/`auth`/`docs`/`settings`/`respDoc`，
 **`folder`（移动请求到别的模块，相对集合根，如 `api/user`；传空串 = 移回项目根）**——请求建错目录时用它挪，
 不需要删了重建；模块不存在会 `[NOT_FOUND]`，路径用 `get_project_modules` 给的值。
@@ -259,6 +260,13 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 
 `bodyFields` 显式传了才覆盖表格（空数组 = 清空）；`summary` 传空串即清空概述。
 `params` 整表覆盖（传空数组 = 清空）；`settings` 仅单请求级，不碰全局配置。
+
+**只加/改一行用 upsert（避免先抄全表）**：`paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert` 按 `name`
+（字段表按字段名）合并 —— 同名整行替换、没有则追加；与对应的整表字段（`params` / `headers` / `bodyFields`）互斥。
+典型用法：`{"bodyFieldsUpsert":[{"name":"id","type":"string","required":true,"description":"用户ID"}]}`。
+
+**批量**：`update_requests` 传 `items: [{uid, ...同上字段}]`（1–10 条），逐条应用；
+单条失败只出现在 `failed[]`（含 `uid` 与原因），不影响其它条目；`dryRun=true` 只校验。
 
 **长文档局部改 `replaces`**：`replaces: [{old, new, replaceAll?}]` 只改 `docs` 里出现的片段（与 `docs` 互斥）；
 任一 `old` 找不到即整单拒绝、不落盘。动过 `docs`/`replaces` 时，成功响应附落盘确认：
@@ -345,9 +353,9 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
-| `get_doc` | `project?`、`uid?` / `uids?`（二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个传 `uid`，批量传 `uids`（按 uid 分组，单条失败不影响其他）。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
+| `get_doc` | `project?`、`uid?` / `path?` / `uids?`（三选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选），批量传 `uids`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入 |
-| `update_doc` | `project?`、`uid` ✅、`content?`、`replaces?`、`name?`、`folder?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换（与 `content` 互斥，`old` 找不到整单拒绝）、`name` 改显示名、`folder` 换分组；成功附「改动行 ±1 / 前 5 行」落盘确认 |
+| `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 必须唯一命中）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
 
 > 集合**根目录**下的 `.md`（含 `README.md`）即使没有 frontmatter 也会作为文档条目出现在 `list_docs` 里：
@@ -411,11 +419,11 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 
 ### 4.12.2 结构化输出（列表类工具）
 
-共 **31 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（35 个工具里除 4 个）：
+共 **32 个工具**在文本之外返回 **`structuredContent`** 并声明 `outputSchema`（36 个工具里除 4 个）：
 
 - **列表/搜索（7）**：`list_projects` / `list_docs` / `list_envs` / `get_project_modules` / `search_requests` / `search_docs` / `list_tools`
 - **文档（4）**：`create_doc` / `update_doc`（`uid/path/size/hash`，dryRun 带 `planned`）/ `delete_doc` / `save_doc_image`（`url/sha256/size/deduped/markdown`）
-- **接口（6）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `delete_request`（+`deleted/trash/dryRun`）/ `delete_requests` / `import_collection`（`imported/skipped/failures/dryRun`）/ `send_request`
+- **接口（7）**：`create_request` / `update_request`（`uid/name/path/method/url`）/ `update_requests`（`updated[]/failed[]`）/ `delete_request`（+`deleted/trash/dryRun`）/ `delete_requests` / `import_collection`（`imported/skipped/failures/dryRun`）/ `send_request`
 - **容器（6）**：`create_module` / `rename_module` / `delete_module`（含 `pruneEmpty` 的 `count`）/ `create_project` / `rename_project` / `delete_project`（`trashPath`）
 - **环境（5）**：`create_env` / `rename_env` / `delete_env` / `set_env_var`（含 `hash` / `keptSecret`）/ `delete_env_var`
 - **响应示例（3）**：`save_response_example` / `update_response_example` / `delete_response_example`

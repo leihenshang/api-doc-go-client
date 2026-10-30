@@ -89,6 +89,7 @@ func TestStructuredListTools(t *testing.T) {
 		// 写/单条读也补：调用方拿 uid/path/hash 无需二次查询
 		"create_doc": true, "update_doc": true, "delete_doc": true,
 		"create_request": true, "update_request": true, "delete_request": true, "import_collection": true,
+		"update_requests": true,
 		// 其余写工具（统一写契约：所有落盘工具都带 outputSchema/structuredContent）
 		"create_module": true, "rename_module": true, "delete_module": true,
 		"create_project": true, "rename_project": true, "delete_project": true,

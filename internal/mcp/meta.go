@@ -44,6 +44,26 @@ const (
 // ConfigurableGroups 设置页可勾选的工具组（不含恒开的 session）；顺序即展示顺序。
 var ConfigurableGroups = []string{GroupCollection, GroupDocs, GroupEnv, GroupExample, GroupNetwork}
 
+// DisabledGroups 返回被显式关闭的可配置组；enabled 为空表示全部启用（返回 nil）。
+// 只给 list_tools 的提示用：调用方需要知道「某类工具不是不存在，而是被设置关了」。
+func DisabledGroups(enabled []string) []string {
+	on := NormalizeGroups(enabled)
+	if len(on) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(on))
+	for _, g := range on {
+		set[g] = true
+	}
+	out := make([]string, 0, len(ConfigurableGroups))
+	for _, g := range ConfigurableGroups {
+		if !set[g] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 // ToolMeta 单个工具的契约元数据。
 type ToolMeta struct {
 	Name string // MCP Tool 名（snake_case，对外契约）
@@ -149,12 +169,18 @@ var toolMetas = []ToolMeta{
 		Output:      envsOutput(),
 	},
 
-	// ---- 集合写（只读模式不注册）：请求 5 + 容器 6 + 文档 4 + 示例 3 ----
+	// ---- 集合写（只读模式不注册）：请求 6 + 容器 6 + 文档 4 + 示例 3 ----
 	{
 		Name: "create_request", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.1.0",
 		Brief:       "新建接口请求",
 		Description: "新建接口：手填字段、curl 或 copyFromUid；folder 指定模块；可同时写 summary/bodyFields/docs/respDoc/settings。",
 		Output:      requestDetailOutput(),
+	},
+	{
+		Name: "update_requests", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.8.0",
+		Brief:       "批量修改接口",
+		Description: "一次改 1–10 个接口（每条 uid + 要改的字段）；单条失败不影响其它，失败明细逐条回报；dryRun 只校验。",
+		Output:      batchUpdateOutput(),
 	},
 	{
 		Name: "import_collection", Group: GroupCollection, Risk: RiskHigh, Write: true, Since: "0.7.0",
@@ -597,6 +623,15 @@ func requestDeleteOutput() map[string]any {
 		"method": strSchema(), "url": strSchema(),
 		"deleted": boolSchema(), "trash": boolSchema(),
 	}, "uid")
+}
+
+// batchUpdateOutput update_requests 的结果（成功 uid 列表 + 失败明细）。
+func batchUpdateOutput() map[string]any {
+	f := objSchema(map[string]any{"uid": strSchema(), "error": strSchema()}, "uid")
+	return objSchema(map[string]any{
+		"project": strSchema(), "requested": intSchema(), "dryRun": boolSchema(),
+		"updated": arrSchema(strSchema()), "failed": arrSchema(f),
+	}, "requested")
 }
 
 // importSummaryOutput import_collection 的结果（批量导入的条数与失败明细）。
