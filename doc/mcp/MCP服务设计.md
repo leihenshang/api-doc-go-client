@@ -97,12 +97,12 @@ Claude Desktop 配置：
 | `create_module` | high | 创建模块（支持嵌套） | `project?`、`name`、`parent?` |
 | `create_project` | high | 新建项目（目录 + manifest，只能在白名单内的可写目录里建） | `name`、`dirName?`、`root?`（留空 = 第一个可写目录） |
 | `update_request` | high | 局部修改（含 params/settings/respDoc）/ `patch` 行级合并 / 移动模块 | `project?`、`uid?`/`path?`、各可选字段、`patch?{params,headers,bodyFields}`、`ifMatch?` |
-| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它；`failed[].index/code`） | `project?`、`items[]`（高频字段子集 + `patch`）、`dryRun?` |
+| `update_requests` | high | 批量局部修改（1–10 条，单条失败不影响其它；`failed[].index/path/code`） | `project?`、`items[]`（uid 或 path + 高频字段子集 + `patch`）、`dryRun?` |
 | `delete_request` | high | 移除请求（进 `.trash`）；`uid`/`path` 二选一 | `project?`、`uid?` / `path?`、`ifMatch?`、`confirmName?`、`dryRun?` |
-| `delete_requests` | high | 批量移除请求（1–10，每条强制 `ifMatch`；`confirm` 可整批二次确认） | `project?`、`confirm?`、`items[]`（uid 或 path）、`dryRun?` |
+| `delete_requests` | high | 批量移除请求（1–10，每条强制 `ifMatch`；`confirm` 整批 + `confirmName` 逐条二次确认） | `project?`、`confirm?`、`items[]`（uid 或 path + `confirmName?`）、`dryRun?` |
 | `import_collection` | high | 批量导入 Postman / OpenAPI / api-doc-go 集合正文 | `project?`、`format`、`text`、`parent?`、`dryRun?` |
 | `create_doc` | high | 新建文档；冲突默认报错（可 suffix/overwrite），支持 uid 幂等与 `fileName` | `project?`、`name`、`folder?`、`content?`、`uid?`、`onConflict?`、`fileName?` |
-| `update_doc` | high | 改正文（覆盖/替换/追加/按 occurrence 或标题插入）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?{anchor,anchorHeading,text,occurrence}`、`name?`、`folder?`、`section?`、`ifMatch?` |
+| `update_doc` | high | 改正文（覆盖/替换/追加/按 occurrence 或标题插入；标题归一化匹配）/ 改名 / 移动分组 | `project?`、`uid?`/`path?`、`content?`/`replaces?`/`append?`/`insertAfter?{anchor,anchorHeading,text,occurrence}`、`name?`、`folder?`、`section?`、`ifMatch?` |
 | `delete_doc` | high | 移除文档（进 `.trash`） | `project?`、`uid` |
 | `save_doc_image` | high | 保存图片（base64，PNG/JPEG/GIF/WebP，≤5MB，内容寻址去重）到项目 `assets/`，返回 `/doc-assets/<sha256>` | `project?`、`data`、`name?` |
 | `rename_module` | high | 改模块显示名（目录/uid 不变） | `project?`、`path`、`name` |

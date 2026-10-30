@@ -411,3 +411,98 @@ func TestStaticResources(t *testing.T) {
 		t.Errorf("错误码 resource 内容不符：%+v", rr.Contents)
 	}
 }
+
+// update_requests 的 items 支持按 path 定位；成功条目回填解析后的 uid。
+func TestUpdateRequestsByPath(t *testing.T) {
+	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api"})
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "folder": "api", "name": "按路径批改", "method": "GET", "url": "/bp",
+	}))
+
+	sc := callStructured(t, cs, "update_requests", map[string]any{
+		"project": "demo",
+		"items": []map[string]any{
+			{"path": "api/按路径批改.yml", "summary": "批量按路径"},
+			{"path": "api/nope.yml", "summary": "不存在"},
+		},
+	})
+	updated, _ := sc["updated"].([]any)
+	failed, _ := sc["failed"].([]any)
+	if len(updated) != 1 || updated[0] != uid {
+		t.Fatalf("按 path 批量应回填解析后的 uid：updated=%v", updated)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("失败条目数不符：%v", failed)
+	}
+	if fm, _ := failed[0].(map[string]any); fm["path"] != "api/nope.yml" || fm["code"] != "NOT_FOUND" {
+		t.Errorf("失败条目应带 path 与 code：%v", failed[0])
+	}
+
+	out := mustCall(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "uid": uid, "sections": []string{"overview"},
+	})
+	if !strings.Contains(out, "批量按路径") {
+		t.Errorf("按 path 的批量修改未落盘：%s", out)
+	}
+}
+
+// delete_requests 的逐条 confirmName：填错只拒绝该条。
+func TestDeleteRequestsConfirmName(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "确认删除", "method": "GET", "url": "/cn",
+	}))
+	sc := callStructured(t, cs, "get_request_detail", map[string]any{
+		"project": "demo", "uid": uid, "sections": []string{"overview"},
+	})
+	hash, _ := sc["hash"].(string)
+
+	bad := callStructured(t, cs, "delete_requests", map[string]any{
+		"project": "demo",
+		"items":   []map[string]any{{"uid": uid, "ifMatch": hash, "confirmName": "别的名字"}},
+		"dryRun":  true,
+	})
+	failed, _ := bad["failed"].([]any)
+	if len(failed) != 1 {
+		t.Fatalf("confirmName 不匹配应失败：%v", bad)
+	}
+	if fm, _ := failed[0].(map[string]any); !strings.Contains(fm["error"].(string), "confirmName") {
+		t.Errorf("失败原因应点名 confirmName：%v", failed[0])
+	}
+
+	ok := callStructured(t, cs, "delete_requests", map[string]any{
+		"project": "demo",
+		"items":   []map[string]any{{"uid": uid, "ifMatch": hash, "confirmName": "确认删除"}},
+		"dryRun":  true,
+	})
+	if deleted, _ := ok["deleted"].([]any); len(deleted) != 1 {
+		t.Errorf("confirmName 匹配应通过：%v", ok)
+	}
+}
+
+// anchorHeading 归一化匹配：全角空格、闭合式 ##、尾部 * 都能命中；找不到时列文内标题。
+func TestAnchorHeadingNormalized(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "标题容错",
+		"content": "## 附录 A\n\n旧内容\n\n## 其它\n\n别的内容",
+	}))
+
+	mustCall(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"insertAfter": map[string]any{"anchorHeading": "##\u3000附录 A ##", "text": "归一化插入"},
+	})
+	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
+	if !strings.Contains(out, "归一化插入") {
+		t.Fatalf("归一化后应命中标题：%s", out)
+	}
+
+	text, isErr := callTool(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"insertAfter": map[string]any{"anchorHeading": "## 不存在", "text": "x"},
+	})
+	if !isErr || !strings.Contains(text, "文内标题") || !strings.Contains(text, "## 附录 A") {
+		t.Errorf("找不到标题时应列出文内标题：%s", text)
+	}
+}

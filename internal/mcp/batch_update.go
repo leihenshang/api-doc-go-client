@@ -20,7 +20,8 @@ const maxBatchUpdate = 10
 
 // UpdateRequestItem 批量更新里的一条：uid + 要改的字段（与 update_request 同名同义）。
 type UpdateRequestItem struct {
-	UID     string `json:"uid" jsonschema:"要更新的接口 uid"`
+	UID     string `json:"uid,omitempty" jsonschema:"要更新的接口 uid；与 path 二选一"`
+	Path    string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml 或 api/users）；与 uid 二选一"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"该接口当前 hash（search_requests / get_request_detail 返回）；不传 = 最后写者赢"`
 	Section string `json:"section,omitempty" jsonschema:"节点守卫（同 update_request）：request / docs；省略表示不限制"`
 
@@ -52,8 +53,9 @@ type UpdateRequestsInput struct {
 type BatchUpdateFailure struct {
 	Index int    `json:"index"` // 对应 items 里的下标（0 基）：同批重复 uid 时靠它定位
 	UID   string `json:"uid"`
-	Code  string `json:"code"`  // 稳定错误码（NOT_FOUND / CONFLICT / INVALID …），便于调用方分流
-	Error string `json:"error"` // 去掉 `[CODE] ` 前缀后的说明
+	Path  string `json:"path,omitempty"` // 按 path 定位时回填，便于调用方对上号
+	Code  string `json:"code"`           // 稳定错误码（NOT_FOUND / CONFLICT / INVALID …），便于调用方分流
+	Error string `json:"error"`          // 去掉 `[CODE] ` 前缀后的说明
 }
 
 // UpdateRequests 逐条应用局部更新；单条失败不影响其它条目。
@@ -78,21 +80,24 @@ func (s *Service) UpdateRequests(in UpdateRequestsInput) ([]string, []BatchUpdat
 	failed := make([]BatchUpdateFailure, 0)
 	for i, it := range in.Items {
 		uid := strings.TrimSpace(it.UID)
-		if uid == "" {
-			failed = append(failed, BatchUpdateFailure{Index: i, Code: CodeInvalid, Error: "缺少 uid"})
+		p := strings.TrimSpace(it.Path)
+		if uid == "" && p == "" {
+			failed = append(failed, BatchUpdateFailure{Index: i, Code: CodeInvalid, Error: "缺少 uid 或 path（二选一）"})
 			continue
 		}
-		if _, err := s.updateRequestWithApp(a, itemToInput(in.Project, uid, it, in.DryRun)); err != nil {
+		r, err := s.updateRequestWithApp(a, itemToInput(in.Project, uid, p, it, in.DryRun))
+		if err != nil {
 			code := CodeOf(err)
 			failed = append(failed, BatchUpdateFailure{
 				Index: i,
 				UID:   uid,
+				Path:  p,
 				Code:  code,
 				Error: strings.TrimPrefix(err.Error(), "["+code+"] "),
 			})
 			continue
 		}
-		updated = append(updated, uid)
+		updated = append(updated, r.UID) // 按 path 定位时回填解析后的 uid
 	}
 	// 末尾再刷一次：让后续读（list/get）看到本批结果；dryRun 没有写盘，不需要。
 	if !in.DryRun {
@@ -102,10 +107,11 @@ func (s *Service) UpdateRequests(in UpdateRequestsInput) ([]string, []BatchUpdat
 }
 
 // itemToInput 把批量子项摊平成单条 UpdateRequestInput（字段一一对应）。
-func itemToInput(project, uid string, it UpdateRequestItem, dryRun bool) UpdateRequestInput {
+func itemToInput(project, uid, reqPath string, it UpdateRequestItem, dryRun bool) UpdateRequestInput {
 	return UpdateRequestInput{
 		Project:    project,
 		UID:        uid,
+		Path:       reqPath,
 		IfMatch:    it.IfMatch,
 		Section:    it.Section,
 		Name:       it.Name,

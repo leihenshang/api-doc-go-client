@@ -9,6 +9,9 @@
     "items": {
       "items": {
         "properties": {
+          "confirmName": {
+            "type": "string"
+          },
           "ifMatch": {
             "type": "string"
           },

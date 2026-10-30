@@ -1795,6 +1795,9 @@ type DeleteRequestItem struct {
 	UID     string `json:"uid,omitempty"`  // 与 Path 二选一
 	Path    string `json:"path,omitempty"` // 请求文件路径（相对集合根）
 	IfMatch string `json:"ifMatch"`        // 必填：该请求当前 hash
+	// ConfirmName 可选逐条二次确认：非空时必须与请求显示名一致，否则该条拒绝。
+	// 批量删同名请求（如十个「用户列表」）时，ifMatch 只能防并发，防不了「删错那一个」。
+	ConfirmName string `json:"confirmName,omitempty"`
 }
 
 // DeleteRequestFailure 单条失败（不影响其它条目）。
@@ -1842,6 +1845,11 @@ func (s *Service) DeleteRequests(project, confirm string, items []DeleteRequestI
 		if rerr != nil {
 			failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeNotFound,
 				Error: fmt.Sprintf("读取请求 %s 失败: %v", uid, rerr)})
+			continue
+		}
+		if cn := strings.TrimSpace(it.ConfirmName); cn != "" && cn != strings.TrimSpace(r.Name) {
+			failed = append(failed, DeleteRequestFailure{Index: i, UID: uid, Code: CodeConflict,
+				Error: fmt.Sprintf("confirmName 与请求名不一致（该条是 %q），未删除", r.Name)})
 			continue
 		}
 		if !hashPrefixMatch(a.FileHash(r.Path), it.IfMatch) {

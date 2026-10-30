@@ -630,7 +630,8 @@ func requestDeleteOutput() map[string]any {
 // batchUpdateOutput update_requests 的结果（成功 uid 列表 + 失败明细）。
 func batchUpdateOutput() map[string]any {
 	f := objSchema(map[string]any{
-		"index": intSchema(), "uid": strSchema(), "code": strSchema(), "error": strSchema(),
+		"index": intSchema(), "uid": strSchema(), "path": strSchema(),
+		"code": strSchema(), "error": strSchema(),
 	}, "uid")
 	return objSchema(map[string]any{
 		"project": strSchema(), "requested": intSchema(), "dryRun": boolSchema(),

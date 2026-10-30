@@ -28,6 +28,8 @@ prod:
 - 候选清单按相关度排序：`[NOT_FOUND]` 附带的请求/模块候选优先展示前缀或目录命中的项。
 - 新增两个静态 resource：`apidoc://error-codes`（错误码表）、`apidoc://collection-format`（集合结构契约）；`list_tools` 的速查同步提示。
 - 批量更新共享一次项目解析，并在开始/结束各刷新一次索引（减少逐条的重复 resolve）。
+- 批量侧与单条对齐：`update_requests.items[]` 支持 `path`（成功条目回填解析后的 uid，失败条目带 `path`），`delete_requests.items[]` 支持逐条 `confirmName`（同名请求多时防「删错那一个」）。
+- `update_doc.insertAfter.anchorHeading` 改为归一化匹配（全角空格、连续空格、闭合式 `## 标题 ##`、尾部 `*` 都认），找不到时列出文内标题，避免盲重试。
 
 ## 2026-10-29  0.1.4-dev
 

@@ -432,29 +432,47 @@ func insertAfterText(cur string, i int, anchor, text string) string {
 
 // insertAfterHeading 在指定 Markdown 标题所在小节的末尾插入 text。
 // 小节范围：该标题行之后、下一个同级或更高级标题之前；occurrence 指定第几个同名标题（默认 1）。
+//
+// 标题按 normalizeHeading 归一化后比较：AI 抄标题时常带全角空格、多个空格或
+// 「## 附录 ##」这类闭合写法，精确比较会假失败；找不到时列出文内标题，省掉一次盲重试。
 func insertAfterHeading(cur, heading string, occurrence int, text string) (string, error) {
 	norm := strings.ReplaceAll(cur, "\r\n", "\n")
 	lines := strings.Split(norm, "\n")
-	target := strings.TrimSpace(heading)
-	if occurrence <= 0 {
-		occurrence = 1
-	}
-	seen, start := 0, -1
-	for i, l := range lines {
-		if strings.TrimSpace(l) == target {
-			seen++
-			if seen == occurrence {
-				start = i
-				break
-			}
-		}
-	}
-	if start < 0 {
-		return "", fmt.Errorf("insertAfter.anchorHeading 未匹配到标题（未写入任何内容）：%s", clipRunes(heading, 60))
+	target := normalizeHeading(heading)
+	if target == "" {
+		return "", errors.New("insertAfter.anchorHeading 不能为空")
 	}
 	level := headingLevel(target)
 	if level == 0 {
 		return "", fmt.Errorf("anchorHeading 必须是 Markdown 标题（以 # 开头）：%s", clipRunes(heading, 60))
+	}
+	if occurrence <= 0 {
+		occurrence = 1
+	}
+	seen, start := 0, -1
+	outline := make([]string, 0, 8)
+	for i, l := range lines {
+		if headingLevel(strings.TrimSpace(l)) == 0 {
+			continue
+		}
+		if len(outline) < 8 {
+			outline = append(outline, strings.TrimSpace(l))
+		}
+		if normalizeHeading(l) != target {
+			continue
+		}
+		seen++
+		if seen == occurrence {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		hint := ""
+		if len(outline) > 0 {
+			hint = "；文内标题：" + strings.Join(outline, " / ")
+		}
+		return "", fmt.Errorf("insertAfter.anchorHeading 未匹配到标题（未写入任何内容）：%s%s", clipRunes(heading, 60), hint)
 	}
 	end := len(lines)
 	for i := start + 1; i < len(lines); i++ {
@@ -474,6 +492,15 @@ func insertAfterHeading(cur, heading string, occurrence int, text string) (strin
 		out += "\n" + tail
 	}
 	return out, nil
+}
+
+// normalizeHeading 归一化标题用于比较：全角空格按半角、连续空白折叠为一个空格，
+// 去掉首尾空白、闭合式 ATX 标题的行尾 # 与尾部 * 强调。
+func normalizeHeading(line string) string {
+	s := strings.ReplaceAll(strings.TrimSpace(line), "\u3000", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.TrimSpace(strings.TrimRight(s, "#"))
+	return strings.TrimSpace(strings.TrimRight(s, "*"))
 }
 
 // headingLevel 返回 Markdown 标题级别（1–6）；不是标题返回 0。

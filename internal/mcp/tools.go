@@ -1567,6 +1567,8 @@ type deleteRequestsItem struct {
 	UID     string `json:"uid,omitempty" jsonschema:"要删除的请求 uid（search_requests 的 results[].uid）；与 path 二选一"`
 	Path    string `json:"path,omitempty" jsonschema:"请求文件路径（相对集合根，如 api/users.yml）；与 uid 二选一"`
 	IfMatch string `json:"ifMatch" jsonschema:"必填：该请求的 hash（search_requests 的 results[].hash，可传 12 位前缀）"`
+	// 逐条二次确认：同名请求较多时用它防「删错那一个」。
+	ConfirmName string `json:"confirmName,omitempty" jsonschema:"可选：填该条请求的显示名，不一致则这一条拒绝（不影响其它条）"`
 }
 
 type deleteRequestsIn struct {
@@ -1581,7 +1583,7 @@ func (ts *toolSet) deleteRequests(ctx context.Context, req *mcp.CallToolRequest,
 		in.Project = ts.proj(req, in.Project)
 		items := make([]DeleteRequestItem, 0, len(in.Items))
 		for _, it := range in.Items {
-			items = append(items, DeleteRequestItem{UID: it.UID, Path: it.Path, IfMatch: it.IfMatch})
+			items = append(items, DeleteRequestItem{UID: it.UID, Path: it.Path, IfMatch: it.IfMatch, ConfirmName: it.ConfirmName})
 		}
 		deleted, failed, err := ts.svc.DeleteRequests(in.Project, in.Confirm, items, in.DryRun)
 		if err != nil {

@@ -144,6 +144,9 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 | 只能按子串锚定插入 | 已完成 | `insertAfter.anchorHeading`（按标题定位小节末尾） |
 | 批量文档只认 uid | 已完成 | `get_doc.paths`（与 `uids` 二选一） |
 | resource 只有模板 | 已完成 | 新增 `apidoc://error-codes`、`apidoc://collection-format` |
+| 批量更新只认 uid | 已完成 | `update_requests.items[].path`（成功条目回填解析后的 uid） |
+| 批量删除缺逐条确认 | 已完成 | `delete_requests.items[].confirmName`（不一致只拒绝该条） |
+| `anchorHeading` 只做精确匹配 | 已完成 | `normalizeHeading`（全角空格/连续空格/闭合 `##`/尾部 `*`）+ 找不到时列文内标题 |
 
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
