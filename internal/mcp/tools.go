@@ -1401,8 +1401,8 @@ func (ts *toolSet) deleteProject(_ context.Context, req *mcp.CallToolRequest, in
 // createModuleIn create_module 的入参。
 type createModuleIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
-	Name    string `json:"name" jsonschema:"模块名"`
-	Parent  string `json:"parent,omitempty" jsonschema:"父模块路径；留空 = 项目根"`
+	Name    string `json:"name" jsonschema:"模块名；可写完整路径（api/user，自动拆成 parent + 末段）"`
+	Parent  string `json:"parent,omitempty" jsonschema:"父模块路径（须已存在）；留空 = 项目根"`
 }
 
 func (ts *toolSet) createModule(ctx context.Context, req *mcp.CallToolRequest, in createModuleIn) (*mcp.CallToolResult, any, error) {
@@ -1476,6 +1476,9 @@ func (ts *toolSet) updateRequests(_ context.Context, req *mcp.CallToolRequest, i
 			action = "（dryRun：未落盘）将更新"
 		}
 		fmt.Fprintf(&sb, "%s %d/%d 条（项目 %s）", action, len(updated), len(in.Items), in.Project)
+		if n := len(in.Items) - len(updated); n > 0 {
+			fmt.Fprintf(&sb, "，其中 %d 条未通过（见 failed[]）", n)
+		}
 		for _, f := range failed {
 			fmt.Fprintf(&sb, "\n- %s：%s", f.UID, f.Error)
 		}
@@ -1617,6 +1620,9 @@ func (ts *toolSet) deleteRequests(ctx context.Context, req *mcp.CallToolRequest,
 			action = "（dryRun：未落盘）将删除"
 		}
 		fmt.Fprintf(&sb, "%s %d/%d 条（项目 %s）", action, len(deleted), len(items), in.Project)
+		if n := len(items) - len(deleted); n > 0 {
+			fmt.Fprintf(&sb, "，其中 %d 条未通过（见 failed[]）", n)
+		}
 		for _, f := range failed {
 			fmt.Fprintf(&sb, "\n- %s：%s", f.UID, f.Error)
 		}

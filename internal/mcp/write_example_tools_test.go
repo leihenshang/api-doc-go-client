@@ -18,6 +18,10 @@ import (
 // TestSaveResponseExampleTool save_response_example 落盘并能被详情读回。
 func TestSaveResponseExampleTool(t *testing.T) {
 	root, svc := setup(t)
+	// folder 要求已存在（不再静默建目录）
+	if _, err := svc.CreateModule("demo", "", "api"); err != nil {
+		t.Fatal(err)
+	}
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Folder: "api", Name: "ex-save", Method: "POST", URL: "http://127.0.0.1/ex",
 	})
@@ -226,6 +230,9 @@ func TestDeleteResponseExampleTool(t *testing.T) {
 // delete_response_example.ifMatch：hash 不符 → [CONFLICT] 且不删；相符才移入 .trash。
 func TestDeleteResponseExampleIfMatch(t *testing.T) {
 	_, svc := setup(t)
+	if _, err := svc.CreateModule("demo", "", "api"); err != nil {
+		t.Fatal(err)
+	}
 	r, err := svc.CreateRequest(CreateRequestInput{
 		Project: "demo", Folder: "api", Name: "ex-ifmatch", Method: "GET", URL: "http://127.0.0.1/x",
 	})

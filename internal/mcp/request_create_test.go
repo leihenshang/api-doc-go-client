@@ -21,6 +21,9 @@ func TestCreateRequestConflictAndStructured(t *testing.T) {
 		return res
 	}
 
+	// folder 现在要求已存在（不再静默建目录）
+	callRaw("create_module", map[string]any{"project": "demo", "name": "_dup"})
+
 	// ① 默认 error：同名第二次 → [CONFLICT]
 	r1 := callRaw("create_request", map[string]any{
 		"project": "demo", "name": "重名接口", "method": "GET", "url": "/v1", "folder": "_dup",

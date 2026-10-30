@@ -1133,9 +1133,16 @@ func (s *Service) CreateRequest(in CreateRequestInput) (*collection.Request, err
 	if name == "" {
 		return nil, errNeedName
 	}
+	// 目标模块必须已存在：静默建目录会让调用方以为写进了别的模块（此前 folder=nope 会直接生成 nope/x.yml）。
+	folder := strings.TrimSpace(in.Folder)
+	if folder != "" {
+		if _, ok := a.FolderUIDByPath(strings.Trim(folder, "/")); !ok {
+			return nil, withNotFound(fmt.Errorf("模块 %q 不存在：%s", folder, s.moduleCandidates(a, folder)))
+		}
+	}
 	// fileName 只在显式给了才生效：默认仍由 name slug 化推导（中文名落中文文件是既有取舍）。
 	opts := collection.RequestCreateOpts{
-		Folder:     strings.TrimSpace(in.Folder),
+		Folder:     folder,
 		Name:       name,
 		Src:        draft,
 		UID:        strings.TrimSpace(in.UID),
@@ -1322,12 +1329,29 @@ func (s *Service) CreateModule(project, parent, name string) (string, error) {
 	if name == "" {
 		return "", errNeedName
 	}
-	childPath := strings.Trim(strings.Join([]string{strings.TrimSpace(parent), name}, "/"), "/")
+	// name 允许写完整路径（api/user）：拆成 parent + 末段。否则集合层只会回
+	// 「名称含非法字符或为空」，调用方根本猜不到要用 parent。
+	full := strings.Trim(strings.Trim(strings.TrimSpace(parent), "/")+"/"+strings.Trim(name, "/"), "/")
+	if i := strings.LastIndex(full, "/"); i >= 0 {
+		parent, name = full[:i], full[i+1:]
+	} else {
+		parent = ""
+	}
+	if parent != "" {
+		if _, ok := a.FolderUIDByPath(parent); !ok {
+			return "", withNotFound(fmt.Errorf("上级模块 %q 不存在：%s", parent, s.moduleCandidates(a, parent)))
+		}
+	}
+	childPath := strings.Trim(strings.Join([]string{parent, name}, "/"), "/")
 	if _, ok := a.FolderUIDByPath(childPath); ok {
 		return "", coded(CodeConflict, fmt.Errorf("模块 %s 已存在（改显示名用 rename_module）", childPath))
 	}
-	if err := a.CreateFolder(strings.TrimSpace(parent), name); err != nil {
-		return "", err
+	if err := a.CreateFolder(parent, name); err != nil {
+		// 名称非法是调用方能改的（路径分隔符、以点开头/结尾），不能笼统报 [INTERNAL]。
+		if errors.Is(err, collection.ErrInvalidEntryName) {
+			return "", withInvalid(err)
+		}
+		return "", coded(CodeIO, err)
 	}
 	child := name
 	if p := strings.Trim(strings.TrimSpace(parent), "/"); p != "" {
@@ -1355,10 +1379,11 @@ type ReplaceOp struct {
 func applyReplaces(text string, ops []ReplaceOp) (string, error) {
 	for i, op := range ops {
 		if op.Old == "" {
-			return "", fmt.Errorf("replaces[%d].old 不能为空", i)
+			return "", withInvalid(fmt.Errorf("replaces[%d].old 不能为空", i))
 		}
 		if !strings.Contains(text, op.Old) {
-			return "", fmt.Errorf("replaces[%d] 未匹配到 old 片段（未写入任何内容）：%s", i, clipRunes(op.Old, 60))
+			// 片段没命中是调用方传错内容，不是服务故障。
+			return "", withInvalid(fmt.Errorf("replaces[%d] 未匹配到 old 片段（未写入任何内容）：%s", i, clipRunes(op.Old, 60)))
 		}
 		if op.ReplaceAll {
 			text = strings.ReplaceAll(text, op.Old, op.New)

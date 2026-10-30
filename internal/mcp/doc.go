@@ -527,6 +527,14 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	if err := validateDocSection(in.Section, in); err != nil {
 		return nil, err
 	}
+	// 移动目标必须已存在，且要在写正文之前校验：否则会留下「正文已写、移动失败」的半成功状态。
+	if in.Folder != nil {
+		if target := strings.TrimSpace(*in.Folder); target != "" {
+			if _, ok := a.FolderUIDByPath(target); !ok {
+				return nil, withNotFound(fmt.Errorf("分组 %q 不存在（用 get_project_modules 或 list_docs 查看现有路径）", target))
+			}
+		}
+	}
 	d, err := a.ReadDoc(uid)
 	if err != nil {
 		return nil, withNotFound(fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err))

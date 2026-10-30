@@ -293,7 +293,7 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "create_env", Group: GroupEnv, Risk: RiskHigh, Write: true, EnvWrite: true, Since: "0.1.0",
 		Brief:       "新建环境",
-		Description: "新建 environments/<name>.yml，可同时写入初始变量；环境名只允许字母、数字、- 与 _。",
+		Description: "新建 environments/<name>.yml，可同时写入初始变量；环境名只允许字母、数字、- 与 _。新集合自带 dev 环境（含 host 变量），建 dev 会 [CONFLICT]。",
 		Output:      envWriteOutput(),
 	},
 	{

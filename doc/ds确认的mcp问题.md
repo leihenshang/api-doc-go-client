@@ -197,6 +197,19 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 
 **审计补全（本轮已修）**：`Event` 增加 `write` / `netEgress` / `envWrite`，并落 `approved` / `grantedBy` / `requestId`；未走授权的调用 `approved` 保持 `nil`（= 未询问），不再靠 `risk` 猜。
 
+### 9.1 处理结果（按 2026-10-31 决策）
+
+| # | 决策 | 实现 |
+|---|---|---|
+| T1 | 不存在**报错** | `CreateRequest` 预检 `FolderUIDByPath`，不存在回 `[NOT_FOUND]` + 候选；不再静默建目录。`TestCreateRequestFolderMustExist` |
+| T2 | **拆分** | `CreateModule` 把 `name` 按 `/` 拆成 `parent` + 末段；上级不存在回 `[NOT_FOUND]`；非法末段回 `[INVALID]`（collection 新增哨兵 `ErrInvalidEntryName`）。`TestCreateModuleSplitsPath` |
+| T3 | 不存在**报错** | `UpdateDoc` 在写正文**之前**校验目标分组，回 `[NOT_FOUND]`；不会留下「正文已写、移动失败」的半成功。`TestUpdateDocMoveRequiresFolder` |
+| T4 | **修** | `applyReplaces` 的 `old` 为空 / 未命中改为 `[INVALID]`。`TestReplacesMissIsInvalid` |
+| T5 | **修** | `create_env` 描述补「新集合自带 dev 环境（含 host 变量），建 dev 会 [CONFLICT]」 |
+| T6 | **修** | 批量更新/删除的头部补「其中 N 条未通过（见 failed[]）」 |
+| T7 | **仅分析** | `saveEnv` 每次写两个文件（`<name>.yml` + `<name>.secrets.yml`），各一次 `tmp.Sync()` + rename ⇒ **2 次 fsync**。即使没有 secret 变量也会写 secrets 文件。可优化点：secrets 内容未变时跳过写，预计省一半（160→80ms）；代价是「secrets 文件缺失时不自动补」，需权衡。本轮不改。 |
+| T8 | 不管 | — |
+
 > 实测：`update_request` schema 11,334 → 11,917 字节（`patch` 少了两层顶层字段，但 SDK 的
 > schema 生成器不复用 `$defs`，`patch` 内部仍要声明三个数组）——结构更清晰，字节数没有下降。
 

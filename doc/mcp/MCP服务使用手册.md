@@ -231,7 +231,8 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 返回 `{imported, skipped, failures}`（`failures` 最多 10 条）。
 
 ### 4.6 `create_module` / `create_project`
-- `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套（`parent=api` 建 `api/user`）。
+- `create_module`：`project?` + `name` ✅（+ `parent` 父模块路径，留空 = 根），支持嵌套：`parent=api` 建 `api/user`，或直接 `name="api/user"`（自动拆分）。
+- 上级模块必须已存在（否则 `[NOT_FOUND]`）；末段不能含 `/`、不能以点开头或结尾（否则 `[INVALID]`）。
 - `create_project`：`name` ✅（manifest 显示名）+ `dirName`（目录名，留空 = 与 name 相同）+ `root`（**必须是工作目录**，
   留空 = 第一个可写授权目录）。`root` 指向项目目录本身/项目内子目录会 `[INVALID]` 并提示改传父级（否则新项目不会被扫描到）；
   白名单外 `[FORBIDDEN]`、只读 `[READONLY]`、重名 `[CONFLICT]`。建完 `list_projects` 立刻可见。

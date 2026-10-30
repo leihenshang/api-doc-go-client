@@ -626,3 +626,73 @@ func TestPatchEmptyArrayClears(t *testing.T) {
 		t.Errorf("未传的 patch.headers 不该被动：%s", out)
 	}
 }
+
+// T1：create_request 的目标 folder 不存在必须报错，不能静默建目录。
+func TestCreateRequestFolderMustExist(t *testing.T) {
+	cs := connectSelf(t)
+	text, isErr := callTool(t, cs, "create_request", map[string]any{
+		"project": "demo", "folder": "no-such", "name": "x", "method": "GET", "url": "/x",
+	})
+	if !isErr || !strings.Contains(text, "[NOT_FOUND]") {
+		t.Errorf("folder 不存在应回 [NOT_FOUND]：%s", text)
+	}
+	// dryRun 也不该建
+	if _, isErr := callTool(t, cs, "create_request", map[string]any{
+		"project": "demo", "folder": "no-such2", "name": "y", "method": "GET", "url": "/y", "dryRun": true,
+	}); !isErr {
+		t.Error("dryRun 下 folder 不存在也应报错")
+	}
+}
+
+// T2：create_module 的 name 允许写完整路径（自动拆 parent + 末段）。
+func TestCreateModuleSplitsPath(t *testing.T) {
+	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api"})
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api/user"})
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api/user/profile"})
+
+	// 上级不存在 → [NOT_FOUND]
+	text, isErr := callTool(t, cs, "create_module", map[string]any{"project": "demo", "name": "nope/x"})
+	if !isErr || !strings.Contains(text, "[NOT_FOUND]") {
+		t.Errorf("上级模块不存在应回 [NOT_FOUND]：%s", text)
+	}
+	// 末段非法 → [INVALID]
+	text, isErr = callTool(t, cs, "create_module", map[string]any{"project": "demo", "name": "api/.."})
+	if !isErr || !strings.Contains(text, "[INVALID]") {
+		t.Errorf("非法模块名应回 [INVALID]：%s", text)
+	}
+}
+
+// T3：update_doc 移动分组不存在时报错，且不能先写正文（避免半成功）。
+func TestUpdateDocMoveRequiresFolder(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "移动校验", "content": "# 原内容",
+	}))
+
+	text, isErr := callTool(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid, "content": "# 新内容", "folder": "no-such",
+	})
+	if !isErr || !strings.Contains(text, "[NOT_FOUND]") {
+		t.Errorf("目标分组不存在应回 [NOT_FOUND]：%s", text)
+	}
+	out := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
+	if strings.Contains(out, "# 新内容") {
+		t.Error("移动失败时不应写入正文（避免半成功）")
+	}
+}
+
+// T4：replaces 片段没命中是参数错，应回 [INVALID]。
+func TestReplacesMissIsInvalid(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "替换校验", "content": "# 正文",
+	}))
+	text, isErr := callTool(t, cs, "update_doc", map[string]any{
+		"project": "demo", "uid": uid,
+		"replaces": []map[string]any{{"old": "不存在的片段", "new": "x"}},
+	})
+	if !isErr || !strings.Contains(text, "[INVALID]") {
+		t.Errorf("replaces 未命中应回 [INVALID]：%s", text)
+	}
+}
