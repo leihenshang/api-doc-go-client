@@ -1,7 +1,11 @@
 package mcp
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -201,5 +205,63 @@ func TestToolBriefAndDescriptionBudget(t *testing.T) {
 		if n := utf8.RuneCountInString(m.Description); n > maxDesc {
 			t.Errorf("%s: Description %d 字超过 %d（细节放手册，描述只留做什么）", m.Name, n, maxDesc)
 		}
+	}
+}
+
+// TestDocsToolCountsMatchMeta 文档里的工具数量必须与 meta 表一致。
+//
+// 这几轮反复出现「文档写 35、实际 36」「只读 13、实际 11」这类漂移，
+// 人工核对不可靠；把数字锚点交给测试，改工具时会立刻发现该同步文档。
+func TestDocsToolCountsMatchMeta(t *testing.T) {
+	names := ToolNames()
+	total := len(names)
+	low, medium, high, withOutput := 0, 0, 0, 0
+	for _, n := range names {
+		m, ok := MetaOf(n)
+		if !ok {
+			t.Fatalf("%s 缺少元数据", n)
+		}
+		switch m.Risk {
+		case RiskLow:
+			low++
+		case RiskMedium:
+			medium++
+		case RiskHigh:
+			high++
+		}
+		if m.Output != nil {
+			withOutput++
+		}
+	}
+
+	cases := []struct {
+		file, pattern string
+		want          int
+		hint          string
+	}{
+		{"../../doc/mcp/MCP服务使用手册.md", `共 \*\*(\d+) 个工具\*\*：`, total, "工具总数"},
+		{"../../doc/mcp/MCP服务使用手册.md", `共 \*\*(\d+) 个工具\*\*在文本之外`, withOutput, "结构化输出工具数"},
+		{"../../doc/mcp/MCP服务使用手册.md", `low = (\d+) 个只读工具`, low, "low 风险数"},
+		{"../../doc/mcp/MCP服务使用手册.md", `high = (\d+) 个写工具`, high, "high 风险数"},
+		{"../../doc/mcp/MCP服务设计.md", `工具清单（(\d+) 个）`, total, "工具总数"},
+	}
+	for _, c := range cases {
+		raw, err := os.ReadFile(filepath.Clean(c.file))
+		if err != nil {
+			t.Fatalf("读文档失败（%s）：%v", c.file, err)
+		}
+		m := regexp.MustCompile(c.pattern).FindStringSubmatch(string(raw))
+		if m == nil {
+			t.Errorf("%s 里找不到「%s」：文档结构变了，请同步更新本测试", c.file, c.hint)
+			continue
+		}
+		got, _ := strconv.Atoi(m[1])
+		if got != c.want {
+			t.Errorf("%s 的%s = %d，实际应为 %d", c.file, c.hint, got, c.want)
+		}
+	}
+	// medium 风险只应有 send_request（唯一真实网络外发）。
+	if medium != 1 {
+		t.Errorf("medium 风险工具数 = %d，期望 1（send_request）", medium)
 	}
 }

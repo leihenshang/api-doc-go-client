@@ -42,6 +42,8 @@ prod:
 - 错误码补全（14 处，此前都落 `[INTERNAL]`）：`update_doc` 的 section 校验、环境系列的「找不到环境/变量」与「变量名不合法」、示例更新/删除的「示例不存在」、`create_request` 的 cURL 解析与复制源请求、`send_request` 的发送失败、`update_doc` 的部分成功提示。新增 `TestErrorCodesClassified` 表驱动防回归。
 - `import_collection` 的 `text` 增加 10MB 上限，超限回 `[LIMIT]`（此前整包一次性进内存解析）。
 - 新增 `TestToolBriefAndDescriptionBudget`：`Brief` ≤ 40 字且不重复、`Description` ≤ 120 字。
+- 索引库改用 WAL + `synchronous=NORMAL`（索引是派生数据，可从集合重建；集合文件仍由 `writeFileAtomic` 的 fsync 保证）：实测单条写操作 316 → 148 ms，5 条批量 1.4 s → 240 ms。
+- 新增 `TestDocsToolCountsMatchMeta`：手册/设计文档里的工具总数、结构化工具数、low/high 风险数必须与 `meta` 表一致（这几轮的数字漂移全靠人工核对，容易漏）。
 
 ## 2026-10-29  0.1.4-dev
 
