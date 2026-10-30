@@ -1,0 +1,534 @@
+{
+  "properties": {
+    "dryRun": {
+      "type": "boolean"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "auth": {
+            "properties": {
+              "in": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "body": {
+            "properties": {
+              "data": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "descs": {
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
+              "fields": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "example": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type",
+                    "required"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "form": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "value",
+                    "enabled"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "raw": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "type": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "bodyFields": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "required"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "bodyFieldsUpsert": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "example": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "required"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "docs": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "folder": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headers": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "enabled"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "headersUpsert": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "enabled"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "ifMatch": {
+            "type": "string"
+          },
+          "method": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "params": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "enabled"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "paramsUpsert": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "enabled"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "replaces": {
+            "items": {
+              "properties": {
+                "new": {
+                  "type": "string"
+                },
+                "old": {
+                  "type": "string"
+                },
+                "replaceAll": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "old",
+                "new"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "respDoc": {
+            "properties": {
+              "contentType": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "headers": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "value",
+                    "enabled"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "params": {
+                "items": {
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "example": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fieldName",
+                    "type",
+                    "required",
+                    "description",
+                    "example"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "sample": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "status": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "type": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "section": {
+            "type": "string"
+          },
+          "settings": {
+            "properties": {
+              "encodeUrl": {
+                "type": [
+                  "null",
+                  "boolean"
+                ]
+              },
+              "followRedirects": {
+                "type": [
+                  "null",
+                  "boolean"
+                ]
+              },
+              "insecureSsl": {
+                "type": [
+                  "null",
+                  "boolean"
+                ]
+              },
+              "maxRedirects": {
+                "type": "integer"
+              },
+              "timeoutSec": {
+                "type": "integer"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "uid": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "uid"
+        ],
+        "type": "object"
+      },
+      "type": [
+        "null",
+        "array"
+      ]
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "type": "object"
+}

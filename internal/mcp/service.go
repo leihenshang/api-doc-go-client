@@ -1108,19 +1108,25 @@ type UpdateRequestInput struct {
 	// Section 节点守卫：限定本次调用只改某一个节点（见 validateSection）。
 	Section string `json:"section,omitempty" jsonschema:"可选：request | response | docs；限定本次只改该节点，混用其它节点的字段会报错。省略=不限制（兼容旧调用）"`
 	// DryRun 只校验参数与 ifMatch，不落盘、不移动目录
-	DryRun     bool                        `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验参数与 ifMatch），不落盘"`
-	Name       *string                     `json:"name,omitempty"`
-	Method     *string                     `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
-	URL        *string                     `json:"url,omitempty"`
-	Params     []collection.KV             `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动"`
-	Headers    []collection.KV             `json:"headers,omitempty"`
-	Body       *BodyInput                  `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
-	BodyFields *[]collection.BodyField     `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖"`
-	Summary    *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
-	Settings   *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
-	RespDoc    *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
-	Auth       *collection.Auth            `json:"auth,omitempty"`
-	Docs       *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
+	DryRun bool            `json:"dryRun,omitempty" jsonschema:"true = 只预演（校验参数与 ifMatch），不落盘"`
+	Name   *string         `json:"name,omitempty"`
+	Method *string         `json:"method,omitempty" jsonschema:"请求方法（GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE/CONNECT/GRPC；其它值会 [INVALID]）"`
+	URL    *string         `json:"url,omitempty"`
+	Params []collection.KV `json:"params,omitempty" jsonschema:"请求参数表；传了整表覆盖（含 description 说明列）；不传不动。与 paramsUpsert 互斥"`
+	// ParamsUpsert 按 name 合并参数行：存在则整行替换，不存在则追加 —— 「只加/改一行」不必先抄全表。
+	ParamsUpsert []collection.KV         `json:"paramsUpsert,omitempty" jsonschema:"按 name 合并参数行（同名整行替换，没有则追加）；与 params 互斥"`
+	Headers      []collection.KV         `json:"headers,omitempty"`
+	Body         *BodyInput              `json:"body,omitempty" jsonschema:"请求体局部更新：不传的子项保留原值——只传 raw 不会动 form/fields/descs；显式传空串/空数组才清空"`
+	BodyFields   *[]collection.BodyField `json:"bodyFields,omitempty" jsonschema:"请求体字段表格；不传则不动，传空数组即清空，传数组即整表覆盖。与 bodyFieldsUpsert 互斥"`
+	// BodyFieldsUpsert 按字段名合并：存在则整行替换，不存在则追加。
+	BodyFieldsUpsert []collection.BodyField `json:"bodyFieldsUpsert,omitempty" jsonschema:"按字段名合并请求体字段表（同名整行替换，没有则追加）；与 bodyFields 互斥"`
+	// HeadersUpsert 按 header 名合并：存在则整行替换，不存在则追加。
+	HeadersUpsert []collection.KV             `json:"headersUpsert,omitempty" jsonschema:"按 header 名合并（同名整行替换，没有则追加）；与 headers 互斥"`
+	Summary       *string                     `json:"summary,omitempty" jsonschema:"API 概述（纯文本）；不传则不动，传空串即清空"`
+	Settings      *collection.RequestSettings `json:"settings,omitempty" jsonschema:"单请求设置（超时/重定向/忽略证书/URL 编码）；只影响本请求，不碰全局配置"`
+	RespDoc       *RespDocInput               `json:"respDoc,omitempty" jsonschema:"响应字段文档局部更新：不传的子项保留原值（可只传 params 补说明），显式传空串/0/空数组才清空；gRPC 请求拒绝"`
+	Auth          *collection.Auth            `json:"auth,omitempty"`
+	Docs          *string                     `json:"docs,omitempty" jsonschema:"接口说明（Markdown）；结构建议对齐 get_doc_template 的模板"`
 	// Replaces 接口说明的局部替换：与 docs 互斥；old 找不到即整单拒绝（不落盘）。
 	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"接口说明的局部替换：[{old,new,replaceAll}]，与 docs 互斥；任一 old 找不到则整单拒绝、不落盘"`
 	Folder   *string     `json:"folder,omitempty" jsonschema:"移动请求到别的模块（相对集合根，如 api/user；传空串 = 移到项目根）；模块不存在会 [NOT_FOUND]。这是把请求挪到其它目录的唯一入口，不需要删了重建"` // 移动到别的模块
@@ -1154,14 +1160,23 @@ func validateSection(section string, in UpdateRequestInput) error {
 	if in.Params != nil {
 		present = append(present, "params")
 	}
+	if len(in.ParamsUpsert) > 0 {
+		present = append(present, "paramsUpsert")
+	}
 	if in.Headers != nil {
 		present = append(present, "headers")
+	}
+	if len(in.HeadersUpsert) > 0 {
+		present = append(present, "headersUpsert")
 	}
 	if in.Body != nil {
 		present = append(present, "body")
 	}
 	if in.BodyFields != nil {
 		present = append(present, "bodyFields")
+	}
+	if len(in.BodyFieldsUpsert) > 0 {
+		present = append(present, "bodyFieldsUpsert")
 	}
 	if in.Summary != nil {
 		present = append(present, "summary")
@@ -1187,7 +1202,8 @@ func validateSection(section string, in UpdateRequestInput) error {
 	var allowed []string
 	switch sec {
 	case sectionRequest:
-		allowed = []string{"name", "method", "url", "params", "headers", "body", "bodyFields", "summary", "auth", "settings", "folder"}
+		allowed = []string{"name", "method", "url", "params", "paramsUpsert", "headers", "headersUpsert",
+			"body", "bodyFields", "bodyFieldsUpsert", "summary", "auth", "settings", "folder"}
 	case sectionResponse:
 		allowed = []string{"respDoc"}
 	case sectionDocs:
@@ -1293,10 +1309,22 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		r.URL = strings.TrimSpace(*in.URL)
 	}
 	if in.Headers != nil {
+		if len(in.HeadersUpsert) > 0 {
+			return withInvalid(errors.New("headers 与 headersUpsert 互斥：整表覆盖用 headers，只加/改一行用 headersUpsert"))
+		}
 		r.Headers = in.Headers
 	}
+	if len(in.HeadersUpsert) > 0 {
+		r.Headers = upsertKV(r.Headers, in.HeadersUpsert)
+	}
 	if in.Params != nil {
+		if len(in.ParamsUpsert) > 0 {
+			return withInvalid(errors.New("params 与 paramsUpsert 互斥：整表覆盖用 params，只加/改一行用 paramsUpsert"))
+		}
 		r.Params = in.Params
+	}
+	if len(in.ParamsUpsert) > 0 {
+		r.Params = upsertKV(r.Params, in.ParamsUpsert)
 	}
 	if in.Body != nil {
 		// 按子项合并：nil = 保留原值，显式空（"" / [] / {}）= 清空。
@@ -1306,7 +1334,13 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 	}
 	// 字段表格单独覆盖：显式传入（含空数组=清空）才动，优先级高于 body.fields
 	if in.BodyFields != nil {
+		if len(in.BodyFieldsUpsert) > 0 {
+			return withInvalid(errors.New("bodyFields 与 bodyFieldsUpsert 互斥：整表覆盖用 bodyFields，只加/改一行用 bodyFieldsUpsert"))
+		}
 		r.Body.Fields = *in.BodyFields
+	}
+	if len(in.BodyFieldsUpsert) > 0 {
+		r.Body.Fields = upsertFields(r.Body.Fields, in.BodyFieldsUpsert)
 	}
 	if in.Summary != nil {
 		r.Summary = *in.Summary
@@ -1327,6 +1361,51 @@ func applyUpdateFields(r *collection.Request, in UpdateRequestInput) error {
 		r.Docs = *in.Docs
 	}
 	return nil
+}
+
+// upsertKV 按 Name 合并行：同名整行替换，没有则追加（保持原顺序，新行落在末尾）。
+// 空 name 的行跳过 —— 新建请求自带一行空占位参数，不该被"追加"出更多空行。
+func upsertKV(rows, add []collection.KV) []collection.KV {
+	out := append([]collection.KV(nil), rows...)
+	for _, a := range add {
+		if strings.TrimSpace(a.Name) == "" {
+			continue
+		}
+		replaced := false
+		for i := range out {
+			if out[i].Name == a.Name {
+				out[i] = a
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// upsertFields 按字段名合并请求体字段表；语义与 upsertKV 一致。
+func upsertFields(rows, add []collection.BodyField) []collection.BodyField {
+	out := append([]collection.BodyField(nil), rows...)
+	for _, a := range add {
+		if strings.TrimSpace(a.Name) == "" {
+			continue
+		}
+		replaced := false
+		for i := range out {
+			if out[i].Name == a.Name {
+				out[i] = a
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // CreateProject 新建项目：目标必须是**授权且可写**的工作目录。

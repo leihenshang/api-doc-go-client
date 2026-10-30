@@ -3,6 +3,9 @@
     "exactMatch": {
       "type": "boolean"
     },
+    "includeHash": {
+      "type": "boolean"
+    },
     "limit": {
       "type": "integer"
     },

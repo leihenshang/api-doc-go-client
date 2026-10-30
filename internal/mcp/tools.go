@@ -490,7 +490,8 @@ func (ts *toolSet) listTools(_ context.Context, _ *mcp.CallToolRequest, in listT
 			"returned": len(items),
 			"tools":    nonNilSlice(items),
 		}
-		return renderToolCatalog(items, total, in.Filter, in.Mode, ts.readOnly), data, nil
+		text := renderToolCatalog(items, total, in.Filter, in.Mode, ts.readOnly)
+		return text + taskCheatSheet(ts.readOnly, ts.groups, in.Filter), data, nil
 	})
 }
 
@@ -566,6 +567,7 @@ func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in 
 
 func (ts *toolSet) registerWriteTools(server *mcp.Server) {
 	addTool(ts, server, "create_request", ts.createRequest)
+	addTool(ts, server, "update_requests", ts.updateRequests)
 	addTool(ts, server, "import_collection", ts.importCollection)
 	addTool(ts, server, "create_module", ts.createModule)
 	addTool(ts, server, "create_project", ts.createProject)
@@ -851,17 +853,18 @@ func (ts *toolSet) batchRequestDetails(in getDetailsIn) (string, any, error) {
 
 // searchDocsIn search_docs 的入参。
 type searchDocsIn struct {
-	Project    string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略则在所有已加载项目里搜"`
-	Pattern    string `json:"pattern" jsonschema:"要搜索的文本（按行匹配，大小写不敏感）"`
-	ExactMatch bool   `json:"exactMatch,omitempty" jsonschema:"true = 整词匹配（左右必须是词边界），默认子串匹配"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"返回文档数上限，默认 50，最大 200"`
+	Project     string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略则在所有已加载项目里搜"`
+	Pattern     string `json:"pattern" jsonschema:"要搜索的文本（按行匹配，大小写不敏感）"`
+	ExactMatch  bool   `json:"exactMatch,omitempty" jsonschema:"true = 整词匹配（左右必须是词边界），默认子串匹配"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"返回文档数上限，默认 50，最大 200"`
+	IncludeHash bool   `json:"includeHash,omitempty" jsonschema:"true = 每条结果附文件 hash（可直接回传 update_doc.ifMatch）；默认 false 省一次读盘"`
 }
 
 // searchDocs 在文档条目正文里搜索：返回 uid/路径/命中行号/片段，避免逐篇 get_doc 全文拉回。
 func (ts *toolSet) searchDocs(ctx context.Context, req *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		hits, total, err := ts.svc.SearchDocs(in.Project, in.Pattern, in.ExactMatch, in.Limit)
+		hits, total, err := ts.svc.SearchDocs(in.Project, in.Pattern, in.ExactMatch, in.Limit, in.IncludeHash)
 		if err != nil {
 			return "", nil, err
 		}
@@ -879,6 +882,9 @@ func (ts *toolSet) searchDocs(ctx context.Context, req *mcp.CallToolRequest, in 
 		fmt.Fprintf(&sb, "「%s」命中 %d 篇文档（返回 %d 篇，按命中行数排序%s）：\n", in.Pattern, total, len(hits), mode)
 		for _, h := range hits {
 			fmt.Fprintf(&sb, "\n- %s（路径 %s，uid %s，%d 处命中）\n", h.Name, h.Path, h.UID, h.Count)
+			if h.Hash != "" {
+				fmt.Fprintf(&sb, "  hash %s（可直接回传 update_doc.ifMatch）\n", h.Hash)
+			}
 			for _, m := range h.Matches {
 				fmt.Fprintf(&sb, "    L%d: %s\n", m.Line, m.Snippet)
 			}
@@ -972,11 +978,12 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 	})
 }
 
-// getDocIn get_doc 的入参（uid 单篇 / uids 批量，二选一）。
+// getDocIn get_doc 的入参（uid/path 单篇 或 uids 批量，二选一）。
 type getDocIn struct {
 	Project string   `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；单个查询，与 uids 二选一）"`
-	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid 二选一，超出直接报错）"`
+	UID     string   `json:"uid,omitempty" jsonschema:"文档 uid（list_docs 返回；与 path/uids 三选一）"`
+	Path    string   `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide；与 uid 二选一，批量请用 uids）"`
+	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10 个（批量；与 uid/path 二选一，超出直接报错）"`
 	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
 	StartLine int  `json:"startLine,omitempty" jsonschema:"从第几行开始（1 基）；与 maxLines 一起分段读取（行号仅供阅读，写回时不要带）"`
 	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
@@ -986,8 +993,12 @@ type getDocIn struct {
 func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
-		if strings.TrimSpace(in.UID) != "" && len(in.UIDs) > 0 {
-			return "", nil, withInvalid(errors.New("uid 与 uids 只能给一个：单篇用 uid，批量用 uids（1–10 篇）"))
+		single := strings.TrimSpace(in.UID) != "" || strings.TrimSpace(in.Path) != ""
+		if single && len(in.UIDs) > 0 {
+			return "", nil, withInvalid(errors.New("uid/path 与 uids 只能给一组：单篇用 uid 或 path，批量用 uids（1–10 篇）"))
+		}
+		if strings.TrimSpace(in.UID) != "" && strings.TrimSpace(in.Path) != "" {
+			return "", nil, withInvalid(errors.New("uid 与 path 只能给一个：知道 uid 就用 uid，只有路径才用 path"))
 		}
 		if len(in.UIDs) > 0 {
 			return ts.batchDocs(getDocsIn{
@@ -995,10 +1006,10 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 				StartLine: in.StartLine, MaxLines: in.MaxLines, Outline: in.Outline,
 			})
 		}
-		if strings.TrimSpace(in.UID) == "" {
-			return "", nil, withInvalid(errors.New("缺少 uid 或 uids：单篇传 uid，批量传 uids（1–10 篇）"))
+		if !single {
+			return "", nil, withInvalid(errors.New("缺少 uid / path / uids：单篇传 uid 或 path，批量传 uids（1–10 篇）"))
 		}
-		d, err := ts.svc.GetDoc(in.Project, in.UID)
+		d, err := ts.svc.GetDocAt(in.Project, in.UID, in.Path)
 		if err != nil {
 			return "", nil, err
 		}
@@ -1310,7 +1321,35 @@ func (ts *toolSet) createRequest(ctx context.Context, req *mcp.CallToolRequest, 
 			return fmt.Sprintf("（dryRun：未落盘）将创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）",
 				r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
 		}
-		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project), data, nil
+		return fmt.Sprintf("已创建请求 [%s] %s（uid=%s，路径 %s，项目 %s）", r.Method, r.Name, r.UID, r.Path, in.Project) + fieldHint(r), data, nil
+	})
+}
+
+// updateRequestsArg update_requests 的入参。
+type updateRequestsArg = UpdateRequestsInput
+
+// updateRequests 批量局部更新：单条失败不影响其它条目，失败明细逐条回报。
+func (ts *toolSet) updateRequests(_ context.Context, req *mcp.CallToolRequest, in updateRequestsArg) (*mcp.CallToolResult, any, error) {
+	return ts.wrapData(func() (string, any, error) {
+		in.Project = ts.proj(req, in.Project)
+		updated, failed, err := ts.svc.UpdateRequests(in)
+		if err != nil {
+			return "", nil, err
+		}
+		data := map[string]any{
+			"project": in.Project, "requested": len(in.Items), "dryRun": in.DryRun,
+			"updated": nonNilSlice(updated), "failed": nonNilSlice(failed),
+		}
+		var sb strings.Builder
+		action := "已更新"
+		if in.DryRun {
+			action = "（dryRun：未落盘）将更新"
+		}
+		fmt.Fprintf(&sb, "%s %d/%d 条（项目 %s）", action, len(updated), len(in.Items), in.Project)
+		for _, f := range failed {
+			fmt.Fprintf(&sb, "\n- %s：%s", f.UID, f.Error)
+		}
+		return sb.String(), data, nil
 	})
 }
 
@@ -1366,6 +1405,9 @@ func (ts *toolSet) updateRequest(ctx context.Context, req *mcp.CallToolRequest, 
 			if kind, body := changePreview(oldDocs, r.Docs); body != "" {
 				out += "\n落盘确认（说明文档" + kind + "）：\n" + body
 			}
+		}
+		if !in.DryRun {
+			out += fieldHint(r)
 		}
 		return out, data, nil
 	})
@@ -1485,9 +1527,9 @@ func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in upd
 		in.Project = ts.proj(req, in.Project)
 		// 动正文前先留旧文本：成功响应要给「改动行 ±1」的落盘确认
 		oldContent := ""
-		touched := in.Content != nil || len(in.Replaces) > 0
+		touched := in.Content != nil || len(in.Replaces) > 0 || in.Append != nil || in.InsertAfter != nil
 		if touched {
-			if d0, derr := ts.svc.GetDoc(in.Project, in.UID); derr == nil {
+			if d0, derr := ts.svc.GetDocAt(in.Project, in.UID, in.Path); derr == nil {
 				oldContent = d0.Content
 			}
 		}
@@ -1516,7 +1558,8 @@ func (ts *toolSet) updateDoc(_ context.Context, req *mcp.CallToolRequest, in upd
 // deleteDocIn delete_doc 的入参（比 deleteIn 多一句说明：这条是文档不是接口）。
 type deleteDocIn struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string `json:"uid" jsonschema:"要移除的文档 uid（list_docs 返回）"`
+	UID     string `json:"uid,omitempty" jsonschema:"要移除的文档 uid（list_docs 返回）；与 path 二选一"`
+	Path    string `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md）；与 uid 二选一"`
 	DryRun  bool   `json:"dryRun,omitempty" jsonschema:"true = 只返回将移入 .trash 的路径，不实际删除"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 list_docs/get_doc 里该文档的 hash；不传 = 最后写者赢"`
 }
@@ -1525,7 +1568,7 @@ func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in del
 	return ts.wrapData(func() (string, any, error) {
 		in.Project = ts.proj(req, in.Project)
 		// 先读一次拿 path（删除后文件已进 .trash，拿不到原路径）
-		d, err := ts.svc.GetDoc(in.Project, in.UID)
+		d, err := ts.svc.GetDocAt(in.Project, in.UID, in.Path)
 		if err != nil {
 			return "", nil, err
 		}
@@ -1538,10 +1581,10 @@ func (ts *toolSet) deleteDoc(_ context.Context, req *mcp.CallToolRequest, in del
 		if in.DryRun {
 			return fmt.Sprintf("（dryRun：未落盘）将把 %s（uid=%s）移入集合 .trash，可人工找回", d.Path, d.UID), data, nil
 		}
-		if err := ts.svc.DeleteDoc(in.Project, in.UID); err != nil {
+		if err := ts.svc.DeleteDocAt(in.Project, in.UID, in.Path); err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", in.UID), data, nil
+		return fmt.Sprintf("已移除文档 %s（文件已移入 .trash，可人工找回）", d.UID), data, nil
 	})
 }
 

@@ -1,5 +1,11 @@
 {
   "properties": {
+    "append": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
     "content": {
       "type": [
         "null",
@@ -18,11 +24,32 @@
     "ifMatch": {
       "type": "string"
     },
+    "insertAfter": {
+      "properties": {
+        "anchor": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "anchor",
+        "text"
+      ],
+      "type": [
+        "null",
+        "object"
+      ]
+    },
     "name": {
       "type": [
         "null",
         "string"
       ]
+    },
+    "path": {
+      "type": "string"
     },
     "project": {
       "type": "string"
@@ -51,12 +78,12 @@
         "array"
       ]
     },
+    "section": {
+      "type": "string"
+    },
     "uid": {
       "type": "string"
     }
   },
-  "required": [
-    "uid"
-  ],
   "type": "object"
 }

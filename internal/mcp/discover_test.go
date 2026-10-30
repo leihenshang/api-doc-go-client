@@ -49,8 +49,8 @@ func catalogByName(t *testing.T, sc map[string]any) map[string]map[string]any {
 func TestListToolsCatalog(t *testing.T) {
 	cs := connectSelf(t)
 	sc := callStructured(t, cs, "list_tools", map[string]any{})
-	if got := sc["total"].(float64); got != 35 {
-		t.Errorf("list_tools total = %v，期望 35（全模式工具数）", got)
+	if got := sc["total"].(float64); got != 36 {
+		t.Errorf("list_tools total = %v，期望 36（全模式工具数）", got)
 	}
 	byName := catalogByName(t, sc)
 	if len(byName) == 0 {

@@ -12,6 +12,8 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -21,6 +23,7 @@ import (
 var (
 	errNeedDocName = coded(CodeInvalid, errors.New("缺少 name：创建文档必须给名称"))
 	errNeedDocUID  = coded(CodeInvalid, errors.New("缺少 uid：请先用 list_docs 找到目标文档"))
+	errNeedDocRef  = coded(CodeInvalid, errors.New("缺少 uid 或 path：请先用 list_docs 找到目标文档（两者给一个即可）"))
 )
 
 // DocItem 文档条目元信息（不含正文），list_docs 的一行。
@@ -98,21 +101,93 @@ func (s *Service) ListDocs(project, query string, limit, offset int, includeHash
 	return page, total, nil
 }
 
-// GetDoc 读单篇文档（含正文）。
+// GetDoc 读单篇文档（含正文）；按 uid 定位。
 func (s *Service) GetDoc(project, uid string) (*DocDetail, error) {
+	return s.GetDocAt(project, uid, "")
+}
+
+// GetDocAt 读单篇文档：uid 与 path 二选一（path 支持集合内相对路径或纯文件名）。
+func (s *Service) GetDocAt(project, uid, docPath string) (*DocDetail, error) {
 	a, _, err := s.resolve(project)
 	if err != nil {
 		return nil, err
 	}
-	uid = strings.TrimSpace(uid)
-	if uid == "" {
-		return nil, errNeedDocUID
+	uid, err = s.resolveDocUID(a, uid, docPath)
+	if err != nil {
+		return nil, err
 	}
 	d, err := a.ReadDoc(uid)
 	if err != nil {
 		return nil, withNotFound(fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err))
 	}
 	return &DocDetail{DocItem: docItem(d), Content: d.Content, Hash: a.DocFileHash(uid)}, nil
+}
+
+// resolveDocUID 把「uid 或 path」统一成 uid；两者都给时以 uid 为准。
+//
+// path 依次匹配：集合内相对路径（docs/guide.md）、去掉 .md 的路径（docs/guide）、
+// 不含目录时的纯文件名（guide.md）。精确命中优先于文件名命中；找不到/歧义时
+// 报错并列出候选 —— 调用方常常只有「用户说的那个文件名」，让它再猜一次不如直接给清单。
+func (s *Service) resolveDocUID(a ProjectApp, uid, docPath string) (string, error) {
+	if uid = strings.TrimSpace(uid); uid != "" {
+		return uid, nil
+	}
+	p := strings.TrimSpace(filepath.ToSlash(docPath))
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	if p == "" {
+		return "", errNeedDocRef
+	}
+	docs, err := a.ListDocs()
+	if err != nil {
+		return "", coded(CodeIO, fmt.Errorf("列不出文档: %w", err))
+	}
+	var exact, loose []*collection.DocEntry
+	for _, d := range docs {
+		dp := strings.TrimPrefix(filepath.ToSlash(d.Path), "/")
+		switch {
+		case dp == p || strings.TrimSuffix(dp, ".md") == p:
+			exact = append(exact, d)
+		case !strings.Contains(p, "/") && path.Base(dp) == p:
+			loose = append(loose, d)
+		}
+	}
+	hit := exact
+	if len(hit) == 0 {
+		hit = loose
+	}
+	switch len(hit) {
+	case 1:
+		return hit[0].UID, nil
+	case 0:
+		return "", withNotFound(fmt.Errorf("找不到文档 %q（用 list_docs 查看可用路径）：%s", p, docCandidates(docs)))
+	default:
+		names := make([]string, 0, len(hit))
+		for _, d := range hit {
+			names = append(names, d.Path)
+		}
+		return "", coded(CodeConflict, fmt.Errorf("路径 %q 匹配到多篇文档：%s；请传完整 path 或 uid", p, strings.Join(names, ", ")))
+	}
+}
+
+// docCandidates 找不到文档时的候选清单（最多 5 条，避免报错本身又把上下文打爆）。
+func docCandidates(docs []*collection.DocEntry) string {
+	const maxShown = 5
+	if len(docs) == 0 {
+		return "项目里还没有文档（可用 create_doc 新建）"
+	}
+	parts := make([]string, 0, maxShown)
+	for i, d := range docs {
+		if i >= maxShown {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s（uid=%s）", d.Path, d.UID))
+	}
+	out := strings.Join(parts, "、")
+	if len(docs) > maxShown {
+		out += fmt.Sprintf(" 等 %d 篇", len(docs))
+	}
+	return out
 }
 
 // CreateDocInput create_doc 的入参。
@@ -185,15 +260,139 @@ func (s *Service) CreateDoc(in CreateDocInput) (*DocDetail, error) {
 // UpdateDocInput update_doc 的入参（指针字段 = 只改传了的）。
 type UpdateDocInput struct {
 	Project string  `json:"project,omitempty" jsonschema:"项目路径、名称或 uid；省略 = 本会话 use_workspace 选定的默认工作目录"`
-	UID     string  `json:"uid" jsonschema:"文档 uid（list_docs / get_doc 返回）"`
+	UID     string  `json:"uid,omitempty" jsonschema:"文档 uid（list_docs / get_doc 返回）；与 path 二选一"`
+	Path    string  `json:"path,omitempty" jsonschema:"文档路径（相对集合根，如 docs/guide.md 或 docs/guide）；与 uid 二选一"`
 	Name    *string `json:"name,omitempty" jsonschema:"新的显示名（只改 frontmatter 的 name，文件名不变）"`
-	Content *string `json:"content,omitempty" jsonschema:"新的 Markdown 正文；传空串 = 清空正文；不传不动"`
+	Content *string `json:"content,omitempty" jsonschema:"新的 Markdown 正文；传空串 = 清空正文；不传不动。与 replaces/append/insertAfter 互斥"`
 	// Replaces 正文的局部替换：与 content 互斥；old 找不到即整单拒绝（不落盘）。
-	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文的局部替换：[{old,new,replaceAll}]，与 content 互斥；任一 old 找不到则整单拒绝、不落盘"`
-	Folder   *string     `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
-	IfMatch  string      `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的完整 hash；磁盘在此期间被外部改动则拒绝写入并返回当前 hash"`
+	Replaces []ReplaceOp `json:"replaces,omitempty" jsonschema:"正文的局部替换：[{old,new,replaceAll}]，与 content/append/insertAfter 互斥；任一 old 找不到则整单拒绝、不落盘"`
+	// Append 在正文末尾追加一段：长文档分段写入时用它，避免整篇重传撞输出上限。
+	Append *string `json:"append,omitempty" jsonschema:"在正文末尾追加一段（自动补空行）；与 content/replaces/insertAfter 互斥"`
+	// InsertAfter 在某段原文之后插入：anchor 必须唯一命中，找不到或命中多处都整单拒绝。
+	InsertAfter *InsertAfterOp `json:"insertAfter,omitempty" jsonschema:"在某段原文之后插入（anchor 必须唯一命中）；与 content/replaces/append 互斥"`
+	Folder      *string        `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
+	// Section 节点守卫：只改正文或只改元信息时用它，防止顺手带上另一类字段。
+	Section string `json:"section,omitempty" jsonschema:"节点守卫：content（正文类：content/replaces/append/insertAfter）/ meta（name/folder）；省略表示不限制"`
+	IfMatch string `json:"ifMatch,omitempty" jsonschema:"并发保护：传 get_doc 返回的完整 hash；磁盘在此期间被外部改动则拒绝写入并返回当前 hash"`
 	// DryRun 只计算新正文/校验 ifMatch，返回预览，不落盘。
 	DryRun bool `json:"dryRun,omitempty" jsonschema:"true = 只返回改动预览与 ifMatch 校验结果，不写盘"`
+}
+
+// InsertAfterOp 在 anchor 之后插入 text（anchor 必须唯一命中）。
+type InsertAfterOp struct {
+	Anchor string `json:"anchor" jsonschema:"定位用的原文片段（必须与正文完全一致且只出现一次）"`
+	Text   string `json:"text" jsonschema:"要插入的内容（Markdown）"`
+}
+
+// validateDocSection 节点守卫：section=content 只允许正文类字段，meta 只允许 name/folder。
+func validateDocSection(sec string, in UpdateDocInput) error {
+	sec = strings.ToLower(strings.TrimSpace(sec))
+	if sec == "" {
+		return nil
+	}
+	present := make([]string, 0, 6)
+	if in.Content != nil {
+		present = append(present, "content")
+	}
+	if len(in.Replaces) > 0 {
+		present = append(present, "replaces")
+	}
+	if in.Append != nil {
+		present = append(present, "append")
+	}
+	if in.InsertAfter != nil {
+		present = append(present, "insertAfter")
+	}
+	if in.Name != nil {
+		present = append(present, "name")
+	}
+	if in.Folder != nil {
+		present = append(present, "folder")
+	}
+	var allowed []string
+	switch sec {
+	case "content":
+		allowed = []string{"content", "replaces", "append", "insertAfter"}
+	case "meta":
+		allowed = []string{"name", "folder"}
+	default:
+		return fmt.Errorf("不支持的 section %q：只支持 content（正文）/ meta（名称与目录），省略表示不限制", sec)
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, f := range allowed {
+		allowedSet[f] = true
+	}
+	var bad []string
+	for _, f := range present {
+		if !allowedSet[f] {
+			bad = append(bad, f)
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("section=%s 只允许改 %s，本次还传了越界字段 %s：请去掉这些字段，或改用对应的 section（content / meta）",
+			sec, strings.Join(allowed, "/"), strings.Join(bad, "/"))
+	}
+	return nil
+}
+
+// nextDocContent 按入参算出新正文；changed=false 表示本次不动正文。
+// content / replaces / append / insertAfter 四种方式互斥（同时给会让人猜不到以哪个为准）。
+func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
+	modes := 0
+	for _, on := range []bool{in.Content != nil, len(in.Replaces) > 0, in.Append != nil, in.InsertAfter != nil} {
+		if on {
+			modes++
+		}
+	}
+	if modes > 1 {
+		return "", false, errors.New("content / replaces / append / insertAfter 互斥：一次只能用一种正文变更方式")
+	}
+	switch {
+	case in.Content != nil:
+		return *in.Content, true, nil
+	case len(in.Replaces) > 0:
+		next, err := applyReplaces(cur, in.Replaces)
+		return next, true, err
+	case in.Append != nil:
+		add := *in.Append
+		if strings.TrimSpace(add) == "" {
+			return "", false, errors.New("append 不能为空：要清空正文请传 content=\"\"")
+		}
+		if cur == "" {
+			return add, true, nil
+		}
+		sep := "\n"
+		if !strings.HasSuffix(cur, "\n") {
+			sep = "\n\n"
+		}
+		return cur + sep + add, true, nil
+	case in.InsertAfter != nil:
+		anchor := in.InsertAfter.Anchor
+		if anchor == "" {
+			return "", false, errors.New("insertAfter.anchor 不能为空")
+		}
+		i := strings.Index(cur, anchor)
+		if i < 0 {
+			return "", false, fmt.Errorf("insertAfter 未匹配到 anchor（未写入任何内容）：%s", clipRunes(anchor, 60))
+		}
+		at := i + len(anchor)
+		if strings.Contains(cur[at:], anchor) {
+			return "", false, fmt.Errorf("insertAfter.anchor 命中多处（未写入任何内容）：%s；请给更长、更唯一的片段", clipRunes(anchor, 60))
+		}
+		rest := cur[at:]
+		prefix := "\n\n"
+		if strings.HasPrefix(rest, "\n\n") {
+			prefix = ""
+		} else if strings.HasPrefix(rest, "\n") {
+			prefix = "\n"
+		}
+		ins := in.InsertAfter.Text
+		if !strings.HasSuffix(ins, "\n") && !strings.HasPrefix(rest, "\n") {
+			ins += "\n"
+		}
+		return cur[:at] + prefix + ins + rest, true, nil
+	}
+	return cur, false, nil
 }
 
 // UpdateDoc 局部更新文档：正文（带 ifMatch 校验）/ 改名 / 移动可任意组合。
@@ -205,30 +404,24 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	if err != nil {
 		return nil, err
 	}
-	uid := strings.TrimSpace(in.UID)
-	if uid == "" {
-		return nil, errNeedDocUID
+	uid, err := s.resolveDocUID(a, in.UID, in.Path)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDocSection(in.Section, in); err != nil {
+		return nil, err
 	}
 	d, err := a.ReadDoc(uid)
 	if err != nil {
 		return nil, withNotFound(fmt.Errorf("读取文档 %s 失败（用 list_docs 查看可用 uid）: %w", uid, err))
 	}
-	// 正文：整篇覆盖（content）与局部替换（replaces）互斥；两者都走 ifMatch 校验。
-	if in.Content != nil && len(in.Replaces) > 0 {
-		return nil, errors.New("content 与 replaces 互斥：整篇覆盖用 content，局部替换用 replaces（不要同时传）")
+	// 正文四种变更方式（content / replaces / append / insertAfter）互斥，统一在这里算新正文。
+	next, changed, err := nextDocContent(d.Content, in)
+	if err != nil {
+		return nil, err
 	}
 	if in.DryRun {
 		// 只算新正文 + 校验 ifMatch，不写盘（也不改名/移动）
-		next := d.Content
-		if in.Content != nil {
-			next = *in.Content
-		} else if len(in.Replaces) > 0 {
-			content, rerr := applyReplaces(d.Content, in.Replaces)
-			if rerr != nil {
-				return nil, rerr
-			}
-			next = content
-		}
 		if want := strings.TrimSpace(in.IfMatch); want != "" {
 			if cur := a.DocFileHash(uid); cur != "" && !strings.HasPrefix(cur, want) {
 				return nil, conflictError("文档", uid, cur)
@@ -238,17 +431,8 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 		out.Content = next
 		return &DocDetail{DocItem: docItem(&out), Content: next, Hash: a.DocFileHash(uid), Planned: "update", PrevContent: d.Content}, nil
 	}
-	if in.Content != nil {
-		d.Content = *in.Content
-		if err := a.SaveDocExpectHash(d, strings.TrimSpace(in.IfMatch)); err != nil {
-			return nil, s.docWriteErr(a, uid, err)
-		}
-	} else if len(in.Replaces) > 0 {
-		content, rerr := applyReplaces(d.Content, in.Replaces)
-		if rerr != nil {
-			return nil, rerr
-		}
-		d.Content = content
+	if changed {
+		d.Content = next
 		if err := a.SaveDocExpectHash(d, strings.TrimSpace(in.IfMatch)); err != nil {
 			return nil, s.docWriteErr(a, uid, err)
 		}
@@ -256,7 +440,7 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	if in.Folder != nil {
 		if err := a.MoveDoc(uid, strings.TrimSpace(*in.Folder)); err != nil {
 			// 审核 L#10：正文已按声明顺序先写并校验，move 失败时把已完成步骤说清楚，避免调用方盲重试撞假冲突。
-			if in.Content != nil {
+			if changed {
 				return nil, fmt.Errorf("正文已写入成功，但移动到 %q 失败：%w（重试可只传 folder，不重复传 content）", *in.Folder, err)
 			}
 			return nil, err
@@ -268,7 +452,7 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 			return nil, errNeedDocName
 		}
 		if err := a.RenameDoc(uid, name); err != nil {
-			if in.Content != nil || in.Folder != nil {
+			if changed || in.Folder != nil {
 				return nil, fmt.Errorf("已完成的步骤保留在盘上，仅改名 %q 失败：%w（重试可只传 name）", name, err)
 			}
 			return nil, err
@@ -281,15 +465,20 @@ func (s *Service) UpdateDoc(in UpdateDocInput) (*DocDetail, error) {
 	return &DocDetail{DocItem: docItem(out), Content: out.Content, Hash: a.DocFileHash(uid)}, nil
 }
 
-// DeleteDoc 移除文档（进 .trash，可人工找回）。
+// DeleteDoc 移除文档（进 .trash，可人工找回）；按 uid 定位。
 func (s *Service) DeleteDoc(project, uid string) error {
+	return s.DeleteDocAt(project, uid, "")
+}
+
+// DeleteDocAt 移除文档：uid 与 path 二选一。
+func (s *Service) DeleteDocAt(project, uid, docPath string) error {
 	a, _, err := s.resolveWrite(project)
 	if err != nil {
 		return err
 	}
-	uid = strings.TrimSpace(uid)
-	if uid == "" {
-		return errNeedDocUID
+	uid, err = s.resolveDocUID(a, uid, docPath)
+	if err != nil {
+		return err
 	}
 	if err := a.DeleteDoc(uid); err != nil {
 		return withNotFound(err)
@@ -319,6 +508,9 @@ type DocHit struct {
 	Project string       `json:"project,omitempty"`
 	Count   int          `json:"count"`
 	Matches []DocHitLine `json:"matches"`
+	// Hash 文档文件 hash（includeHash=true 时回填）：可直接回传 update_doc.ifMatch，
+	// 省掉「搜到 → 再 get_doc 拿 hash」的一次往返。
+	Hash string `json:"hash,omitempty"`
 }
 
 // SaveImage 把一张 base64 图片存进项目本地 assets/，返回可直接写进 Markdown 的 URL。
@@ -349,7 +541,8 @@ func (s *Service) SaveImage(project, dataBase64 string) (ImageResult, error) {
 // SearchDocs 在文档正文里逐行搜索（不读请求的 docs 字段，那是接口说明）。
 // exact=true 走整词匹配（词边界，不切词）；否则大小写不敏感的子串。
 // project 为空时在所有已加载项目里搜；返回按命中行数降序、名称升序排列。
-func (s *Service) SearchDocs(project, pattern string, exact bool, limit int) ([]DocHit, int, error) {
+// includeHash=true 时给每条命中回填文件 hash（按项目批量读一次，不逐篇读盘）。
+func (s *Service) SearchDocs(project, pattern string, exact bool, limit int, includeHash bool) ([]DocHit, int, error) {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		return nil, 0, errEmptyQuery
@@ -365,6 +558,10 @@ func (s *Service) SearchDocs(project, pattern string, exact bool, limit int) ([]
 		docs, derr := a.ListDocs()
 		if derr != nil {
 			continue // 单个项目失败不影响整体
+		}
+		var hashes map[string]string
+		if includeHash {
+			hashes, _ = a.DocHashes() // 取不到就留空，不影响搜索结果
 		}
 		for _, d := range docs {
 			var lines []DocHitLine
@@ -384,6 +581,7 @@ func (s *Service) SearchDocs(project, pattern string, exact bool, limit int) ([]
 			matchedDocs++
 			hits = append(hits, DocHit{
 				UID: d.UID, Name: d.Name, Path: d.Path, Project: key, Count: count, Matches: lines,
+				Hash: hashes[d.UID],
 			})
 		}
 	}

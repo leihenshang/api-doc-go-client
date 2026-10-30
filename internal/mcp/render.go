@@ -75,6 +75,46 @@ func renderToolCatalog(items []toolCatalogItem, total int, filter, mode string, 
 	return sb.String()
 }
 
+// fieldHint 请求体有类型但字段表为空时给一句提醒（不阻断写盘）。
+//
+// 为什么值得提示：接口文档的「请求参数表」只来自 body.fields（唯一真源），
+// AI 常只写 body.raw 就收工，生成文档时那张表会静默变成空表。
+func fieldHint(r *collection.Request) string {
+	if r == nil || len(r.Body.Fields) > 0 {
+		return ""
+	}
+	switch r.Body.Type {
+	case "json", "form", "multipart":
+		return "\n提示：body.fields 为空，接口文档的「请求参数表」会是空表；用 update_request.bodyFieldsUpsert 可按需补行（不会清掉其它行）。"
+	}
+	return ""
+}
+
+// taskCheatSheet list_tools 末尾的固定提示：常见任务 → 工具、resource、只读/未启用组。
+//
+// 为什么值得占这点固定成本：AI 拿到工具清单后仍要自己推导「补说明该用哪个参数的哪种形态」，
+// 推导错一次就是一次失败调用 + 一次授权弹窗。这段约 150 字，换掉的是最常见的误选。
+// 带 filter 时不输出（说明调用方已在找具体工具，速查是噪音）。
+func taskCheatSheet(readOnly bool, groups []string, filter string) string {
+	if strings.TrimSpace(filter) != "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n常见任务 → 工具：\n")
+	sb.WriteString("- 改接口字段/移动 → update_request（批量用 update_requests）\n")
+	sb.WriteString("- 补/改接口说明 → update_request(section=docs)：整篇覆盖传 docs，局部改传 replaces\n")
+	sb.WriteString("- 改文档正文 → update_doc：整篇 content / 局部 replaces / 追加 append / 指定位置 insertAfter\n")
+	sb.WriteString("- 按路径读文档 → get_doc(path=docs/guide.md)；批量导入 → import_collection；发请求 → send_request\n")
+	sb.WriteString("接口说明模板：resource apidoc://doc-template（客户端支持 resources 时读取）。\n")
+	if readOnly {
+		sb.WriteString("当前是只读模式：写工具未注册（在设置里关闭「只读模式」并保存后重启服务）。\n")
+	}
+	if disabled := DisabledGroups(groups); len(disabled) > 0 {
+		fmt.Fprintf(&sb, "未启用的工具组：%s（设置 → MCP 服务 → 启用的工具组）。\n", strings.Join(disabled, "、"))
+	}
+	return sb.String()
+}
+
 // bodySummary 请求体的简短摘要（仅用于打分，不进输出）。
 func bodySummary(r *collection.Request) string {
 	switch r.Body.Type {
@@ -321,11 +361,14 @@ func renderDetail(d *RequestDetail, sections map[string]bool, docsView LineView)
 			// 说明文档可能很长：与 get_doc 共用行区间 / 大纲视图（全文时超长会加一行建议）
 			docsView.Suggest = true
 			fmt.Fprintf(&sb, "\n说明文档：\n%s", renderDocContent(d.Docs, docsView))
+			sb.WriteString("\n（改它用 update_request.section=docs：整篇覆盖传 docs，局部改动传 replaces；两者互斥）\n")
 		}
 		if len(d.RelatedDocs) > 0 {
 			sb.WriteString("\n相关文档条目：\n")
 			for _, r := range d.RelatedDocs {
-				fmt.Fprintf(&sb, "  %s（%s）\n", r.Name, r.Path)
+				// uid 必须打出来：get_doc / update_doc 都按 uid 定位（也接受 path），
+				// 只给名称+路径会让调用方被迫再 list_docs 找一次 uid。
+				fmt.Fprintf(&sb, "  %s（%s，uid=%s）\n", r.Name, r.Path, r.UID)
 			}
 		}
 	}
