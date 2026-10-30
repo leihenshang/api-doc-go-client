@@ -61,12 +61,16 @@ func (s *Service) ResetCandidateCache() {
 	s.candMu.Unlock()
 }
 
-// reloadForCandidates 为候选清单刷新索引（同一项目 2 秒内只刷一次）。
+// candidateReloadInterval 候选清单的索引刷新节流窗口。
+// 太小会让连续 not found 反复全树重建，太大会让刚创建的条目长时间不出现在候选里。
+const candidateReloadInterval = 2 * time.Second
+
+// reloadForCandidates 为候选清单刷新索引（同一项目一个窗口内只刷一次）。
 func (s *Service) reloadForCandidates(a ProjectApp) {
 	key := fmt.Sprintf("%p", a)
 	now := time.Now()
 	s.candMu.Lock()
-	if last, ok := s.candAt[key]; ok && now.Sub(last) < 2*time.Second {
+	if last, ok := s.candAt[key]; ok && now.Sub(last) < candidateReloadInterval {
 		s.candMu.Unlock()
 		return
 	}

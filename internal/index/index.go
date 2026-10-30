@@ -46,6 +46,19 @@ func Open(path string) (*DB, error) {
 	}
 	// 单连接即可：客户端单写者
 	db.SetMaxOpenConns(1)
+	// 索引是派生数据（可从集合文件重建），用 WAL + NORMAL：
+	// 每次写只 fsync 一次，崩溃最多丢最后几笔索引更新（重建补齐）。
+	// 真实内容由 writeFileAtomic 的 fsync 保证，不受这里影响。
+	for _, pragma := range []string{
+		`PRAGMA journal_mode=WAL`,
+		`PRAGMA synchronous=NORMAL`,
+		`PRAGMA busy_timeout=5000`,
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("设置索引参数 %q: %w", pragma, err)
+		}
+	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS node (
 			uid    TEXT PRIMARY KEY,
