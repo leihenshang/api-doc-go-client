@@ -1190,15 +1190,11 @@ func detailData(d *RequestDetail) map[string]any {
 	for _, e := range d.Examples {
 		ex = append(ex, map[string]any{"uid": e.UID, "name": e.Name, "path": e.Path, "hash": e.Hash, "status": e.Status})
 	}
-	rel := make([]map[string]any, 0, len(d.RelatedDocs))
-	for _, r := range d.RelatedDocs {
-		rel = append(rel, map[string]any{"uid": r.UID, "name": r.Name, "path": r.Path})
-	}
 	return map[string]any{
 		"project": d.Project, "uid": d.UID, "name": d.Name, "method": d.Method,
 		"url": d.URL, "path": d.Path, "hash": d.Hash, "summary": d.Summary,
 		"params": len(d.Params), "headers": len(d.Headers), "bodyFields": len(d.Body.Fields),
-		"examples": nonNilSlice(ex), "relatedDocs": nonNilSlice(rel),
+		"examples": nonNilSlice(ex),
 	}
 }
 

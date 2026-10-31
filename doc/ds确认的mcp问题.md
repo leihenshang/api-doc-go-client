@@ -229,3 +229,14 @@ bash scripts/check.sh --no-race  # 全绿：gofmt / share 版本 / build / vet /
 - `TestToolSchemaContract` 快照随契约变更显式更新，不静默漂移。
 - 新增单测：`quotedList` 多参数、只读模式 `list_tools(mode=write)`、`import_collection` 错误分类。
 - 工具数量与风险分类的断言集中在一个测试里，注释不再重复写数字。
+
+## 10. v6 测评反馈核实（2026-10-31）
+
+| 反馈 | 结论 | 处理 |
+|---|---|---|
+| Q-1 `relatedDocs` 恒为空、无建立途径 | **存在**：原实现用 `matchDoc`（文档名包含接口名或子序列）猜关联，注入率不可预测；`ListDocs()` 也只做名字匹配，不读正文 | **移除**该字段（`RequestDetail`/`detailData`/`outputSchema`/渲染四处），并删掉 `matchDoc` 与 `DocBrief`。`TestRelatedDocsRemoved` 锁死 schema 不再声明 |
+| Q-2 `insertAfter` / 互斥报 `[INTERNAL]` | **存在且更多**：`doc.go` 10 处、`service.go` 4 处未归类的入参错误 | 全部归 `[INVALID]` / `[NOT_FOUND]`；`TestInsertAfterErrorsAreInvalid` 覆盖 6 种 |
+| Q-3 `folder` 必须存在但描述没提示 | **部分存在**：`create_request`/`create_doc` 描述已写；`update_doc` 的 `folder` 未提 | 已补「须已存在，否则 [NOT_FOUND]」 |
+| P-4 `weakMatch` 恒 null | **代码已修**（`json:"weakMatch"` 无 omitempty）；真机实测 `results[0].weakMatch = false` 正常输出 | dev 端点是旧部署，未同步本轮代码 |
+| P-6 `method` 缺 enum | 仍是取舍：SDK 的 `jsonschema` tag 只作 description 且禁止 `WORD=` 前缀，加 enum 必须手写整份 InputSchema | 不修 |
+| P-7 两工具未恢复 | 设计取舍（resource / 合并到 delete_module） | 不恢复 |

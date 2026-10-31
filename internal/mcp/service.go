@@ -135,9 +135,9 @@ func (s *Service) resolveKey(project string) (string, error) {
 	// 为什么把「会话/重启会失效」写进报错：默认目标按会话保存（见 tools.go 的 toolSet.sel），
 	// 客户端重连或 MCP 服务重启后就是新的会话，之前选定的目录自然不在了 —— 不说明的话
 	// 调用方只会觉得「刚才还好好的，怎么突然没指定 project」。
-	return "", fmt.Errorf("未指定 project：请先 use_workspace 选定默认工作目录（选定后本会话可省略 project）。"+
+	return "", withInvalid(fmt.Errorf("未指定 project：请先 use_workspace 选定默认工作目录（选定后本会话可省略 project）。"+
 		"默认目标按会话保存，客户端重连或 MCP 服务重启后需重新选定；不想依赖它也可以每次显式传 project。%s",
-		s.workspaceHint())
+		s.workspaceHint()))
 }
 
 // workspaceHint 可用项目提示（拼进报错里，AI 能照着改）。
@@ -208,7 +208,7 @@ func (s *Service) ListWorkspaces(selected string) []WorkspaceItem {
 func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) {
 	key := strings.TrimSpace(workspace)
 	if key == "" {
-		return WorkspaceItem{}, "", fmt.Errorf("缺少 workspace：请传 list_workspaces 返回的工作目录 path，或一个项目标识")
+		return WorkspaceItem{}, "", withInvalid(fmt.Errorf("缺少 workspace：请传 list_workspaces 返回的工作目录 path，或一个项目标识"))
 	}
 	// ① 先按工作目录解析（授权目录集合里有它才算数）
 	if a, err := s.reg.allowFor(key, false); err == nil {
@@ -220,11 +220,11 @@ func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) 
 		}
 		switch len(projects) {
 		case 0:
-			return WorkspaceItem{}, "", fmt.Errorf("工作目录 %s 下没有可用项目（用 list_workspaces 查看）", a.Path)
+			return WorkspaceItem{}, "", withNotFound(fmt.Errorf("工作目录 %s 下没有可用项目（用 list_workspaces 查看）", a.Path))
 		case 1:
 			return s.workspaceItem(projects[0], a), projects[0], nil
 		default:
-			return WorkspaceItem{}, "", fmt.Errorf("工作目录 %s 下有多个项目：%s；请直接指定其中之一", a.Path, strings.Join(projects, "、"))
+			return WorkspaceItem{}, "", withInvalid(fmt.Errorf("工作目录 %s 下有多个项目：%s；请直接指定其中之一", a.Path, strings.Join(projects, "、")))
 		}
 	}
 	// ② 再按项目解析
@@ -664,29 +664,21 @@ type RequestDetail struct {
 	Project string `json:"project"`
 	UID     string `json:"uid"`
 	// Hash 磁盘内容哈希：原样传给 update_request.if_match 即可获得冲突保护。
-	Hash        string                      `json:"hash,omitempty"`
-	Name        string                      `json:"name"`
-	Method      string                      `json:"method"`
-	URL         string                      `json:"url"`
-	Path        string                      `json:"path"`
-	Summary     string                      `json:"summary,omitempty"` // API 概述（纯文本一句话）
-	Params      []collection.KV             `json:"params,omitempty"`
-	Headers     []collection.KV             `json:"headers,omitempty"`
-	Body        collection.Body             `json:"body"`
-	Auth        *collection.Auth            `json:"auth,omitempty"`
-	Settings    *collection.RequestSettings `json:"settings,omitempty"`
-	GRPC        *collection.GrpcBlock       `json:"grpc,omitempty"`
-	Docs        string                      `json:"docs,omitempty"`        // 请求自带说明（Markdown）
-	RespDoc     *collection.ResponseDoc     `json:"respDoc,omitempty"`     // 响应字段文档（返回类型/字段表/样例；样例按 includeBody 裁剪）
-	RelatedDocs []DocBrief                  `json:"relatedDocs,omitempty"` // 集合里与该请求相关的 docs/*.md 条目
-	Examples    []ExampleItem               `json:"examples,omitempty"`    // 已保存的响应示例
-}
-
-// DocBrief 集合级文档条目的摘要。
-type DocBrief struct {
-	UID  string `json:"uid"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Hash     string                      `json:"hash,omitempty"`
+	Name     string                      `json:"name"`
+	Method   string                      `json:"method"`
+	URL      string                      `json:"url"`
+	Path     string                      `json:"path"`
+	Summary  string                      `json:"summary,omitempty"` // API 概述（纯文本一句话）
+	Params   []collection.KV             `json:"params,omitempty"`
+	Headers  []collection.KV             `json:"headers,omitempty"`
+	Body     collection.Body             `json:"body"`
+	Auth     *collection.Auth            `json:"auth,omitempty"`
+	Settings *collection.RequestSettings `json:"settings,omitempty"`
+	GRPC     *collection.GrpcBlock       `json:"grpc,omitempty"`
+	Docs     string                      `json:"docs,omitempty"`     // 请求自带说明（Markdown）
+	RespDoc  *collection.ResponseDoc     `json:"respDoc,omitempty"`  // 响应字段文档（返回类型/字段表/样例；样例按 includeBody 裁剪）
+	Examples []ExampleItem               `json:"examples,omitempty"` // 已保存的响应示例
 }
 
 // DetailOptions get_request_detail 的可选参数。
@@ -737,13 +729,6 @@ func (s *Service) GetRequestDetailAt(project, uid, reqPath string, opts DetailOp
 		}
 		d.RespDoc = &rd
 	}
-	// 集合级文档：按 query 或请求名做模糊关联（docs 是集合级条目，没有直接外键）
-	docs, _ := a.ListDocs()
-	for _, doc := range docs {
-		if matchDoc(doc.Name, doc.Path, r.Name, opts.Query) {
-			d.RelatedDocs = append(d.RelatedDocs, DocBrief{UID: doc.UID, Name: doc.Name, Path: doc.Path})
-		}
-	}
 	// 已保存的响应示例
 	examples, err := a.ListResponseExamples(r.UID)
 	if err == nil {
@@ -776,18 +761,6 @@ func bodyRaw(b collection.Body) string {
 		return b.Raw
 	}
 	return ""
-}
-
-// matchDoc 文档与请求的关联判断：显式 query 优先，否则用请求名做子串/子序列匹配。
-func matchDoc(name, path, reqName, query string) bool {
-	q := normalize(query)
-	if q == "" {
-		q = normalize(reqName)
-	}
-	if q == "" {
-		return false
-	}
-	return strings.Contains(normalize(name), q) || strings.Contains(normalize(path), q) || isSubsequence(q, normalize(name))
 }
 
 // resolveRequestUID 把「uid 或 path」统一成 uid；两者都给时以 uid 为准。
