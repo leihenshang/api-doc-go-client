@@ -366,14 +366,6 @@ func renderDetail(d *RequestDetail, sections map[string]bool, docsView LineView)
 			fmt.Fprintf(&sb, "\n说明文档：\n%s", renderDocContent(d.Docs, docsView))
 			sb.WriteString("\n（改它用 update_request.section=docs：整篇覆盖传 docs，局部改动传 replaces；两者互斥）\n")
 		}
-		if len(d.RelatedDocs) > 0 {
-			sb.WriteString("\n相关文档条目：\n")
-			for _, r := range d.RelatedDocs {
-				// uid 必须打出来：get_doc / update_doc 都按 uid 定位（也接受 path），
-				// 只给名称+路径会让调用方被迫再 list_docs 找一次 uid。
-				fmt.Fprintf(&sb, "  %s（%s，uid=%s）\n", r.Name, r.Path, r.UID)
-			}
-		}
 	}
 	if hasSection(sections, "respDoc") && d.RespDoc != nil {
 		fmt.Fprintf(&sb, "\n响应字段文档（返回类型 %s，共 %d 个字段）：\n", d.RespDoc.Type, len(d.RespDoc.Params))

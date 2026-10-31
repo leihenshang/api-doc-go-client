@@ -27,7 +27,6 @@ var (
 )
 
 // DocItem 文档条目元信息（不含正文），list_docs 的一行。
-// 名字避开 service.go 里已有的 DocBrief（那是 get_request_detail 的 relatedDocs 用的精简版）。
 type DocItem struct {
 	UID  string `json:"uid"`
 	Name string `json:"name"`
@@ -276,7 +275,7 @@ type UpdateDocInput struct {
 	Append *string `json:"append,omitempty" jsonschema:"在正文末尾追加一段（自动补空行）；与 content/replaces/insertAfter 互斥"`
 	// InsertAfter 在某段原文之后插入：anchor 必须唯一命中，找不到或命中多处都整单拒绝。
 	InsertAfter *InsertAfterOp `json:"insertAfter,omitempty" jsonschema:"在某段原文之后插入（anchor 必须唯一命中）；与 content/replaces/append 互斥"`
-	Folder      *string        `json:"folder,omitempty" jsonschema:"移动到该分组目录（相对集合根）；传空串 = 移到集合根；不传不动"`
+	Folder      *string        `json:"folder,omitempty" jsonschema:"移动到该分组目录（须已存在，否则 [NOT_FOUND]）；传空串 = 移到集合根；不传不动"`
 	// Section 节点守卫：只改正文或只改元信息时用它，防止顺手带上另一类字段。
 	Section string `json:"section,omitempty" jsonschema:"节点守卫：content（正文类）/ meta（name/folder）；省略 = 不限制"`
 	IfMatch string `json:"ifMatch,omitempty" jsonschema:"get_doc 返回的完整 hash；磁盘被外部改动则拒绝写入并回当前 hash"`
@@ -354,7 +353,7 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 		}
 	}
 	if modes > 1 {
-		return "", false, errors.New("content / replaces / append / insertAfter 互斥：一次只能用一种正文变更方式")
+		return "", false, withInvalid(errors.New("content / replaces / append / insertAfter 互斥：一次只能用一种正文变更方式"))
 	}
 	switch {
 	case in.Content != nil:
@@ -365,7 +364,7 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 	case in.Append != nil:
 		add := *in.Append
 		if strings.TrimSpace(add) == "" {
-			return "", false, errors.New("append 不能为空：要清空正文请传 content=\"\"")
+			return "", false, withInvalid(errors.New("append 不能为空：要清空正文请传 content=\"\""))
 		}
 		if cur == "" {
 			return add, true, nil
@@ -385,17 +384,17 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 			return next, true, nil
 		}
 		if op.Anchor == "" {
-			return "", false, errors.New("insertAfter 需要 anchor 或 anchorHeading（二选一）")
+			return "", false, withInvalid(errors.New("insertAfter 需要 anchor 或 anchorHeading（二选一）"))
 		}
 		if op.Occurrence <= 0 {
 			// 不传 occurrence：要求唯一，避免长文档里插错位置。
 			i := strings.Index(cur, op.Anchor)
 			if i < 0 {
-				return "", false, fmt.Errorf("insertAfter 未匹配到 anchor（未写入任何内容）：%s", clipRunes(op.Anchor, 60))
+				return "", false, withInvalid(fmt.Errorf("insertAfter 未匹配到 anchor（未写入任何内容）：%s", clipRunes(op.Anchor, 60)))
 			}
 			if strings.Contains(cur[i+len(op.Anchor):], op.Anchor) {
-				return "", false, fmt.Errorf("insertAfter.anchor 命中多处（未写入任何内容）：%s；请给更长/更唯一的片段，或传 occurrence 指定第几处",
-					clipRunes(op.Anchor, 60))
+				return "", false, withInvalid(fmt.Errorf("insertAfter.anchor 命中多处（未写入任何内容）：%s；请给更长/更唯一的片段，或传 occurrence 指定第几处",
+					clipRunes(op.Anchor, 60)))
 			}
 			return insertAfterText(cur, i, op.Anchor, op.Text), true, nil
 		}
@@ -404,8 +403,8 @@ func nextDocContent(cur string, in UpdateDocInput) (string, bool, error) {
 		for n := 0; n < op.Occurrence; n++ {
 			j := strings.Index(cur[from:], op.Anchor)
 			if j < 0 {
-				return "", false, fmt.Errorf("insertAfter.occurrence=%d 不存在（正文里只有 %d 处 anchor）：%s",
-					op.Occurrence, n, clipRunes(op.Anchor, 60))
+				return "", false, withInvalid(fmt.Errorf("insertAfter.occurrence=%d 不存在（正文里只有 %d 处 anchor）：%s",
+					op.Occurrence, n, clipRunes(op.Anchor, 60)))
 			}
 			idx = from + j
 			from = idx + len(op.Anchor)
@@ -446,11 +445,11 @@ func insertAfterHeading(cur, heading string, occurrence int, text string) (strin
 	lines := strings.Split(norm, "\n")
 	target := normalizeHeading(heading)
 	if target == "" {
-		return "", errors.New("insertAfter.anchorHeading 不能为空")
+		return "", withInvalid(errors.New("insertAfter.anchorHeading 不能为空"))
 	}
 	level := headingLevel(target)
 	if level == 0 {
-		return "", fmt.Errorf("anchorHeading 必须是 Markdown 标题（以 # 开头）：%s", clipRunes(heading, 60))
+		return "", withInvalid(fmt.Errorf("anchorHeading 必须是 Markdown 标题（以 # 开头）：%s", clipRunes(heading, 60)))
 	}
 	if occurrence <= 0 {
 		occurrence = 1
@@ -478,7 +477,7 @@ func insertAfterHeading(cur, heading string, occurrence int, text string) (strin
 		if len(outline) > 0 {
 			hint = "；文内标题：" + strings.Join(outline, " / ")
 		}
-		return "", fmt.Errorf("insertAfter.anchorHeading 未匹配到标题（未写入任何内容）：%s%s", clipRunes(heading, 60), hint)
+		return "", withInvalid(fmt.Errorf("insertAfter.anchorHeading 未匹配到标题（未写入任何内容）：%s%s", clipRunes(heading, 60), hint))
 	}
 	end := len(lines)
 	for i := start + 1; i < len(lines); i++ {
@@ -659,7 +658,7 @@ func (s *Service) SaveImage(project, dataBase64 string) (ImageResult, error) {
 		return ImageResult{}, err
 	}
 	if strings.TrimSpace(dataBase64) == "" {
-		return ImageResult{}, errors.New("data 不能为空：传图片的 base64（可带 data:image/...;base64, 前缀）")
+		return ImageResult{}, withInvalid(errors.New("data 不能为空：传图片的 base64（可带 data:image/...;base64, 前缀）"))
 	}
 	url, info, err := a.SaveDocImageInfo(dataBase64)
 	if err != nil {

@@ -49,6 +49,9 @@ prod:
 - `create_module` 的 `name` 支持写完整路径（`api/user` 自动拆成 `parent` + 末段）；上级不存在回 `[NOT_FOUND]`，末段非法回 `[INVALID]`（不再笼统 `[INTERNAL]`）。
 - `replaces` 的 `old` 为空或未命中改为 `[INVALID]`。
 - `create_env` 描述补充「新集合自带 dev 环境」；批量更新/删除的结果头补「其中 N 条未通过（见 failed[]）」。
+- **移除** `get_request_detail` 的 `relatedDocs` 字段（输出 schema 与结构化结果都不再出现）：原实现靠「文档名包含接口名」猜关联，命中率不可预测、也没有建立关联的入口，属于「声明了却基本恒空」，按「声明必须能用」的原则撤掉。
+- 入参错误统一归 `[INVALID]`：`update_doc` 的 `insertAfter` 未匹配/命中多处/occurrence 越界/`anchorHeading` 未匹配、正文变更方式互斥、`append` 为空、图片 `data` 为空，以及 `use_workspace` 的缺失/歧义与「未指定 project」。
+- `update_doc` 的 `folder` 描述补「须已存在，否则 [NOT_FOUND]」。
 - `create_doc` 的 `folder` 与另两个写工具统一：显式指定时要求已存在（`[NOT_FOUND]`）；默认目录 `docs/` 例外（不传或显式写 `docs` 都自动创建）。新增 `ProjectApp.DirExists`（不要求 `folder.yml`，否则纯文档目录会被误拒）。`import_collection` 保留按集合结构自动建目录，描述已注明。
 
 ## 2026-10-29  0.1.4-dev

@@ -5,6 +5,7 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -12,24 +13,17 @@ import (
 )
 
 // 详情里的「相关文档条目」必须带 uid，否则 AI 没法顺着读；docs 段要给出回写入口。
-func TestDetailDocsHintsAndRelatedUID(t *testing.T) {
+func TestDetailDocsHints(t *testing.T) {
 	cs := connectSelf(t)
 	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
 		"project": "demo", "name": "用户列表", "method": "GET", "url": "/users",
 		"docs": "# 用户列表\n\n说明正文",
 	}))
-	mustCall(t, cs, "create_doc", map[string]any{
-		"project": "demo", "name": "用户列表说明", "content": "# 说明",
-	})
-
 	out := mustCall(t, cs, "get_request_detail", map[string]any{
 		"project": "demo", "uid": uid, "sections": []string{"docs"},
 	})
 	if !strings.Contains(out, "update_request.section=docs") {
 		t.Errorf("docs 段应给出回写入口：%s", out)
-	}
-	if !strings.Contains(out, "用户列表说明") || !strings.Contains(out, "uid=") {
-		t.Errorf("相关文档条目应带 uid：%s", out)
 	}
 }
 
@@ -716,5 +710,63 @@ func TestCreateDocFolderMustExist(t *testing.T) {
 		"project": "demo", "name": "显式文档目录", "folder": "docs",
 	}); isErr {
 		t.Errorf("已存在的纯文档目录应被接受：%s", text)
+	}
+}
+
+// Q-2：insertAfter 的入参错误（未匹配 / 命中多处 / 互斥）都必须回 [INVALID]。
+func TestInsertAfterErrorsAreInvalid(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidAfter(t, mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "插入校验", "content": "# 标题\n\n唯一段落\n\n重复段\n\n重复段",
+	}))
+
+	cases := []struct {
+		label string
+		args  map[string]any
+	}{
+		{"anchor 未匹配", map[string]any{"insertAfter": map[string]any{"anchor": "不存在的锚点", "text": "x"}}},
+		{"anchor 命中多处", map[string]any{"insertAfter": map[string]any{"anchor": "重复段", "text": "x"}}},
+		{"occurrence 越界", map[string]any{"insertAfter": map[string]any{"anchor": "唯一段落", "text": "x", "occurrence": 5}}},
+		{"anchorHeading 未匹配", map[string]any{"insertAfter": map[string]any{"anchorHeading": "## 没有这个标题", "text": "x"}}},
+		{"content/append 互斥", map[string]any{"content": "a", "append": "b"}},
+		{"append 为空", map[string]any{"append": ""}},
+	}
+	for _, c := range cases {
+		args := map[string]any{"project": "demo", "uid": uid}
+		for k, v := range c.args {
+			args[k] = v
+		}
+		if text, isErr := callTool(t, cs, "update_doc", args); !isErr || !strings.Contains(text, "[INVALID]") {
+			t.Errorf("%s 应回 [INVALID]：%s", c.label, text)
+		}
+	}
+}
+
+// Q-1：relatedDocs 已移除——schema 与结构化输出都不应再出现该字段。
+func TestRelatedDocsRemoved(t *testing.T) {
+	cs := connectSelf(t)
+	uid := uidOfCreate(t, mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "name": "关联字段", "method": "GET", "url": "/rel",
+	}))
+	mustCall(t, cs, "create_doc", map[string]any{
+		"project": "demo", "name": "关联字段说明", "content": "# 文档",
+	})
+	sc := callStructured(t, cs, "get_request_detail", map[string]any{"project": "demo", "uid": uid})
+	if _, ok := sc["relatedDocs"]; ok {
+		t.Errorf("relatedDocs 已移除，不应再出现在结构化输出：%v", sc)
+	}
+
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name != "get_request_detail" {
+			continue
+		}
+		raw, _ := json.Marshal(tool.OutputSchema)
+		if strings.Contains(string(raw), "relatedDocs") {
+			t.Errorf("outputSchema 仍声明 relatedDocs：%s", raw)
+		}
 	}
 }

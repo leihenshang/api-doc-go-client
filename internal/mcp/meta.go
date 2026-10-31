@@ -747,7 +747,6 @@ func requestDetailFullOutput() map[string]any {
 		"uid": strSchema(), "name": strSchema(), "path": strSchema(),
 		"hash": strSchema(), "status": intSchema(),
 	}, "uid", "path")
-	rel := objSchema(map[string]any{"uid": strSchema(), "name": strSchema(), "path": strSchema()}, "uid", "path")
 	item := objSchema(map[string]any{
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
 		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "summary": strSchema(),
@@ -757,7 +756,7 @@ func requestDetailFullOutput() map[string]any {
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "method": strSchema(),
 		"url": strSchema(), "path": strSchema(), "hash": strSchema(), "summary": strSchema(),
 		"bodyFields": intSchema(), "params": intSchema(), "headers": intSchema(),
-		"examples": arrSchema(ex), "relatedDocs": arrSchema(rel),
+		"examples": arrSchema(ex),
 		// 批量形态
 		"total": intSchema(), "returned": intSchema(), "items": arrSchema(item),
 	}, "project")

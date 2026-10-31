@@ -131,7 +131,8 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 	if len(d.Examples) != 0 {
 		t.Errorf("新请求不该有示例: %+v", d.Examples)
 	}
-	// 关联文档：走 API 建一条 docs 条目（不手写 frontmatter，格式以集合层为准）
+	// relatedDocs 已移除（模糊名字匹配不可预测，且没有建立关联的入口），
+	// 这里只验证文档条目仍可正常创建并读回。
 	doc, err := a.CreateDoc("ping 接口说明", "")
 	if err != nil {
 		t.Fatal(err)
@@ -140,12 +141,8 @@ func TestModulesAndSearchAndDetail(t *testing.T) {
 	if err := a.SaveDoc(doc); err != nil {
 		t.Fatal(err)
 	}
-	d, err = svc.GetRequestDetail("demo", ping, DetailOptions{})
-	if err != nil {
+	if _, err := svc.GetRequestDetail("demo", ping, DetailOptions{}); err != nil {
 		t.Fatal(err)
-	}
-	if len(d.RelatedDocs) == 0 {
-		t.Errorf("应关联到 docs/ping.md: %+v", d)
 	}
 	_ = uidOrder
 }
