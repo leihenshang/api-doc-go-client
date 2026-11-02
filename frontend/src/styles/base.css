@@ -128,11 +128,13 @@ body.dragging.row * {
   --app-chip-strong: #dfe3e6;
   --app-kbd-bg: #ffffff;
   --app-kbd-border: #cfe0d6;
-  /* 语义色（错误 / 警告 / 反白文字） */
+  /* 语义色（错误 / 警告 / 推荐 / 反白文字） */
   --app-danger: #d03050;
   --app-danger-tint: #fdecec;
   --app-warn: #d08830;
   --app-warn-tint: #fff4e0;
+  --app-ok: #1a7f37;
+  --app-ok-tint: #e8f5ec;
   --app-on-accent: #ffffff;
   --app-scrollbar: #d4d4d8;
   --app-scrollbar-hover: #b8b8be;
@@ -251,6 +253,8 @@ body.dragging.row * {
   --app-danger-tint: #2a1d20;
   --app-warn: #f2c97d;
   --app-warn-tint: #2a2418;
+  --app-ok: #6ecf8b;
+  --app-ok-tint: #16281c;
   --app-on-accent: #ffffff;
   --app-scrollbar: #3a3d42;
   --app-scrollbar-hover: #4a4e54;
@@ -344,6 +348,17 @@ body .md-editor-preview .md-editor-code .md-editor-code-head {
 .n-modal-mask,
 .n-drawer-mask {
   border-radius: var(--app-radius-window);
+}
+
+/* 气泡提示（naive-ui 的 Tooltip 复用 Popover 的浮层 DOM）：Popover 的底色是面板色，
+   而 Tooltip 的字色默认白 —— 浅色主题下白底白字，气泡看着是空的。
+   这里用令牌做反色（底 = 正文色、字 = 面板色），明暗主题自动互换。
+   naive 把 --n-color/--n-text-color 写在弹层的内联 style 上，只能 !important 覆盖
+   （与 RequestBar.vue 覆盖 --n-color 是同一套做法）。 */
+.n-tooltip.n-popover {
+  --n-color: var(--app-text) !important;
+  --n-text-color: var(--app-panel) !important;
+  --n-arrow-color: var(--app-text) !important;
 }
 
 .muted {

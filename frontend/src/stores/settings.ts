@@ -19,6 +19,8 @@ const DEFAULTS: Settings = {
   theme: ThemeLight,
   proxyUrl: '',
   autoSave: false,
+  // Markdown 编辑器默认分屏（源码 + 预览）：与改动前的实际表现一致，不改变老用户观感。
+  mdEditorMode: 'split',
   trayResident: false,
   trayCloseAction: 'ask',
   restoreLimit: 8,
@@ -45,6 +47,8 @@ export const useSettingsStore = defineStore('settings', {
     responseSize: (s) => s.form.responseSize,
     /** 编辑后自动写盘（默认关 = 手动保存模式） */
     autoSave: (s) => s.form.autoSave,
+    /** Markdown 编辑器打开时的默认状态：readonly（只读预览）/ split（分屏编辑） */
+    mdEditorMode: (s): 'readonly' | 'split' => (s.form.mdEditorMode === 'readonly' ? 'readonly' : 'split'),
     isDark: () => isDark.value,
   },
   actions: {

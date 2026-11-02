@@ -1380,6 +1380,7 @@ export namespace config {
 	    theme: string;
 	    proxyUrl: string;
 	    autoSave: boolean;
+	    mdEditorMode: string;
 	    trayResident: boolean;
 	    trayCloseAction: string;
 	    restoreLimit: number;
@@ -1403,6 +1404,7 @@ export namespace config {
 	        this.theme = source["theme"];
 	        this.proxyUrl = source["proxyUrl"];
 	        this.autoSave = source["autoSave"];
+	        this.mdEditorMode = source["mdEditorMode"];
 	        this.trayResident = source["trayResident"];
 	        this.trayCloseAction = source["trayCloseAction"];
 	        this.restoreLimit = source["restoreLimit"];

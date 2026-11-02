@@ -7,6 +7,7 @@ require (
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
 	github.com/energye/systray v1.0.3
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/wailsapp/wails/v2 v2.16.0
@@ -22,7 +23,6 @@ require (
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

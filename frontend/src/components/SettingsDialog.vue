@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 全局设置：界面（语言/主题/缩放/响应区位置）、网络策略（Doc C5）、本地数据（Doc C10）。
 import McpAuditPanel from '@/components/McpAuditPanel.vue'
+import SettingHint from '@/components/SettingHint.vue'
 import { api } from '@/lib/ipc'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
 import { useCollectionStore } from '@/stores/collection'
@@ -228,6 +229,11 @@ const layoutOptions = computed(() => [
   { label: t('settings.layoutRight'), value: 'right' },
   { label: t('settings.layoutBottom'), value: 'bottom' },
 ])
+// Markdown 编辑器打开时的默认状态：只读预览 / 分屏编辑（源码 + 预览）。
+const mdModeOptions = computed(() => [
+  { label: t('settings.mdEditorSplit'), value: 'split' },
+  { label: t('settings.mdEditorReadonly'), value: 'readonly' },
+])
 const themeOptions = computed(() => [
   { label: t('settings.themeLight'), value: ThemeLight },
   { label: t('settings.themeDark'), value: ThemeDark },
@@ -329,6 +335,7 @@ function snapshot(s: Settings): string {
     historyLimit: s.historyLimit,
     uiScale: s.uiScale,
     responseLayout: s.responseLayout,
+    mdEditorMode: s.mdEditorMode,
     restoreLimit: s.restoreLimit,
     proxyUrl: s.proxyUrl,
     mcp: {
@@ -419,26 +426,34 @@ function close(): void {
             <n-select v-model:value="form.responseLayout" :options="layoutOptions" size="small" class="num"
               data-testid="settings.layout" />
           </div>
-          <div class="row row--stack">
-            <span class="lbl">{{ t('settings.autoSave') }}</span>
-            <div class="field">
-              <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
-                @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }" />
-              <span class="hint">{{ t('settings.autoSaveHint') }}</span>
-            </div>
+          <div class="row">
+            <span class="lbl">
+              {{ t('settings.mdEditorMode') }}
+              <setting-hint :text="t('settings.mdEditorModeHint')" />
+            </span>
+            <n-select v-model:value="form.mdEditorMode" :options="mdModeOptions" size="small" class="num"
+              data-testid="settings.mdEditorMode" />
+          </div>
+          <div class="row">
+            <span class="lbl">
+              {{ t('settings.autoSave') }}
+              <setting-hint :text="t('settings.autoSaveHint')" tone="warn" />
+            </span>
+            <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
+              @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }" />
           </div>
           <!-- 关闭窗口的行为：已把原「驻留托盘」+「关闭窗口时」合并为单个下拉。
                是否常驻托盘由该值派生（Go 侧：非「直接退出」即常驻），不再单独设开关。 -->
-          <div class="row row--stack">
-            <span class="lbl">{{ t('settings.trayCloseAction') }}</span>
-            <div class="field">
-              <!-- 显式赋值再 applyNow（与本文件其它勾选项同一写法）：v-model + @update:value 并存时
-                   两个 handler 的先后顺序不保证，可能把旧值写盘 -->
-              <n-select :value="form.trayCloseAction" :options="trayCloseOptions" size="small" class="num"
-                data-testid="settings.trayCloseAction"
-                @update:value="(v: 'ask' | 'tray' | 'quit') => { form.trayCloseAction = v; form.trayResident = v !== 'quit'; void applyNow() }" />
-              <span class="hint">{{ t('settings.trayCloseActionHint') }}</span>
-            </div>
+          <div class="row">
+            <span class="lbl">
+              {{ t('settings.trayCloseAction') }}
+              <setting-hint :text="t('settings.trayCloseActionHint')" tone="warn" />
+            </span>
+            <!-- 显式赋值再 applyNow（与本文件其它勾选项同一写法）：v-model + @update:value 并存时
+                 两个 handler 的先后顺序不保证，可能把旧值写盘 -->
+            <n-select :value="form.trayCloseAction" :options="trayCloseOptions" size="small" class="num"
+              data-testid="settings.trayCloseAction"
+              @update:value="(v: 'ask' | 'tray' | 'quit') => { form.trayCloseAction = v; form.trayResident = v !== 'quit'; void applyNow() }" />
           </div>
 
         </div>
@@ -446,22 +461,22 @@ function close(): void {
         <!-- 分区二：网络与安全 -->
         <div v-show="active === 'network'" class="pane" data-testid="settings.pane.network">
           <div class="row">
-            <n-checkbox :checked="form.insecureSsl" data-testid="settings.insecureSsl"
-              @update:checked="(v: boolean) => { form.insecureSsl = v; void applyNow() }">
+            <span class="lbl">
               {{ t('settings.insecureSsl') }}
-            </n-checkbox>
+              <setting-hint :text="t('settings.insecureSslHint')" tone="danger" />
+            </span>
+            <n-checkbox :checked="form.insecureSsl" data-testid="settings.insecureSsl"
+              @update:checked="(v: boolean) => { form.insecureSsl = v; void applyNow() }" />
           </div>
-          <p class="hint muted">{{ t('settings.insecureSslHint') }}</p>
           <div class="row">
             <span class="lbl">{{ t('settings.timeout') }}</span>
             <n-input-number v-model:value="form.timeoutSec" size="small" :min="1" :max="600" class="num"
               data-testid="settings.timeout" />
           </div>
           <div class="row">
+            <span class="lbl">{{ t('settings.followRedirects') }}</span>
             <n-checkbox :checked="form.followRedirects" data-testid="settings.followRedirects"
-              @update:checked="(v: boolean) => { form.followRedirects = v; void applyNow() }">
-              {{ t('settings.followRedirects') }}
-            </n-checkbox>
+              @update:checked="(v: boolean) => { form.followRedirects = v; void applyNow() }" />
           </div>
           <div class="row">
             <span class="lbl">{{ t('settings.maxRedirects') }}</span>
@@ -470,7 +485,7 @@ function close(): void {
           </div>
           <div class="row">
             <span class="lbl">{{ t('settings.proxy') }}</span>
-            <n-input v-model:value="form.proxyUrl" size="small" class="num" data-testid="settings.proxy"
+            <n-input v-model:value="form.proxyUrl" size="small" class="num wide" data-testid="settings.proxy"
               :placeholder="t('settings.proxyPlaceholder')" />
           </div>
 
@@ -479,10 +494,9 @@ function close(): void {
         <!-- 分区三：本地数据 -->
         <div v-show="active === 'local'" class="pane" data-testid="settings.pane.local">
           <div class="row">
+            <span class="lbl">{{ t('settings.persistCookies') }}</span>
             <n-checkbox :checked="form.persistCookies" data-testid="settings.persistCookies"
-              @update:checked="(v: boolean) => { form.persistCookies = v; void applyNow() }">
-              {{ t('settings.persistCookies') }}
-            </n-checkbox>
+              @update:checked="(v: boolean) => { form.persistCookies = v; void applyNow() }" />
             <span class="sp" />
             <n-popconfirm @positive-click="clearCookies">
               <template #trigger>
@@ -498,16 +512,20 @@ function close(): void {
 
           <!-- 多工作目录：启动恢复上限 + 当前占用的监听数（每个根一个文件监听，Windows 上会占住目录） -->
           <div class="row">
-            <span class="lbl">{{ t('settings.restoreLimit') }}</span>
+            <span class="lbl">
+              {{ t('settings.restoreLimit') }}
+              <setting-hint :text="t('settings.restoreLimitHint')" tone="ok" />
+            </span>
             <n-input-number v-model:value="form.restoreLimit" size="small" :min="1" :max="32" class="num"
               data-testid="settings.restoreLimit" />
           </div>
-          <p class="hint muted">{{ t('settings.restoreLimitHint') }}</p>
           <div class="row">
-            <span class="lbl">{{ t('settings.openRoots') }}</span>
+            <span class="lbl">
+              {{ t('settings.openRoots') }}
+              <setting-hint :text="t('settings.openRootsHint')" tone="warn" />
+            </span>
             <span class="muted" data-testid="settings.openRoots">{{ coll.roots.length }}</span>
           </div>
-          <p class="hint muted">{{ t('settings.openRootsHint') }}</p>
 
         </div>
 
@@ -846,26 +864,22 @@ function close(): void {
   flex: 0 0 auto;
 }
 
+/* 标签列：宽度固定且不换行 —— 换行会让该行与上下行的控件不在同一水平线上。
+   宽度要容下最长的「Markdown 编辑器默认状态」+ 其后的说明气泡图标（约 175px）。 */
 .lbl {
+  flex: 0 0 200px;
+  width: 200px;
   font-size: 13px;
-  width: 130px;
-}
-
-/* 控件 + 长说明竖排：说明换行时左缘对齐控件列（不再塞进 checkbox label 里导致回绕错位） */
-.row--stack {
-  align-items: flex-start;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex: 1 1 auto;
-  min-width: 0;
+  white-space: nowrap;
 }
 
 .num {
   width: 130px;
+}
+
+/* 需要放长串的输入（代理地址）：比普通控件宽，避免占位符都被截断 */
+.num.wide {
+  width: 220px;
 }
 
 /* 端口数字框：地址行里固定宽度，足够完整显示 5 位端口 */
