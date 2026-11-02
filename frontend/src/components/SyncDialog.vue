@@ -2,6 +2,7 @@
 // 同步设置与冲突（I1–I6）：绑定服务端项目 / 解绑 / 模式与 PAT 维护 / 冲突应用内二选一。
 // 「立即同步」不在这里触发 —— 侧栏根行的刷新按钮直接同步，同步后有冲突才打开本弹窗。
 import ConflictResolver from '@/components/ConflictResolver.vue'
+import SettingHint from '@/components/SettingHint.vue'
 import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import type { ConflictDetail, ServerProject, SyncBindInfo, SyncBindReq } from '@/types'
@@ -246,7 +247,7 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
           <div class="cell">
             <label class="cl">
               {{ t('sync.projectId') }}
-              <span class="cl-hint">{{ t('sync.projectIdHint') }}</span>
+              <setting-hint :text="t('sync.projectIdHint')" :max-width="240" />
             </label>
             <div class="proj-row">
               <n-select v-if="projects.length" v-model:value="projectId" :options="projectOptions" size="small"
@@ -309,7 +310,8 @@ async function resolveAll(choice: 'local' | 'remote'): Promise<void> {
             </n-button>
           </div>
         </div>
-        <p class="hint">{{ t('sync.passHint') }}</p>
+        <!-- 口令一旦忘记，换设备就解不开 secret 变量：属安全风险，红色色条常驻可见 -->
+        <p class="hint note-bar note-danger">{{ t('sync.passHint') }}</p>
       </section>
 
       <p v-if="error" class="err">{{ error }}</p>

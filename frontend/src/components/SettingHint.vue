@@ -15,7 +15,11 @@ import { computed } from 'vue'
 
 type HintTone = 'info' | 'warn' | 'danger' | 'ok'
 
-const props = withDefaults(defineProps<{ text: string; tone?: HintTone }>(), { tone: 'info' })
+/** maxWidth：气泡最大宽度（px）。设置页默认 320；请求编辑器里的窄面板传小一点，免得盖住正文。 */
+const props = withDefaults(defineProps<{ text: string; tone?: HintTone; maxWidth?: number }>(), {
+  tone: 'info',
+  maxWidth: 320,
+})
 
 const ICONS = {
   info: InformationCircleOutline,
@@ -28,9 +32,9 @@ const icon = computed(() => ICONS[props.tone])
 </script>
 
 <template>
-  <n-tooltip placement="top-start" :style="{ maxWidth: '320px' }">
+  <n-tooltip placement="top-start" :style="{ maxWidth: `${maxWidth}px` }">
     <template #trigger>
-      <n-icon class="hint-icon" :class="`tone-${tone}`" :component="icon" data-testid="settings.hint" />
+      <n-icon class="hint-icon" :class="`tone-${tone}`" :component="icon" data-testid="hint.icon" />
     </template>
     <!-- 气泡底色统一深色（对比度最好），级别只用左侧色条表达，避免彩色文字在深底上读不清 -->
     <span class="hint-body" :class="`tone-${tone}`">{{ text }}</span>

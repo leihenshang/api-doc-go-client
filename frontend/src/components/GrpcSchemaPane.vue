@@ -2,6 +2,7 @@
 // gRPC Schema 分段（设计文档 G2/G3/G4）：定义来源与时间、导入 / 更新 / 移除、服务方法列表、解析错误常驻。
 // 语义（D3）：不做文件监听 —— 只有「导入 / 更新定义」才重新解析；缓存随集合切换失效（Go 侧负责）。
 // 语义（D4）：导入是原子的 —— 解析失败时不复制、不落盘，只在界面留常驻错误（proto 路径保持不变）。
+import SettingHint from '@/components/SettingHint.vue'
 import { NButton, NIcon, NInput, NPopconfirm, NSelect, NSpin } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -307,8 +308,10 @@ function isPicked(service: string, m: GrpcMethodInfo): boolean {
     <!-- import 搜索路径：定义解析失败时的修复通道 -->
     <div class="paths">
       <div class="ph">
-        <span class="lbl">{{ t('grpc.importPaths') }}</span>
-        <span class="hint">{{ t('grpc.importPathHint') }}</span>
+        <span class="lbl">
+          {{ t('grpc.importPaths') }}
+          <setting-hint :text="t('grpc.importPathHint')" :max-width="260" />
+        </span>
         <span class="sp" />
         <button class="addp" type="button" :disabled="readonly" data-testid="grpc.schema.addImport" @click="addImportPath">
           + {{ t('grpc.addImportPath') }}
@@ -509,11 +512,7 @@ function isPicked(service: string, m: GrpcMethodInfo): boolean {
   font-size: 12px;
   font-weight: 600;
   color: var(--app-text);
-}
-
-.hint {
-  font-size: 11px;
-  color: var(--app-muted);
+  white-space: nowrap;
 }
 
 .addp {

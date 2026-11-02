@@ -102,7 +102,8 @@ async function answer(decision: AuthzDecision) {
       </div>
       <div class="args-label">{{ t('mcpAuthz.args') }}</div>
       <pre class="args" data-testid="mcp.consent.args">{{ prettyArgs }}</pre>
-      <p class="hint">{{ t('mcpAuthz.argsHint') }}</p>
+      <!-- 授权弹窗的安全声明：不能收进气泡（用户必须看到），用红色色条提升显著性 -->
+      <p class="hint note-bar note-danger">{{ t('mcpAuthz.argsHint') }}</p>
       <p v-if="timedOut" class="error">{{ t('mcpAuthz.timeout') }}</p>
       <p v-else-if="localError" class="error">{{ localError }}</p>
     </div>
