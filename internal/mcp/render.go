@@ -40,11 +40,18 @@ func renderImportSummary(project, format, parent string, sum *collection.ImportS
 // renderToolCatalog list_tools 的文本输出：一行一个工具（名 + 读/写 + 必填 + 一句话）。
 //
 // 刻意不在这里贴完整 schema —— 那正是 list_tools 要省掉的东西；需要细节再单独取。
-func renderToolCatalog(items []toolCatalogItem, total int, filter, mode string, readOnly bool) string {
+func renderToolCatalog(items []toolCatalogItem, total, modeTotal int, filter, mode string, readOnly bool) string {
 	var sb strings.Builder
-	if filter != "" {
+	switch {
+	case filter != "" && modeTotal != total:
+		fmt.Fprintf(&sb, "共 %d 个可用工具，mode=%s 匹配 %d 个，filter=%s 命中 %d 个\n",
+			total, mode, modeTotal, filter, len(items))
+	case filter != "":
 		fmt.Fprintf(&sb, "共 %d 个可用工具，命中 %d 个（filter=%s）\n", total, len(items), filter)
-	} else {
+	case modeTotal != total:
+		fmt.Fprintf(&sb, "共 %d 个可用工具，mode=%s 匹配 %d 个（本次返回 %d 个）\n",
+			total, mode, modeTotal, len(items))
+	default:
 		fmt.Fprintf(&sb, "共 %d 个可用工具（本次返回 %d 个）\n", total, len(items))
 	}
 	if strings.EqualFold(strings.TrimSpace(mode), "write") {
