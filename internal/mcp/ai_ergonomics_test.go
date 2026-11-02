@@ -811,3 +811,37 @@ func TestWeakMatchSemantics(t *testing.T) {
 		}
 	}
 }
+
+// list_tools 的三个数量必须语义分明：total（服务注册总数）、modeTotal（mode 匹配数）、returned（filter 后）。
+func TestListToolsModeTotal(t *testing.T) {
+	cs := connectSelf(t)
+	cases := []struct {
+		args             map[string]any
+		total, modeTotal int
+	}{
+		{map[string]any{}, 36, 36},
+		{map[string]any{"mode": "read"}, 36, 12},
+		{map[string]any{"mode": "write"}, 36, 24},
+	}
+	for _, c := range cases {
+		sc := callStructured(t, cs, "list_tools", c.args)
+		if got := int(sc["total"].(float64)); got != c.total {
+			t.Errorf("%v total=%d，期望 %d", c.args, got, c.total)
+		}
+		if got := int(sc["modeTotal"].(float64)); got != c.modeTotal {
+			t.Errorf("%v modeTotal=%d，期望 %d", c.args, got, c.modeTotal)
+		}
+		if got := int(sc["returned"].(float64)); got != c.modeTotal {
+			t.Errorf("%v returned=%d，期望与 modeTotal 相同 %d", c.args, got, c.modeTotal)
+		}
+	}
+
+	// filter 只影响 returned，不影响 total/modeTotal
+	sc := callStructured(t, cs, "list_tools", map[string]any{"filter": "delete"})
+	if int(sc["total"].(float64)) != 36 || int(sc["modeTotal"].(float64)) != 36 {
+		t.Errorf("filter 不应影响 total/modeTotal：total=%v modeTotal=%v", sc["total"], sc["modeTotal"])
+	}
+	if int(sc["returned"].(float64)) >= 36 {
+		t.Errorf("filter=delete 的 returned 应小于总数：%v", sc["returned"])
+	}
+}

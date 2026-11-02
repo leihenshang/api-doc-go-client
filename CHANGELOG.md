@@ -10,6 +10,8 @@ prod:
 
 ## 2026-10-30  0.1.5-dev
 
+- `list_tools` 新增 `modeTotal`（当前 `mode` 匹配数），`total` 的描述改为「服务启动时注册总数（受只读模式与工具组影响，不受 mode/filter 影响）」：此前 `total` 容易被读成「当前 mode 的工具数」，`returned < total` 会被误判成「还有没取完的」。
+- `method` 的白名单与 description 一致性由测试锁定（`TestMethodDescriptionMatchesWhitelist`）：SDK 的 `jsonschema` tag 不支持 enum，加 enum 必须手写整份 InputSchema，因此改为用测试防两处漂移。
 - MCP 工具精简（39 → 35，破坏性契约变更）：`get_request_details` 并入 `get_request_detail`（`uid` 单个 / `uids` 批量 1–10），`get_docs` 并入 `get_doc`，`prune_empty_modules` 并入 `delete_module`（`pruneEmpty=true`），`get_doc_template` 迁移为 MCP resource `apidoc://doc-template`。旧工具名不再注册。
 - MCP 设置新增「启用的工具组」（集合与接口 / 文档 / 环境变量 / 响应示例 / 发送请求）：不用的组不注册，减少 AI 工具列表体积；工具总览、工作目录与项目列表（`session`）恒开。
 - MCP 工具描述瘦身（9507 → 1713 字，预算上限 3200），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。

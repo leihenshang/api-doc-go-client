@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // TestValidateMetas 元数据表完整性：name 唯一、分组合法、Brief/描述齐备、风险自洽。
@@ -263,5 +265,25 @@ func TestDocsToolCountsMatchMeta(t *testing.T) {
 	// medium 风险只应有 send_request（唯一真实网络外发）。
 	if medium != 1 {
 		t.Errorf("medium 风险工具数 = %d，期望 1（send_request）", medium)
+	}
+}
+
+// method 的 description 必须列全 allowedMethods —— 白名单只有代码一处真源，
+// 描述是给 LLM 看的副本，改一处漏另一处时这条测试会红（比手写整份 InputSchema 便宜得多）。
+func TestMethodDescriptionMatchesWhitelist(t *testing.T) {
+	for _, v := range []any{CreateRequestInput{}, UpdateRequestInput{}, SendRequestInput{}} {
+		sch, err := jsonschema.ForType(reflect.TypeOf(v), &jsonschema.ForOptions{})
+		if err != nil {
+			t.Fatalf("%T 生成 schema 失败: %v", v, err)
+		}
+		p, ok := sch.Properties["method"]
+		if !ok {
+			t.Fatalf("%T 缺少 method 字段", v)
+		}
+		for m := range allowedMethods {
+			if !strings.Contains(p.Description, m) {
+				t.Errorf("%T 的 method 描述缺 %q：%q", v, m, p.Description)
+			}
+		}
 	}
 }

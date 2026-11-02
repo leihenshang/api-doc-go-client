@@ -500,21 +500,23 @@ type toolCatalogItem struct {
 
 func (ts *toolSet) listTools(_ context.Context, _ *mcp.CallToolRequest, in listToolsIn) (*mcp.CallToolResult, any, error) {
 	return ts.wrapData(func() (string, any, error) {
-		items, total := ts.catalog(in.Filter, in.Mode)
+		items, total, modeTotal := ts.catalog(in.Filter, in.Mode)
 		data := map[string]any{
-			"total":    total,
-			"returned": len(items),
-			"tools":    nonNilSlice(items),
+			"total":     total,
+			"modeTotal": modeTotal,
+			"returned":  len(items),
+			"tools":     nonNilSlice(items),
 		}
-		text := renderToolCatalog(items, total, in.Filter, in.Mode, ts.readOnly)
+		text := renderToolCatalog(items, total, modeTotal, in.Filter, in.Mode, ts.readOnly)
 		return text + taskCheatSheet(ts.readOnly, ts.groups, in.Filter), data, nil
 	})
 }
 
 // catalog 按过滤条件产出总览行；total 恒为「当前模式已注册的工具总数」。
 // 只读模式下只列本模式可用的工具，避免 AI 挑了未注册的工具却调用不到。
-func (ts *toolSet) catalog(filter, mode string) ([]toolCatalogItem, int) {
+func (ts *toolSet) catalog(filter, mode string) ([]toolCatalogItem, int, int) {
 	total := len(NamesForMode(ts.readOnly, ts.groups))
+	modeTotal := 0 // mode 过滤后（filter 之前）的工具数
 	filter = strings.ToLower(strings.TrimSpace(filter))
 	wantWrite := -1 // -1=不限，0=只读，1=写
 	switch strings.ToLower(strings.TrimSpace(mode)) {
@@ -537,6 +539,7 @@ func (ts *toolSet) catalog(filter, mode string) ([]toolCatalogItem, int) {
 		if wantWrite == 1 && !m.Write {
 			continue
 		}
+		modeTotal++
 		if filter != "" && !strings.Contains(strings.ToLower(m.Name), filter) &&
 			!strings.Contains(strings.ToLower(m.Description), filter) &&
 			!strings.Contains(strings.ToLower(m.Brief), filter) {
@@ -550,7 +553,7 @@ func (ts *toolSet) catalog(filter, mode string) ([]toolCatalogItem, int) {
 			Required:    nonNilSlice(ts.requiredOf(m.Name)),
 		})
 	}
-	return out, total
+	return out, total, modeTotal
 }
 
 // ---- 工作目录（白名单 + 默认目标）----

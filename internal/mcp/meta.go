@@ -504,10 +504,11 @@ func toolsCatalogOutput() map[string]any {
 		"description": strSchema(), "required": arrSchema(strSchema()),
 	}, "name", "description")
 	return objSchema(map[string]any{
-		// total 是「当前模式注册的工具总数」，与 filter 无关；returned 才是过滤后条数。
-		"total":    map[string]any{"type": "integer", "description": "当前模式已注册的工具总数（不受 filter 影响）"},
-		"returned": map[string]any{"type": "integer", "description": "本次实际返回的条数（filter 之后）"},
-		"tools":    arrSchema(item),
+		// 三个数量是递进的：服务注册总数 → mode 匹配数 → filter 之后实际返回数。
+		"total":     map[string]any{"type": "integer", "description": "服务启动时注册的工具总数（受只读模式与工具组影响，不受 mode/filter 影响）"},
+		"modeTotal": map[string]any{"type": "integer", "description": "当前 mode 匹配的工具数（filter 之前）"},
+		"returned":  map[string]any{"type": "integer", "description": "本次实际返回的条数（filter 之后）"},
+		"tools":     arrSchema(item),
 	}, "tools")
 }
 
