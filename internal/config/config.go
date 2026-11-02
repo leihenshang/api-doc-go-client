@@ -43,6 +43,15 @@ const (
 	maxRestoreLimit     = 32
 )
 
+// Markdown 编辑器打开时的默认状态（Settings.MdEditorMode 的合法取值）。
+//
+// 只决定「打开时」的呈现：readonly = 只读预览（渲染后的正文），split = 分屏编辑（左源码右预览）。
+// 两种状态下用户都能在编辑器里临时切换，不回写设置 —— 「默认」就该只影响初值。
+const (
+	MdEditorSplit    = "split"
+	MdEditorReadonly = "readonly"
+)
+
 // Settings 全局设置：请求级 settings 未覆盖时生效。
 type Settings struct {
 	InsecureSSL     bool    `json:"insecureSsl"` // 跳过 TLS 证书校验（自签/内网证书）
@@ -57,7 +66,10 @@ type Settings struct {
 	Theme           string  `json:"theme"`          // 主题：light | dark（前端切换后经 SaveSettings 落盘）
 	ProxyURL        string  `json:"proxyUrl"`       // HTTP(S) 代理，如 http://127.0.0.1:7890；空 = 直连
 	AutoSave        bool    `json:"autoSave"`       // 编辑后自动写盘：默认关（手动保存模式）；关时仅靠 Ctrl+S / 关闭页签 / 保存所有 落盘
-	TrayResident    bool    `json:"trayResident"`   // Deprecated：实际常驻与否由 TrayCloseAction 派生（trayResidentOf：非 quit 即常驻）；字段仅为旧配置兼容保留，新代码勿以其为准
+	// MdEditorMode Markdown 编辑器打开时的默认状态：split（分屏编辑，默认）| readonly（只读预览）。
+	// 只影响初值：用户在编辑器里临时切换不回写，下次打开仍按本设置。
+	MdEditorMode string `json:"mdEditorMode"`
+	TrayResident bool   `json:"trayResident"` // Deprecated：实际常驻与否由 TrayCloseAction 派生（trayResidentOf：非 quit 即常驻）；字段仅为旧配置兼容保留，新代码勿以其为准
 	// TrayCloseAction 关闭窗口行为的唯一控制入口（ask/tray 都常驻托盘）：
 	//   ask（默认）= 弹框询问「放入托盘 / 直接关闭」，勾「不再显示」后把选择写回本字段；
 	//   tray       = 直接隐藏到托盘；
@@ -140,6 +152,7 @@ func Default() Settings {
 		ResponseLayout:  LayoutRight,
 		ResponseSize:    defaultRespSize,
 		Theme:           ThemeLight,
+		MdEditorMode:    MdEditorSplit,
 		TrayCloseAction: TrayCloseAsk,
 		RestoreLimit:    defaultRestoreLimit,
 		MCP: MCPConfig{
@@ -189,6 +202,10 @@ func (s Settings) Normalize() Settings {
 	// 未知主题一律回落浅色（旧版本配置文件里没有该字段也走这里）
 	if s.Theme != ThemeDark {
 		s.Theme = ThemeLight
+	}
+	// Markdown 编辑器默认状态：未知取值（含旧配置缺字段 = ""）回落「分屏编辑」
+	if s.MdEditorMode != MdEditorReadonly {
+		s.MdEditorMode = MdEditorSplit
 	}
 	// 关闭行为：未知取值（含旧配置缺字段 = ""）回落「每次询问」
 	switch s.TrayCloseAction {

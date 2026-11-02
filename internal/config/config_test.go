@@ -75,6 +75,21 @@ func TestThemeNormalize(t *testing.T) {
 	}
 }
 
+// Markdown 编辑器默认状态：默认分屏、只读原样保留、未知/缺字段回落分屏。
+func TestMdEditorModeNormalize(t *testing.T) {
+	if got := Default().MdEditorMode; got != MdEditorSplit {
+		t.Fatalf("默认应为分屏编辑 %q，实际 %q", MdEditorSplit, got)
+	}
+	if got := (Settings{MdEditorMode: MdEditorReadonly}).Normalize().MdEditorMode; got != MdEditorReadonly {
+		t.Fatalf("Normalize 不应改写合法的只读预览，实际 %q", got)
+	}
+	for _, bad := range []string{"", "ReadOnly", "preview", "split "} {
+		if got := (Settings{MdEditorMode: bad}).Normalize().MdEditorMode; got != MdEditorSplit {
+			t.Fatalf("非法取值 %q 应回落分屏编辑，实际 %q", bad, got)
+		}
+	}
+}
+
 // 缺字段的文件（例如旧版本写的配置）应按默认值补齐，而不是被 false/0 覆盖。
 func TestLoadMergesMissingFieldsWithDefault(t *testing.T) {
 	dir := t.TempDir()

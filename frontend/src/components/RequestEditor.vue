@@ -20,6 +20,7 @@ import { message } from '@/lib/notice'
 import { requestSegByTab, respSubViewByTab } from '@/lib/tabViewState'
 import { detectTextKind, prettyText } from '@/lib/textFormat'
 import { useCollectionStore } from '@/stores/collection'
+import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { useTabsStore } from '@/stores/tabs'
 import type { Auth, BodyField } from '@/types'
@@ -150,8 +151,8 @@ const bodyType = computed({
   },
 })
 
-/** Docs 默认只读预览；编辑态由父级持有（页内查找按它判断是否有可查找 textarea）。 */
-const docsEditing = ref(false)
+/** Docs 的初始编辑态取自设置「Markdown 编辑器默认状态」；之后由页内按钮临时切换（不回写设置）。 */
+const docsEditing = ref(useSettingsStore().mdEditorMode === 'split')
 
 // 页签角标：该段有内容时显示小圆点
 const hasParams = computed(() => props.tab.request.params.some((p) => p.name.trim()))

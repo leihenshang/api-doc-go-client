@@ -453,6 +453,11 @@ export interface Settings {
    * 只在 Ctrl+S / 关闭页签 / 「保存所有」时写盘，编辑期间文件保持不动（页签上有未保存圆点）。
    */
   autoSave: boolean
+  /**
+   * Markdown 编辑器**打开时**的默认状态（文档页签 / 接口说明）：
+   * readonly = 只读预览；split = 分屏编辑（默认）。编辑器内可临时切换，不回写本字段。
+   */
+  mdEditorMode: 'readonly' | 'split'
   /** 任务栏驻留：开启后托盘常驻，关闭窗口可隐藏到托盘而非退出；默认关 = 关窗即退出 */
   trayResident: boolean
   /**

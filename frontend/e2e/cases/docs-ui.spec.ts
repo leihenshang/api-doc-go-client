@@ -155,6 +155,71 @@ test('文档自动保存：保存期间的后续编辑不会误标为已保存',
   }
 })
 
+// 设置 → 界面 → 「Markdown 编辑器默认状态」：只读预览 / 分屏编辑。
+// 断言按实际渲染宽度量：previewOnly 下源码列宽为 0、预览列占满；切回后源码列恢复。
+test('Markdown 编辑器默认状态：只读预览生效且可临时切回分屏', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+
+  // ① 设置改为只读预览并保存
+  await openSettings(page)
+  await page.getByTestId('settings.mdEditorMode').click()
+  await page.locator('.n-base-select-option').filter({ hasText: t('settings.mdEditorReadonly') }).click()
+  await saveSettings(page)
+
+  // ② 新建文档 → 打开页签：应直接是预览态
+  const group = treeRow(page, 'api')
+  await group.hover()
+  await group.getByTestId('tree.row.menu').click()
+  await page.getByTestId('tree.row.newDoc').click()
+  await page.locator('.n-modal input').first().fill('只读文档')
+  await page.getByRole('button', { name: t('common.confirm') }).click()
+  await treeRow(page, '只读文档').click()
+  await expect(page.locator('.md-editor').first()).toBeVisible()
+
+  /** 当前是哪种态：只读预览只渲染 MdPreview，分屏编辑才有源码列。 */
+  const mode = () =>
+    page.evaluate(() => ({
+      src: document.querySelectorAll('.md-editor-input-wrapper').length,
+      preview: document.querySelectorAll('.md-editor-preview, .md-preview').length,
+    }))
+
+  await expect.poll(async () => (await mode()).src).toBe(0)
+  expect((await mode()).preview).toBeGreaterThan(0)
+
+  // ③ 页签内临时切回分屏：源码列出现、预览仍在
+  await page.getByTestId('doc.toggleMode').click()
+  await expect.poll(async () => (await mode()).src).toBe(1)
+  expect((await mode()).preview).toBeGreaterThan(0)
+
+  // ④ 切回只读预览仍生效（按钮是双向的）
+  await page.getByTestId('doc.toggleMode').click()
+  await expect.poll(async () => (await mode()).src).toBe(0)
+})
+
+// 接口说明（request.docs）的初始化同样跟随该设置：只读预览直接给渲染结果，「编辑」按钮可临时切回。
+test('接口说明默认状态：只读预览下打开 Docs 段不出现源码列', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await openCollection(page, app)
+
+  await openSettings(page)
+  await page.getByTestId('settings.mdEditorMode').click()
+  await page.locator('.n-base-select-option').filter({ hasText: t('settings.mdEditorReadonly') }).click()
+  await saveSettings(page)
+
+  // 新建的请求页签才会读到新设置（已打开的页签保持原态，符合「默认状态」语义）
+  await treeRow(page, 'ping').click()
+  await page.locator('[data-testid="req.tab"][data-seg="docs"]').click()
+
+  const srcCount = () => page.locator('.md-editor-input-wrapper').count()
+  await expect.poll(srcCount).toBe(0)
+  await expect(page.getByTestId('docs.edit')).toHaveText(t('docs.edit'))
+
+  // 「编辑」按钮仍可临时切回分屏
+  await page.getByTestId('docs.edit').click()
+  await expect.poll(srcCount).toBe(1)
+})
+
 test('文档树叶子：拖动改目录后 uid 不变', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   await openCollection(page, app)

@@ -74,5 +74,7 @@ export function buildThemeOverrides(dark: boolean): GlobalThemeOverrides {
             color: dark ? 'var(--app-surface-3)' : 'var(--app-panel)',
             padding: '4px',
         },
+        // Tooltip 的底色/字色不在这里配：它复用 Popover 的浮层 DOM，naive 会把 --n-color
+        // 写在弹层内联样式上（覆盖主题变量），只能在 base.css 里用 !important 反色。
     }
 }
