@@ -556,7 +556,12 @@ func searchRequestsOutput() map[string]any {
 	item := objSchema(map[string]any{
 		"uid": strSchema(), "name": strSchema(), "method": strSchema(), "url": strSchema(),
 		"path": strSchema(), "project": strSchema(), "score": intSchema(),
-		"matched": arrSchema(strSchema()), "snippet": strSchema(), "hash": strSchema(), "weakMatch": boolSchema(),
+		"matched": arrSchema(strSchema()), "snippet": strSchema(), "hash": strSchema(),
+		// 明确「弱」的定义：原文里没有这个串，只靠分词/有序子序列命中（如 query=lg 命中 login）。
+		"weakMatch": map[string]any{
+			"type":        "boolean",
+			"description": "true = 原文不含该串，仅靠分词/有序子序列命中（如 lg→login）；删除/覆盖前请核对 name 与 path",
+		},
 	}, "uid", "path")
 	return objSchema(map[string]any{
 		"query": strSchema(), "total": intSchema(), "returned": intSchema(), "results": arrSchema(item),

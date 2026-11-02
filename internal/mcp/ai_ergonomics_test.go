@@ -770,3 +770,44 @@ func TestRelatedDocsRemoved(t *testing.T) {
 		}
 	}
 }
+
+// weakMatch 的语义：原文里没有该串、只靠有序子序列命中时才为 true。
+// （外部测评用「用户/登录/l」这类原串片段去测，自然全为 false——不是缺陷。）
+func TestWeakMatchSemantics(t *testing.T) {
+	cs := connectSelf(t)
+	mustCall(t, cs, "create_module", map[string]any{"project": "demo", "name": "api"})
+	mustCall(t, cs, "create_request", map[string]any{
+		"project": "demo", "folder": "api", "name": "用户登录", "method": "POST", "url": "/login",
+	})
+
+	find := func(query string) (bool, bool) {
+		sc := callStructured(t, cs, "search_requests", map[string]any{"project": "demo", "query": query})
+		for _, it := range sc["results"].([]any) {
+			m, _ := it.(map[string]any)
+			if m["name"] == "用户登录" {
+				weak, _ := m["weakMatch"].(bool)
+				return weak, true
+			}
+		}
+		return false, false
+	}
+
+	for _, c := range []struct {
+		query string
+		want  bool
+	}{
+		{"用户登录", false},  // 名称原串命中
+		{"login", false}, // URI 原串命中
+		{"lg", true},     // 子序列：login 里有 l…g，但没有连续的 "lg"
+		{"用登", true},     // 中文子序列
+	} {
+		got, ok := find(c.query)
+		if !ok {
+			t.Errorf("query=%q 应命中「用户登录」", c.query)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("query=%q weakMatch=%v，期望 %v", c.query, got, c.want)
+		}
+	}
+}

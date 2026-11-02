@@ -193,7 +193,7 @@ func docCandidates(docs []*collection.DocEntry) string {
 type CreateDocInput struct {
 	Project string `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
 	Name    string `json:"name" jsonschema:"文档显示名（不含 .md，不能带路径分隔符）；可重复，身份以 uid/path 为准"`
-	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（如 docs 或 用户/说明，须已存在）；留空 = 默认 docs/（不存在会自动创建）"`
+	Folder  string `json:"folder,omitempty" jsonschema:"目标分组目录（如 docs 或 用户/说明）；显式指定时须已存在（否则 [NOT_FOUND]）；留空或写 docs 时落到默认目录 docs/（不存在会自动创建）"`
 	Content string `json:"content,omitempty" jsonschema:"Markdown 正文；留空 = 空文档，之后用 update_doc 写入"`
 	// UID 可选：批量导入/幂等创建时传固定 uid；已存在时按 onConflict 处理。
 	UID string `json:"uid,omitempty" jsonschema:"可选：指定 uid（批量导入做幂等）；已存在时按 onConflict 处理"`

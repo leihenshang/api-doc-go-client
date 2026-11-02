@@ -49,6 +49,8 @@ prod:
 - `create_module` 的 `name` 支持写完整路径（`api/user` 自动拆成 `parent` + 末段）；上级不存在回 `[NOT_FOUND]`，末段非法回 `[INVALID]`（不再笼统 `[INTERNAL]`）。
 - `replaces` 的 `old` 为空或未命中改为 `[INVALID]`。
 - `create_env` 描述补充「新集合自带 dev 环境」；批量更新/删除的结果头补「其中 N 条未通过（见 failed[]）」。
+- `search_requests` 的 `weakMatch` 补 schema 说明（明确「原文不含该串、仅靠分词/有序子序列命中」，如 `lg`→`login`）；新增 `TestWeakMatchSemantics` 覆盖 true/false 两侧。
+- `create_doc` 的 `folder` 说明消除歧义：「显式指定时须已存在」与「留空或写 docs 落到默认目录 docs/（自动创建）」分开表述。
 - **移除** `get_request_detail` 的 `relatedDocs` 字段（输出 schema 与结构化结果都不再出现）：原实现靠「文档名包含接口名」猜关联，命中率不可预测、也没有建立关联的入口，属于「声明了却基本恒空」，按「声明必须能用」的原则撤掉。
 - 入参错误统一归 `[INVALID]`：`update_doc` 的 `insertAfter` 未匹配/命中多处/occurrence 越界/`anchorHeading` 未匹配、正文变更方式互斥、`append` 为空、图片 `data` 为空，以及 `use_workspace` 的缺失/歧义与「未指定 project」。
 - `update_doc` 的 `folder` 描述补「须已存在，否则 [NOT_FOUND]」。
