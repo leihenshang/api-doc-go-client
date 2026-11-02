@@ -568,9 +568,10 @@ function close(): void {
           <!-- 工具组：不用的组不注册，缩小 tools/list 体积；session（工具总览/工作目录/项目列表）恒开 -->
           <div class="block">
             <div class="row">
-              <span class="lbl">{{ t('settings.mcpGroups') }}</span>
-              <span class="sp" />
-              <span class="muted">{{ t('settings.mcpGroupsHint') }}</span>
+              <span class="lbl">
+                {{ t('settings.mcpGroups') }}
+                <setting-hint :text="t('settings.mcpGroupsHint')" />
+              </span>
             </div>
             <div class="row">
               <n-checkbox v-for="g in mcpGroups" :key="g.value" :checked="groupChecked(g.value)"
@@ -590,8 +591,8 @@ function close(): void {
                 @update:checked="(v: boolean) => { interactiveChecked = v; void applyNow() }">
                 {{ t('settings.mcpInteractiveAuth') }}
               </n-checkbox>
+              <setting-hint :text="t('settings.mcpInteractiveAuthHint')" tone="warn" />
             </div>
-            <p class="hint muted">{{ t('settings.mcpInteractiveAuthHint') }}</p>
           </div>
 
           <!-- 「始终允许」持久授权清单：弹窗选择后写入，可在这里单条移除/清空 -->
@@ -882,9 +883,12 @@ function close(): void {
   width: 220px;
 }
 
-/* 端口数字框：地址行里固定宽度，足够完整显示 5 位端口 */
+/* 端口输入框：地址行里固定宽度、且**不许被前面的 flex 输入框压缩**。
+   只写 width 不够 —— 同一行有 .grow（flex: 1 1 auto）时，本元素默认 flex-shrink: 1
+   会被挤到 60px 左右，5 位端口只显示得出前 3 位（实测 8189 显示成 818）。 */
 .port {
-  width: 150px;
+  flex: 0 0 96px;
+  width: 96px;
 }
 
 /* MCP 配置示例：只读等宽块，高度放宽避免默认出现纵向滚动条，内容仍可整块选中复制 */
