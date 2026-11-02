@@ -560,7 +560,8 @@ function onSegInput(): void {
     <n-modal v-model:show="genDialog" preset="card" class="gen-modal"
       style="width: 460px; max-width: calc(100vw - 32px)" :title="t('body.genTitle')">
       <div data-testid="body.genDialog">
-        <p class="gen-hint">{{ t('body.genHint') }}</p>
+        <!-- 「覆盖」会按本次派生重建、丢掉同名字段以外的说明：黄色提醒 -->
+        <p class="gen-hint note-bar note-warn">{{ t('body.genHint') }}</p>
         <div class="gen-actions">
           <n-button size="small" type="primary" data-testid="body.genAppend" @click="onConfirmGenerate('append')">
             {{ t('body.genAppend') }}

@@ -3,6 +3,7 @@
 // 请求级超时覆盖、跳过证书校验、请求压缩。
 // 规则：连接设置落 `grpc.tls`；超时落请求级 `settings.timeoutSec`（留空 = 用全局设置）；
 // 跳过校验「全局或请求级任一开启即生效」（执行器侧合并，G7.3）。
+import SettingHint from '@/components/SettingHint.vue'
 import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NSelect } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -104,7 +105,10 @@ const compressOptions = computed(() => [
 <template>
   <div class="opt-pane">
     <div class="orow">
-      <span class="lbl">{{ t('grpc.options.connection') }}</span>
+      <span class="lbl">
+        {{ t('grpc.options.connection') }}
+        <setting-hint :text="t('grpc.options.connectionHint')" :max-width="260" />
+      </span>
       <n-select
         :value="mode"
         :options="modeOptions"
@@ -114,7 +118,6 @@ const compressOptions = computed(() => [
         data-testid="grpc.options.mode"
         @update:value="setMode"
       />
-      <span class="hint">{{ t('grpc.options.connectionHint') }}</span>
     </div>
 
     <template v-if="tlsEnabled">
@@ -135,21 +138,29 @@ const compressOptions = computed(() => [
         </n-button>
       </div>
       <div class="orow">
-        <span class="lbl">{{ t('grpc.options.skipVerify') }}</span>
+        <span class="lbl">
+          {{ t('grpc.options.skipVerify') }}
+          <!-- 跳过证书校验属安全风险，与设置页「忽略 SSL」同一级别，用红色 -->
+          <setting-hint
+            :text="settings.form.insecureSsl ? t('grpc.options.skipVerifyGlobalOn') : t('grpc.options.skipVerifyHint')"
+            tone="danger"
+            :max-width="260"
+          />
+        </span>
         <n-checkbox
           :checked="grpc.tls?.insecureSkipVerify === true"
           :disabled="readonly"
           data-testid="grpc.options.skipVerify"
           @update:checked="setSkipVerify"
         />
-        <span class="hint">
-          {{ settings.form.insecureSsl ? t('grpc.options.skipVerifyGlobalOn') : t('grpc.options.skipVerifyHint') }}
-        </span>
       </div>
     </template>
 
     <div class="orow">
-      <span class="lbl">{{ t('grpc.options.timeout') }}</span>
+      <span class="lbl">
+        {{ t('grpc.options.timeout') }}
+        <setting-hint :text="t('grpc.options.timeoutHint', { n: settings.form.timeoutSec ?? 30 })" :max-width="260" />
+      </span>
       <n-input-number
         :value="timeout"
         size="small"
@@ -161,11 +172,13 @@ const compressOptions = computed(() => [
         data-testid="grpc.options.timeout"
         @update:value="timeout = $event"
       />
-      <span class="hint">{{ t('grpc.options.timeoutHint', { n: settings.form.timeoutSec ?? 30 }) }}</span>
     </div>
 
     <div class="orow">
-      <span class="lbl">{{ t('grpc.options.compress') }}</span>
+      <span class="lbl">
+        {{ t('grpc.options.compress') }}
+        <setting-hint :text="t('grpc.options.compressHint')" :max-width="260" />
+      </span>
       <n-select
         :value="grpc.compress ?? ''"
         :options="compressOptions"
@@ -175,7 +188,6 @@ const compressOptions = computed(() => [
         data-testid="grpc.options.compress"
         @update:value="setCompress"
       />
-      <span class="hint">{{ t('grpc.options.compressHint') }}</span>
     </div>
   </div>
 </template>
@@ -196,11 +208,14 @@ const compressOptions = computed(() => [
   flex-wrap: wrap;
 }
 
+/* 标签列固定宽度让各行的控件左缘对齐；120px 是为「跳过证书校验」+ 其后的说明图标留的
+   （96px 时图标会被挤到下一行）。nowrap 保证标签与图标始终同一行。 */
 .lbl {
-  width: 96px;
+  width: 120px;
   flex: 0 0 auto;
   font-size: 12px;
   color: var(--app-text);
+  white-space: nowrap;
 }
 
 .ctl {
@@ -208,10 +223,4 @@ const compressOptions = computed(() => [
   flex: 0 0 auto;
 }
 
-.hint {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 11.5px;
-  color: var(--app-muted);
-}
 </style>

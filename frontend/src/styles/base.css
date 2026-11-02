@@ -361,6 +361,26 @@ body .md-editor-preview .md-editor-code .md-editor-code-head {
   --n-arrow-color: var(--app-text) !important;
 }
 
+/* 常驻可见的提示段落分级：与气泡同一套语义色，只在左侧加一条色条。
+   这些提示不能收进气泡（例如授权弹窗的安全声明、"覆盖"会丢说明），
+   但需要一眼看出轻重，所以保留文字 + 上色。 */
+.note-bar {
+  padding-left: 8px;
+  border-left: 3px solid var(--app-muted);
+}
+
+.note-bar.note-warn {
+  border-left-color: var(--app-warn);
+}
+
+.note-bar.note-danger {
+  border-left-color: var(--app-danger);
+}
+
+.note-bar.note-ok {
+  border-left-color: var(--app-ok);
+}
+
 .muted {
   color: var(--app-muted);
 }

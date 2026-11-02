@@ -341,7 +341,8 @@ const respSnap = computed(() => props.tab.request.respDoc ?? null)
     <n-modal v-model:show="respGenDialog" preset="card" class="gen-modal"
       style="width: 460px; max-width: calc(100vw - 32px)" :title="t('resp.genTitle')">
       <div data-testid="resp.genDialog">
-        <p class="gen-hint">{{ t('resp.genHint') }}</p>
+        <!-- 「覆盖」会按本次派生重建、丢掉同名字段以外的说明：黄色提醒 -->
+        <p class="gen-hint note-bar note-warn">{{ t('resp.genHint') }}</p>
         <p v-if="respGenSource === 'current'" class="gen-hint" data-testid="resp.genHintLive">
           {{ t('resp.genHintLive') }}
         </p>
