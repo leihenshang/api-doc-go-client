@@ -28,3 +28,7 @@ go.work.sum
 # AI 工具目录（本机 skill / 会话记忆等）
 .codebuddy
 .workbuddy/
+
+# Playwright 运行产物（每次 e2e 都会变，不入库）
+frontend/test-results/
+frontend/playwright-report/
