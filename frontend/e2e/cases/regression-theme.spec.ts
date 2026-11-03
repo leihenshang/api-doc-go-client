@@ -5,6 +5,7 @@ import path from 'node:path'
 import { expect, test, type AppFixture } from '../helpers/app'
 import { t, tEn } from '../helpers/i18n'
 import {
+  ensureDocsEditing,
   openCollection,
   openReqTab,
   openRequest,
@@ -139,8 +140,8 @@ test.describe('主题与多语言', () => {
     await openRequest(page, 'ping')
     await openReqTab(page, 'docs')
 
-    // Docs 分段默认是查看态（MdPreview），先切到编辑态才挂 MdEditor
-    await page.getByTestId('docs.edit').click()
+    // 编辑态由设置决定（默认分屏）；只在确实处于查看态时才切
+    await ensureDocsEditing(page)
     const md = ['## 标题', '', '- 列表项一', '- 列表项二', '', '<script>window.__xss = 1</script>'].join('\n')
     await page.locator('.md-editor .cm-content').click()
     await page.keyboard.type(md)
