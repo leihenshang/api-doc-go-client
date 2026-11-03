@@ -1,6 +1,7 @@
 package syncengine
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -115,6 +116,88 @@ func TestCollectDocOpsEmptyGuard(t *testing.T) {
 		if op.Op == "delete" {
 			t.Fatalf("扫空异常场景不应产生任何删除 op，got %+v", op)
 		}
+	}
+}
+
+// TestCollectDocOpsCarriesNameAndTitle 文档名两个键都要带：
+// 客户端历史上发 name、服务端历史上按 title 落库，只发一个键会让另一端拿到空名。
+func TestCollectDocOpsCarriesNameAndTitle(t *testing.T) {
+	dir := t.TempDir()
+	c, err := collection.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := c.CreateDoc("项目说明", "", ""); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	e := &Engine{Coll: c, Bind: BindInfo{DocHashes: map[string]string{}}}
+	rep := &Report{}
+	b := newPushBatch(8)
+	e.collectDocOps(b, rep)
+
+	var found bool
+	for _, op := range b.ops {
+		if op.Op != "upsert" || op.Type != "doc" {
+			continue
+		}
+		var p Payload
+		if err := json.Unmarshal(op.Payload, &p); err != nil {
+			t.Fatalf("payload 解析失败: %v", err)
+		}
+		if p.Name != "项目说明" || p.Title != "项目说明" {
+			t.Errorf("doc payload name=%q title=%q，应两者都带", p.Name, p.Title)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("没有产生 doc upsert")
+	}
+}
+
+// TestApplyDocFallsBackToTitle 旧服务端只下发 title：客户端也要能取到文档名，
+// 不能落成「未命名文档」。
+func TestApplyDocFallsBackToTitle(t *testing.T) {
+	dir := t.TempDir()
+	c, err := collection.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	e := &Engine{Coll: c}
+	rep := &Report{}
+	if err := e.applyDoc("uid-title-only", Payload{Title: "只给标题", Content: "正文"}, rep); err != nil {
+		t.Fatalf("applyDoc: %v", err)
+	}
+	d, err := c.ReadDoc("uid-title-only")
+	if err != nil {
+		t.Fatalf("ReadDoc: %v", err)
+	}
+	if d.Name != "只给标题" {
+		t.Errorf("文档名 = %q，应按 title 兜底为「只给标题」", d.Name)
+	}
+}
+
+// TestSaveLocalIfDirtyCountsConflict api 冲突也要计入报告：
+// 副本生成了但 Conflicts 恒为 0 时，脚本/日志会以为「没冲突」。
+func TestSaveLocalIfDirtyCountsConflict(t *testing.T) {
+	dir := t.TempDir()
+	c, err := collection.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	r, err := c.CreateRequest("", "未推送的改动", "GET")
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	e := &Engine{Coll: c}
+	rep := &Report{}
+	e.saveLocalIfDirty(rep, r.UID, 7, []byte(`{"name":"未推送的改动"}`))
+	if rep.Conflicts != 1 {
+		t.Fatalf("api 冲突应计入报告，Conflicts = %d（副本 %v）", rep.Conflicts, e.snapped)
+	}
+	// 同一条再走一次不应重复计数（复用 snapshotOnce 的去重表）
+	e.saveLocalIfDirty(rep, r.UID, 7, nil)
+	if rep.Conflicts != 1 {
+		t.Errorf("同一条本轮应只计一次，Conflicts = %d", rep.Conflicts)
 	}
 }
 
