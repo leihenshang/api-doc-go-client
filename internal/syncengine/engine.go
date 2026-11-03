@@ -213,13 +213,23 @@ func (e *Engine) pull(rep *Report) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if e.Bind.Cursor > 0 && st.Cursor > e.Bind.Cursor {
-		return e.pullIncremental(rep)
+	// 全局变量（scope=3）不属于任何项目，不推进项目游标：只比 Cursor 会漏掉
+	// 「管理员改了全局变量、项目本身没变」—— 那种情况下两端取值会不一致，
+	// 所以 GlobalCursor 前进同样要拉一次增量（增量响应里附带全局变量当前值）。
+	globalStale := st.GlobalCursor > e.Bind.GlobalCursor
+	if e.Bind.Cursor > 0 && (st.Cursor > e.Bind.Cursor || globalStale) {
+		more, perr := e.pullIncremental(rep)
+		if perr == nil {
+			e.Bind.GlobalCursor = st.GlobalCursor
+		}
+		return more, perr
 	}
 	if e.Bind.Cursor == 0 {
 		if err := e.pullSnapshot(rep); err != nil {
 			return false, err
 		}
+		// 快照同样附带全局变量，基线一并推进，避免下一轮白拉一次。
+		e.Bind.GlobalCursor = st.GlobalCursor
 	}
 	return false, nil
 }

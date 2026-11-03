@@ -33,6 +33,11 @@ type BindInfo struct {
 	Mode      string `json:"mode"` // auto | manual | mirror
 	// Cursor 本地已应用的 change_log 游标
 	Cursor int64 `json:"cursor"`
+	// GlobalCursor 全局变量（scope=3）已同步到的变更 id。
+	// 全局变量不属于任何项目、不推进项目游标：管理员改了全局变量而项目本身无变更时，
+	// 只看 Cursor 就永远拉不到 —— 所以「Cursor 或 GlobalCursor 任一前进」都要拉一次增量
+	// （服务端在增量响应里附带全局变量当前值）。
+	GlobalCursor int64 `json:"globalCursor,omitempty"`
 	// Token 访问令牌（PAT），只存在于内存（json:"-"）：落盘一律写 TokenEnc 密文。
 	// .sync.json 已加入集合 .gitignore，但用户仍可能拷贝/打包集合，明文令牌太容易外泄。
 	Token string `json:"-"`
