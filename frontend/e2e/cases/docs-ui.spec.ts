@@ -4,6 +4,7 @@
 // Sidebar doc 行、tabs.openDocTab/saveDoc、useTreeDnd 的 doc 分支。
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { patchSettings } from '../helpers/api'
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
 import { openCollection, openSettings, saveSettings, treeRow, treeRowByUid } from '../helpers/ui'
@@ -195,6 +196,10 @@ test('Markdown 编辑器默认状态：只读预览生效且可临时切回分�
   // ④ 切回只读预览仍生效（按钮是双向的）
   await page.getByTestId('doc.toggleMode').click()
   await expect.poll(async () => (await mode()).src).toBe(0)
+
+  // 设置是整个 run 共享的一份：改完必须复原，否则后续用例都在「只读预览」下跑
+  // （文档页签没有 .md-editor，相关断言会整片超时）
+  await patchSettings(app, { mdEditorMode: 'split' })
 })
 
 // 接口说明（request.docs）的初始化同样跟随该设置：只读预览直接给渲染结果，「编辑」按钮可临时切回。
@@ -218,6 +223,8 @@ test('接口说明默认状态：只读预览下打开 Docs 段不出现源码�
   // 「编辑」按钮仍可临时切回分屏
   await page.getByTestId('docs.edit').click()
   await expect.poll(srcCount).toBe(1)
+
+  await patchSettings(app, { mdEditorMode: 'split' }) // 复原共享设置
 })
 
 test('文档树叶子：拖动改目录后 uid 不变', async ({ page, app }) => {
