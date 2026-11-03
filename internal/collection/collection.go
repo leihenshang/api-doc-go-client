@@ -801,6 +801,8 @@ func (r *Request) toFile() *requestFile {
 	f := &requestFile{Docs: r.Docs, Settings: r.Settings, Summary: r.Summary}
 	f.Info.Name, f.Info.Seq = r.Name, r.Seq
 	f.Meta.UID, f.Meta.BaseRev = r.UID, r.BaseRev
+	// 生命周期元数据：落 meta 段（服务端权威，客户端只读保留）。
+	f.Meta.Status, f.Meta.Version, f.Meta.DeprecatedAt = r.Status, r.Version, r.DeprecatedAt
 	if r.IsGRPC() {
 		// gRPC：只写 grpc 段（http 段为空 → 靠 HTTPBlock.IsZero + omitempty 整段省略）
 		f.Info.Type = TypeGRPC
@@ -865,6 +867,8 @@ func fromFile(path string, f *requestFile) *Request {
 	r := &Request{
 		UID: f.Meta.UID, Name: f.Info.Name, Seq: f.Info.Seq, Path: path,
 		Summary: f.Summary, Settings: f.Settings, Docs: f.Docs, BaseRev: f.Meta.BaseRev,
+		// 生命周期元数据（服务端权威，客户端只读保留）
+		Status: f.Meta.Status, Version: f.Meta.Version, DeprecatedAt: f.Meta.DeprecatedAt,
 	}
 	r.VarsPreRequest, r.Script, r.Asserts = parseScriptExtra(f.Extra)
 

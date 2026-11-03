@@ -80,6 +80,13 @@ type Request struct {
 	// 磁盘上落在顶层 respdoc 段（经 Extra 往返），同步 extra 用 retType/retParams/retSample。
 	// 返回参数行的 fieldName 已是 a.b / a[].c 嵌套路径，原样存取、不做展平/还原。
 	RespDoc *ResponseDoc `json:"respDoc,omitempty"`
+	// 生命周期元数据（服务端权威，客户端只读保留、不回推）：
+	// Status 1=草稿 2=已发布 3=已废弃；Version 业务版本号；DeprecatedAt 首次废弃时间。
+	// 为什么放在请求里：Web 端标记「已废弃」后，同步下来的客户端集合要能看到同样的状态，
+	// 否则两端对「这条接口还能不能用」的判断是割裂的。
+	Status       int    `json:"status,omitempty"`
+	Version      string `json:"version,omitempty"`
+	DeprecatedAt string `json:"deprecatedAt,omitempty"`
 }
 
 // ResponseDoc 一条接口的响应侧文档（Web 端「返回参数/响应样例」），随同步双向传播。
