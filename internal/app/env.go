@@ -73,9 +73,22 @@ func (a *App) DeleteEnv(name string) error {
 }
 
 // envVars 取指定环境的变量表（含 secret 合并与内置动态变量）。
-// 未选择环境时只给内置动态变量：不再把全部环境混在一起，避免意外命中其它环境的值。
+// 未选择环境时只给内置动态变量与全局变量：不再把全部环境混在一起，避免意外命中其它环境的值。
+//
+// 全局变量（服务端 scope=3、跨项目共享）由同步下发到集合根 globals.yml，
+// 优先级最低：先放，再被当前环境的同名变量覆盖。
 func (a *App) envVars(envName string) (map[string]string, error) {
 	vars := map[string]string{}
+	// 全局变量：读不到集合或文件时静默跳过（没有集合时也要能用内置变量）。
+	if c, cerr := a.requireCollection(); cerr == nil {
+		if globals, gerr := c.ListGlobals(); gerr == nil {
+			for _, v := range globals {
+				if v.Enabled && v.Name != "" {
+					vars[v.Name] = v.Value
+				}
+			}
+		}
+	}
 	if envName != "" {
 		c, err := a.requireCollection()
 		if err != nil {

@@ -510,6 +510,8 @@ func (e *Engine) applyAPI(uid string, p Payload, rep *Report) error {
 		}
 		created.URL = p.URL
 		applyExtra(created, p.Extra)
+		// 生命周期元数据（服务端权威）：新建时直接落 meta 段。
+		applyLifecycle(created, p)
 		// 服务端 docs 里的 /uploads/* 换成本地 /doc-assets/*（图片下载落 assets/）
 		created.Docs = e.localizeContent(created.Docs, rep)
 		return e.Coll.SaveRequest(created)
@@ -542,6 +544,8 @@ func (e *Engine) applyAPI(uid string, p Payload, rep *Report) error {
 		r.URL = p.URL
 	}
 	applyExtra(r, p.Extra)
+	// 生命周期元数据（服务端权威，缺键不改）
+	applyLifecycle(r, p)
 	r.Docs = e.localizeContent(r.Docs, rep)
 	return e.Coll.SaveRequest(r)
 }
@@ -576,6 +580,9 @@ func (e *Engine) applyDoc(uid string, p Payload, rep *Report) error {
 		}
 		created.Content = p.Content
 		created.Icon = p.Icon
+		if p.DocSeq != 0 {
+			created.Seq = p.DocSeq
+		}
 		return e.Coll.SaveDoc(created)
 	}
 	if n := docName(p); n != "" && n != d.Name {
@@ -583,6 +590,10 @@ func (e *Engine) applyDoc(uid string, p Payload, rep *Report) error {
 	}
 	d.Content = p.Content
 	d.Icon = p.Icon
+	// 同层排序权重（缺键不改：0 = 未设置）。
+	if p.DocSeq != 0 {
+		d.Seq = p.DocSeq
+	}
 	return e.Coll.SaveDoc(d)
 }
 
@@ -833,6 +844,10 @@ func (e *Engine) applyVarEnv(uid string, p Payload) error {
 // secret 值尝试口令解密——未设/错口令时按密文原样落 secrets 文件（不丢数据，设好口令后下轮重新对齐），
 // 之后整份 SaveEnv（名称/启停/敏感标记/值一并覆盖）。
 func (e *Engine) applyVariable(uid string, p Payload) error {
+	// 全局变量（scope=3）不属于任何环境：落集合根 globals.yml，不进环境文件。
+	if p.Scope == serverScopeGlobal {
+		return e.applyGlobalVar(uid, p)
+	}
 	if p.Name == "" || p.EnvUID == "" {
 		return nil
 	}
@@ -1348,6 +1363,7 @@ func (e *Engine) collectDocOps(b *pushBatch, rep *Report) {
 			Title:   d.Name,
 			Content: e.serverizeContent(d.Content, rep),
 			Icon:    d.Icon,
+			DocSeq:  d.Seq,
 		}
 		// J11-2.1：目录归属 = 服务端分组。根级与 docs/ 默认位都算未分组（空串），
 		// 与「旧集合 docs/*.md 挂根」的既有行为一致。
