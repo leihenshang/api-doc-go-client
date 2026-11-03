@@ -4,7 +4,7 @@ import { patchRequest } from '../helpers/api'
 import { expect, test } from '../helpers/app'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openReqTab, openRequest, reopenApp, saveNow, send } from '../helpers/ui'
+import { ensureDocsViewing, openCollection, openReqTab, openRequest, reopenApp, saveNow, send } from '../helpers/ui'
 
 const PING_UID = '33333333-3333-4333-8333-333333333333'
 
@@ -89,7 +89,9 @@ test.describe('Resp 节点已移出集合树 + Docs 生成', () => {
     // 选「完全覆盖」→ 关闭对话框，主区预览显示生成内容
     await page.getByTestId('docs.dlgOverwrite').click()
     await expect(page.getByTestId('docs.genDialog')).toHaveCount(0)
-    await expect(page.locator('.md-preview').first()).toContainText(t('docs.resFields'))
+    // 主区预览只在查看态可见：初始态由设置决定（默认分屏=编辑态），先切过去
+    await ensureDocsViewing(page)
+    await expect(page.locator('.docs-pane .md-preview').first()).toContainText(t('docs.resFields'))
 
     // 已有内容：再生成 → 选「放到已有文档下方」（追加）；主区仍含生成章节，且原内容未被清掉
     await page.getByTestId('docs.gen').click()

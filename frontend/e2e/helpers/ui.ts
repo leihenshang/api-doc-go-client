@@ -192,6 +192,30 @@ export async function rawJSON<T = Record<string, unknown>>(page: Page): Promise<
 }
 
 /** 请求区：切到某个页签（params / body / headers / auth / docs） */
+/**
+ * 让「接口说明（Docs）」处于编辑态。
+ *
+ * 初始态由设置 `mdEditorMode` 决定（默认 split = 直接分屏编辑），所以不能再假设
+ * 「打开就是查看态、点一下 docs.edit 进入编辑」——那样会反而切回查看。
+ */
+/**
+ * 让「接口说明（Docs）」处于查看态（MdPreview）。
+ *
+ * 与 ensureDocsEditing 成对：初始态由设置 `mdEditorMode` 决定（默认分屏=编辑态），
+ * 而「主区预览内容」类断言只能在查看态验证（编辑态下正文在 textarea 的 value 里）。
+ */
+export async function ensureDocsViewing(page: Page): Promise<void> {
+  if (await page.locator('.docs-pane .md-preview').count()) return
+  await page.getByTestId('docs.edit').click()
+  await page.locator('.docs-pane .md-preview').waitFor()
+}
+
+export async function ensureDocsEditing(page: Page): Promise<void> {
+  if (await page.locator('.md-editor .cm-content').count()) return
+  await page.getByTestId('docs.edit').click()
+  await page.locator('.md-editor .cm-content').waitFor()
+}
+
 export async function openReqTab(page: Page, seg: string): Promise<void> {
   await page.locator(`[data-testid="req.tab"][data-seg="${seg}"]`).click()
 }

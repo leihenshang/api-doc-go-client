@@ -13,13 +13,17 @@ import { expect, type Locator } from '@playwright/test'
  * 这里用 toPass 把「hover + 打开菜单 + click」作为一个整体重试，任一步失败就重来。
  */
 export async function hoverAndClick(row: Locator, testId: string, timeout = 15_000): Promise<void> {
+  const page = row.page()
   await expect(async () => {
+    // 旧下拉在关闭动画期间仍留在 DOM 且能接住点击（此时事件已解绑，点了等于没点）：
+    // 先等上一条收起，再开新的；否则 toPass 重试会一直在旧浮层上打转。
+    await page.locator('.n-dropdown:visible').first().waitFor({ state: 'hidden', timeout: 800 }).catch(() => {})
     await row.hover()
     const menu = row.getByTestId('tree.row.menu')
     if (await menu.count()) {
       await menu.click({ timeout: 1_500 })
     }
-    // 只点当前可见的菜单项：旧下拉常留在 DOM 里，全局 first() 可能点到已隐藏的旧项
-    await row.page().locator(`[data-testid="${testId}"]:visible`).first().click({ timeout: 1_500 })
+    // 菜单项 teleport 到 body：取最后（最新打开）的可见项，避免命中旧浮层或被其它行遮挡的项
+    await page.locator(`[data-testid="${testId}"]:visible`).last().click({ timeout: 1_500 })
   }).toPass({ timeout })
 }
