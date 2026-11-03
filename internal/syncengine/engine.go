@@ -433,8 +433,23 @@ func (e *Engine) saveLocalIfDirty(rep *Report, uid string, serverRev int64, serv
 		}
 		if req, err := e.Coll.ReadRequest(uid); err == nil {
 			// 冲突副本是本地改动的唯一留底：写失败必须让用户看到，否则改动会被远端版本直接盖掉。
-			if _, cerr := e.Coll.SaveConflictCopy(req, serverRev, serverPayload); cerr != nil && rep != nil {
-				rep.Errors = append(rep.Errors, req.UID+": 保存冲突副本失败（本地改动可能未留存）："+cerr.Error())
+			_, cerr := e.Coll.SaveConflictCopy(req, serverRev, serverPayload)
+			if cerr != nil {
+				if rep != nil {
+					rep.Errors = append(rep.Errors,
+						req.UID+": 保存冲突副本失败（本地改动可能未留存）："+cerr.Error())
+				}
+			} else if rep != nil {
+				// 与 snapshotOnce 同口径计数：漏了这一步，api 冲突在报告里恒为 0
+				// （副本其实已经生成、UI 也靠扫 .conflicts/ 显示，但脚本/日志会以为没冲突）。
+				// 同一条本轮只计一次（复用 snapshotOnce 的去重表）。
+				if e.snapped == nil {
+					e.snapped = map[string]bool{}
+				}
+				if key := "api\x00" + req.Path; !e.snapped[key] {
+					e.snapped[key] = true
+					rep.Conflicts++
+				}
 			}
 		}
 		return
@@ -543,7 +558,7 @@ func (e *Engine) applyDoc(uid string, p Payload, rep *Report) error {
 	d, err := e.Coll.ReadDoc(uid)
 	if err != nil {
 		// 新建
-		name := p.Name
+		name := docName(p)
 		if name == "" {
 			name = "未命名文档"
 		}
@@ -563,12 +578,23 @@ func (e *Engine) applyDoc(uid string, p Payload, rep *Report) error {
 		created.Icon = p.Icon
 		return e.Coll.SaveDoc(created)
 	}
-	if p.Name != "" && p.Name != d.Name {
-		d.Name = p.Name
+	if n := docName(p); n != "" && n != d.Name {
+		d.Name = n
 	}
 	d.Content = p.Content
 	d.Icon = p.Icon
 	return e.Coll.SaveDoc(d)
+}
+
+// docName 取远端下发的文档显示名：name 优先、title 兜底。
+//
+// 为什么要兜底：文档名在两端口径历史上不一致（客户端 name、早先服务端 title），
+// 只认 name 会让「旧服务端 → 新客户端」的文件落成「未命名文档」。
+func docName(p Payload) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.Title
 }
 
 // ---- 拉取覆盖前的本地版本留底（P0）----
@@ -1313,7 +1339,16 @@ func (e *Engine) collectDocOps(b *pushBatch, rep *Report) {
 			continue // 内容未变化，跳过
 		}
 		// 本地 /doc-assets/<hash> → 服务端 URL（首次上传，映射存 Bind.AssetURLs）
-		p := Payload{Name: d.Name, Content: e.serverizeContent(d.Content, rep), Icon: d.Icon}
+		//
+		// 显示名同时写 name 与 title：文档名在两端口径历史上不一致（客户端读写 name、
+		// 早先服务端按 title 落库/下发），只发一个键会让另一端拿到空名（Web 显示无标题、
+		// 客户端落成「未命名文档」）。两个键都带，新旧服务端都能取到。
+		p := Payload{
+			Name:    d.Name,
+			Title:   d.Name,
+			Content: e.serverizeContent(d.Content, rep),
+			Icon:    d.Icon,
+		}
 		// J11-2.1：目录归属 = 服务端分组。根级与 docs/ 默认位都算未分组（空串），
 		// 与「旧集合 docs/*.md 挂根」的既有行为一致。
 		if dir := parentDir(d.Path); dir != "" && dir != "docs" {
