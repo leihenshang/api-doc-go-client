@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '../helpers/app'
+import { setAutoSave } from '../helpers/api'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
 import { openCollection, openRequest, openSettings, saveSettings, settleDetail } from '../helpers/ui'
@@ -14,6 +15,11 @@ async function editUrl(page: import('@playwright/test').Page, url: string) {
 }
 
 test.describe('保存模型与冲突检测', () => {
+  // 前提：本文件所有用例都假设「手动保存」。用例内部会临时打开自动保存，
+  // 忘记恢复会让后面的用例在自动保存模式下跑（表现为「不保存却写盘」之类的假失败）。
+  test.beforeEach(async ({ app }) => {
+    await setAutoSave(app, false)
+  })
   test('[E26] 默认手动保存：编辑不写盘，Ctrl+S 落盘；外部改动回填干净页签', async ({ page, app }) => {
     const dir = await app.newCollection('basic')
     await openCollection(page, app)
@@ -121,6 +127,8 @@ test.describe('保存模型与冲突检测', () => {
     } finally {
       releaseFirst()
       await page.unroute('**/api/App/SaveRequest')
+      // 本用例打开了自动保存：结束时恢复，否则后续「手动保存」用例会莫名落盘
+      await setAutoSave(app, false)
     }
   })
 
@@ -241,6 +249,31 @@ function rewriteDocBody(file: string, body: string): void {
   writeFileSync(file, s.slice(0, close + 4) + body, 'utf8')
 }
 
+/**
+ * 外部重写正文并等到界面出现预期效果。
+ *
+ * 为什么不能只写一次：文档写盘后有 1.5s「自写忽略窗口」，并行跑（机器负载高）时
+ * 上一次保存的窗口可能还没结束，外部写入会被当成自写而忽略 —— 事件丢了就不会再补发。
+ * 这里最多重写 3 次，每次给 4s 观察窗口；进程空闲后再写一定能触发。
+ */
+async function rewriteDocBodyUntil(
+  file: string,
+  body: string,
+  check: () => Promise<unknown>,
+): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    rewriteDocBody(file, body)
+    try {
+      await check()
+      return
+    } catch {
+      // 可能落进自写忽略窗口：再写一次
+    }
+  }
+  rewriteDocBody(file, body)
+  await check()
+}
+
 test('[E26] 文档页签：外部改动回填干净页签；脏页签标冲突并可用「重新加载」', async ({ page, app }) => {
   const dir = await app.newCollection('basic')
   await openCollection(page, app)
@@ -259,16 +292,18 @@ test('[E26] 文档页签：外部改动回填干净页签；脏页签标冲突�
   await page.waitForTimeout(1800)
 
   // ① 干净页签：外部写入新正文 → 自动回填（不需要用户手动重载）
-  rewriteDocBody(file, 'MCP 更新后的正文')
-  await expect(editor).toContainText('MCP 更新后的正文', { timeout: 10_000 })
+  await rewriteDocBodyUntil(file, 'MCP 更新后的正文', () =>
+    expect(editor).toContainText('MCP 更新后的正文', { timeout: 4_000 }),
+  )
   await expect(editor).not.toContainText('旧正文')
 
   // ② 脏页签：本地有未保存编辑时被外部改动 → 冲突条出现（提示用户选「重新加载 / 另存为副本」）
   await page.locator('.md-editor textarea, .md-editor .cm-content').first().click()
   await page.keyboard.type('本地未保存的编辑')
-  rewriteDocBody(file, 'MCP 第二次更新')
   const bar = page.getByTestId('req.conflict')
-  await expect(bar).toBeVisible({ timeout: 10_000 })
+  await rewriteDocBodyUntil(file, 'MCP 第二次更新', () =>
+    expect(bar).toBeVisible({ timeout: 4_000 }),
+  )
 
   // ③ 「重新加载」对文档同样有效：正文换成磁盘版本、冲突条消失、脏点清掉
   await page.getByTestId('conflict.reload').click()
