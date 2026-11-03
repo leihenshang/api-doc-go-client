@@ -1125,6 +1125,9 @@ export namespace collection {
 	    script?: ScriptBlock;
 	    asserts?: ScriptAssert[];
 	    respDoc?: ResponseDoc;
+	    status?: number;
+	    version?: string;
+	    deprecatedAt?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
@@ -1152,6 +1155,9 @@ export namespace collection {
 	        this.script = this.convertValues(source["script"], ScriptBlock);
 	        this.asserts = this.convertValues(source["asserts"], ScriptAssert);
 	        this.respDoc = this.convertValues(source["respDoc"], ResponseDoc);
+	        this.status = source["status"];
+	        this.version = source["version"];
+	        this.deprecatedAt = source["deprecatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
