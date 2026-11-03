@@ -213,7 +213,10 @@ onBeforeUnmount(() => {
     </button>
 
     <!-- 右键 tab 的上下文菜单（手动定位到鼠标处；点外面自动收起） -->
-    <n-dropdown trigger="manual" placement="bottom-start" :x="menuX" :y="menuY" :show="menuKey !== ''"
+    <!-- 用 v-if 而不是 :show：naive-ui 的 :show=false 是带过渡的隐藏，淡出那 200ms 里旧浮层的
+         DOM 仍在、且能接住点击（此时组件状态已清空，点了等于什么都没发生）。用户在关闭动画内
+         立刻右键并点选项就会「点了没反应」——e2e [A7] 正是这么踩到的。v-if 让浮层立即卸载。 -->
+    <n-dropdown v-if="menuKey !== ''" trigger="manual" placement="bottom-start" :x="menuX" :y="menuY" :show="true"
       :options="menuOptions" data-testid="tab.menu" @select="onMenuSelect" @clickoutside="closeMenu" />
   </div>
 </template>
