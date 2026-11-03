@@ -12,7 +12,7 @@
   "info": {
     "companyName": "api-doc-go",
     "productName": "api-doc-go",
-    "productVersion": "0.1.0",
+    "productVersion": "0.1.7",
     "copyright": "Copyright © 2026 api-doc-go",
     "comments": "AI-native, local-first API client"
   }
