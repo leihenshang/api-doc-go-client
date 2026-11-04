@@ -13,11 +13,12 @@
 // 状态由本组件唯一持有，不读 md-editor 的内部状态、不依赖 DOM 结构或按钮文案。
 import { uploadMdImages } from '@/lib/md-image'
 import { isDark } from '@/lib/theme'
+import { useSettingsStore } from '@/stores/settings'
 import type { DocTabDoc } from '@/stores/tabs'
 import { EyeOutline, PencilOutline } from '@vicons/ionicons5'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NIcon } from 'naive-ui'
 
@@ -31,8 +32,24 @@ const { t, locale } = useI18n()
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
-/** 当前是否只读预览。唯一状态源，由两个按钮各自切换。 */
-const previewOnly = ref(false)
+/**
+ * 当前是否只读预览。唯一状态源，由两个按钮各自切换。
+ *
+ * 初值：
+ *   - 设置为「分屏编辑」→ 直接进编辑；
+ *   - 否则默认只读（避免打开旧文档就误改）；
+ *   - 例外：**空文档**（刚新建）直接进编辑 —— 新建就是为了写，让人再点一次「编辑」很别扭。
+ */
+const settings = useSettingsStore()
+const previewOnly = ref(!(settings.mdEditorMode === 'split' || props.doc.content.trim() === ''))
+
+// 设置改了就跟随（文档页签不记住「上次手动切到哪」，一律以设置为准）
+watch(
+  () => settings.mdEditorMode,
+  (mode) => {
+    previewOnly.value = mode === 'readonly'
+  },
+)
 
 /** 正文走 store：改一点就标脏，保存由页签统一调度（手动/快捷键一致）。 */
 function onContent(v: string): void {
