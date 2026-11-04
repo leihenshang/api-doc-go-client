@@ -177,6 +177,7 @@ test('Markdown 文档：默认编辑态，工具栏「仅预览」可双向切�
       src: document.querySelectorAll('.md-editor-input-wrapper').length,
       srcW: [...document.querySelectorAll('.md-editor-input-wrapper')].reduce((n, e) => n + e.getBoundingClientRect().width, 0),
       preview: document.querySelectorAll('.md-editor-preview-wrapper, .md-editor-preview, .md-preview').length,
+      tools: document.querySelectorAll('.md-editor-toolbar-item').length,
     }))
 
   // ① 默认编辑态；顶部不再有自绘的编辑/预览按钮
@@ -188,10 +189,13 @@ test('Markdown 文档：默认编辑态，工具栏「仅预览」可双向切�
   await previewToggle.click()
   await expect.poll(async () => (await mode()).srcW).toBe(0)
   expect((await mode()).preview).toBeGreaterThan(0)
+  // 预览态工具栏必须只剩切换按钮：否则「加粗/插入表格」会悄悄改正文
+  await expect.poll(async () => (await mode()).tools).toBe(1)
 
-  // ③ 再点一次回到编辑态（开关是双向的）
+  // ③ 再点一次回到编辑态（开关是双向的），工具栏恢复全量
   await previewToggle.click()
   await expect.poll(async () => (await mode()).srcW).toBeGreaterThan(0)
+  await expect.poll(async () => (await mode()).tools).toBeGreaterThan(5)
 })
 
 // 接口说明（request.docs）的初始化同样跟随该设置：只读预览直接给渲染结果，「编辑」按钮可临时切回。
