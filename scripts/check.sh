@@ -91,6 +91,9 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "i18n key 一致性"
   (cd "$ROOT/frontend" && npm run --silent i18n:check)
 
+  step "出包脚本自检（-clean/-o .exe/GOWORK/编码）"
+  bash "$ROOT/scripts/check-build-scripts.sh"
+
   step "前后端模型契约门禁（type-contract）"
   (cd "$ROOT/frontend" && node scripts/type-contract.mjs)
 
