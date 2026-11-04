@@ -801,3 +801,59 @@ export interface SyncStatus {
   cursor: number
   lastReport?: SyncReport | null
 }
+
+/** 分享只读数据（对齐 Go 侧 app.ShareBundle 的 JSON）。 */
+export interface ShareBundle {
+  project: { id: number; title: string; description: string; version: string }
+  groups: ShareGroup[]
+  apis: ShareApi[]
+  docs: ShareDoc[]
+  remark?: string
+  expire_time?: string | null
+}
+
+export interface ShareGroup {
+  id: number
+  p_id: number
+  title: string
+  type: number
+  priority: number
+}
+
+/** 分享里的一条接口（服务端 model.Api 的字段子集，各富字段是 JSON 文本）。 */
+export interface ShareApi {
+  id: number
+  group_id: number
+  priority: number
+  api_name: string
+  http_method_type: string
+  url: string
+  description: string
+  http_request_summary: string
+  http_request_params: string
+  http_request_header: string
+  http_request_body_type: string
+  http_request_body: string
+  http_request_body_form: string
+  http_request_body_descs: string
+  http_request_body_fields: string
+  http_auth: string
+  http_script: string
+  script_vars: string
+  script_asserts: string
+  http_return_type: string
+  http_return_params: string
+  http_return_sample: string
+  http_return_content_type: string
+  status: number
+  version: string
+}
+
+export interface ShareDoc {
+  id: number
+  group_id: number
+  priority: number
+  title: string
+  content: string
+  icon: string
+}

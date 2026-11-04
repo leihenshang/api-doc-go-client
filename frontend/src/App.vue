@@ -21,6 +21,7 @@ import RunCollectionDialog from '@/components/RunCollectionDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import ShareBrowser from '@/components/ShareBrowser.vue'
 import SyncDialog from '@/components/SyncDialog.vue'
 import TabBar from '@/components/TabBar.vue'
 import TitleBar from '@/components/TitleBar.vue'
@@ -92,6 +93,8 @@ const showMock = ref(false)
 const showCollDefaults = ref(false)
 const showFieldMappings = ref(false)
 const showSync = ref(false)
+/** U5：只读打开分享链接（不落盘、不参与同步） */
+const showShareBrowser = ref(false)
 /** 同步设置/冲突弹窗当前针对的根（空串 = 活动根），支持非活动根的冲突展示 */
 const syncRoot = ref('')
 /** 正在同步的根列表（侧栏根行按钮转圈） */
@@ -470,6 +473,7 @@ function onCommand(key: string): void {
   else if (key === 'history') showHistory.value = true
   else if (key === 'settings') showSettings.value = true
   else if (key === 'import') showImport.value = true
+  else if (key === 'open-share') showShareBrowser.value = true
   else if (key === 'export-md') void exportDoc('markdown')
   else if (key === 'export-html') void exportDoc('html')
 }
@@ -944,6 +948,7 @@ watch(
       <collection-defaults-dialog v-model:show="showCollDefaults" />
       <field-mappings-dialog v-model:show="showFieldMappings" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
+      <share-browser v-model:show="showShareBrowser" />
       <command-palette v-model:show="showPalette" :tree="coll.tree" :envs="coll.info?.envs ?? []" :roots="coll.roots"
         :active-root="coll.activeRoot" @open-request="openRequestInRoot" @open-doc="openDocInRoot" @switch-env="pickEnv"
         @command="onCommand" />

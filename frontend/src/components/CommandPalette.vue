@@ -4,19 +4,7 @@
 import MethodTag from '@/components/MethodTag.vue'
 import { api } from '@/lib/ipc'
 import type { CollectionSummary, Env, TreeNode } from '@/types'
-import {
-    AddOutline,
-    FolderOpenOutline,
-    MoonOutline,
-    PlayOutline,
-    RefreshOutline,
-    SearchOutline,
-    ServerOutline,
-    SettingsOutline,
-    SwapVerticalOutline,
-    TimeOutline,
-    DocumentTextOutline,
-} from '@vicons/ionicons5'
+import { AddOutline, DocumentTextOutline, FolderOpenOutline, LinkOutline, MoonOutline, PlayOutline, RefreshOutline, SearchOutline, ServerOutline, SettingsOutline, SwapVerticalOutline, TimeOutline } from '@vicons/ionicons5'
 import type { InputInst } from 'naive-ui'
 import { NIcon, NInput, NModal } from 'naive-ui'
 import type { Component } from 'vue'
@@ -139,6 +127,7 @@ const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'history', labelKey: 'palette.history', icon: TimeOutline },
   { key: 'settings', labelKey: 'palette.settings', icon: SettingsOutline },
   { key: 'import', labelKey: 'import.title', icon: FolderOpenOutline },
+  { key: 'open-share', labelKey: 'palette.openShare', icon: LinkOutline },
   { key: 'export-md', labelKey: 'export.markdown', icon: FolderOpenOutline },
   { key: 'export-html', labelKey: 'export.html', icon: FolderOpenOutline },
 ]
