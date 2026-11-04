@@ -669,7 +669,7 @@ export default {
     uiScale: 'UI scale',
     responseLayout: 'Response panel',
     mdEditorMode: 'Markdown editor',
-    mdEditorModeHint: 'How documents and API docs open: preview-only shows the rendered text; split shows source and preview side by side. Switching inside the editor does not change this setting.',
+    mdEditorModeHint: 'How API docs open: preview-only shows the rendered text; split shows source and preview side by side. Document tabs always open in edit mode — use the toolbar Preview only toggle.',
     mdEditorSplit: 'Split',
     mdEditorReadonly: 'Preview only',
     autoSave: 'Auto save',
