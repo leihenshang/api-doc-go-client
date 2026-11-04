@@ -10,7 +10,7 @@ import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPGrant, MCPStatus, Settings } from '@/types'
 import { ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
-import { NButton, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch } from 'naive-ui'
+import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 

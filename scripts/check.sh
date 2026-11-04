@@ -94,6 +94,9 @@ if [[ "$MODE" != "e2e-ui" ]]; then
   step "出包脚本自检（-clean/-o .exe/GOWORK/编码）"
   bash "$ROOT/scripts/check-build-scripts.sh"
 
+  step "naive-ui 组件导入检查（防控件静默消失）"
+  (cd "$ROOT/frontend" && node scripts/check-naive-imports.mjs)
+
   step "前后端模型契约门禁（type-contract）"
   (cd "$ROOT/frontend" && node scripts/type-contract.mjs)
 
