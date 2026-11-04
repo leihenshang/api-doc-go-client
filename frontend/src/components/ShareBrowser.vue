@@ -149,7 +149,7 @@ function close(): void {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="t('share.title')" style="width: 1000px" data-testid="share.dialog"
+  <n-modal :show="show" preset="card" :title="t('share.title')" :style="{ width: bundle ? '1000px' : '560px' }" data-testid="share.dialog"
     @update:show="close">
     <div class="top">
       <n-input v-model:value="url" size="small" :placeholder="t('share.urlPlaceholder')" data-testid="share.url"
@@ -245,7 +245,11 @@ function close(): void {
           <p v-else class="muted">{{ t('share.pickHint') }}</p>
         </div>
       </div>
-      <p v-else class="muted hint">{{ t('share.intro') }}</p>
+      <div v-else class="empty">
+        <n-icon :component="LinkOutline" :size="36" class="empty-ic" />
+        <p class="empty-t">{{ t('share.emptyTitle') }}</p>
+        <p class="empty-d">{{ t('share.intro') }}</p>
+      </div>
     </n-spin>
   </n-modal>
 </template>
@@ -410,8 +414,31 @@ function close(): void {
   font-size: 12px;
 }
 
-.hint {
-  padding: 40px 8px;
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 24px 30px;
   text-align: center;
+}
+
+.empty-ic {
+  color: var(--app-accent);
+  opacity: 0.55;
+}
+
+.empty-t {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.empty-d {
+  margin: 0;
+  max-width: 420px;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.7;
 }
 </style>

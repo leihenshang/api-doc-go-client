@@ -30,7 +30,7 @@ api.isDev().then((v) => {
 }).catch(() => { })
 
 // 与 frontend/package.json 的 version 保持一致（不引 JSON 模块，避免额外构建配置）
-const VERSION = 'v0.0.1'
+const VERSION = 'v0.1.9'
 
 /** 最大化后窗口铺满屏幕，外壳圆角要归零（见 styles/base.css 的 :root[data-window='max']）。 */
 const RESIZE_SYNC_MS = 180

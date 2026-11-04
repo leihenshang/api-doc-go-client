@@ -8,7 +8,7 @@ import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPGrant, MCPStatus, Settings } from '@/types'
 import { ColorPaletteOutline, FolderOpenOutline, GlobeOutline } from '@vicons/ionicons5'
-import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect } from 'naive-ui'
+import { NButton, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -439,8 +439,8 @@ function close(): void {
               {{ t('settings.autoSave') }}
               <setting-hint :text="t('settings.autoSaveHint')" tone="warn" />
             </span>
-            <n-checkbox :checked="form.autoSave" data-testid="settings.autoSave"
-              @update:checked="(v: boolean) => { form.autoSave = v; void applyNow() }" />
+            <n-switch class="ck" size="small" :value="form.autoSave" data-testid="settings.autoSave"
+              @update:value="(v: boolean) => { form.autoSave = v; void applyNow() }" />
           </div>
           <!-- 关闭窗口的行为：已把原「驻留托盘」+「关闭窗口时」合并为单个下拉。
                是否常驻托盘由该值派生（Go 侧：非「直接退出」即常驻），不再单独设开关。 -->
@@ -841,6 +841,10 @@ function close(): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.ck {
+  flex: 0 0 auto;
 }
 
 .row {

@@ -892,6 +892,7 @@ export default {
     title: 'Open shared link (read-only)',
     urlPlaceholder: 'Paste a share link, e.g. http://127.0.0.1:8080/share/<token>',
     open: 'Open',
+    emptyTitle: 'Paste a share link to browse read-only requests and docs',
     needUrl: 'Paste a share link first',
     intro: 'Read-only: nothing is written to disk, no collection is created, no sync. Copy as cURL or send the request.',
     empty: 'This share contains no requests or docs',

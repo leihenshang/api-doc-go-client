@@ -896,6 +896,7 @@ export default {
     title: '打开分享链接（只读）',
     urlPlaceholder: '粘贴分享链接，例如 http://127.0.0.1:8080/share/<token>',
     open: '打开',
+    emptyTitle: '粘贴分享链接，浏览只读接口与文档',
     needUrl: '请先粘贴分享链接',
     intro: '分享浏览是只读的：不落盘、不建集合、不参与同步；可以复制 cURL 或直接发送试接口。',
     empty: '这个分享里没有接口或文档',
