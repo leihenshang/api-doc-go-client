@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"flag"
 	"log"
 	"os"
 
@@ -25,6 +27,10 @@ var assets embed.FS
 func main() {
 	// 须在 wails.Run（GTK 初始化）之前：无会话总线时改用内存 backend，避免文件对话框刷 dconf 警告
 	platform.EnsureGSettingsBackend()
+	// -dir：启动即打开指定集合（命令行 / 桌面快捷方式 / 自动化截图都用得上）。
+	// 放在 OnStartup 里执行而不是这里：OpenCollection 会 emit 事件，需要 Wails 运行时已就绪。
+	dir := flag.String("dir", "", "启动时直接打开的集合目录")
+	flag.Parse()
 	core := app.NewApp()
 	// 内嵌 MCP 服务：实现放在 internal/mcp（那边已经要用 App 的集合运行时，
 	// 反向依赖会成环），这里注入；设置页「MCP 服务」分区靠它启停。
@@ -55,7 +61,18 @@ func main() {
 			// 其余未命中路径仍返回 404（与未设 Handler 时一致）。
 			Handler: core.DocAssetHandler(),
 		},
-		OnStartup:  core.Startup,
+		OnStartup: func(ctx context.Context) {
+			core.Startup(ctx)
+			if d := *dir; d != "" {
+				info, err := core.OpenCollection(d)
+				log.Printf("[startup] -dir=%s err=%v", d, err)
+				if err == nil && info != nil {
+					if roots, e := core.ListCollections(); e == nil {
+						log.Printf("[startup] roots=%d", len(roots))
+					}
+				}
+			}
+		},
 		OnDomReady: core.DomReady,
 		// Alt+F4 / 系统关闭先拦截：前端确认未保存改动后再放行（见 app.OnBeforeClose）
 		OnBeforeClose: core.OnBeforeClose,
