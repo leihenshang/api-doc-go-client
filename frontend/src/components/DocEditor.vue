@@ -5,54 +5,34 @@
 // tab.doc 传入，编辑经 update:doc 回写 store（标脏），保存由父组件走
 // tabs.saveDoc（带 ExpectHash 冲突检测）——本组件不自己读写门面。
 // 文档改名只在左侧树上进行（树的右键/悬停菜单），编辑器内不再放标题框。
+//
+// 编辑 / 预览（方案：官方推荐路径）：
+//   预览 = MdPreview（纯渲染、无工具栏，天然不可能误改正文），顶部只留「编辑」按钮；
+//   编辑 = MdEditor（工具栏全量），把内置的 previewOnly 开关排除掉，换成我们自己的
+//   「只读预览」按钮（toolbars-exclude + defToolbars）。
+// 状态由本组件唯一持有，不读 md-editor 的内部状态、不依赖 DOM 结构或按钮文案。
 import { uploadMdImages } from '@/lib/md-image'
 import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
-import { MdEditor } from 'md-editor-v3'
+import { EyeOutline, PencilOutline } from '@vicons/ionicons5'
+import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NIcon } from 'naive-ui'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
 const emit = defineEmits<{
   'update:doc': [doc: DocTabDoc]
   save: []
 }>()
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 
-// 编辑 / 预览切换：不再自建按钮，直接用 md-editor 工具栏自带的「仅预览」开关。
-// 文档页签固定以编辑态打开 —— v7 里 previewOnly 既不是受控 prop、也没进实例暴露，
-// 想在挂载时「程序化进入预览」只能模拟点击，脆弱且会和重渲染打架；
-// 而工具栏开关本身就是双向的，用户点一下即可，语义也更直白。
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
-// 仅预览时工具栏只留「切换」按钮：否则预览态下点「加粗/插入表格」等仍在改正文，
-// 而用户看不到源码列，等于悄悄改内容。编辑态回到默认全量工具栏（undefined = 用组件默认值）。
+/** 当前是否只读预览。唯一状态源，由两个按钮各自切换。 */
 const previewOnly = ref(false)
-const toolbars = computed<import('md-editor-v3').ToolbarNames[] | undefined>(() =>
-  previewOnly.value ? ['previewOnly'] : undefined,
-)
-
-// md-editor 不对外 emit「预览态变化」（内部只有 eventBus 常量），这里用事件委托同步：
-// 点了「仅预览」按钮后，等编辑器把源码列收起，再按实际布局判定当前态。
-const rootRef = ref<HTMLElement | null>(null)
-
-function isPreviewMode(): boolean {
-  const src = rootRef.value?.querySelector<HTMLElement>('.md-editor-input-wrapper')
-  return !src || src.getBoundingClientRect().width === 0
-}
-
-function onEditorClick(ev: MouseEvent): void {
-  const el = ev.target as HTMLElement | null
-  const btn = el?.closest?.('.md-editor-toolbar-item')
-  if (!btn) return
-  if (!/仅预览|preview only/i.test(btn.getAttribute('title') ?? '')) return
-  // md-editor 在这一次点击里切换内部状态；等 DOM 落定再读，避免读到切换前的宽度
-  requestAnimationFrame(() => {
-    previewOnly.value = isPreviewMode()
-  })
-}
 
 /** 正文走 store：改一点就标脏，保存由页签统一调度（手动/快捷键一致）。 */
 function onContent(v: string): void {
@@ -63,19 +43,41 @@ function onContent(v: string): void {
 function onSave(): void {
   emit('save')
 }
-
 </script>
 
 <template>
-  <div ref="rootRef" class="doc-editor" @click.capture="onEditorClick">
-    <div class="body edit">
+  <div class="doc-editor">
+    <!-- 顶部细条：与 md-editor 工具栏同高，只放一个切换按钮。
+         预览态走 MdPreview（纯渲染、无编辑器工具栏），因此预览下不可能误改正文。 -->
+    <div class="doc-bar">
+      <button v-if="previewOnly" class="gin" type="button" data-testid="doc.toEdit" @click="previewOnly = false">
+        <n-icon :component="PencilOutline" :size="13" />
+        {{ t('docs.edit') }}
+      </button>
+      <button v-else class="gin" type="button" data-testid="doc.toPreview" @click="previewOnly = true">
+        <n-icon :component="EyeOutline" :size="14" />
+        {{ t('settings.mdEditorReadonly') }}
+      </button>
+    </div>
+
+    <div v-if="previewOnly" class="body preview">
+      <md-preview
+        :model-value="doc.content"
+        :language="mdLanguage"
+        :theme="isDark ? 'dark' : 'light'"
+        :preview-theme="isDark ? 'github' : 'default'"
+        class="md-preview"
+      />
+    </div>
+
+    <div v-else class="body edit">
       <md-editor
         :model-value="doc.content"
         :language="mdLanguage"
         :theme="isDark ? 'dark' : 'light'"
         class="md-edit"
         :readonly="readonly"
-        :toolbars="toolbars"
+        :toolbars-exclude="['previewOnly']"
         :on-upload-img="uploadMdImages"
         @update:model-value="onContent"
         @on-save="onSave"
@@ -85,6 +87,35 @@ function onSave(): void {
 </template>
 
 <style scoped>
+/* 预览态的顶部细条：与 md-editor 工具栏同高同底边，视觉上算「工具栏还没消失」 */
+.doc-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 34px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.doc-bar .gin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  border-radius: 5px;
+  padding: 4px 10px;
+  background: none;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.doc-bar .gin:hover {
+  background: var(--app-row-hover);
+  color: var(--app-text);
+}
+
 .doc-editor {
   display: flex;
   flex-direction: column;
