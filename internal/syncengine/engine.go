@@ -1256,12 +1256,16 @@ type pushBatch struct {
 	// collectDocOps 的墓碑分支据此跳过，避免「一次删除发两条 op」（P1-10）：
 	// 走 DeleteDoc 的文档已经在 pendingDeletes 里按 doc 类型发出去了。
 	pendingDel map[string]bool
+	// folderUID 目录路径 → 分组 uid：推 request 时要带 GroupUID，否则服务端只能落到「未分组」；
+	// 推子分组时要带 PID，否则多层级会被拍平成同一级。拓扑序保证 folder 先于 request 处理。
+	folderUID map[string]string
 }
 
 func newPushBatch(capacity int) *pushBatch {
 	return &pushBatch{
 		ops:        make([]Op, 0, capacity),
 		meta:       make(map[string]dirtyMeta, capacity),
+		folderUID:  make(map[string]string, capacity),
 		pendingDel: make(map[string]bool, capacity),
 	}
 }
@@ -1272,10 +1276,11 @@ func (b *pushBatch) add(op Op, m dirtyMeta) {
 	b.meta[op.OpID] = m
 }
 
-// addFolderOp 分组：payload 只带标题；分组无文件 hash，回执用哨兵值标同步。
+// addFolderOp 分组：标题 + 父分组 uid（多层级）；分组无文件 hash，回执用哨兵值标同步。
 func (e *Engine) addFolderOp(b *pushBatch, n index.Node) {
+	b.folderUID[n.Path] = n.UID
 	op := Op{OpID: newOpID(), Op: "upsert", Type: "group", UID: n.UID}
-	op.Payload, _ = json.Marshal(Payload{Title: n.Title})
+	op.Payload, _ = json.Marshal(Payload{Title: n.Title, PID: b.folderUID[parentDir(n.Path)]})
 	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
 }
 
@@ -1291,10 +1296,11 @@ func (e *Engine) addRequestOp(b *pushBatch, n index.Node, rep *Report) {
 	remote.Docs = e.serverizeContent(req.Docs, rep)
 	op := Op{OpID: newOpID(), Op: "upsert", Type: "api", UID: n.UID, BaseRev: n.BaseRev}
 	op.Payload, _ = json.Marshal(Payload{
-		Name:   req.Name,
-		Method: req.Method,
-		URL:    req.URL,
-		Extra:  collection.SyncExtra(&remote),
+		Name:     req.Name,
+		Method:   req.Method,
+		URL:      req.URL,
+		GroupUID: b.folderUID[parentDir(req.Path)],
+		Extra:    collection.SyncExtra(&remote),
 	})
 	b.add(op, dirtyMeta{uid: n.UID, hash: n.Hash, typ: n.Type})
 }
