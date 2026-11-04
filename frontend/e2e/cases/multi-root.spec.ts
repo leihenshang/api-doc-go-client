@@ -365,3 +365,44 @@ test('[M5] 集合级「全部收起/展开」只作用于本集合，且不切�
   await expect(treeRow(page, 'ping')).toHaveCount(1)
   await expect(treeRow(page, '用户-列表')).toHaveCount(1)
 })
+
+/**
+ * 回归：点**非活动根**里的文档打不开。
+ *
+ * 旧实现里 Sidebar 的 doc 分支漏了 ensureActive（request 分支有），于是
+ * `readDoc(uid)` 在「当前活动根」里查找 —— 文档在另一根，直接 not found；
+ * 调用处又是 `void`，异常被吞掉，表现为「树上有这个文档，点了右侧毫无反应」。
+ */
+test('[M2] 多工作目录：点非活动根里的文档能打开并切过去', async ({ page, app }) => {
+  await app.newCollection('basic')
+  await app.addCollection('bruno-sample')
+  await openCollection(page, app)
+
+  const roots = page.getByTestId('tree.root')
+  await expect(roots).toHaveCount(2)
+  const basic = roots.filter({ hasText: 'e2e-basic' })
+  const bruno = roots.filter({ hasText: 'e2e-bruno' })
+  await expect(bruno).toHaveClass(/root-active/)
+
+  // ① 切到 basic，走 UI 新建一篇文档（与用户实际路径一致，也顺带创建分组归属）
+  await basic.click()
+  await expect(basic).toHaveClass(/root-active/)
+  const group = treeRow(page, 'api')
+  await group.hover()
+  await group.getByTestId('tree.row.menu').click()
+  await page.getByTestId('tree.row.newDoc').click()
+  await page.locator('.n-modal input').first().fill('M2 文档')
+  await page.getByRole('button', { name: t('common.confirm') }).click()
+  const docRow = treeRow(page, 'M2 文档')
+  await expect(docRow).toHaveCount(1)
+
+  // ② 切回 bruno：此时这篇文档位于「非活动根」里
+  await bruno.click()
+  await expect(bruno).toHaveClass(/root-active/)
+  await expect(basic).not.toHaveClass(/root-active/)
+
+  // ③ 点它 —— 旧实现会在 bruno 里按 uid 查找，找不到就静默无反应
+  await docRow.getByTestId('tree.row.name').click()
+  await expect(basic).toHaveClass(/root-active/)
+  await expect(page.getByTestId('tab.item').filter({ hasText: 'M2 文档' })).toHaveCount(1)
+})
