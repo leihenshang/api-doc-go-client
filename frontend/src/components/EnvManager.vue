@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // 环境变量管理：新建/删除环境，编辑变量（敏感值明文只落 *.secrets.yml，由 Go 层拆分存储）。
+import { api } from '@/lib/ipc'
 import { message } from '@/lib/notice'
 import { useCollectionStore } from '@/stores/collection'
-import type { Env } from '@/types'
+import type { Env, EnvVar } from '@/types'
 import { AddOutline, CloseOutline, TrashOutline } from '@vicons/ionicons5'
 import { NButton, NCheckbox, NIcon, NInput, NModal, NPopconfirm } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
@@ -15,11 +16,19 @@ const coll = useCollectionStore()
 
 const selected = ref('')
 const working = ref<Env>({ name: '', vars: [] })
+/** 全局变量（服务端 scope=3 的只读镜像）：只展示、不可编辑，改了也会被下一轮同步覆盖。 */
+const globals = ref<EnvVar[]>([])
 
 watch(
   () => props.show,
-  (v) => {
-    if (v) select(coll.currentEnv || coll.envNames[0] || '')
+  async (v) => {
+    if (!v) return
+    select(coll.currentEnv || coll.envNames[0] || '')
+    try {
+      globals.value = await api.listGlobals()
+    } catch {
+      globals.value = [] // 读不到不影响环境编辑
+    }
   },
 )
 
@@ -157,12 +166,58 @@ function close(): void {
           </div>
         </template>
         <div v-else class="muted none">{{ t('env.noEnvs') }}</div>
+
+        <!-- 全局变量：服务端下发、客户端只读；优先级低于当前环境的同名变量 -->
+        <div v-if="globals.length" class="globals">
+          <p class="hint muted">{{ t('env.globalsHint') }}</p>
+          <div class="vt">
+            <div class="th">
+              <span class="ctr">{{ t('env.enabled') }}</span>
+              <span>{{ t('env.varName') }}</span>
+              <span>{{ t('env.varValue') }}</span>
+              <span />
+              <span />
+            </div>
+            <div v-for="g in globals" :key="g.name" class="row ro" data-testid="env.globalRow">
+              <span class="ctr">{{ g.enabled ? '✓' : '—' }}</span>
+              <span class="nm">{{ g.name }}</span>
+              <span class="vl">{{ g.secret ? '••••••' : g.value }}</span>
+              <span />
+              <span />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </n-modal>
 </template>
 
 <style scoped>
+/* 全局变量只读区：与上方变量表同一列宽，但整块用虚线分隔并置灰 */
+.globals {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--app-border);
+}
+
+.globals .ro {
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.globals .ro .nm {
+  font-family: var(--app-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.globals .ro .vl {
+  color: var(--app-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wrap {
   display: flex;
   gap: 14px;

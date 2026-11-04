@@ -1,0 +1,1175 @@
+// 多标签会话：tab = 一个打开的请求（uid + 内存草稿 + 响应 + 同步状态）。
+// 规则（设计文档 §5.3 会话模型）：
+//   - Send 用当前草稿，绝不因"未保存"阻塞；
+//   - 自动保存（防抖 800ms，关闭 tab / 失焦 / 发送前 flush）；
+//   - URL 预览与变量告警独立防抖（300ms）；
+//   - 新建请求先开「未落盘草稿」tab（draft=true）：不写盘、不自动保存，关闭时由 UI 提示保存 + 选分组。
+import { i18n } from '@/i18n';
+import { grpcSendBlocker } from '@/lib/grpc';
+import { api } from '@/lib/ipc';
+import { dialog, message } from '@/lib/notice';
+import { useCollectionStore } from '@/stores/collection';
+import { useSettingsStore } from '@/stores/settings';
+import { defineStore } from 'pinia';
+let seq = 0;
+const nextKey = () => `tab-${++seq}`;
+/** 草稿 tab 的临时 uid：不落盘、不与磁盘 uid 冲突，仅用于取消发送等按 uid 定位的场景。 */
+let draftSeq = 0;
+const nextDraftUid = () => `draft-${++draftSeq}-${Date.now().toString(36)}`;
+const SAVE_DEBOUNCE = 800;
+const RESOLVE_DEBOUNCE = 300;
+const saveTimers = new Map();
+const resolveTimers = new Map();
+let draftsTimer = null;
+/** 会话现场按集合 uid 记忆（与 client.env.<uid> 同一套 localStorage）。 */
+const sessionKey = (root) => `client.tabs.${root}`;
+/** 未保存草稿单独存一份：应用重启/切换集合后仍能找回（新建流程不写盘）。 */
+const draftsKey = (root) => `client.drafts.${root}`;
+/**
+ * 旧版本按「集合 uid」存会话与草稿（client.tabs.<uid> / client.drafts.<uid>）。
+ * 新版按工作目录标识存：读一次旧键做迁移，写新键时顺手清掉旧键 ——
+ * 否则「新键被清空」之后会把早就丢弃的旧草稿又找回来。
+ */
+function legacyKey(kind, collUid) {
+    return `client.${kind}.${collUid}`;
+}
+function legacyValue(kind, collUid) {
+    return collUid ? (localStorage.getItem(legacyKey(kind, collUid)) ?? '') : '';
+}
+function clearLegacyKey(kind, collUid) {
+    if (collUid)
+        localStorage.removeItem(legacyKey(kind, collUid));
+}
+/** 把参数表补进裸 URL（MCP / 文件导入可能只写 params，url 不带 query）。
+ *  仅修改内存展示；启用且有名才拼，保持 URL 中原有 fragment。 */
+function fillUrlQuery(r) {
+    if (!r.url.trim() || r.url.includes('?') || r.grpc)
+        return;
+    const parts = r.params
+        .filter((p) => p.enabled && p.name.trim())
+        .map((p) => `${encodeURIComponent(p.name.trim())}=${encodeURIComponent(p.value ?? '')}`);
+    if (!parts.length)
+        return;
+    const hash = r.url.indexOf('#');
+    const base = hash >= 0 ? r.url.slice(0, hash) : r.url;
+    const suffix = hash >= 0 ? r.url.slice(hash) : '';
+    r.url = `${base}?${parts.join('&')}${suffix}`;
+}
+/** 新建草稿的空请求模板：与 Go 侧 CreateRequest 的默认值一致（URL 留空，不预填 {{host}}）。 */
+function blankRequest() {
+    return {
+        uid: '',
+        name: '',
+        seq: 0,
+        path: '',
+        method: 'GET',
+        url: '',
+        summary: '',
+        params: [{ name: '', value: '', enabled: true }],
+        headers: [{ name: 'Content-Type', value: 'application/json', enabled: true }],
+        body: { type: 'none', raw: '', form: [] },
+        auth: { type: 'none' },
+        docs: '',
+        baseRev: 0,
+    };
+}
+/**
+ * 新建 gRPC 草稿的空请求模板（G1.2）：grpc 段存在即 gRPC 请求；
+ * target/service/method/proto/message 全空，由用户在请求栏与 Schema 分段补齐。
+ * Method 固定 `GRPC`、URL 留空 —— 落盘时由集合层派生（对齐 collection.MethodGRPC / GrpcURL）。
+ */
+export function blankGrpcRequest() {
+    return {
+        uid: '',
+        name: '',
+        seq: 0,
+        path: '',
+        method: 'GRPC',
+        url: '',
+        summary: '',
+        params: [],
+        headers: [],
+        body: { type: 'none', raw: '', form: [] },
+        auth: { type: 'none' },
+        grpc: {
+            target: '',
+            service: '',
+            method: '',
+            proto: '',
+            imports: [],
+            metadata: [{ name: '', value: '', enabled: true }],
+            message: '',
+            stream: '',
+        },
+        docs: '',
+        baseRev: 0,
+    };
+}
+// ---- 请求级撤销/重做（G9）：编辑停顿后把「上一状态」压栈，Ctrl+Z / Ctrl+Shift+Z 取出 ----
+const HISTORY_LIMIT = 50;
+const HISTORY_DEBOUNCE = 400;
+const undoStacks = new Map();
+const redoStacks = new Map();
+const lastSnap = new Map();
+/** 正在保存的草稿 key：挡住回车与点击/双击造成的并发保存（会重复建请求）。 */
+const draftSaving = new Set();
+const historyTimers = new Map();
+function snap(r) {
+    return JSON.stringify(r);
+}
+/** 文档保存与同值编辑判断使用固定字段顺序，避免对象构造顺序不同造成假变化。 */
+function snapDoc(d) {
+    return JSON.stringify({ uid: d.uid, path: d.path, name: d.name, content: d.content, icon: d.icon });
+}
+// ---- 滚动位置记忆（G8）：按 tab 记录请求区/响应区 scrollTop ----
+const scrollPos = new Map();
+export const useTabsStore = defineStore('tabs', {
+    state: () => ({
+        tabs: [],
+        activeKey: '',
+        /** 请求 uid → 磁盘内容哈希（来自 index；外部改动 / 自身写盘后刷新）。 */
+        hashes: {},
+        /** 正在进行的写盘个数（状态栏「保存中…」） */
+        savingCount: 0,
+        /** 最后一次成功写盘的时间戳（状态栏「已保存 HH:mm」） */
+        lastSavedAt: 0,
+        /** 草稿写 localStorage 失败只提示一次的标记 */
+        draftsWarned: false,
+    }),
+    getters: {
+        active: (s) => s.tabs.find((t) => t.key === s.activeKey) ?? null,
+        count: (s) => s.tabs.length,
+        // 「可被 flush 保存」的已落盘页签：草稿走 localStorage、无 uid 无从写盘。
+        // 冲突页签已挂横幅且 flush 会跳过 —— 都不计入。供切区/退出前的未保存询问复用。
+        // 审核 H#2：不按 kind 排除——doc 页签同样可被 flush 保存，否则「只改了文档」退出时无询问直接丢数据。
+        savableTabs: (s) => s.tabs.filter((t) => !t.draft && t.uid && t.dirty && !t.conflict),
+    },
+    actions: {
+        /** 打开一条请求（已有 tab 则激活）。 */
+        async openRequest(uid) {
+            const exist = this.tabs.find((t) => t.uid === uid && (t.kind ?? 'request') === 'request');
+            if (exist) {
+                this.setActive(exist.key);
+                return;
+            }
+            const r = await api.readRequest(uid);
+            await this.refreshHashes();
+            this.pushTab(r);
+            const tab = this.tabs.find((t) => t.uid === uid);
+            if (tab)
+                tab.baseHash = this.hashes[uid] ?? '';
+        },
+        /**
+         * B19：打开文档页签（树叶子点击入口）。同 uid 已开则聚焦，与 openRequest 同逻辑。
+         * 真相源是 tab.doc；request 仅作占位，UI 层按 kind 分派到 DocEditor。
+         */
+        async openDocTab(uid) {
+            const exist = this.tabs.find((t) => t.uid === uid && t.kind === 'doc');
+            if (exist) {
+                this.setActive(exist.key);
+                return;
+            }
+            const d = await api.readDoc(uid);
+            const tab = {
+                key: nextKey(), uid: d.uid, title: d.name, kind: 'doc', request: blankRequest(),
+                doc: { uid: d.uid, path: d.path ?? '', name: d.name ?? '', content: d.content ?? '', icon: d.icon ?? '' },
+                dirty: false, sending: false, response: null, error: '', resolve: null,
+                draft: false, draftFolder: '', grpcSchema: null, grpcError: '',
+            };
+            this.tabs.push(tab);
+            this.setActive(tab.key);
+            // 与请求页签一致，记录磁盘基线（hash）。没有它，外部改动（MCP / 其它编辑器）
+            // 在 syncExternalChanges 里会被 `!tab.baseHash` 直接跳过：既不回填内容，也不标冲突。
+            await this.refreshDocHash(tab);
+            this.saveSession();
+        },
+        /**
+         * B19：保存文档页签。与请求保存共用「脏点 + 保存中 + 冲突」三态，
+         * expectHash 走 Go 侧 SaveDocExpectHash（磁盘 hash 不一致即返回 [conflict]）。
+         */
+        async saveDoc(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            // 文件被外部删除（missing）时也允许保存：Ctrl+S 即可用当前内容重建，不必先改动
+            if (!tab || tab.kind !== 'doc' || !tab.doc || (!tab.dirty && !tab.missing))
+                return;
+            if (tab.saving || tab.conflict)
+                return;
+            const doc = {
+                uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
+                content: tab.doc.content, icon: tab.doc.icon,
+            };
+            const snapshot = snapDoc(tab.doc);
+            let saved = false;
+            tab.saving = true;
+            try {
+                // missing（文件已被外部删除）：expectHash 传空 = 跳过哈希校验，直接重建文件
+                await api.saveDocExpectHash(doc, tab.missing ? '' : (tab.baseHash ?? ''));
+                saved = true;
+                tab.missing = false;
+                // 保存期间可能又有编辑：本次只写入了快照，不能把后续内容也标成已保存。
+                tab.dirty = snapDoc(tab.doc) !== snapshot;
+                await this.refreshDocHash(tab);
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (msg.includes('[conflict]')) {
+                    tab.conflict = true;
+                    message.warning(i18n.global.t('conflict.detected'));
+                }
+                else {
+                    message.error(msg);
+                }
+            }
+            finally {
+                tab.saving = false;
+                if (saved && tab.dirty && !tab.conflict && useSettingsStore().autoSave && this.tabs.includes(tab)) {
+                    this.scheduleAfterEdit(tab);
+                }
+            }
+        },
+        /**
+         * 冲突 / 外部删除时的第三条出口「仍然保存」：不带 expectHash 直接写盘 ——
+         * 覆盖磁盘上的外部版本；文档已被删除时用当前内容重建文件。完成后刷新基线并清标记。
+         */
+        async saveOverwriting(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab || tab.draft || !tab.uid || tab.saving)
+                return;
+            tab.saving = true;
+            this.savingCount++;
+            try {
+                if ((tab.kind ?? 'request') === 'doc' && tab.doc) {
+                    await api.saveDoc({
+                        uid: tab.doc.uid, name: tab.doc.name, path: tab.doc.path,
+                        content: tab.doc.content, icon: tab.doc.icon,
+                    });
+                    tab.dirty = false;
+                    tab.conflict = false;
+                    tab.missing = false;
+                    await this.refreshDocHash(tab);
+                    // 自写落在文件监听的忽略窗口里：显式重扫一次，让重建/覆盖后的文档回到树上
+                    await useCollectionStore().reload();
+                }
+                else {
+                    await api.saveRequest({ ...tab.request, expectHash: undefined });
+                    tab.dirty = false;
+                    tab.conflict = false;
+                    tab.grpcError = '';
+                    await this.refreshHashes();
+                    tab.baseHash = this.hashes[tab.uid] ?? '';
+                    void this.doResolve(tab);
+                }
+                this.lastSavedAt = Date.now();
+                message.success(i18n.global.t('conflict.overwriteDone'));
+            }
+            catch (e) {
+                message.error(e instanceof Error ? e.message : String(e));
+            }
+            finally {
+                tab.saving = false;
+                this.savingCount--;
+            }
+        },
+        /** 文档页签的磁盘 hash 刷新（文档不进 SQLite 索引，单独读一次 hash）。 */
+        async refreshDocHash(tab) {
+            try {
+                tab.baseHash = (await api.docFileHash(tab.uid)) ?? '';
+            }
+            catch {
+                // 取不到 hash 时留空：下次保存不带 expectHash（退化为无冲突检测）
+            }
+        },
+        /** B19：文档页签编辑回写（内容/标题任一变化即标脏）。 */
+        touchDoc(key, patch) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab || tab.kind !== 'doc' || !tab.doc)
+                return;
+            const next = { ...tab.doc, ...patch };
+            // md-editor 在 prop 回写/保存后可能再次发出相同正文；无实际变化不能重新标脏，
+            // 否则自动保存会在「保存 → 同值回写 → 标脏」之间循环。
+            if (snapDoc(next) === snapDoc(tab.doc))
+                return;
+            tab.doc = next;
+            tab.dirty = true;
+            // 与请求一致：每次编辑都重新防抖；手动模式下只标脏，等 Ctrl+S / 关闭询问。
+            this.scheduleAfterEdit(tab);
+        },
+        /** 新建请求（由集合层先落盘拿到 uid，再开 tab）。 */
+        openDoc(r) {
+            this.pushTab(r);
+        },
+        /**
+         * 新建请求的主路径：开一个**未落盘**的草稿 tab（不写盘、不弹窗）。
+         * doc 为「导入 cURL」等预填内容；folder 是保存对话框的默认分组。
+         */
+        openDraft(doc, folder = '') {
+            const r = doc ?? blankRequest();
+            fillUrlQuery(r);
+            const tab = {
+                key: nextKey(), uid: nextDraftUid(), kind: 'request',
+                title: r.name || i18n.global.t(r.grpc ? 'tab.newGrpcDraft' : 'tab.newDraft'), request: r,
+                dirty: true, sending: false, response: null, error: '', resolve: null,
+                draft: true, draftFolder: folder, grpcSchema: null, grpcError: '',
+            };
+            this.tabs.push(tab);
+            this.setActive(tab.key);
+            const current = this.tabs.find((t) => t.key === tab.key);
+            if (current) {
+                void this.doResolve(current);
+                lastSnap.set(tab.key, snap(current.request));
+            }
+            // 恢复的 gRPC 草稿已带定义路径：直接把 Schema 解析回来（空定义时是空操作）
+            void this.loadGrpcSchema(tab.key);
+            this.saveSession();
+            this.saveDrafts();
+            return tab.key;
+        },
+        /** 把草稿落盘成真实请求：uid / 文件名 / 序号由集合层分配，成功后 tab 转正（不再是草稿）。 */ /**
+         * 请求在集合树里被移动（拖动改上级目录 / 「移动到…」）后，同步已打开页签里的路径。
+         * 不做的话：页签面包屑仍显示旧位置，而且后续保存会把文件写回旧路径（在旧目录里多出一份）。
+         */
+        syncPath(uid, path) {
+            for (const tab of this.tabs) {
+                if (tab.uid !== uid)
+                    continue;
+                // B19：文档页签同步 doc.path（否则后续保存会把内容写回旧路径）
+                if ((tab.kind ?? 'request') === 'doc') {
+                    if (tab.doc && tab.doc.path !== path)
+                        tab.doc.path = path;
+                    continue;
+                }
+                if (tab.request.path === path)
+                    continue;
+                tab.request.path = path;
+                tab.draftFolder = '';
+            }
+        },
+        async saveDraft(key, folder, name) {
+            // 同一草稿并发保存会各建一个请求（回车与点击/双击时可能发生）：
+            // 用 in-flight 集合挡住第二次，保存完成后自动释放。
+            if (draftSaving.has(key))
+                throw new Error(i18n.global.t('prompt.savingDraft'));
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab)
+                throw new Error(i18n.global.t('tab.notFound'));
+            if (!tab.draft)
+                throw new Error(i18n.global.t('prompt.savingDraft'));
+            draftSaving.add(key);
+            try {
+                const created = await api.createRequestFromDraft(folder, name, { ...tab.request, name });
+                tab.uid = created.uid;
+                tab.request = created;
+                tab.title = created.name;
+                tab.draft = false;
+                tab.draftFolder = '';
+                tab.dirty = false;
+                lastSnap.set(key, snap(created));
+                undoStacks.delete(key);
+                redoStacks.delete(key);
+                await useCollectionStore().reload();
+                this.saveSession();
+                this.saveDrafts();
+                return created;
+            }
+            finally {
+                draftSaving.delete(key);
+            }
+        },
+        /** 丢弃草稿（关闭 tab，不落盘）。 */
+        async discardDraft(key) {
+            await this.close(key, { save: false });
+        },
+        pushTab(r) {
+            fillUrlQuery(r);
+            const tab = {
+                key: nextKey(), uid: r.uid, title: r.name, kind: 'request', request: r,
+                dirty: false, sending: false, response: null, error: '', resolve: null,
+                draft: false, draftFolder: '', grpcSchema: null, grpcError: '',
+            };
+            this.tabs.push(tab);
+            this.setActive(tab.key);
+            // 必须取数组里的响应式代理再解析：直接改 push 进去的原始对象不会触发视图更新
+            const current = this.tabs.find((t) => t.key === tab.key);
+            if (current) {
+                void this.doResolve(current);
+                lastSnap.set(tab.key, snap(current.request));
+            }
+            void this.loadGrpcSchema(tab.key);
+            this.saveSession();
+        },
+        /**
+         * 解析该 tab 里已保存的 gRPC 定义（打开请求 / 导入 / 更新 / 换定义后调用）。
+         * 结果与错误都常驻在 tab 上：成功 → 请求栏与 Schema 分段可用；失败 → 界面展示错误卡片（D4 的界面态）。
+         */
+        async loadGrpcSchema(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            const g = tab?.request.grpc;
+            if (!tab || !g)
+                return;
+            const proto = (g.proto ?? '').trim();
+            if (!proto) {
+                tab.grpcSchema = null;
+                tab.grpcError = '';
+                return;
+            }
+            try {
+                tab.grpcSchema = await api.loadGrpcSchema(proto, g.imports ?? []);
+                tab.grpcError = '';
+            }
+            catch (e) {
+                tab.grpcSchema = null;
+                tab.grpcError = e instanceof Error ? e.message : String(e);
+            }
+        },
+        setActive(key) {
+            this.activeKey = key;
+            this.saveSession();
+        },
+        /** G7：把 from 位置的 tab 挪到 to 位置。 */
+        reorder(from, to) {
+            if (from === to || from < 0 || to < 0 || from >= this.tabs.length || to >= this.tabs.length)
+                return;
+            const [item] = this.tabs.splice(from, 1);
+            this.tabs.splice(to, 0, item);
+            this.saveSession();
+        },
+        /** G8：记录某 tab 的滚动位置。 */
+        saveScroll(key, pane, top) {
+            const cur = scrollPos.get(key) ?? { editor: 0, resp: 0 };
+            cur[pane] = top;
+            scrollPos.set(key, cur);
+        },
+        /** G8：取某 tab 的滚动位置（无记录时 0）。 */
+        getScroll(key) {
+            return scrollPos.get(key) ?? { editor: 0, resp: 0 };
+        },
+        /**
+         * 只标脏、不调度自动保存：用于「格式化」这类需要用户确认后再落盘的操作。
+         * 同时取消该页签已排队的自动保存，避免格式化后紧跟着又被定时器写盘。
+         */
+        markDirty(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab)
+                return;
+            tab.title = tab.request.name || tab.title;
+            tab.dirty = true;
+            clearTimeout(saveTimers.get(key));
+            // 草稿仍要进 localStorage（不写集合文件），否则切走/重启会丢草稿
+            if (tab.draft)
+                this.scheduleDrafts();
+        },
+        /** 任意编辑入口：标脏 + 调度自动保存、解析预览与撤销快照。 */
+        touch(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab)
+                return;
+            tab.title = tab.request.name || tab.title;
+            tab.dirty = true;
+            // 自动保存是设置项（默认关 = 手动保存模式）：编辑期间不写盘，页签保留未保存圆点，
+            // 落盘只发生在 Ctrl+S / 关闭页签 / 「保存所有」。草稿始终走 localStorage（重启找回，不算写集合）。
+            this.scheduleAfterEdit(tab);
+            // 解析预览
+            clearTimeout(resolveTimers.get(key));
+            resolveTimers.set(key, setTimeout(() => void this.doResolve(tab), RESOLVE_DEBOUNCE));
+            // 撤销快照（编辑停顿后提交一段）
+            clearTimeout(historyTimers.get(key));
+            historyTimers.set(key, setTimeout(() => this.commitHistory(key), HISTORY_DEBOUNCE));
+        },
+        /** 把「编辑前状态」压入撤销栈（当前状态与上次快照不同时）。 */
+        commitHistory(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab)
+                return;
+            const cur = snap(tab.request);
+            const last = lastSnap.get(key);
+            if (last === undefined) {
+                lastSnap.set(key, cur);
+                return;
+            }
+            if (last === cur)
+                return;
+            const stack = undoStacks.get(key) ?? [];
+            stack.push(JSON.parse(last));
+            if (stack.length > HISTORY_LIMIT)
+                stack.shift();
+            undoStacks.set(key, stack);
+            redoStacks.set(key, []);
+            lastSnap.set(key, cur);
+        },
+        /** 撤销一步（无历史时为空操作）。 */
+        undo(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            const stack = undoStacks.get(key);
+            if (!tab || !stack?.length)
+                return;
+            const prev = stack.pop();
+            const cur = JSON.parse(snap(tab.request));
+            redoStacks.set(key, [...(redoStacks.get(key) ?? []), cur]);
+            tab.request = prev;
+            tab.title = prev.name || tab.title;
+            tab.dirty = true;
+            lastSnap.set(key, snap(prev));
+            this.scheduleAfterEdit(tab);
+        },
+        /** 重做一步。 */
+        redo(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            const stack = redoStacks.get(key);
+            if (!tab || !stack?.length)
+                return;
+            const next = stack.pop();
+            const cur = JSON.parse(snap(tab.request));
+            undoStacks.set(key, [...(undoStacks.get(key) ?? []), cur]);
+            tab.request = next;
+            tab.title = next.name || tab.title;
+            tab.dirty = true;
+            lastSnap.set(key, snap(next));
+            this.scheduleAfterEdit(tab);
+        },
+        /** 编辑后的落盘调度（touch / undo / redo 共用）：
+         *  草稿走 localStorage；已落盘请求**只在开启自动保存时**才调度写盘（默认手动保存模式）。
+         *  因此 undo/redo 不会绕过「手动保存」——未开启自动保存时按 Ctrl+Z 只改内存并标脏，不落盘。 */
+        scheduleAfterEdit(tab) {
+            clearTimeout(saveTimers.get(tab.key));
+            if (tab.draft)
+                this.scheduleDrafts();
+            else if (useSettingsStore().autoSave) {
+                saveTimers.set(tab.key, setTimeout(() => void this.flush(tab.key), SAVE_DEBOUNCE));
+            }
+        },
+        /** 立即保存（幂等；无脏改动、草稿、无 uid 时跳过）。
+         *  写盘前做冲突检测：把「读到文件时的哈希」作为 expectHash 上传，磁盘已被外部改动就拒写并标冲突。
+         *  写盘被拒（冲突 / 定义解析失败 / 磁盘错误）时保留脏标记，错误原因挂到 grpcError 供界面展示。 */
+        async flush(key) {
+            clearTimeout(saveTimers.get(key));
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab || tab.draft || !tab.dirty || !tab.uid)
+                return;
+            // B19：文档页签走文档保存通道（expectHash + 冲突三态），不进下面的请求保存链路
+            if ((tab.kind ?? 'request') === 'doc') {
+                await this.saveDoc(key);
+                return;
+            }
+            const coll = useCollectionStore();
+            // P2：只读集合（同步镜像）不允许写盘 —— 编辑可以，落盘不行
+            if (coll.isReadOnly) {
+                const msg = i18n.global.t('conflict.readOnly');
+                if (tab.grpcError !== msg) {
+                    tab.grpcError = msg;
+                    message.warning(msg);
+                }
+                return;
+            }
+            // P0：冲突未解决前不再尝试写盘（界面横幅提供「重新加载 / 另存为副本」）
+            if (tab.conflict)
+                return;
+            // 防假冲突：编辑触发的自动保存可能仍在在途（tab.saving）。并发 flush 会在「索引已更新、
+            // baseHash 尚未回写」的中间态做比对 —— baseHash 只在保存成功后才更新，同一 uid 在途期间
+            // 再跑一次比较必然对不上，会把**本方正在进行的保存**误判成外部改动 → 假冲突（Windows 上
+            // 慢 I/O 更容易踩到）。在途的那次保存完成后会刷新 baseHash，改动由后续的防抖保存继续。
+            if (tab.saving)
+                return;
+            await this.refreshHashes();
+            const disk = this.hashes[tab.uid] ?? '';
+            if (tab.baseHash && disk && disk !== tab.baseHash) {
+                tab.conflict = true;
+                message.warning(i18n.global.t('conflict.detected'));
+                return;
+            }
+            tab.saving = true;
+            this.savingCount++;
+            // 快照本次落盘内容：保存期间用户又改动了的话，落盘的是旧内容，下面对比后保持脏并让
+            // 后续的防抖保存接手，避免「写进了旧内容却把脏标记清掉」悄悄丢编辑。
+            const snapshot = JSON.stringify(tab.request);
+            let saved = false;
+            try {
+                await api.saveRequest({ ...tab.request, expectHash: tab.baseHash || undefined });
+                saved = true;
+                const editedAgain = JSON.stringify(tab.request) !== snapshot;
+                tab.dirty = editedAgain;
+                tab.grpcError = '';
+                // Go 侧写盘后已把索引 hash 更新为新值，这里取回来作为下一次比对的基准
+                await this.refreshHashes();
+                tab.baseHash = this.hashes[tab.uid] ?? tab.baseHash;
+                this.lastSavedAt = Date.now();
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (msg.includes('[conflict]')) {
+                    // Go 侧比对哈希发现磁盘被改：拒写。已处于冲突态就不再重复弹 toast（避免连保存拒写时堆叠）。
+                    const already = tab.conflict;
+                    tab.conflict = true;
+                    if (!already)
+                        message.warning(i18n.global.t('conflict.detected'));
+                    return;
+                }
+                // 同一条错误只提示一次（自动保存会反复触发），Schema 分段常驻展示这次失败原因
+                if (tab.grpcError !== msg) {
+                    tab.grpcError = msg;
+                    message.error(msg);
+                }
+                return;
+            }
+            finally {
+                tab.saving = false;
+                this.savingCount = Math.max(0, this.savingCount - 1);
+                // 保存期间的编辑所安排的定时器可能已在 single-flight 检查处返回；
+                // 当前写盘结束后再补一次尾次调度，保证停止输入后也会自动落盘。
+                if (saved && tab.dirty && !tab.conflict && useSettingsStore().autoSave && this.tabs.includes(tab)) {
+                    this.scheduleAfterEdit(tab);
+                }
+            }
+        },
+        async flushAll() {
+            for (const t of this.tabs)
+                await this.flush(t.key);
+        },
+        /** 从索引取全量请求哈希（uid → hash）。失败时保留旧值，冲突检测退化为不检测。 */
+        async refreshHashes() {
+            try {
+                const nodes = await api.searchIndex('', 0);
+                const map = {};
+                for (const n of nodes) {
+                    if (n.type === 'request' && n.uid)
+                        map[n.uid] = n.hash ?? '';
+                }
+                this.hashes = map;
+            }
+            catch {
+                // 忽略：下次外部改动/保存时再刷
+            }
+        },
+        /**
+         * 外部改动（文件监听 / 同步）后同步打开的页签（G10 真正落地）：
+         * - 干净页签：磁盘内容已变 → 直接回填（用户没有任何未保存编辑，不丢东西）；
+         * - 脏页签：只标 `conflict`（写盘会被拒），由界面的冲突条提供「重新加载 / 另存为副本」。
+         * 返回新标冲突的页签数。
+         */
+        async syncExternalChanges() {
+            const coll = useCollectionStore();
+            if (!coll.ready)
+                return 0;
+            await this.refreshHashes();
+            let conflicts = 0;
+            for (const tab of this.tabs) {
+                if (tab.draft || !tab.uid)
+                    continue;
+                // B19：文档页签单独比对（文档不进 SQLite 索引，hash 需单独取）
+                if ((tab.kind ?? 'request') === 'doc') {
+                    if (tab.saving)
+                        continue;
+                    let cur = '';
+                    try {
+                        cur = (await api.docFileHash(tab.uid)) ?? '';
+                    }
+                    catch {
+                        continue;
+                    }
+                    // 文件已不存在（外部删除 / 进回收站）：保留页签内容，提示一次；
+                    // 用户可在冲突条里选「仍然保存」用当前内容重建文件（不会静默丢掉编辑）。
+                    if (!cur) {
+                        if (!tab.missing) {
+                            tab.missing = true;
+                            message.warning(i18n.global.t('conflict.docMissing', { name: tab.doc?.name || tab.title }));
+                        }
+                        continue;
+                    }
+                    if (tab.missing)
+                        tab.missing = false; // 文件回来了（撤销删除等）：恢复正常态
+                    if (!tab.baseHash || cur === tab.baseHash)
+                        continue;
+                    if (tab.dirty) {
+                        if (!tab.conflict) {
+                            tab.conflict = true;
+                            conflicts++;
+                        }
+                        continue;
+                    }
+                    try {
+                        const d = await api.readDoc(tab.uid);
+                        if (tab.doc) {
+                            tab.doc = { uid: d.uid, path: d.path ?? '', name: d.name ?? '', content: d.content ?? '', icon: d.icon ?? '' };
+                            tab.title = d.name || tab.title;
+                        }
+                        tab.baseHash = cur;
+                    }
+                    catch {
+                        // 读失败保持现状
+                    }
+                    continue;
+                }
+                // 本方保存可能在途：索引已更新、baseHash 尚未回写（flush 只在保存成功后刷 baseHash）。
+                // 若此时按「索引≠baseHash」判冲突，就把正在进行的本方保存误判成外部改动 → 假冲突。
+                // 与 flush 的 `if (tab.saving) return` 对齐，同一 uid 在途期间跳过这次同步。
+                if (tab.saving)
+                    continue;
+                const cur = this.hashes[tab.uid] ?? '';
+                if (!cur || !tab.baseHash || cur === tab.baseHash)
+                    continue;
+                if (tab.dirty) {
+                    if (!tab.conflict) {
+                        tab.conflict = true;
+                        conflicts++;
+                    }
+                    continue;
+                }
+                try {
+                    const doc = await api.readRequest(tab.uid);
+                    fillUrlQuery(doc);
+                    tab.request = doc;
+                    tab.title = doc.name || tab.title;
+                    tab.baseHash = this.hashes[tab.uid] ?? cur;
+                    tab.grpcError = '';
+                    // 文档换了一份，撤销历史作废（避免撤销跨过外部改动把旧内容写回去）
+                    lastSnap.set(tab.key, snap(doc));
+                    undoStacks.delete(tab.key);
+                    redoStacks.delete(tab.key);
+                    void this.doResolve(tab);
+                    void this.loadGrpcSchema(tab.key);
+                }
+                catch {
+                    // 读失败保持现状
+                }
+            }
+            return conflicts;
+        },
+        /** 冲突出路一：放弃内存里的编辑，重新从磁盘读取（清脏、清冲突、重建撤销基线）。 */
+        async reloadFromDisk(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab?.uid)
+                return;
+            // 文档页签：冲突条上的「重新加载」走 readDoc（文档不进 SQLite 索引，不能按请求读）
+            if ((tab.kind ?? 'request') === 'doc') {
+                const d = await api.readDoc(tab.uid);
+                if (tab.doc) {
+                    tab.doc = {
+                        uid: d.uid, path: d.path ?? '', name: d.name ?? '',
+                        content: d.content ?? '', icon: d.icon ?? '',
+                    };
+                    tab.title = d.name || tab.title;
+                }
+                tab.dirty = false;
+                tab.conflict = false;
+                tab.missing = false;
+                await this.refreshDocHash(tab);
+                message.success(i18n.global.t('conflict.reloaded'));
+                return;
+            }
+            const doc = await api.readRequest(tab.uid);
+            tab.request = doc;
+            tab.title = doc.name || tab.title;
+            tab.dirty = false;
+            tab.conflict = false;
+            tab.grpcError = '';
+            await this.refreshHashes();
+            tab.baseHash = this.hashes[tab.uid] ?? '';
+            lastSnap.set(key, snap(doc));
+            undoStacks.delete(key);
+            redoStacks.delete(key);
+            void this.doResolve(tab);
+            void this.loadGrpcSchema(key);
+            message.success(i18n.global.t('conflict.reloaded'));
+        },
+        /** 冲突出路二：把内存里的版本另存为副本（文件名冲突时集合层自动加序号），并打开副本页签。 */
+        async saveAsCopy(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab)
+                return;
+            // 文档页签：新建一篇副本（保留正文/图标），并切到副本 —— 冲突条对文档同样可用
+            if ((tab.kind ?? 'request') === 'doc' && tab.doc) {
+                const p = tab.doc.path ?? '';
+                const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+                // CreateDoc 的 folder 为空 = 旧的 docs/ 默认位；要留在集合根必须显式传 "."
+                const folder = dir || '.';
+                const name = i18n.global.t('conflict.copyName', { name: tab.doc.name || tab.title });
+                const created = await api.createDoc(name, folder);
+                await api.saveDoc({
+                    uid: created.uid,
+                    name: created.name || name,
+                    path: created.path ?? '',
+                    content: tab.doc.content ?? '',
+                    icon: tab.doc.icon ?? '',
+                });
+                // 自写会被文件监听忽略：显式重扫一次，让副本出现在树上
+                await useCollectionStore().reload();
+                await this.openDocTab(created.uid);
+                message.success(i18n.global.t('conflict.copySaved', { name }));
+                return;
+            }
+            const p = tab.request.path ?? '';
+            const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+            const name = i18n.global.t('conflict.copyName', { name: tab.request.name });
+            const created = await api.createRequestFromDraft(folder, name, {
+                ...tab.request,
+                name,
+                expectHash: undefined,
+            });
+            this.pushTab(created);
+            message.success(i18n.global.t('conflict.copySaved', { name }));
+        },
+        async doResolve(tab) {
+            const coll = useCollectionStore();
+            if (!coll.ready)
+                return;
+            // 变量来自「地址」：HTTP 是 URL，gRPC 是服务地址 target（G10.1）；两者都空时无需解析
+            const text = (tab.request.grpc ? tab.request.grpc.target : tab.request.url).trim();
+            if (!text) {
+                tab.resolve = null; // 刚新建的空草稿
+                return;
+            }
+            try {
+                tab.resolve = await api.resolveText(text, coll.currentEnv);
+            }
+            catch {
+                tab.resolve = null;
+            }
+        },
+        /** 环境变化 / 集合变更后刷新解析预览。 */
+        refreshResolve() {
+            for (const t of this.tabs)
+                void this.doResolve(t);
+        },
+        /** 发送：先 flush，再用当前草稿真实发送；可用 cancel() 中止。 */
+        async send(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab || tab.sending)
+                return;
+            // gRPC 发送门禁（G3.6）：地址 / 定义 / 服务方法 / 消息任一未就绪都不发送（按钮已置灰，这里兜底）
+            const blocker = grpcSendBlocker(tab.request, !!tab.grpcSchema);
+            if (blocker) {
+                tab.response = null;
+                tab.error = i18n.global.t(blocker);
+                return;
+            }
+            const coll = useCollectionStore();
+            // 手动保存模式下发送前不落盘：改动只在 Ctrl+S / 显式保存时写入文件，
+            // 避免「改完就点发送」把未保存内容偷偷写盘（与 autoSave 关闭的预期一致）。
+            if (useSettingsStore().autoSave)
+                await this.flush(key);
+            // 草稿不把临时标识写回实体，只在发送副本上使用；两个草稿因此能分别登记和取消。
+            const request = tab.draft ? { ...tab.request, uid: tab.uid } : tab.request;
+            tab.sendUid = request.uid;
+            tab.sending = true;
+            tab.error = '';
+            try {
+                tab.response = await api.send(request, coll.currentEnv);
+            }
+            catch (e) {
+                tab.response = null;
+                tab.error = e instanceof Error ? e.message : String(e);
+            }
+            finally {
+                tab.sending = false;
+                tab.sendUid = undefined;
+            }
+        },
+        /** 取消当前 tab 的在途发送：必须使用本次实际发送的标识，不能按空 uid 批量取消草稿。 */
+        cancelSend(key) {
+            const tab = this.tabs.find((t) => t.key === key);
+            if (!tab || !tab.sending || tab.sendUid === undefined)
+                return;
+            void api.cancelSend(tab.sendUid);
+        },
+        /**
+         * 关闭页签。
+         * `save: false` 给「用户明确选择不保存」的场景用（未保存询问框的「不保存」、删掉请求后关页签）：
+         * 这时**绝不写盘**，否则会把刚被删掉的文件写回来、或把用户选择丢弃的改动悄悄落盘。
+         * 默认 `save: true` 保持既有语义：关闭前 flush 一次（补上防抖还没触发的最后编辑），
+         * 失败也不阻止关闭（本地已自动保存，关闭不该卡住）；界面上的未保存询问在关闭前就拦住了。
+         */
+        async close(key, opts = {}) {
+            clearTimeout(saveTimers.get(key));
+            clearTimeout(resolveTimers.get(key));
+            clearTimeout(historyTimers.get(key));
+            const idx = this.tabs.findIndex((t) => t.key === key);
+            if (idx < 0)
+                return;
+            if (opts.save !== false) {
+                try {
+                    await this.flush(key);
+                }
+                catch {
+                    // 忽略保存错误，仍继续关闭
+                }
+            }
+            this.tabs.splice(idx, 1);
+            if (this.activeKey === key) {
+                const next = this.tabs[Math.min(idx, this.tabs.length - 1)];
+                this.activeKey = next?.key ?? '';
+            }
+            undoStacks.delete(key);
+            redoStacks.delete(key);
+            lastSnap.delete(key);
+            scrollPos.delete(key);
+            this.saveSession();
+            // 草稿列表要和页签保持一致：丢弃草稿后不补这一下，重启会把已丢弃的草稿又找回来
+            this.saveDrafts();
+        },
+        /** 丢弃未保存的改动直接关闭（不写盘）：供「未保存询问框」的「不保存」使用。 */
+        async closeDiscard(key) {
+            await this.close(key, { save: false });
+        },
+        /**
+         * 复制新建：把该请求整份深拷贝成一张**未落盘草稿**（名字加「副本」，分组沿用原请求），
+         * 走的是与「新建」同一条保存路径 —— Ctrl+S 或关闭时才问名称与分组，天然不会覆盖原请求。
+         * 返回新 tab 的 key（失败返回空串）。
+         */
+        duplicate(key) {
+            const src = this.tabs.find((t) => t.key === key);
+            if (!src)
+                return '';
+            // 必须用 JSON 往返深拷贝：src.request 是 Vue 响应式代理，structuredClone 会抛 DataCloneError
+            const copy = JSON.parse(JSON.stringify(src.request));
+            // 副本是「未落盘草稿」：uid 必须清空，否则它会被当成原请求（发送时按原 uid 登记，
+            // 取消原请求的在途发送、历史也记到原请求名下）。
+            copy.uid = '';
+            copy.name = src.request.name ? i18n.global.t('tab.duplicateName', { name: src.request.name }) : '';
+            // 原请求文件路径去掉最后一段 = 所属分组（根目录为空串）
+            const p = src.request.path ?? '';
+            const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+            return this.openDraft(copy, folder);
+        },
+        /**
+         * 请求被移出当前工作目录（跨目录移动）后，把它从标签与会话里摘掉。
+         *
+         * 为什么不能只关标签：会话是**按根**存在 localStorage 里的，非活动根的那份也会记着这个 uid；
+         * 恢复时虽然会跳过已不存在的 uid，但顺手清掉更干净（也避免历史会话越来越长）。
+         */
+        forgetRequest(uid) {
+            if (!uid)
+                return;
+            const tab = this.tabs.find((x) => x.uid === uid);
+            if (tab)
+                void this.close(tab.key, { save: false }); // 文件已不在这个根里，别再写盘
+            // 审核 L#8：saveSession 自 B19 起写 {uid,kind} 对象，旧数据是纯 string——比较须过 idOf，
+            // 否则跨根清理永久失配（残留 uid 靠恢复容错兜住）。
+            const idOf = (x) => (typeof x === 'string' ? x : x.uid);
+            const coll = useCollectionStore();
+            for (const r of coll.roots) {
+                try {
+                    const raw = localStorage.getItem(sessionKey(r.root));
+                    if (!raw)
+                        continue;
+                    const data = JSON.parse(raw);
+                    const uids = data.uids ?? [];
+                    if (!uids.some((x) => idOf(x) === uid))
+                        continue;
+                    localStorage.setItem(sessionKey(r.root), JSON.stringify({
+                        uids: uids.filter((x) => idOf(x) !== uid),
+                        activeUid: data.activeUid === uid ? '' : data.activeUid,
+                    }));
+                }
+                catch {
+                    // 忽略：会话清理失败不影响主流程
+                }
+            }
+        },
+        /**
+         * 切换工作目录（多根）：先把当前根的会话/草稿落盘，再切活动根并恢复目标根的会话。
+         *
+         * 必须统一走这里：标签是**按根分组**的（client.tabs.<root>），任何切根动作都要换一组标签；
+         * 之前只有「点根行」这条路径会换，点别根里的请求（ensureActive）只切了后端活动根，
+         * 结果是两个根的标签混在一起。
+         */
+        async switchRoot(root) {
+            const coll = useCollectionStore();
+            if (!root || root === coll.activeRoot)
+                return;
+            // 手动保存模式下：切换工作区不强制落盘，先询问未保存改动怎么处理（避免无提示写盘 + 假冲突）
+            const mode = await this.confirmLeaveUnsaved();
+            if (mode === 'cancel')
+                return;
+            await this.reset(mode === 'save');
+            await coll.setActive(root);
+            await this.restoreSession();
+        },
+        /**
+         * 切换工作区前的未保存改动确认：
+         *  - 开启了自动保存：改动本就已落盘，无需询问，直接全量 flush；
+         *  - 没有可保存的未保存页签（草稿/无 uid/已冲突）：正常切换；
+         *  - 手动保存且有未保存改动：弹窗三选 —— 保存并切换 / 放弃更改 / 取消。
+         */
+        async confirmLeaveUnsaved() {
+            const settings = useSettingsStore();
+            if (settings.autoSave)
+                return 'save';
+            // 只统计「可被 flush 保存」的已落盘页签（口径见 savableTabs getter），都不满足则无需询问。
+            const savable = this.savableTabs;
+            if (!savable.length)
+                return 'save';
+            return new Promise((resolve) => {
+                const d = dialog.warning({
+                    title: i18n.global.t('confirm.unsavedTitle'),
+                    content: i18n.global.t('confirm.unsavedSwitch', { n: savable.length }),
+                    positiveText: i18n.global.t('common.saveAndSwitch'),
+                    negativeText: i18n.global.t('common.discardChanges'),
+                    onPositiveClick: () => resolve('save'),
+                    onNegativeClick: () => resolve('discard'),
+                    onClose: () => resolve('cancel'),
+                    onMaskClick: () => resolve('cancel'),
+                });
+                // onMaskClick 返回 false 时断开「点遮罩关闭」可能会触发 onClose 二次 resolve；
+                // Promise 只取首次，无需额外处理。变量 d 仅用于保持引用，避免被 GC。
+                void d;
+            });
+        },
+        /**
+         * 关闭集合 / 切换集合时清空内存会话。
+         *  - flush=true（默认）：先落盘未保存改动（自动保存模式/手动显式「保存并切换」）；
+         *  - flush=false：放弃未保存的内存改动，直接清空（调用方已确认）。
+         * 现场与草稿已单独落 localStorage。
+         */
+        async reset(flush = true) {
+            if (flush)
+                await this.flushAll();
+            // 先把草稿落 localStorage 再清空：挂起的防抖保存会被下面的 clearTimeout 取消，
+            // 不补这一下就会丢掉「切换集合前最后一段草稿编辑」。
+            this.saveDrafts();
+            for (const t of this.tabs) {
+                clearTimeout(saveTimers.get(t.key));
+                clearTimeout(resolveTimers.get(t.key));
+                clearTimeout(historyTimers.get(t.key));
+            }
+            if (draftsTimer)
+                clearTimeout(draftsTimer);
+            this.tabs = [];
+            this.activeKey = '';
+            undoStacks.clear();
+            redoStacks.clear();
+            lastSnap.clear();
+            scrollPos.clear();
+        },
+        async deleteRequest(uid) {
+            await api.deleteRequest(uid);
+            const tab = this.tabs.find((t) => t.uid === uid);
+            // 不 save：文件刚被删除，flush 会把它写回来
+            if (tab)
+                await this.close(tab.key, { save: false });
+        },
+        /** 草稿编辑防抖落 localStorage（草稿没有磁盘副本，重启后靠它找回）。 */
+        scheduleDrafts() {
+            if (draftsTimer)
+                clearTimeout(draftsTimer);
+            draftsTimer = setTimeout(() => this.saveDrafts(), SAVE_DEBOUNCE);
+        },
+        /** 把所有未保存草稿写进 localStorage（没有草稿时清掉旧键）。 */
+        saveDrafts() {
+            const coll = useCollectionStore();
+            // 会话与草稿按**工作目录**存（不是集合 uid）：同一份集合的拷贝 uid 相同、路径不同
+            if (!coll.activeRoot)
+                return;
+            const drafts = this.tabs
+                .filter((t) => t.draft)
+                .map((t) => ({ request: t.request, folder: t.draftFolder }));
+            try {
+                if (drafts.length)
+                    localStorage.setItem(draftsKey(coll.activeRoot), JSON.stringify(drafts));
+                else
+                    localStorage.removeItem(draftsKey(coll.activeRoot));
+                clearLegacyKey('drafts', coll.uid);
+                this.draftsWarned = false;
+            }
+            catch {
+                // P2：localStorage 满 / 隐私模式下草稿写不进去 —— 不能静默（重启会丢草稿），提示一次
+                if (!this.draftsWarned) {
+                    this.draftsWarned = true;
+                    message.warning(i18n.global.t('tab.draftSaveFailed'));
+                }
+            }
+        },
+        /** 打开集合后恢复上次未保存的草稿（放最后，保持「草稿是最近打开的」直觉）。 */
+        restoreDrafts() {
+            const coll = useCollectionStore();
+            if (!coll.activeRoot)
+                return;
+            let raw = '';
+            try {
+                raw = localStorage.getItem(draftsKey(coll.activeRoot)) ?? '';
+                if (!raw)
+                    raw = legacyValue('drafts', coll.uid); // 旧版本按集合 uid 存，迁移一次
+            }
+            catch {
+                return;
+            }
+            if (!raw)
+                return;
+            let list;
+            try {
+                list = JSON.parse(raw);
+            }
+            catch {
+                return;
+            }
+            for (const d of list ?? []) {
+                if (d?.request)
+                    this.openDraft(d.request, d.folder ?? '');
+            }
+        },
+        /** 落盘 tab 现场（uid 列表 + 激活项）；草稿走 saveDrafts，不在这里重复。 */
+        saveSession() {
+            const coll = useCollectionStore();
+            if (!coll.activeRoot)
+                return;
+            const active = this.tabs.find((t) => t.key === this.activeKey);
+            const data = {
+                // B19：带 kind 保存（旧版本读出 string[] 时按 request 处理，向后兼容）
+                uids: this.tabs.filter((t) => !t.draft).map((t) => ({ uid: t.uid, kind: t.kind ?? 'request' })),
+                activeUid: active && !active.draft ? active.uid : '',
+            };
+            try {
+                localStorage.setItem(sessionKey(coll.activeRoot), JSON.stringify(data));
+                clearLegacyKey('tabs', coll.uid);
+            }
+            catch {
+                // localStorage 满/隐私模式：忽略，不影响使用
+            }
+            this.saveDrafts(); // 会话与草稿同进同出，避免关闭草稿后 localStorage 里残留
+        },
+        /** 打开集合后恢复上次的 tab 现场；已删除的 uid 自动跳过。 */
+        async restoreSession() {
+            const coll = useCollectionStore();
+            if (!coll.activeRoot)
+                return;
+            let raw = '';
+            try {
+                raw = localStorage.getItem(sessionKey(coll.activeRoot)) ?? '';
+                if (!raw)
+                    raw = legacyValue('tabs', coll.uid); // 旧版本按集合 uid 存，迁移一次
+            }
+            catch {
+                return;
+            }
+            if (!raw)
+                return;
+            let data;
+            try {
+                data = JSON.parse(raw);
+            }
+            catch {
+                return;
+            }
+            for (const it of data.uids ?? []) {
+                // 兼容旧格式：纯字符串 uid 视为请求
+                const uid = typeof it === 'string' ? it : it.uid;
+                const kind = typeof it === 'string' ? 'request' : it.kind ?? 'request';
+                if (!uid)
+                    continue;
+                try {
+                    if (kind === 'doc')
+                        await this.openDocTab(uid);
+                    else
+                        await this.openRequest(uid);
+                }
+                catch {
+                    // 条目已被删除：跳过，不阻断恢复
+                }
+            }
+            this.restoreDrafts();
+            if (data.activeUid) {
+                const tab = this.tabs.find((t) => t.uid === data.activeUid);
+                if (tab)
+                    this.setActive(tab.key);
+            }
+        },
+    },
+});

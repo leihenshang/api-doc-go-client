@@ -61,3 +61,32 @@ func TestGlobalVarResolvesAndEnvOverridesIt(t *testing.T) {
 		t.Fatalf("禁用的全局变量不应参与解析: %+v", vars)
 	}
 }
+
+// U1：变量面板要能读到全局变量（只读镜像）——门面必须把接口暴露出来。
+func TestListGlobalsExposesMirror(t *testing.T) {
+	core, _ := newTestApp(t)
+	c, err := core.requireCollection()
+	if err != nil {
+		t.Fatalf("取集合失败: %v", err)
+	}
+	if err := c.SaveGlobals([]collection.Var{
+		{UID: "g1", Name: "global_host", Value: "https://g.example.com", Enabled: true},
+		{UID: "g2", Name: "global_token", Value: "secret-value", Enabled: false, Secret: true},
+	}); err != nil {
+		t.Fatalf("写全局变量失败: %v", err)
+	}
+	got, err := core.ListGlobals()
+	if err != nil {
+		t.Fatalf("ListGlobals: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("应返回 2 条，实际 %+v", got)
+	}
+	// 落盘按名字排序：global_host 在前
+	if got[0].Name != "global_host" || got[0].Value != "https://g.example.com" {
+		t.Fatalf("条目内容不符: %+v", got[0])
+	}
+	if !got[1].Secret || got[1].Enabled {
+		t.Fatalf("secret/disabled 标记丢失: %+v", got[1])
+	}
+}

@@ -114,3 +114,15 @@ func (a *App) envVars(envName string) (map[string]string, error) {
 	}
 	return vars, nil
 }
+
+// ListGlobals 集合内缓存的全局变量（服务端 scope=3 的只读镜像）。
+//
+// 谁写它：同步引擎（syncengine/globalvar.go）；谁读它：变量面板只读展示。
+// 客户端不提供编辑入口 —— 全局变量由服务端管理员维护，本地改了也会被下一轮同步覆盖。
+func (a *App) ListGlobals() ([]collection.Var, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.ListGlobals()
+}

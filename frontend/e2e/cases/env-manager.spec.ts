@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { expect, test } from '../helpers/app'
 import { t } from '../helpers/i18n'
 import { openCollection } from '../helpers/ui'
@@ -49,4 +51,48 @@ test('[F1/F3] 环境下拉：新建的环境立刻可选、选中即切换；保
       }),
     )
     .toBe('env-2')
+})
+
+/**
+ * U1：全局变量（服务端 scope=3）在变量面板里只读展示。
+ *
+ * 真实来源是同步下发到集合根 `globals.yml`；这里直接写该文件模拟一次下发，
+ * 断言面板能看到条目、且敏感值打码（只读镜像不该把明文摊在面板里）。
+ */
+test('U1 全局变量：变量面板只读展示，敏感值打码', async ({ page, app }) => {
+  const dir = await app.newCollection('basic')
+  await openCollection(page, app)
+
+  writeFileSync(
+    path.join(dir, 'globals.yml'),
+    [
+      'globals:',
+      '  - uid: g1',
+      '    name: global_host',
+      '    value: https://global.example.com',
+      '    enabled: true',
+      '    secret: false',
+      '  - uid: g2',
+      '    name: global_token',
+      '    value: s3cret-value',
+      '    enabled: true',
+      '    secret: true',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+
+  await page.getByTestId('env.select').click()
+  await page.locator('.n-dropdown-option').filter({ hasText: t('env.manage') }).click()
+  const modal = page.locator('.n-modal').filter({ hasText: t('env.title') })
+  await expect(modal).toBeVisible()
+
+  const rows = page.getByTestId('env.globalRow')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('global_host')
+  await expect(rows.nth(0)).toContainText('https://global.example.com')
+  // 敏感值必须打码
+  await expect(rows.nth(1)).toContainText('global_token')
+  await expect(rows.nth(1)).toContainText('••••••')
+  await expect(rows.nth(1)).not.toContainText('s3cret-value')
 })

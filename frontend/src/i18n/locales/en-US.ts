@@ -233,6 +233,8 @@ export default {
     preview: 'Preview',
     // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
     urlPlaceholder: 'https://api.example.com/users',
+    statusDraft: 'Draft',
+    statusDeprecated: 'Deprecated',
     summaryPlaceholder: 'API summary: one line about what this endpoint does (optional)',
     summaryAdd: 'Add a summary…',
     // Local image upload for Markdown (lib/md-image.ts)
@@ -515,6 +517,7 @@ export default {
     fieldsClearConfirm: 'Clear all fields?',
     findInResponse: 'Find in response',
     save: 'Save response',
+    globalsHint: 'Global variables (from the server, read-only). Overridden by same-name variables in the current environment.',
     saveHint: 'Save into the collection examples/ directory',
     saveResponse: 'Save response example',
     exampleName: 'Example name',
