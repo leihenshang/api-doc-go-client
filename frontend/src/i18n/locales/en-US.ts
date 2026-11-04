@@ -848,6 +848,7 @@ export default {
   export: {
     markdown: 'Export Markdown',
     html: 'Export HTML',
+    openapi: 'OpenAPI 3.0',
     bundle: 'Export api-doc-go collection',
     saved: 'Exported to {path}',
   },

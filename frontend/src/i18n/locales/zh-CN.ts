@@ -852,6 +852,7 @@ export default {
   export: {
     markdown: '导出 Markdown',
     html: '导出 HTML',
+    openapi: 'OpenAPI 3.0',
     bundle: '导出 api-doc-go 集合',
     saved: '已导出到 {path}',
   },
