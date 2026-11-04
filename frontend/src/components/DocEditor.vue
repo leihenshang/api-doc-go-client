@@ -10,7 +10,7 @@ import { isDark } from '@/lib/theme'
 import type { DocTabDoc } from '@/stores/tabs'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ doc: DocTabDoc; readonly?: boolean }>()
@@ -27,6 +27,33 @@ const { locale } = useI18n()
 const readonly = computed(() => props.readonly ?? false)
 const mdLanguage = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 
+// 仅预览时工具栏只留「切换」按钮：否则预览态下点「加粗/插入表格」等仍在改正文，
+// 而用户看不到源码列，等于悄悄改内容。编辑态回到默认全量工具栏（undefined = 用组件默认值）。
+const previewOnly = ref(false)
+const toolbars = computed<import('md-editor-v3').ToolbarNames[] | undefined>(() =>
+  previewOnly.value ? ['previewOnly'] : undefined,
+)
+
+// md-editor 不对外 emit「预览态变化」（内部只有 eventBus 常量），这里用事件委托同步：
+// 点了「仅预览」按钮后，等编辑器把源码列收起，再按实际布局判定当前态。
+const rootRef = ref<HTMLElement | null>(null)
+
+function isPreviewMode(): boolean {
+  const src = rootRef.value?.querySelector<HTMLElement>('.md-editor-input-wrapper')
+  return !src || src.getBoundingClientRect().width === 0
+}
+
+function onEditorClick(ev: MouseEvent): void {
+  const el = ev.target as HTMLElement | null
+  const btn = el?.closest?.('.md-editor-toolbar-item')
+  if (!btn) return
+  if (!/仅预览|preview only/i.test(btn.getAttribute('title') ?? '')) return
+  // md-editor 在这一次点击里切换内部状态；等 DOM 落定再读，避免读到切换前的宽度
+  requestAnimationFrame(() => {
+    previewOnly.value = isPreviewMode()
+  })
+}
+
 /** 正文走 store：改一点就标脏，保存由页签统一调度（手动/快捷键一致）。 */
 function onContent(v: string): void {
   emit('update:doc', { ...props.doc, content: v })
@@ -40,7 +67,7 @@ function onSave(): void {
 </script>
 
 <template>
-  <div class="doc-editor">
+  <div ref="rootRef" class="doc-editor" @click.capture="onEditorClick">
     <div class="body edit">
       <md-editor
         :model-value="doc.content"
@@ -48,6 +75,7 @@ function onSave(): void {
         :theme="isDark ? 'dark' : 'light'"
         class="md-edit"
         :readonly="readonly"
+        :toolbars="toolbars"
         :on-upload-img="uploadMdImages"
         @update:model-value="onContent"
         @on-save="onSave"
