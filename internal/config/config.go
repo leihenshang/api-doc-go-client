@@ -152,7 +152,7 @@ func Default() Settings {
 		ResponseLayout:  LayoutRight,
 		ResponseSize:    defaultRespSize,
 		Theme:           ThemeLight,
-		MdEditorMode:    MdEditorSplit,
+		MdEditorMode:    MdEditorReadonly,
 		TrayCloseAction: TrayCloseAsk,
 		RestoreLimit:    defaultRestoreLimit,
 		MCP: MCPConfig{

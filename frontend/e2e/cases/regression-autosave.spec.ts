@@ -6,7 +6,7 @@ import { expect, test } from '../helpers/app'
 import { setAutoSave } from '../helpers/api'
 import { readCollectionFile } from '../helpers/fs'
 import { t } from '../helpers/i18n'
-import { openCollection, openRequest, openSettings, saveSettings, settleDetail } from '../helpers/ui'
+import { expandAllFolders, openCollection, openRequest, openSettings, saveSettings, settleDetail } from '../helpers/ui'
 
 
 async function editUrl(page: import('@playwright/test').Page, url: string) {
@@ -281,7 +281,10 @@ test('[E26] 文档页签：外部改动回填干净页签；脏页签标冲突�
   await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '旧正文' })
   await openCollection(page, app) // 重进页面让树看到新文档
 
+  await expandAllFolders(page)
   await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  // 文档默认只读预览：这些用例要编辑正文，先切到编辑态
+  await page.getByTestId('doc.toEdit').click()
   const editor = page.locator('.md-editor').first()
   await expect(editor).toContainText('旧正文')
   const file = path.join(dir, created.path)
@@ -323,7 +326,10 @@ test('[E26] 文档被外部删除：提示条提供「仍然保存」并重建�
   await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '待重建内容' })
   await openCollection(page, app)
 
+  await expandAllFolders(page)
   await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  // 文档默认只读预览：这些用例要编辑正文，先切到编辑态
+  await page.getByTestId('doc.toEdit').click()
   await expect(page.locator('.md-editor').first()).toContainText('待重建内容')
   // 等过 IPC SaveDoc 的自写忽略窗口，再模拟外部删除
   await page.waitForTimeout(1800)
@@ -357,7 +363,10 @@ test('[E26] 文档冲突时「仍然保存」：当前编辑覆盖外部版本',
   await app.ipc('SaveDoc', { uid: created.uid, name: '说明', path: created.path, content: '旧正文' })
   await openCollection(page, app)
 
+  await expandAllFolders(page)
   await page.getByTestId('tree.row').filter({ hasText: '说明' }).first().click()
+  // 文档默认只读预览：这些用例要编辑正文，先切到编辑态
+  await page.getByTestId('doc.toEdit').click()
   const editor = page.locator('.md-editor textarea, .md-editor .cm-content').first()
   await expect(page.locator('.md-editor').first()).toContainText('旧正文')
   await page.waitForTimeout(1800)

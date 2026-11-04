@@ -20,7 +20,7 @@ const DEFAULTS: Settings = {
   proxyUrl: '',
   autoSave: false,
   // Markdown 编辑器默认分屏（源码 + 预览）：与改动前的实际表现一致，不改变老用户观感。
-  mdEditorMode: 'split',
+  mdEditorMode: 'readonly',
   trayResident: false,
   trayCloseAction: 'ask',
   restoreLimit: 8,
