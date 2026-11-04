@@ -158,17 +158,10 @@ test('文档自动保存：保存期间的后续编辑不会误标为已保存',
 
 // 设置 → 界面 → 「Markdown 编辑器默认状态」：只读预览 / 分屏编辑。
 // 断言按实际渲染宽度量：previewOnly 下源码列宽为 0、预览列占满；切回后源码列恢复。
-test('Markdown 编辑器默认状态：只读预览生效且可临时切回分屏', async ({ page, app }) => {
+test('Markdown 文档：默认编辑态，工具栏「仅预览」可双向切换', async ({ page, app }) => {
   await app.newCollection('basic')
   await openCollection(page, app)
 
-  // ① 设置改为只读预览并保存
-  await openSettings(page)
-  await page.getByTestId('settings.mdEditorMode').click()
-  await page.locator('.n-base-select-option').filter({ hasText: t('settings.mdEditorReadonly') }).click()
-  await saveSettings(page)
-
-  // ② 新建文档 → 打开页签：应直接是预览态
   const group = treeRow(page, 'api')
   await group.hover()
   await group.getByTestId('tree.row.menu').click()
@@ -178,28 +171,27 @@ test('Markdown 编辑器默认状态：只读预览生效且可临时切回分�
   await treeRow(page, '只读文档').click()
   await expect(page.locator('.md-editor').first()).toBeVisible()
 
-  /** 当前是哪种态：只读预览只渲染 MdPreview，分屏编辑才有源码列。 */
+  /** 当前是哪种态：源码列存在 = 编辑态，不存在 = 仅预览。 */
   const mode = () =>
     page.evaluate(() => ({
       src: document.querySelectorAll('.md-editor-input-wrapper').length,
-      preview: document.querySelectorAll('.md-editor-preview, .md-preview').length,
+      srcW: [...document.querySelectorAll('.md-editor-input-wrapper')].reduce((n, e) => n + e.getBoundingClientRect().width, 0),
+      preview: document.querySelectorAll('.md-editor-preview-wrapper, .md-editor-preview, .md-preview').length,
     }))
 
-  await expect.poll(async () => (await mode()).src).toBe(0)
+  // ① 默认编辑态；顶部不再有自绘的编辑/预览按钮
+  await expect.poll(async () => (await mode()).srcW).toBeGreaterThan(0)
+  await expect(page.getByTestId('doc.toggleMode')).toHaveCount(0)
+
+  // ② 工具栏自带「仅预览」→ 源码列消失、预览仍在
+  const previewToggle = page.getByTitle('仅预览').first()
+  await previewToggle.click()
+  await expect.poll(async () => (await mode()).srcW).toBe(0)
   expect((await mode()).preview).toBeGreaterThan(0)
 
-  // ③ 页签内临时切回分屏：源码列出现、预览仍在
-  await page.getByTestId('doc.toggleMode').click()
-  await expect.poll(async () => (await mode()).src).toBe(1)
-  expect((await mode()).preview).toBeGreaterThan(0)
-
-  // ④ 切回只读预览仍生效（按钮是双向的）
-  await page.getByTestId('doc.toggleMode').click()
-  await expect.poll(async () => (await mode()).src).toBe(0)
-
-  // 设置是整个 run 共享的一份：改完必须复原，否则后续用例都在「只读预览」下跑
-  // （文档页签没有 .md-editor，相关断言会整片超时）
-  await patchSettings(app, { mdEditorMode: 'split' })
+  // ③ 再点一次回到编辑态（开关是双向的）
+  await previewToggle.click()
+  await expect.poll(async () => (await mode()).srcW).toBeGreaterThan(0)
 })
 
 // 接口说明（request.docs）的初始化同样跟随该设置：只读预览直接给渲染结果，「编辑」按钮可临时切回。

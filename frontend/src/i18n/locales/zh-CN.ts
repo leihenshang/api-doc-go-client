@@ -673,7 +673,7 @@ export default {
     uiScale: '界面缩放',
     responseLayout: '响应区位置',
     mdEditorMode: 'Markdown 编辑器默认状态',
-    mdEditorModeHint: '打开文档或接口说明时的呈现方式：只读预览直接看渲染结果，分屏编辑左源码右预览；编辑器内仍可临时切换，不改这里的设置',
+    mdEditorModeHint: '接口说明的默认呈现方式：只读预览直接看渲染结果，分屏编辑左源码右预览；文档页签固定为编辑态，可用工具栏的「仅预览」临时切换',
     mdEditorSplit: '分屏编辑',
     mdEditorReadonly: '只读预览',
     autoSave: '自动保存',
