@@ -100,12 +100,13 @@ if (-not $DevOnly) {
 }
 if (-not $ProdOnly) {
     Info "构建开发版 exe"
-    wails build -platform windows/amd64 -clean -tags devbuild -o api-doc-client-dev.exe
+    # 注意：这里不能带 -clean —— -clean 会清空 build\bin，把上一步的正式版删掉。
+    wails build -platform windows/amd64 -tags devbuild -o api-doc-client-dev.exe
     if ($LASTEXITCODE -ne 0) { Fail "开发版构建失败" }
 }
 if ($Nsis) {
     Info "构建 NSIS 安装包"
-    wails build -platform windows/amd64 -clean -nsis -o api-doc-client.exe
+    wails build -platform windows/amd64 -nsis -o api-doc-client.exe
     if ($LASTEXITCODE -ne 0) { Fail "NSIS 安装包构建失败（先跑 wails doctor 看缺什么）" }
 }
 
@@ -121,9 +122,12 @@ Write-Host ''
 Info '产物：'
 foreach ($f in $exes) {
     $vi = $f.VersionInfo
-    $ver = if ($vi.FileVersion) { $vi.FileVersion } else { '(无资源版本)' }
+    # wails 写的是固定资源字段，FileVersion 可能为空；ProductVersion 更可靠
+    $ver = if ($vi.ProductVersion) { $vi.ProductVersion } elseif ($vi.FileVersion) { $vi.FileVersion } else { '(无资源版本)' }
     Write-Host ("  {0,-46} {1,7:N1} MB  版本 {2}" -f $f.Name, ($f.Length / 1MB), $ver)
 }
 Write-Host ''
-Info "安装包（如有）：双击 $Bin\api-doc-client-amd64-installer.exe"
-Info "免安装：直接运行 $Bin\api-doc-client.exe（需 WebView2 Runtime）"
+if ($Nsis) { Info "安装包：双击 $Bin\api-doc-client-amd64-installer.exe" }
+$run = Join-Path $Bin 'api-doc-client.exe'
+if (-not (Test-Path $run)) { $run = Join-Path $Bin 'api-doc-client-dev.exe' }
+Info "免安装：直接运行 $run（需 WebView2 Runtime）"
