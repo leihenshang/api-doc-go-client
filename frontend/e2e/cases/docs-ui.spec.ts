@@ -158,7 +158,7 @@ test('文档自动保存：保存期间的后续编辑不会误标为已保存',
 
 // 设置 → 界面 → 「Markdown 编辑器默认状态」：只读预览 / 分屏编辑。
 // 断言按实际渲染宽度量：previewOnly 下源码列宽为 0、预览列占满；切回后源码列恢复。
-test('Markdown 文档：默认编辑态，工具栏「仅预览」可双向切换', async ({ page, app }) => {
+test('Markdown 文档：默认编辑态，工具栏「只读预览」按钮可双向切换', async ({ page, app }) => {
   await app.newCollection('basic')
   await openCollection(page, app)
 
@@ -169,33 +169,22 @@ test('Markdown 文档：默认编辑态，工具栏「仅预览」可双向切�
   await page.locator('.n-modal input').first().fill('只读文档')
   await page.getByRole('button', { name: t('common.confirm') }).click()
   await treeRow(page, '只读文档').click()
-  await expect(page.locator('.md-editor').first()).toBeVisible()
 
-  /** 当前是哪种态：源码列存在 = 编辑态，不存在 = 仅预览。 */
-  const mode = () =>
-    page.evaluate(() => ({
-      src: document.querySelectorAll('.md-editor-input-wrapper').length,
-      srcW: [...document.querySelectorAll('.md-editor-input-wrapper')].reduce((n, e) => n + e.getBoundingClientRect().width, 0),
-      preview: document.querySelectorAll('.md-editor-preview-wrapper, .md-editor-preview, .md-preview').length,
-      tools: document.querySelectorAll('.md-editor-toolbar-item').length,
-    }))
-
-  // ① 默认编辑态；顶部不再有自绘的编辑/预览按钮
-  await expect.poll(async () => (await mode()).srcW).toBeGreaterThan(0)
+  // ① 默认编辑态：编辑器在、工具栏入口在；顶部不再有自绘的编辑/预览按钮
+  await expect(page.locator('.md-edit')).toHaveCount(1)
+  await expect(page.getByTestId('doc.toPreview')).toBeVisible()
   await expect(page.getByTestId('doc.toggleMode')).toHaveCount(0)
 
-  // ② 工具栏自带「仅预览」→ 源码列消失、预览仍在
-  const previewToggle = page.getByTitle('仅预览').first()
-  await previewToggle.click()
-  await expect.poll(async () => (await mode()).srcW).toBe(0)
-  expect((await mode()).preview).toBeGreaterThan(0)
-  // 预览态工具栏必须只剩切换按钮：否则「加粗/插入表格」会悄悄改正文
-  await expect.poll(async () => (await mode()).tools).toBe(1)
+  // ② 切只读预览：编辑器整个卸载（MdPreview 纯渲染，预览下不可能误改正文）
+  await page.getByTestId('doc.toPreview').click()
+  await expect(page.locator('.md-edit')).toHaveCount(0)
+  await expect(page.locator('.md-preview').first()).toBeVisible()
+  await expect(page.getByTestId('doc.toEdit')).toBeVisible()
 
-  // ③ 再点一次回到编辑态（开关是双向的），工具栏恢复全量
-  await previewToggle.click()
-  await expect.poll(async () => (await mode()).srcW).toBeGreaterThan(0)
-  await expect.poll(async () => (await mode()).tools).toBeGreaterThan(5)
+  // ③ 点「编辑」回到编辑态
+  await page.getByTestId('doc.toEdit').click()
+  await expect(page.locator('.md-edit')).toHaveCount(1)
+  await expect(page.getByTestId('doc.toPreview')).toBeVisible()
 })
 
 // 接口说明（request.docs）的初始化同样跟随该设置：只读预览直接给渲染结果，「编辑」按钮可临时切回。
