@@ -6,7 +6,7 @@
   产物统一落在 build\bin\：
     api-doc-client.exe                正式版
     api-doc-client-dev.exe            开发版（标题栏带 dev 标记）
-    api-doc-client-amd64-installer.exe  NSIS 安装包（-Nsis 时）
+    api-doc-client-amd64-installer.exe  NSIS 安装包（默认生成；需装 NSIS，-NoNsis 可跳过）
 
   版本号只认一个来源（与 scripts/check-versions.sh 同口径）：
     wails.json info.productVersion = frontend/package.json version = frontend/src/lib/version.ts APP_VERSION
@@ -19,7 +19,9 @@
 #>
 param(
     [string]$Version = "",
+    # 默认就出安装包（直说不带参数 = 全量产物）；装了 NSIS 才会真正生成，没装则跳过并提示。
     [switch]$Nsis,
+    [switch]$NoNsis,
     [switch]$SkipFrontend,
     [switch]$DevOnly,
     [switch]$ProdOnly
@@ -28,6 +30,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+
+# 默认出安装包；-NoNsis 才跳过。没装 makensis 时退化为只出 exe（不整体失败）。
+$NsisExe = (Get-Command 'makensis' -ErrorAction SilentlyContinue).Source
+if (-not $NsisExe) {
+    # NSIS 安装后不一定进 PATH，按默认安装位置兜底找一次
+    foreach ($p in @("$env:ProgramFiles\NSIS\makensis.exe", "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+        if ($p -and (Test-Path $p)) { $NsisExe = $p; $env:PATH = "$(Split-Path $p);$env:PATH"; break }
+    }
+}
+$HaveNsis = [bool]$NsisExe
+$WantNsis = (-not $NoNsis) -or $Nsis
 
 # 发布构建必须用 go.mod 里锁定的 share 版本，不能受开发者本地 go.work 影响：
 # 本地 share 副本落后时，会出现「Linux 能编、Windows 报字段不存在」这种诡异差异。
@@ -72,8 +85,9 @@ foreach ($t in @('go', 'node', 'npm', 'wails')) {
         Fail "缺少 $t：$(if ($t -eq 'wails') { 'go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1' } else { '请先安装并加入 PATH' })"
     }
 }
-if ($Nsis -and -not (Get-Command 'makensis' -ErrorAction SilentlyContinue)) {
-    Fail "缺少 makensis（NSIS）：winget install NSIS.NSIS，或去掉 -Nsis 只出 exe"
+if ($WantNsis -and -not $HaveNsis) {
+    Write-Host "[build-win] 未检测到 makensis（NSIS）：本次只出 exe，跳过安装包。" -ForegroundColor Yellow
+    Write-Host "            需要安装包请先装 NSIS：winget install NSIS.NSIS（装完重开终端让 PATH 生效）" -ForegroundColor Yellow
 }
 Info ("go=" + (go version))
 Info ("wails=" + (wails version 2>$null | Select-Object -First 1))
@@ -104,7 +118,7 @@ if (-not $ProdOnly) {
     wails build -platform windows/amd64 -tags devbuild -o api-doc-client-dev.exe
     if ($LASTEXITCODE -ne 0) { Fail "开发版构建失败" }
 }
-if ($Nsis) {
+if ($WantNsis -and $HaveNsis) {
     Info "构建 NSIS 安装包"
     wails build -platform windows/amd64 -nsis -o api-doc-client.exe
     if ($LASTEXITCODE -ne 0) { Fail "NSIS 安装包构建失败（先跑 wails doctor 看缺什么）" }
@@ -127,7 +141,8 @@ foreach ($f in $exes) {
     Write-Host ("  {0,-46} {1,7:N1} MB  版本 {2}" -f $f.Name, ($f.Length / 1MB), $ver)
 }
 Write-Host ''
-if ($Nsis) { Info "安装包：双击 $Bin\api-doc-client-amd64-installer.exe" }
+$installer = Join-Path $Bin 'api-doc-client-amd64-installer.exe'
+if (Test-Path $installer) { Info "安装包：双击 $installer" }
 $run = Join-Path $Bin 'api-doc-client.exe'
 if (-not (Test-Path $run)) { $run = Join-Path $Bin 'api-doc-client-dev.exe' }
 Info "免安装：直接运行 $run（需 WebView2 Runtime）"
