@@ -37,6 +37,12 @@ Write-Host "[build-win] GOWORK=off（使用 go.mod 锁定的 api-doc-go-share �
 function Info($m) { Write-Host "[build-win] $m" -ForegroundColor Cyan }
 function Fail($m) { Write-Host "[build-win] $m" -ForegroundColor Red; exit 1 }
 
+# PowerShell 5.1 的 Set-Content 默认写 ANSI，会把这些文件里的中文注释写乱码；
+# 统一用 UTF-8 无 BOM 写回（Go / Node 都按 UTF-8 读）。
+function Write-Utf8($Path, $Text) {
+    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 # ---- 1) 版本号：改或校验 ----------------------------------------------------
 $WailsJson = Join-Path $Root 'wails.json'
 $PkgJson = Join-Path $Root 'frontend/package.json'
@@ -48,9 +54,9 @@ $tv = [regex]::Match((Get-Content $VerTs -Raw), "APP_VERSION\s*=\s*'v?([^']+)'")
 
 if ($Version) {
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "版本号须形如 0.2.0" }
-    (Get-Content $WailsJson -Raw) -replace '("productVersion"\s*:\s*")[^"]*(")', "`$1$Version`$2" | Set-Content $WailsJson -NoNewline
-    (Get-Content $PkgJson -Raw) -replace '("version"\s*:\s*")[^"]*(")', "`$1$Version`$2" | Set-Content $PkgJson -NoNewline
-    (Get-Content $VerTs -Raw) -replace "(APP_VERSION\s*=\s*')v?[^']*(')", "`$1v$Version`$2" | Set-Content $VerTs -NoNewline
+    Write-Utf8 $WailsJson ((Get-Content $WailsJson -Raw) -replace '("productVersion"\s*:\s*")[^"]*(")', "`$1$Version`$2")
+    Write-Utf8 $PkgJson ((Get-Content $PkgJson -Raw) -replace '("version"\s*:\s*")[^"]*(")', "`$1$Version`$2")
+    Write-Utf8 $VerTs ((Get-Content $VerTs -Raw) -replace "(APP_VERSION\s*=\s*')v?[^']*(')", "`$1v$Version`$2")
     $wv = $Version; $pv = $Version; $tv = $Version
     Info "已把三处版本号改为 $Version（记得提交）"
 }
@@ -88,23 +94,28 @@ New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 
 if (-not $DevOnly) {
     Info "构建正式版 exe"
-    wails build -platform windows/amd64 -clean -o api-doc-client
+    # -o 必须显式带 .exe：Wails 在 Windows 上不会自动补后缀，否则产物叫 api-doc-client（无扩展名）
+    wails build -platform windows/amd64 -clean -o api-doc-client.exe
     if ($LASTEXITCODE -ne 0) { Fail "正式版构建失败" }
 }
 if (-not $ProdOnly) {
     Info "构建开发版 exe"
-    wails build -platform windows/amd64 -clean -tags devbuild -o api-doc-client-dev
+    wails build -platform windows/amd64 -clean -tags devbuild -o api-doc-client-dev.exe
     if ($LASTEXITCODE -ne 0) { Fail "开发版构建失败" }
 }
 if ($Nsis) {
     Info "构建 NSIS 安装包"
-    wails build -platform windows/amd64 -clean -nsis
+    wails build -platform windows/amd64 -clean -nsis -o api-doc-client.exe
     if ($LASTEXITCODE -ne 0) { Fail "NSIS 安装包构建失败（先跑 wails doctor 看缺什么）" }
 }
 
 # ---- 5) 产物校验 ------------------------------------------------------------
-$exes = Get-ChildItem $Bin -Filter *.exe | Sort-Object LastWriteTime
-if (-not $exes) { Fail "构建结束但 build\bin 下没有 exe" }
+# Wails 的 -o 不带 .exe 时产物就没有后缀（照样能跑）；这里两种都收，
+# 避免「明明构建成功，脚本却说没有 exe」。
+$exes = Get-ChildItem $Bin -File |
+    Where-Object { $_.Extension -eq '.exe' -or ($_.Extension -eq '' -and $_.Length -gt 1MB) } |
+    Sort-Object LastWriteTime
+if (-not $exes) { Fail "构建结束但 build\bin 下没有可执行文件（wails 的 -o 是否写到了别处？）" }
 
 Write-Host ''
 Info '产物：'
