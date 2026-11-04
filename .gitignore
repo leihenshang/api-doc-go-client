@@ -36,3 +36,7 @@ frontend/playwright-report/
 # vue-tsc -b（build 模式）会往源码目录输出 .vue.js 编译产物，禁止入库
 frontend/src/**/*.vue.js
 frontend/src/*.vue.js
+
+# vue-tsc -b（build 模式）会往源码目录输出 .js 编译产物与 tsbuildinfo，禁止入库
+frontend/src/**/*.js
+frontend/tsconfig.tsbuildinfo
