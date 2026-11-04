@@ -393,6 +393,11 @@ func (e *Engine) applyUpsert(it Item, rep *Report) error {
 		e.snapshotVarIfDirty(rep, it.UID, p)
 		return e.applyVariable(it.UID, p)
 	}
+	// U6：集合级公共参数（项目级单例，服务端权威）。它不是「集合里的一个条目」，
+	// 不进索引、也不产生冲突副本，直接覆盖本地清单里的 defaults 段。
+	if it.Type == "defaults" {
+		return e.applyDefaults(p)
+	}
 
 	// 拉取前若本地已 dirty，先把本地版本存进 .conflicts/（R8 / §4.4）。
 	// it.Payload 即服务端版本快照，一并存入副本，应用内解决冲突时才能「采用服务器版本」。

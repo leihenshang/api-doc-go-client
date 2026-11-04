@@ -15,6 +15,8 @@ import type {
   Env,
   EnvVar,
   FieldMapping,
+  ShareApi,
+  ShareBundle,
   GrpcDefault,
   GrpcFieldInfo,
   GrpcProtoFile,
@@ -309,6 +311,11 @@ export const api = {
     call<string[]>('MoveFolderToCollection', srcRoot, uid, destRoot, destParent),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
+  /** 只读打开分享链接（免登录）：拉取项目/分组/接口/文档快照，不落盘 */
+  fetchShare: (shareUrl: string) => call<ShareBundle>('FetchShare', shareUrl),
+  /** 用分享里的接口发一次请求（不写本地历史） */
+  sendSharedRequest: (a: ShareApi, envName: string) =>
+    call<SendResult>('SendSharedRequest', a, envName).then(normalizeSend),
   /** 全局变量（服务端 scope=3 的只读镜像，落在集合根 globals.yml） */
   listGlobals: () => call<EnvVar[]>('ListGlobals'),
   /** 给环境改名：两个文件（主文件 + secrets）一起搬，旧文件进 .trash */
