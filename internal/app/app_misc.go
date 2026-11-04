@@ -778,8 +778,11 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 	case "apidocgo":
 		// 集合整包（目录 + 请求 + 文档），可被其他 api-doc-go 客户端直接导入
 		raw, err = c.ExportBundle()
+	case "openapi":
+		// OpenAPI 3.0 JSON：可被服务端「导入 OpenAPI」或任意 OpenAPI 工具消费
+		raw, err = c.ExportOpenAPI()
 	default:
-		return "", fmt.Errorf("不支持的导出格式：%s（仅支持 markdown / html / apidocgo）", format)
+		return "", fmt.Errorf("不支持的导出格式：%s（仅支持 markdown / html / apidocgo / openapi）", format)
 	}
 	if err != nil {
 		return "", err
@@ -792,6 +795,8 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 			name = c.Name + ".html"
 		case strings.EqualFold(format, "apidocgo"):
 			name = c.Name + ".apidocgo.json"
+		case strings.EqualFold(format, "openapi"):
+			name = c.Name + ".openapi.json"
 		}
 	}
 	var path string

@@ -475,9 +475,10 @@ function onCommand(key: string): void {
 }
 
 // ---- 导出（H10：Markdown / HTML；item 26：集合整包 apidocgo）----
-async function exportDoc(format: 'markdown' | 'html' | 'apidocgo'): Promise<void> {
+async function exportDoc(format: 'markdown' | 'html' | 'apidocgo' | 'openapi'): Promise<void> {
   try {
-    const ext = format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : '.md'
+    const ext =
+      format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : format === 'openapi' ? '.openapi.json' : '.md'
     const path = await api.exportDoc(format, coll.name + ext)
     if (path) message.success(t('export.saved', { path }))
   } catch (e) {

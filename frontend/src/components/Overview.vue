@@ -24,7 +24,7 @@ const emit = defineEmits<{
   'new-request': []
   run: []
   import: []
-  export: [format: 'markdown' | 'html' | 'apidocgo']
+  export: [format: 'markdown' | 'html' | 'apidocgo' | 'openapi']
   mock: []
   'collection-defaults': []
   'field-mappings': []
@@ -121,6 +121,13 @@ const shortcuts = computed(() => [
             <n-icon :component="ArchiveOutline" :size="14" />
           </template>
           {{ t('export.bundle') }}
+        </n-button>
+        <!-- OpenAPI 3.0：可被服务端「导入 OpenAPI」或任意 OpenAPI 工具消费 -->
+        <n-button class="act" size="medium" secondary data-testid="overview.exportOpenapi" @click="emit('export', 'openapi')">
+          <template #icon>
+            <n-icon :component="CloudUploadOutline" :size="14" />
+          </template>
+          {{ t('export.openapi') }}
         </n-button>
         <n-button class="act" size="medium" secondary data-testid="overview.defaults"
           @click="emit('collection-defaults')">
