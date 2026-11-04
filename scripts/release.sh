@@ -19,16 +19,16 @@ echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "版本号须形如 
 # 三处对齐：wails.json → deb 包版本；package.json → npm 生态；TitleBar → 界面显示
 sed -i -E "s/(\"productVersion\"[[:space:]]*:[[:space:]]*\")[^\"]*/\1$VER/" wails.json
 sed -i -E "0,/^[[:space:]]*\"version\"[[:space:]]*:/s/(\"version\"[[:space:]]*:[[:space:]]*\")[^\"]*/\1$VER/" frontend/package.json
-sed -i -E "s/(const VERSION = ')v?[^']*/\1v$VER/" frontend/src/components/TitleBar.vue
+sed -i -E "s/(APP_VERSION = ')v?[^']*/\1v$VER/" frontend/src/lib/version.ts
 
 if [ "${2:-}" = "--dry-run" ]; then
   git --no-pager diff --stat
-  git checkout -- wails.json frontend/package.json frontend/src/components/TitleBar.vue
+  git checkout -- wails.json frontend/package.json frontend/src/lib/version.ts
   exit 0
 fi
 
 bash scripts/check-versions.sh
-git add wails.json frontend/package.json frontend/src/components/TitleBar.vue
+git add wails.json frontend/package.json frontend/src/lib/version.ts
 git commit -q -m "chore(release): v$VER"
 git tag -a "v$VER" -m "v$VER"
 git push origin master

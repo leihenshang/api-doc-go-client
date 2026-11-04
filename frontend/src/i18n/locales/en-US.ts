@@ -654,6 +654,13 @@ export default {
   },
   settings: {
     title: 'Settings',
+    version: 'Version',
+    checkUpdate: 'Check for updates',
+    upToDate: 'Already up to date ({v})',
+    updateTitle: 'Update available',
+    updateTip: 'The package is saved to Downloads, then handed to your system installer for confirmation.',
+    updateNow: 'Download and install',
+    updateHandedOff: 'Package downloaded and handed to the system installer',
     appearance: 'Appearance',
     language: 'Language',
     theme: 'Theme',

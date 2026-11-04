@@ -658,6 +658,13 @@ export default {
   },
   settings: {
     title: '全局设置',
+    version: '版本',
+    checkUpdate: '检查更新',
+    upToDate: '已是最新版本（{v}）',
+    updateTitle: '发现新版本',
+    updateTip: '安装包会下载到「下载」目录，随后交给系统安装器确认安装。',
+    updateNow: '下载并安装',
+    updateHandedOff: '安装包已下载，已交给系统安装器',
     appearance: '界面',
     language: '语言',
     theme: '主题',

@@ -857,3 +857,14 @@ export interface ShareDoc {
   content: string
   icon: string
 }
+
+/** 检查更新结果（对齐 Go 侧 app.UpdateInfo）。 */
+export interface UpdateInfo {
+  current: string
+  latest: string
+  available: boolean
+  url: string
+  notes: string
+  assetUrl: string
+  assetName: string
+}

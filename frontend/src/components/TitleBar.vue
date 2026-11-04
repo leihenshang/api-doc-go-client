@@ -8,6 +8,7 @@
 // 行为与系统标题栏一致（占满工作区，不盖任务栏）。
 import { api, hasWailsRuntime, windowCtl } from '@/lib/ipc'
 import { requestQuit } from '@/lib/quit'
+import { APP_VERSION } from '@/lib/version'
 import { CloseOutline, CopyOutline, MoonOutline, RemoveOutline, SquareOutline, SunnyOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -29,8 +30,8 @@ api.isDev().then((v) => {
   if (v) document.title = 'api-doc-go-dev'
 }).catch(() => { })
 
-// 与 frontend/package.json 的 version 保持一致（不引 JSON 模块，避免额外构建配置）
-const VERSION = 'v0.1.9'
+// 版本号来自 lib/version.ts（唯一来源，由 scripts/release.sh 统一写入）
+const VERSION = APP_VERSION
 
 /** 最大化后窗口铺满屏幕，外壳圆角要归零（见 styles/base.css 的 :root[data-window='max']）。 */
 const RESIZE_SYNC_MS = 180

@@ -3,7 +3,9 @@
 import McpAuditPanel from '@/components/McpAuditPanel.vue'
 import SettingHint from '@/components/SettingHint.vue'
 import { api } from '@/lib/ipc'
+import { message } from '@/lib/notice'
 import { ThemeDark, ThemeLight, type ThemeMode } from '@/lib/theme'
+import { APP_VERSION } from '@/lib/version'
 import { useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { MCPGrant, MCPStatus, Settings } from '@/types'
@@ -17,6 +19,48 @@ const emit = defineEmits<{ 'update:show': [v: boolean]; saved: [] }>()
 const { t, locale } = useI18n()
 const settings = useSettingsStore()
 const coll = useCollectionStore()
+
+// ---- 检查更新 ----
+// 版本号由 lib/version.ts 提供（与 wails.json / package.json 三门禁一致），
+// 这里把它传给 Go 侧做比较，避免「界面显示的版本」和「比较用的版本」不是同一个。
+const checking = ref(false)
+const updateInfo = ref<import('@/types').UpdateInfo | null>(null)
+const showUpdate = ref(false)
+const downloading = ref(false)
+
+async function doCheckUpdate(): Promise<void> {
+  checking.value = true
+  try {
+    const r = await api.checkUpdate(APP_VERSION)
+    if (!r.available) {
+      message.success(t('settings.upToDate', { v: r.current || APP_VERSION }))
+      return
+    }
+    updateInfo.value = r
+    showUpdate.value = true
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    checking.value = false
+  }
+}
+
+/** 下载并交给系统安装器（deb 需要 root，由系统弹确认，客户端不静默提权）。 */
+async function doUpdate(): Promise<void> {
+  const u = updateInfo.value
+  if (!u) return
+  downloading.value = true
+  try {
+    const p = await api.downloadUpdate(u.assetUrl, u.assetName)
+    await api.installUpdate(p)
+    message.success(t('settings.updateHandedOff'))
+    showUpdate.value = false
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    downloading.value = false
+  }
+}
 
 const form = ref<Settings>({ ...settings.form })
 const error = ref('')
@@ -386,6 +430,27 @@ function close(): void {
 </script>
 
 <template>
+  <!-- 更新提示：独立弹窗，叠在设置页之上 -->
+  <n-modal v-model:show="showUpdate" preset="card" :title="t('settings.updateTitle')" style="width: 520px"
+    data-testid="settings.updateDialog">
+    <p class="up-line">
+      <span class="up-cur">{{ updateInfo?.current }}</span>
+      <span class="up-arrow">→</span>
+      <b class="up-new">{{ updateInfo?.latest }}</b>
+    </p>
+    <pre v-if="updateInfo?.notes" class="up-notes">{{ updateInfo.notes }}</pre>
+    <p class="up-tip">{{ t('settings.updateTip') }}</p>
+    <template #footer>
+      <div class="up-foot">
+        <n-button size="small" @click="showUpdate = false">{{ t('common.cancel') }}</n-button>
+        <n-button type="primary" size="small" :loading="downloading" :disabled="!updateInfo?.assetUrl"
+          data-testid="settings.updateNow" @click="doUpdate">
+          {{ t('settings.updateNow') }}
+        </n-button>
+      </div>
+    </template>
+  </n-modal>
+
   <n-modal :show="show" preset="card" :title="t('settings.title')" style="width: 760px" @update:show="close">
     <div class="cols">
       <!-- 左侧竖向菜单：按设置类型分区，右侧只显示当前分区。
@@ -441,6 +506,14 @@ function close(): void {
             </span>
             <n-switch class="ck" size="small" :value="form.autoSave" data-testid="settings.autoSave"
               @update:value="(v: boolean) => { form.autoSave = v; void applyNow() }" />
+          </div>
+          <div class="row">
+            <span class="lbl">{{ t('settings.version') }}</span>
+            <span class="ver-line">
+              <span class="ver">{{ APP_VERSION }}</span>
+              <n-button size="tiny" secondary :loading="checking" data-testid="settings.checkUpdate"
+                @click="doCheckUpdate">{{ t('settings.checkUpdate') }}</n-button>
+            </span>
           </div>
           <!-- 关闭窗口的行为：已把原「驻留托盘」+「关闭窗口时」合并为单个下拉。
                是否常驻托盘由该值派生（Go 侧：非「直接退出」即常驻），不再单独设开关。 -->
@@ -845,6 +918,58 @@ function close(): void {
 
 .ck {
   flex: 0 0 auto;
+}
+
+.ver-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ver {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.up-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.up-cur {
+  color: var(--app-muted);
+}
+
+.up-new {
+  color: var(--app-accent);
+}
+
+.up-notes {
+  margin: 0 0 10px;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--app-surface-3);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.up-tip {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.up-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .row {
