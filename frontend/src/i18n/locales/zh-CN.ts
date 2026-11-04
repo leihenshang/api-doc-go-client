@@ -233,6 +233,8 @@ export default {
     preview: '预览',
     // 新建请求的 URL 不再提示 / 预填 {{host}}：示例给真实地址（变量支持由输入框高亮与悬停提示承担）
     urlPlaceholder: 'https://api.example.com/users',
+    statusDraft: '草稿',
+    statusDeprecated: '已废弃',
     summaryPlaceholder: '接口概述：一句话说明这个接口做什么（选填）',
     summaryAdd: '添加概要…',
     // Markdown 本地图片上传（lib/md-image.ts）
@@ -516,6 +518,7 @@ export default {
     fieldsClearConfirm: '确认清空全部字段？',
     findInResponse: '在响应中查找',
     save: '保存响应',
+    globalsHint: '全局变量（来自服务端，只读）：优先级低于当前环境的同名变量，改这里不会生效',
     saveHint: '存入集合 examples/ 目录',
     saveResponse: '保存响应示例',
     exampleName: '示例名称',

@@ -124,6 +124,17 @@ function touch(): void {
 }
 
 /** API 概述：默认只读展示，点文本或「编辑」切换成输入框；提交时写回并标脏。 */
+/** 生命周期徽标：只在「草稿 / 已废弃」时出现（已发布是常态，不必占位）。 */
+const lifecycle = computed(() => {
+  const st = props.tab.request.status ?? 0
+  const ver = (props.tab.request.version ?? '').trim()
+  if (st === 3) {
+    return { text: ver ? `${t('editor.statusDeprecated')} · ${ver}` : t('editor.statusDeprecated'), cls: 'dep' }
+  }
+  if (st === 1) return { text: t('editor.statusDraft'), cls: 'draft' }
+  return null
+})
+
 const summaryEditing = ref(false)
 const summaryDraft = ref('')
 const summaryInput = ref<InstanceType<typeof NInput> | null>(null)
@@ -370,6 +381,10 @@ async function copyExport(): Promise<void> {
         @click="cancel">
         {{ t('editor.cancelSend') }}
       </button>
+      <!-- 服务端标记的生命周期：客户端只读展示，避免「Web 标废弃、客户端照常调」 -->
+      <span v-if="lifecycle" class="lifecycle" :class="lifecycle.cls" data-testid="req.lifecycle">
+        {{ lifecycle.text }}
+      </span>
     </div>
 
     <!-- 导入 CURL：解析后覆盖当前请求的所有信息 -->
@@ -410,6 +425,25 @@ async function copyExport(): Promise<void> {
 }
 
 /* 概述：只读态是一行小字（比输入框小一号 12px），编辑态才显示输入框 */
+.lifecycle {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.lifecycle.dep {
+  color: var(--app-danger);
+  background: var(--app-danger-tint);
+}
+
+.lifecycle.draft {
+  color: var(--app-warn);
+  background: var(--app-warn-tint);
+}
+
 .req-summary {
   display: flex;
   align-items: center;

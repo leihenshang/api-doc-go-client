@@ -13,6 +13,7 @@ import type {
   CookieInfo,
   DocEntry,
   Env,
+  EnvVar,
   FieldMapping,
   GrpcDefault,
   GrpcFieldInfo,
@@ -308,6 +309,8 @@ export const api = {
     call<string[]>('MoveFolderToCollection', srcRoot, uid, destRoot, destParent),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
+  /** 全局变量（服务端 scope=3 的只读镜像，落在集合根 globals.yml） */
+  listGlobals: () => call<EnvVar[]>('ListGlobals'),
   /** 给环境改名：两个文件（主文件 + secrets）一起搬，旧文件进 .trash */
   renameEnv: (oldName: string, newName: string) => call<null>('RenameEnv', oldName, newName, ''),
   deleteEnv: (name: string) => call<null>('DeleteEnv', name),

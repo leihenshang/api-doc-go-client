@@ -204,6 +204,13 @@ export interface RequestDoc {
   asserts?: ScriptAssert[] | null
   /** 响应文档（返回类型/返回参数/响应样例），随文件持久化并经同步与 Web 端往返 */
   respDoc?: ResponseDoc | null
+  /**
+   * 生命周期（服务端权威，客户端只读）：1=草稿 2=已发布 3=已废弃。
+   * 落盘在请求文件的 meta 段，随同步下发；客户端不回推。
+   */
+  status?: number
+  version?: string
+  deprecatedAt?: string
 }
 
 /** 一条接口的响应侧文档（对齐 Go collection.ResponseDoc）。 */
