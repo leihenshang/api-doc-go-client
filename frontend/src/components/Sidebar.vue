@@ -987,7 +987,28 @@ function onRowClick(root: string, node: TreeNode, ev: MouseEvent): void {
   const el = ev.target as HTMLElement | null
   if (el?.closest('.act, .caret, .n-dropdown, .n-input, input, textarea, select, a')) return
   if (node.type === 'doc') {
-    void tabs.openDocTab(node.uid)
+    // 与请求分支同口径：多根并存时先把点击的那一根切成活动根。
+    // 少了这一步，点非活动根里的文档会在「当前活动根」里按 uid 查找 —— 找不到就静默失败
+    // （表现为「树上有、点了右侧没反应」，MCP 写入后尤其容易踩到）。
+    const open = (): void => {
+      void tabs.openDocTab(node.uid).catch(async (e: unknown) => {
+        // 外部工具（MCP / 脚本）刚写完时，目录与索引可能还没对齐（Windows 上文件事件尤其晚）：
+        // 刷新这一根再重试一次，能自愈掉大部分「树上有、点不开」。
+        try {
+          await coll.reloadRoot(coll.activeRoot)
+          await tabs.openDocTab(node.uid)
+          return
+        } catch {
+          const m = e instanceof Error ? e.message : String(e)
+          message.error(`打开文档失败：${m}（若集合刚被外部工具改过，先刷新集合树再试）`)
+        }
+      })
+    }
+    if (root && root !== coll.activeRoot) {
+      void ensureActive(root).then(open)
+      return
+    }
+    open()
     return
   }
   if (node.type === 'folder') {
