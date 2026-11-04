@@ -600,6 +600,9 @@ function onHotkey(e: KeyboardEvent): void {
 
 onMounted(() => {
   const settingsReady = settings.load()
+  // 后端可能已经打开了集合（命令行 -dir / 同进程内重载页面）：把状态同步过来，
+  // 否则会出现「Go 侧已开、界面还停在欢迎页」。没有打开的根时 loadRoots 保持 ready=false。
+  void coll.loadRoots()
   window.addEventListener('keydown', onHotkey)
   // 侧栏宽：应用上次拖过的值（夹取到当前 [标题宽, 50%]），窗口缩放时同步夹取
   clampSideWidth()

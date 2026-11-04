@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 W=$(grep -oP '"productVersion"\s*:\s*"\K[^"]+' wails.json | head -1)
 P=$(grep -oP '^  "version"\s*:\s*"\K[^"]+' frontend/package.json | head -1)
-T=$(grep -oP "const VERSION = '\K[^']+" frontend/src/components/TitleBar.vue | sed 's/^v//')
+T=$(grep -oP "APP_VERSION = '\K[^']+" frontend/src/lib/version.ts | sed 's/^v//')
 
 fail=0
 [ "$W" = "$P" ] || { echo "wails.json=$W 与 package.json=$P 不一致" >&2; fail=1; }

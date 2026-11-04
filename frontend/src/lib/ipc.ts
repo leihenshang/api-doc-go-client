@@ -9,6 +9,7 @@ import type {
   CollectionSummary,
   CollectionDefaults,
   ConflictDetail,
+  UpdateInfo,
   ConflictItem,
   CookieInfo,
   DocEntry,
@@ -311,6 +312,12 @@ export const api = {
     call<string[]>('MoveFolderToCollection', srcRoot, uid, destRoot, destParent),
   deleteRequest: (uid: string) => call<null>('DeleteRequest', uid),
   saveEnv: (env: Env) => call<null>('SaveEnv', env),
+  /** 检查更新：查 GitHub 最新 Release，与当前版本比较 */
+  checkUpdate: (current: string) => call<UpdateInfo>('CheckUpdate', current),
+  /** 下载安装包到 ~/Downloads，返回本地路径 */
+  downloadUpdate: (assetUrl: string, name: string) => call<string>('DownloadUpdate', assetUrl, name),
+  /** 交给系统安装器打开 deb（需要用户确认提权） */
+  installUpdate: (path: string) => call<null>('InstallUpdate', path),
   /** 只读打开分享链接（免登录）：拉取项目/分组/接口/文档快照，不落盘 */
   fetchShare: (shareUrl: string) => call<ShareBundle>('FetchShare', shareUrl),
   /** 用分享里的接口发一次请求（不写本地历史） */
