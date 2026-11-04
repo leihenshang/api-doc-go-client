@@ -85,8 +85,49 @@ ShowInstDetails show
 Var PrevLoc      # 旧版安装目录（HKLM/HKCU 的 InstallLocation）
 Var Wv2Pv        # WebView2 运行时版本（注册表 pv 值），空 = 未就绪
 
+# 通用「客户端仍在运行」检测（W-5）：与「有没有旧版可卸载」无关。
+# 之前的检查只挂在「注册表里存在旧版 InstallLocation + uninstall.exe」这一支上，
+# 首次安装、或旧版由 wails 默认安装器装过（键名/位置不同）时完全不会拦 ——
+# 客户端在跑就覆盖文件，安装器报错或留下半装状态。
+# 检测方式用 tasklist 的 CSV 输出：有该进程时首字符是引号；
+# 没有时是 "INFO:" / "信息:" 之类的本地化纯文本 —— 这样中英文系统都成立。
+Function checkAppRunning
+  nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq ${PRODUCT_EXECUTABLE}" /FO CSV /NH'
+  Pop $0
+  Pop $1
+  StrCpy $2 $1 1
+  # 注意：tasklist 的两个分支里，只有「确实存在该进程」时输出才以引号开头
+  # （CSV 行形如 "api-doc-client.exe","1234",...），否则是本地化的 INFO 文本。
+  ${If} $2 == '"'
+    # 命中：继续往下（提示 / 结束进程）
+  ${Else}
+    Return
+  ${EndIf}
+
+  # 静默安装（/S，脚本/CI）：不打断，直接结束进程
+  ${If} ${Silent}
+    DetailPrint "检测到客户端正在运行，静默安装：结束进程 ${PRODUCT_EXECUTABLE}"
+    nsExec::ExecToLog '"$WINDIR\System32\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /F'
+    Pop $0
+    Sleep 600
+    Return
+  ${EndIf}
+
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION '检测到客户端正在运行。$\n$\n安装需要替换程序文件。建议先保存未提交的修改并退出客户端，再点“取消”重新运行安装。$\n$\n选“确定”将由安装程序直接关闭客户端（未保存的修改会丢失）。' IDOK kill_app
+  Abort
+
+  kill_app:
+  DetailPrint "用户确认：结束运行中的客户端 ${PRODUCT_EXECUTABLE}"
+  nsExec::ExecToLog '"$WINDIR\System32\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /F'
+  Pop $0
+  Sleep 600
+FunctionEnd
+
 Function .onInit
    !insertmacro wails.checkArchitecture
+
+   # 先拦「客户端在跑」：后面无论是升级卸载还是首次覆盖，都需要文件不再被占用
+   Call checkAppRunning
 
    SetRegView 64
    !ifdef WAILS_INSTALL_SCOPE
