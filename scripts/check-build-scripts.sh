@@ -26,7 +26,15 @@ if [ "${n_clean:-0}" -gt 1 ]; then
   bad "build-win.ps1 有 $n_clean 处 -clean（只允许第一条构建带，否则后一条清掉前一条产物）"
 fi
 
-# 5) 版本一致性脚本的口径：前端版本看 lib/version.ts
+# 5) 安装器必须无条件检查「客户端是否在运行」：
+#    只挂在「有旧版可卸载」分支上时，首次安装 / 旧版注册表缺失都不会拦，
+#    结果就是覆盖被占用的 exe 失败（W-5 踩过）。
+Nsi=build/windows/installer/installer.nsi
+grep -q 'Function checkAppRunning' "$Nsi" || bad "installer.nsi 缺少 checkAppRunning（安装时不检测运行中的客户端）"
+grep -q 'Call checkAppRunning' "$Nsi" || bad "installer.nsi 的 .onInit 未调用 checkAppRunning"
+grep -q 'tasklist' "$Nsi" || bad "installer.nsi 未用 tasklist 检测进程"
+
+# 6) 版本一致性脚本的口径：前端版本看 lib/version.ts
 grep -q 'lib/version.ts' scripts/check-versions.sh || bad "check-versions.sh 未读取 frontend/src/lib/version.ts"
 
 if [ "$fail" != 0 ]; then
