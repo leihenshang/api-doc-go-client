@@ -144,6 +144,8 @@ export function ListEnvs():Promise<Array<collection.Env>>;
 
 export function ListFieldMappings():Promise<Array<collection.FieldMapping>>;
 
+export function ListGlobals():Promise<Array<collection.EnvVar>>;
+
 export function ListGrpcProtos():Promise<Array<collection.ProtoFileInfo>>;
 
 export function ListHistory(arg1:number):Promise<Array<history.Entry>>;

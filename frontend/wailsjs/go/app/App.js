@@ -258,6 +258,10 @@ export function ListFieldMappings() {
   return window['go']['app']['App']['ListFieldMappings']();
 }
 
+export function ListGlobals() {
+  return window['go']['app']['App']['ListGlobals']();
+}
+
 export function ListGrpcProtos() {
   return window['go']['app']['App']['ListGrpcProtos']();
 }

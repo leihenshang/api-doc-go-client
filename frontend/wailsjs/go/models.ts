@@ -1917,6 +1917,7 @@ export namespace syncengine {
 	    projectId: number;
 	    mode: string;
 	    cursor: number;
+	    globalCursor?: number;
 	    tokenEnc?: string;
 	    exampleHashes?: Record<string, string>;
 	    docHashes?: Record<string, string>;
@@ -1936,6 +1937,7 @@ export namespace syncengine {
 	        this.projectId = source["projectId"];
 	        this.mode = source["mode"];
 	        this.cursor = source["cursor"];
+	        this.globalCursor = source["globalCursor"];
 	        this.tokenEnc = source["tokenEnc"];
 	        this.exampleHashes = source["exampleHashes"];
 	        this.docHashes = source["docHashes"];
