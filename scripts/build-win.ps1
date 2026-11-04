@@ -29,6 +29,11 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+# 发布构建必须用 go.mod 里锁定的 share 版本，不能受开发者本地 go.work 影响：
+# 本地 share 副本落后时，会出现「Linux 能编、Windows 报字段不存在」这种诡异差异。
+$env:GOWORK = 'off'
+Write-Host "[build-win] GOWORK=off（使用 go.mod 锁定的 api-doc-go-share 版本）" -ForegroundColor DarkGray
+
 function Info($m) { Write-Host "[build-win] $m" -ForegroundColor Cyan }
 function Fail($m) { Write-Host "[build-win] $m" -ForegroundColor Red; exit 1 }
 

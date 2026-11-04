@@ -11,6 +11,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# 发布构建用 go.mod 锁定的 share 版本，忽略 go.work（本地副本落后时能编过才怪）
+export GOWORK=off
+
 DEV=""
 FRONT=1
 for a in "$@"; do
