@@ -64,7 +64,7 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			core.Startup(ctx)
 			if d := *dir; d != "" {
-				info, err := core.OpenCollection(d)
+				info, err := core.InitCollection(d)
 				log.Printf("[startup] -dir=%s err=%v", d, err)
 				if err == nil && info != nil {
 					if roots, e := core.ListCollections(); e == nil {

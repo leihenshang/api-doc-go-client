@@ -192,7 +192,7 @@ function rootOfDir(dir: string): string {
  * 打开一个工作目录：追加为新的根并置为活动根，然后恢复该根的标签会话。
  * （后端 OpenCollection 已经是「追加 + 幂等」，同一目录重复打开只会切成活动根。）
  */
-async function openCollection(dir: string): Promise<void> {
+async function openCollection(dir: string, create = false): Promise<void> {
   if (!dir) {
     try {
       dir = await api.pickDirectory()
@@ -209,7 +209,9 @@ async function openCollection(dir: string): Promise<void> {
   if (mode === 'cancel') return
   await tabs.reset(mode === 'save')
   try {
-    await coll.open(dir)
+    // 「新建集合」是明确的创建意图，直接初始化；「打开」才需要确认。
+    if (create) await api.initCollection(dir)
+    else await coll.open(dir)
     // 打开集合时恢复 tab 现场，但同样不让 activeUid 把根自动展开：集合树默认收起，展开态由记忆决定
     coll.restoring = true
     try {
@@ -221,28 +223,9 @@ async function openCollection(dir: string): Promise<void> {
     void refreshSyncStatus()
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    // 目录里有内容但没有 opencollection.yml：先问用户，确认后再初始化并重新打开。
+    // 缺 opencollection.yml（含空目录）：弹居中确认框，确认后才初始化并载入。
     if (msg.includes('尚未初始化')) {
-      const ok = window.confirm(
-        `该目录不是本项目创建的集合（缺少 opencollection.yml）。\n\n` +
-        `初始化后，目录里已有的 .yml 请求文件会被识别为本项目的接口。\n\n` +
-        `目录：${dir}\n\n是否初始化并载入？`,
-      )
-      if (!ok) return
-      try {
-        await api.initCollection(dir)
-        await coll.open(dir)
-        coll.restoring = true
-        try {
-          await tabs.restoreSession()
-        } finally {
-          await nextTick()
-          coll.restoring = false
-        }
-        void refreshSyncStatus()
-      } catch (err) {
-        message.error(err instanceof Error ? err.message : String(err))
-      }
+      needsInitDir.value = dir
       return
     }
     message.error(msg)
@@ -698,6 +681,39 @@ onBeforeUnmount(() => {
   if (mcpTimer) clearInterval(mcpTimer)
 })
 
+// ---- 集合初始化确认（缺 opencollection.yml，含空目录）----
+/** 待确认初始化的目录；非空时弹窗显示。 */
+const needsInitDir = ref('')
+const needsInitBusy = ref(false)
+
+function cancelNeedsInit(): void {
+  needsInitDir.value = ''
+}
+
+/** 用户确认：补清单 → 打开 → 恢复会话。取消则什么都不做（不写盘、不进最近）。 */
+async function confirmNeedsInit(): Promise<void> {
+  const dir = needsInitDir.value
+  if (!dir) return
+  needsInitBusy.value = true
+  try {
+    await api.initCollection(dir)
+    await coll.open(dir)
+    needsInitDir.value = ''
+    coll.restoring = true
+    try {
+      await tabs.restoreSession()
+    } finally {
+      await nextTick()
+      coll.restoring = false
+    }
+    void refreshSyncStatus()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    needsInitBusy.value = false
+  }
+}
+
 // ---- 同步状态（状态栏）----
 async function refreshSyncStatus(): Promise<void> {
   if (!coll.ready) return
@@ -902,7 +918,7 @@ watch(
                 @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
                 @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
                 @new-doc="newDocAt" @import-curl="openCurl" @sync="openSyncSettings()" @sync-root="syncRootNow"
-                @open-collection="openCollection('')" @create-collection="openCollection" />
+                @open-collection="openCollection('')" @create-collection="(d: string) => openCollection(d, true)" />
             </aside>
 
             <!-- 侧栏拖宽手柄：夹在 [标题自然宽, 页面 50%] 之间，松手记入 localStorage -->
@@ -996,6 +1012,19 @@ watch(
       <curl-import-dialog v-model:show="showCurl" :folder="curlFolder" @imported="onCurlImported" />
 
       <!-- 未保存的新建请求：关闭时（可丢弃）或 Ctrl+S 时（只保存）在这里问名称与分组 -->
+      <!-- 集合初始化确认：缺 opencollection.yml（含空目录）时先问，取消则不载入 -->
+      <n-modal :show="needsInitDir !== ''" preset="card" :title="t('welcome.needsInitTitle')" style="width: 480px"
+        :mask-closable="false" data-testid="welcome.needsInitDialog" @update:show="(v: boolean) => { if (!v) cancelNeedsInit() }">
+        <p class="needs-init-text">{{ t('welcome.needsInitContent', { dir: needsInitDir }) }}</p>
+        <template #footer>
+          <div class="needs-init-foot">
+            <n-button size="small" :disabled="needsInitBusy" @click="cancelNeedsInit">{{ t('common.cancel') }}</n-button>
+            <n-button type="primary" size="small" :loading="needsInitBusy" data-testid="welcome.needsInitOk"
+              @click="confirmNeedsInit">{{ t('welcome.needsInitOk') }}</n-button>
+          </div>
+        </template>
+      </n-modal>
+
       <n-modal :show="draftTab !== null" preset="card" :title="t('prompt.saveDraftTitle')" style="width: 460px"
         @update:show="(v: boolean) => (v ? undefined : closeDraftDialog())">
         <div @keydown.enter="onDraftEnter">
