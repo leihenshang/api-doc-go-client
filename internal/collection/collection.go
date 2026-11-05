@@ -136,8 +136,10 @@ func open(dir string, force bool) (*Collection, error) {
 
 	c := &Collection{Dir: abs}
 	mPath := filepath.Join(abs, "opencollection.yml")
+	// 缺清单一律要确认 —— 空目录也一样（用户可能选错了目录，静默建集合会留下无主文件）。
+	// 明确要「新建集合」的入口（Init / 命令行 -dir）走 force=true，不受此限。
 	if !force {
-		if _, err := os.Stat(mPath); os.IsNotExist(err) && hasForeignContent(abs) {
+		if _, err := os.Stat(mPath); os.IsNotExist(err) {
 			return nil, ErrNeedsInit
 		}
 	}

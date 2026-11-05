@@ -49,7 +49,7 @@ func main() {
 	// 与桌面端一致：浏览器调试态也注入内嵌 MCP 服务（设置里启用后即可用）
 	core.SetMCPBackend(mcpsrv.NewBackend(log.New(os.Stderr, "mcp ", log.LstdFlags)))
 	core.SetHeadlessDir(*dir)
-	if _, err := core.OpenCollection(*dir); err != nil {
+	if _, err := core.InitCollection(*dir); err != nil {
 		log.Fatal(err)
 	}
 

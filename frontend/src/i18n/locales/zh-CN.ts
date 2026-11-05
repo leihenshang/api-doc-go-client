@@ -44,6 +44,9 @@ export default {
     restoreFailed: '部分工作目录恢复失败（已跳过）：{msg}',
     restoreTruncated:
       '已恢复 {n} 个工作目录，另有 {m} 个未恢复（启动恢复上限可在设置里调整）；可从工具条「最近打开」补开。',
+    needsInitTitle: '初始化集合目录',
+    needsInitContent: '该目录还不是本项目的集合（缺少 opencollection.yml）。初始化后，目录里已有的 .yml 请求文件会被识别为本项目的接口。目录：{dir}',
+    needsInitOk: '初始化并载入',
   },
   toolbar: {
     toggleSide: '切换侧边栏',

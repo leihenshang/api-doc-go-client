@@ -1,18 +1,23 @@
 # api-doc-go-client 更新日志
 
 dev:
-当前版本 0.1.9-dev
+当前版本 0.1.10-dev
 prod:
 当前版本 0.1.9
 
 > 版本口径：`prod` 与 `wails.json` 的 `info.productVersion` 一致（发布时抬升）；
 > `dev` 为开发线版本，每新增一条日期条目 patch +1。维护规则见 `AGENTS.md`。
 
+## 2026-11-05  0.1.10-dev
+
+- 修复**请求头 / 查询参数的启用状态在同步后丢失**：服务端行结构新增 `enabled`（缺键 = 启用，只在停用时写 `false`），客户端推送时带上本地启停状态、拉取时按行还原。此前一律按启用处理，Web 上勾掉的行同步回客户端又变回启用；旧载荷（没有该键）行为不变。
+
 ## 2026-11-04  0.1.9-dev
 
 - 新增**只读打开分享链接**（命令面板 →「打开分享链接」）：粘贴 `http://host/share/<token>` 即可浏览接口与文档，不落盘、不建集合、不参与同步；支持一键复制 cURL 与直接发送（走客户端发送链路，但不写本地历史）。
 - 新增**集合级公共参数同步**：Web 项目概览「公共参数」里配置的公共请求头/认证（`project.defaults`，服务端权威），客户端同步后落到本地清单，发送时在「请求自己没有配置」时套用；服务端清空时本地镜像同步清空。
 - 打开集合增加初始化确认：目录里已有内容但没有 `opencollection.yml` 时，先询问是否初始化（提示「既有 .yml 会被识别为接口」），取消则不载入；空目录与已初始化的集合行为不变。
+- 空目录同样走初始化确认（选错目录不会静默建集合）；提示改为居中弹窗（原来的 window.confirm 贴在窗口顶部）。
 - 无集合也能进主界面：没有任何已打开的根时，自动创建并使用配置目录下的 `default-collection`，新建请求直接保存到那里，不再先挡一层欢迎页。
 - 配套：share 依赖升到 **v0.15.2**（`syncapi.Payload` 增加 `defaults`）。
 - 修复 **UI 体检发现的问题**：标题栏版本号恒为 `v0.0.1`；设置页「自动保存」checkbox 未选中态只剩 1px 细线；分享弹窗固定 1000px 过宽、空态只有一行灰字。
@@ -30,7 +35,7 @@ prod:
 ## 2026-11-03  0.1.7
 
 - 修复**文档名同步双向丢失**：客户端推送时发 `name`、服务端按 `title` 落库与下发，导致 Web 端文档标题为空、客户端从服务端拉到的文档变成「未命名文档」（文件名也随之丢失）。现在推送与下发都同时带 `name`/`title`，两端读取都是「`name` 优先、`title` 兜底」，新旧版本客户端/服务端互通。
-- 修复单轮同步报告里 **api 冲突不计入 `conflicts`**：冲突副本与「采用服务端版本」的覆盖行为本就正确（状态栏按 `.conflicts/` 统计也正常），但报告/日志数字恒为 0，脚本按报告判断会漏报冲突；现按条去重计数。
+- 修复单轮同步报告里 **api 冲突不计入 `conflicts`**：冲突副本与「采用服务器版本」的覆盖行为本就正确（状态栏按 `.conflicts/` 统计也正常），但报告/日志数字恒为 0，脚本按报告判断会漏报冲突；现按条去重计数。
 - 服务端配套：Web 新建/更新接口与文档的返回体补上本次 `last_change_id`（此前恒为 0，调用方据此计算 `base_rev` 会失真）。
 - 修复**标签栏右键菜单在关闭动画期间点击丢失**：naive-ui 的 `:show=false` 是带过渡的隐藏，淡出那约 200ms 内旧浮层 DOM 仍在、还能接住点击，而组件里记录的选中目标已清空——表现为「刚执行过一次菜单操作、马上再右键并点选项，点了没反应」。改用 `v-if` 让浮层立即卸载；e2e `[A7]`（tab 右键菜单）此前一直由此失败，现已通过。
 - 同步链路补齐三类服务端元数据（此前两端不一致，详见《两端功能对齐整改清单》）：
@@ -43,127 +48,8 @@ prod:
 ## 2026-11-02  0.1.6-dev
 
 - 设置 → 界面新增「Markdown 编辑器默认状态」：**只读预览**（打开直接看渲染结果）或**分屏编辑**（左源码右预览，默认，与改动前一致）。
-- 该设置决定文档页签与接口说明（Docs）**打开时**的呈现；编辑器内仍可随时用「编辑 / 查看」按钮临时切换，切换不回写设置。已打开的页签保持原态，新开的页签才按新设置。
+- 该设置决定文档页签与接口说明（Docs）**打开时**的呈现；编辑器内仍可随时用「编辑 / 查看」按钮临时切换，切换不回写设置。已打开的页签保持原态，新开的页签才按该设置。
 - 只读预览的正文与容器边框之间补上留白（上下 16px、左右 22px），不再贴着边框。
 - 设置页排版统一：标签列固定宽度不换行、控件列左对齐；说明文字改为标签后面的气泡图标（悬停显示），不再在下方单独占一行；代理输入框加宽到 220px。
-- 说明气泡按重要程度分级着色：灰色 = 纯说明（Markdown 编辑器默认状态）、黄色 = 注意（自动保存、关闭窗口时、当前打开目录会占用监听）、红色 = 风险（忽略 SSL 证书校验）、绿色 = 安心提示（恢复目录数上限不会丢目录）；气泡内左侧同色竖条（图标同色），底色统一深色以保证可读。
+- 说明气泡按重要程度分级着色：灰色 = 纯说明（Markdown 编辑器默认状态）、黄色 = 注意（自动保存、关闭窗口时、当前打开目录会占用监听）、红色 = 风险（忽略 SSL 证书校验）、绿色 = 安心提示（恢复目录数上限不会丢目录）；气泡内左侧同色竖条（图标同色），底色统一深色以保证可读性。
 - MCP 设置分区同步：端口输入框改为固定 96px 且不被左侧地址框挤压（此前只写 `width`，被 flex 压到约 60px，5 位端口只显示得出前 3 位）；「启用的工具组」「风险操作前要求确认」的说明文字改为标签/勾选框后的气泡（后者为黄色注意级）。
-- 说明气泡推广到其它面板：gRPC 选项（连接模式 / 跳过证书校验 / 超时 / 压缩）、gRPC Schema 的「导入搜索路径」、同步面板的「项目编号」都改成标签后的气泡，不再在控件右侧占一行（`SettingHint` 支持按面板指定气泡宽度，`data-testid` 改为通用的 `hint.icon`）。
-- 常驻可见的重要提示加左侧色条分级（不收进气泡，保证必须看到）：MCP 授权弹窗的「参数已脱敏」声明、同步面板的加密口令说明为红色；「生成字段表格」确认框里「覆盖会丢说明」的提醒为黄色。
-- 修复气泡提示在浅色主题下白底白字（naive-ui 的 Tooltip 复用了 Popover 的面板底色，字色仍是默认白）。
-
-## 2026-10-30  0.1.5-dev
-
-- `list_tools` 新增 `modeTotal`（当前 `mode` 匹配数），`total` 的描述改为「服务启动时注册总数（受只读模式与工具组影响，不受 mode/filter 影响）」：此前 `total` 容易被读成「当前 mode 的工具数」，`returned < total` 会被误判成「还有没取完的」。
-- `method` 的白名单与 description 一致性由测试锁定（`TestMethodDescriptionMatchesWhitelist`）：SDK 的 `jsonschema` tag 不支持 enum，加 enum 必须手写整份 InputSchema，因此改为用测试防两处漂移。
-- MCP 工具精简（39 → 35，破坏性契约变更）：`get_request_details` 并入 `get_request_detail`（`uid` 单个 / `uids` 批量 1–10），`get_docs` 并入 `get_doc`，`prune_empty_modules` 并入 `delete_module`（`pruneEmpty=true`），`get_doc_template` 迁移为 MCP resource `apidoc://doc-template`。旧工具名不再注册。
-- MCP 设置新增「启用的工具组」（集合与接口 / 文档 / 环境变量 / 响应示例 / 发送请求）：不用的组不注册，减少 AI 工具列表体积；工具总览、工作目录与项目列表（`session`）恒开。
-- MCP 工具描述瘦身（9507 → 1713 字，预算上限 3200），`list_tools` 只回一句话摘要（Brief），不再把长描述重新塞回上下文；只读模式下 `list_tools(mode=write)` 会明确说明「写工具未注册」。
-- 修复：`rename_project` / `delete_project` 的 `project` 改为真正必填（此前可省略并回落到默认项目，与参数说明矛盾）；入参校验错误的多参数列表不再夹带 `["..."]` 标点；显式 `fileName` 非法时直接报错（不再静默改成 `untitled`）；`import_collection` 的格式/内容错误统一回 `[INVALID]`，不再误判为 `[IO]`。
-- MCP 新增 `update_requests` 批量更新（工具数 35 → 36）：一次改 1–10 个接口（每条 `uid` + 要改的字段），单条失败不影响其它并逐条回报，`dryRun` 只校验；统一补说明/改字段不再需要 N 次往返与 N 次授权弹窗。
-- 文档工具可按 `path` 定位：`get_doc` / `update_doc` / `delete_doc` 的 `uid` 与 `path` 二选一（`docs/guide.md` 或 `docs/guide` 都认），找不到时列出候选；`update_doc` 新增 `append`（末尾追加）与 `insertAfter`（在某段后插入，anchor 必须唯一）并加 `section=content|meta` 守卫，长文档不必整篇重传。
-- `update_request` 新增 `paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert`：按名合并（同名整行替换、没有则追加），「加一行 header / 补一个字段」不必先抄全表。
-- AI 可发现性：`get_request_detail` 的「相关文档条目」补 `uid`、`docs` 段补回写入口；`search_docs` 新增 `includeHash`；`list_tools` 末尾附「常见任务 → 工具」速查与被关闭的工具组提示；请求体有类型但字段表为空时给出提醒。
-- MCP 入参更宽容：`enabled` / `required` 不再是必填（不传分别按 true / false），「加一行 header / 补一个字段」不再需要编造这两个值；`paramsUpsert` / `headersUpsert` / `bodyFieldsUpsert` 改为按字段合并（只改说明不会清掉类型、示例值）。
-- 请求也能按 `path` 定位：`get_request_detail` / `update_request` / `delete_request` 的 `uid` 与 `path` 二选一（`api/users.yml` 或 `api/users`），找不到时列出候选（请求与模块的 `[NOT_FOUND]` 都覆盖）。
-- `update_doc.insertAfter` 新增 `occurrence`：长文档里同一小标题出现多次时，可指定第 N 处精确插入（不传仍要求唯一，防误插）。
-- `update_requests` 精简 `items`（去掉批量场景极少用的 `respDoc` / `auth` / `settings`），失败条目新增稳定 `code` 字段；批量写的审计摘要记录 uid 列表，排查时能看出改了哪几条。
-- MCP 入参进一步收敛：`update_request` 的三个 `*Upsert` 字段合并为 `patch: {params, headers, bodyFields}`（行级合并语义不变，与整表字段互斥），`update_requests.items[]` 同步支持 `patch`。
-- 批量与路径一致性：`delete_requests` 支持 `path` 与整批 `confirm`，失败条目带 `index`/`code`；`get_doc` 批量新增 `paths`（与 `uids` 二选一）。
-- 长文档插入：`update_doc.insertAfter` 新增 `anchorHeading`，按 Markdown 标题定位到该小节末尾（下一个同级或更高级标题之前）。
-- 候选清单按相关度排序：`[NOT_FOUND]` 附带的请求/模块候选优先展示前缀或目录命中的项。
-- 新增两个静态 resource：`apidoc://error-codes`（错误码表）、`apidoc://collection-format`（集合结构契约）；`list_tools` 的速查同步提示。
-- 批量更新共享一次项目解析，并在开始/结束各刷新一次索引（减少逐条的重复 resolve）。
-- 批量侧与单条对齐：`update_requests.items[]` 支持 `path`（成功条目回填解析后的 uid，失败条目带 `path`），`delete_requests.items[]` 支持逐条 `confirmName`（同名请求多时防「删错那一个」）。
-- `update_doc.insertAfter.anchorHeading` 改为归一化匹配（全角空格、连续空格、闭合式 `## 标题 ##`、尾部 `*` 都认），找不到时列出文内标题，避免盲重试。
-- `patch` 显式传空数组现在等于清空该表（此前被静默忽略），与 `params: []` 的整表覆盖语义一致；只传部分行时仍按名合并，不会丢其它行。
-- 写路径改用 `diskHashOf` 按文件直取 hash，批量更新不再逐条全树扫索引；`get_request_detail` 仍用索引 hash，保持「读后被外部改动」的冲突检测口径。
-- 错误路径的候选清单不再强制 `ReloadCollection`（索引由写路径与 fsnotify 维护），连续 not found 不会反复全树重建。
-- 静态 resource（doc-template / error-codes / collection-format）标题与描述补英文副标题，正文仍为中文 Markdown。
-- 字段说明合计压缩约 3,500 字；新增 `TestToolsListBudget` 锁定 `tools/list` 真实体积（当前 66.7KB，上限 70KB）。
-- 修复：`section` 的取值说明三处不一致（`update_requests.items` 漏 `response`、错误提示漏 `docs`）；`section` 非法值与越界字段统一回 `[INVALID]`（此前落到 `[INTERNAL]`）。
-- `get_doc` / `get_request_detail` 补 `outputSchema`：此前成功态返回 `structuredContent` 却未声明；schema 覆盖单条/批量两种形态，`required` 只留 `project`。
-- `search_requests` 的 `weakMatch` 去掉 `omitempty`，结构化输出里恒出现（此前精确命中时字段缺失，调用方读不到 `false`）。
-- `list_tools` 的 `total` / `returned` 补 schema 说明：`total` 是当前模式注册的工具总数，不受 `filter` 影响。
-- 错误码补全（14 处，此前都落 `[INTERNAL]`）：`update_doc` 的 section 校验、环境系列的「找不到环境/变量」与「变量名不合法」、示例更新/删除的「示例不存在」、`create_request` 的 cURL 解析与复制源请求、`send_request` 的发送失败、`update_doc` 的部分成功提示。新增 `TestErrorCodesClassified` 表驱动防回归。
-- `import_collection` 的 `text` 增加 10MB 上限，超限回 `[LIMIT]`（此前整包一次性进内存解析）。
-- 新增 `TestToolBriefAndDescriptionBudget`：`Brief` ≤ 40 字且不重复、`Description` ≤ 120 字。
-- 索引库改用 WAL + `synchronous=NORMAL`（索引是派生数据，可从集合重建；集合文件仍由 `writeFileAtomic` 的 fsync 保证）：实测单条写操作 316 → 148 ms，5 条批量 1.4 s → 240 ms。
-- 新增 `TestDocsToolCountsMatchMeta`：手册/设计文档里的工具总数、结构化工具数、low/high 风险数必须与 `meta` 表一致（这几轮的数字漂移全靠人工核对，容易漏）。
-- 审计补全：事件新增 `write` / `netEgress` / `envWrite`（此前只能靠 `risk` 猜是写盘还是外发），并落 `approved` / `grantedBy` / `requestId`——未走授权判定的调用 `approved` 保持 `nil`（未询问），拒绝时记 `approved=false`。新增 `TestAuditCapabilityFlags`、`TestAuditApprovalFields`。
-- **行为变更**：`create_request` 的 `folder` 不存在时改为 `[NOT_FOUND]`（此前会静默建目录，导致 AI 以为写进了别的模块）；`update_doc` 的 `folder` 同样要求目标已存在，且校验前移到写正文之前（不再出现「正文已写、移动失败」）。
-- `create_module` 的 `name` 支持写完整路径（`api/user` 自动拆成 `parent` + 末段）；上级不存在回 `[NOT_FOUND]`，末段非法回 `[INVALID]`（不再笼统 `[INTERNAL]`）。
-- `replaces` 的 `old` 为空或未命中改为 `[INVALID]`。
-- `create_env` 描述补充「新集合自带 dev 环境」；批量更新/删除的结果头补「其中 N 条未通过（见 failed[]）」。
-- `search_requests` 的 `weakMatch` 补 schema 说明（明确「原文不含该串、仅靠分词/有序子序列命中」，如 `lg`→`login`）；新增 `TestWeakMatchSemantics` 覆盖 true/false 两侧。
-- `create_doc` 的 `folder` 说明消除歧义：「显式指定时须已存在」与「留空或写 docs 落到默认目录 docs/（自动创建）」分开表述。
-- **移除** `get_request_detail` 的 `relatedDocs` 字段（输出 schema 与结构化结果都不再出现）：原实现靠「文档名包含接口名」猜关联，命中率不可预测、也没有建立关联的入口，属于「声明了却基本恒空」，按「声明必须能用」的原则撤掉。
-- 入参错误统一归 `[INVALID]`：`update_doc` 的 `insertAfter` 未匹配/命中多处/occurrence 越界/`anchorHeading` 未匹配、正文变更方式互斥、`append` 为空、图片 `data` 为空，以及 `use_workspace` 的缺失/歧义与「未指定 project」。
-- `update_doc` 的 `folder` 描述补「须已存在，否则 [NOT_FOUND]」。
-- `create_doc` 的 `folder` 与另两个写工具统一：显式指定时要求已存在（`[NOT_FOUND]`）；默认目录 `docs/` 例外（不传或显式写 `docs` 都自动创建）。新增 `ProjectApp.DirExists`（不要求 `folder.yml`，否则纯文档目录会被误拒）。`import_collection` 保留按集合结构自动建目录，描述已注明。
-
-## 2026-10-29  0.1.4-dev
-
-- Markdown 编辑器（文档条目 / 接口说明 / 生成文档弹窗）支持**本地上传与粘贴图片**：PNG / JPEG / GIF / WebP、单张 ≤5MB、按文件头校验（SVG 等拒收），按 sha256 存入 `<集合>/assets/`（同图自动去重），正文引用 `/doc-assets/<sha256>`，预览离线可直接显示。
-- 新增文档图片只读路由 `/doc-assets/<sha256>`：桌面壳 `AssetServer` 与 devserver 共用同一处理器，`Content-Type` 只认文件头嗅探、带 `nosniff` 与长缓存；只接受 64 位 hex 文件名，防路径穿越。
-- MCP 新增 `save_doc_image`（工具数 29 → 30）：传图片 base64，返回可直接写进 Markdown 的 URL，AI 可为文档或接口说明配图；同样走文件头校验与 5MB 上限。
-- 同步支持图片：推送前自动把正文里的 `/doc-assets/<sha256>` 换回服务端 URL（首次按需上传，映射存 `.sync.json`，改文字不重复上传）；拉取后自动下载 `/uploads/*`、`/api/file/<hash>` 到本地 `assets/` 并改写成本地引用。文档条目与接口说明（`request.docs`）都覆盖，外链图片原样保留。注意：按服务端现有约定，同步后的图片位于 `/uploads` 公开静态路径（与 Web 编辑器一致），敏感截图请勿入库。
-- MCP「一键复制示例」的服务名从 `apidoc` 改为 `api-doc-go`（与使用手册 / 设计文档一致），粘进 AI 工具的配置别名不变。
-- MCP 契约升级（工具数 30 → 36）：
-  - `create_doc` 同名默认报 `[CONFLICT]`（带已有 uid/path），可 `onConflict=suffix/overwrite`；新增 `uid` 幂等、`dryRun` 演练。
-  - 统一错误码：`[NOT_FOUND]/[CONFLICT]/[INVALID]/[READONLY]/[AUTH]/[LIMIT]/[IO]/[INTERNAL]`（含 SDK 参数校验）。
-  - `list_docs` 支持 `limit/offset` 分页并默认返回 `hash`；新增批量 `get_docs`（1–10）。
-  - 容器级 CRUD：`rename_module`、`delete_module`（可递归）、`rename_project`、`delete_project`（`confirm` 二次确认）、`prune_empty_modules`；删除一律进 `.trash`。
-  - 列表类工具返回 `structuredContent` + `outputSchema`（文本不变）。
-  - `send_request` 默认**不再**保存响应示例（显式 `saveExample=true` 才存）。
-  - 工具描述瘦身：总字符 6135 → 3799，并加预算回归测试；`list_envs` 支持分页。
-  - `dryRun` 全量对齐：`create_request` / `update_request` / `save_response_example` / `update_response_example` 也支持 dryRun（返回 planned 与落点，不写盘）。
-  - v3 接口类实测修复：`search_requests` 结果新增 `weakMatch`（弱匹配提示）；新增 `delete_requests`（批量，强制每条 `ifMatch`，支持 `dryRun`）与 `delete_request.confirmName`；空结果统一返回 `[]`（不再 `null`）；create/update/send 校验 `method`（非法 `[INVALID]`）；`get_request_detail`/`get_request_details`/`send_request` 补 `structuredContent`（结构化覆盖 34/37）；工具数 36 → 37。
-  - 文档类实测补齐：`get_docs` 返回 `structuredContent`（含 `docs[].error`）；`save_doc_image` 返回 `{url,sha256,size,deduped,markdown}`；所有工具失败时补 `structuredContent={error:{code,message}}`（结构化覆盖 30/36）。
-  - `ifMatch` 收口：`delete_doc` / `delete_request` / `delete_response_example` 也支持并发校验（完整 hash 或 12 位前缀，不一致 `[CONFLICT]` 且不删除）；`get_request_detail` 的响应示例行补 `hash=`。
-  - 统一写契约（破坏性）：权限码 `[AUTH]` → `[FORBIDDEN]`；结构化输出扩到 **29/36**（容器/环境/响应示例/图片全部补 `outputSchema` + `structuredContent`）；`dryRun` 覆盖全部破坏性删除（request/module/project/env/env_var/response_example），`delete_env` 新增 `ifMatch` 并发保护；创建类统一默认 `[CONFLICT]`（仅 create_doc/create_request 支持 suffix/overwrite；`create_module`/`create_env` 重名已补 `[CONFLICT]`）。
-  - 第四轮实测修复：`get_request_detail(s)` 的 `sections` 支持 `bodyFields`/`respDoc`（大小写不敏感，此前恒定 `[INVALID]`）；`create_request` 新增 `uid` 与 `onConflict`（默认 error，不再静默加 `-2`），并返回 `structuredContent`（连同 `update_request`/`delete_request`，结构化工具 6 → 13）；`list_docs` 描述写明只含 .md 文档、接口请求用 `get_project_modules`。
-  - 结构化输出补全：`create_doc`/`update_doc`/`get_doc`/`delete_doc` 也返回 `structuredContent`（uid/path/size/hash 等），`outputSchema` 的数组元素写明具体字段与 required（不再只有 `items:{type:"object"}`）；`create_doc` 建完可直接取 uid/path/hash。
-  - 复测修正：`create_doc` 的 dryRun 只输出计划（不再同时打印「已创建」）；`create_project` 的 `root` 必须是工作目录（指向项目目录时 `[INVALID]` 并提示父级），白名单外 `[AUTH]`、重名 `[CONFLICT]`（不传 root 时若默认可写目录本身是项目也会 `[INVALID]` 提示改父级）；`list_docs` 带 hash 由「逐篇重扫」改为单次扫描（30 篇实测 168ms → 24ms）。
-- 已知限制：**导出**（Markdown / HTML）仍不打包图片；冲突时手动选择「采用服务器版本」的说明文档，其图片要等下一轮同步才会本地化。
-- MCP 新增 `list_tools`（工具数 37 → 38）：一次返回全部工具名 + 一句话用途 + 必填参数（可按 `filter` 关键词、`mode=read|write` 过滤），不必为「查有哪些工具」逐个拉完整 schema。
-- MCP 新增 `import_collection`（工具数 38 → 39）：把 Postman / OpenAPI / api-doc-go 集合的**正文**一次导入成多条请求（与客户端「导入」同源），`dryRun=true` 只解析并回报条数、不落盘，省掉逐个 `create_request` 的往返。
-- MCP `create_doc` / `create_request` 新增可选 `fileName`：中文显示名也能落 ASCII 文件名（不传仍按既有规则由 `name` 推导，不动老集合）。
-- MCP 参数可发现性：`update_request.folder`（把请求移到别的模块）、`create_request.folder`、`curl`、`copyFromUid` 此前在 schema 里没有说明，AI 基本无从得知「请求还能移动」，现补齐并写入手册。
-- MCP 报错更好懂：入参校验失败不再回英文 `validating … missing properties`，改为中文并点名参数与工具（如「缺少必填参数：name（工具 create_doc）」）；省略 `project` 时会说明默认目标**按会话保存、重连或服务重启后需重新 `use_workspace`**。
-
-## 2026-10-28  0.1.3-dev
-
-- MCP 搜索升级：`search_requests` 支持整词 `exactMatch`、`fields` 限定范围、命中片段 `snippet` 与 `includeHash`；新增 `search_docs`（文档正文按行命中，返回 `L行号`）；新增 `get_request_details`（一次 1–10 个 uid 的批量详情）。
-- MCP 读取升级：`get_request_detail` 支持 `sections` 分段；详情 hash 输出完整值，可直接回传 `ifMatch`。
-- MCP 写入更安全：`update_request` / `update_doc` 支持 `replaces` 局部替换（`old` 找不到整单拒绝、不落盘），成功响应附「改动行 ±1」落盘确认；`ifMatch` 冲突时报错并给出当前完整 hash，不写入。
-- MCP 长文档分段读取：`get_doc` 新增 `outline` 大纲与 `startLine` + `maxLines` 区间（行号仅供阅读，写回时不要带；全文超长只提示不截断）；`get_request_detail` 同步支持 `docsOutline` / `docsStartLine` / `docsMaxLines`；`search_docs` 的行号可直接接续精读。
-- 集合树行右键菜单：新增「复制 ID」「复制 MCP 指令」（请求附 12 位短 hash，文档用 `get_doc` 同款；与悬停「···」共用选项），并修复菜单在选中、点击外部、按 Esc、滚动、鼠标移开后不消失的问题。
-- 修复打开 MCP 设置时凭空提示「配置已修改」：来源白名单空值在前后端分别是 `null` / `[]`，脏检查误判；现统一归一。
-- 修复 Linux 下窗口缩小后无法拖动边框调整大小：外壳为画阴影让出 32px 留白，可见边框离窗口外沿太远，Wails 自带边缘检测（外沿 6px）命中不到；现在可见边框内侧新增 6px 缩放热区，按下直接把缩放交回窗口管理器（最大化时自动隐藏）。
-- 文档与回归：工具数 27 → 29，使用手册 / 设计文档 / 优化清单同步；新增 MCP 优化、长文档分段、树复制/右键菜单等自动化用例。
-
-## 2026-10-27  0.1.2-dev
-
-- 集合树支持自定义拖动排序：集合、目录、接口、文档均可拖动，落点支持 before / after / inside，顺序按 `seq` 写回文件（集合根顺序、`folder.yml`、请求 `info.seq`、文档 frontmatter `seq`）。
-
-## 2026-10-26  0.1.1-dev
-
-- 响应字段生成改为读取「当前响应」：按钮改为「从当前响应生成」，直接取右侧正在展示的响应（实时或已保存示例）；响应为空时填充，已有数据需选择「覆盖」才会替换；同时修复响应类型偶尔回退为 `application/json` 的问题。
-- PAT 本地加密落盘（`.sync.json` 仅保存密文，密钥在用户配置目录），拆分超大前端组件并接入 ESLint。
-- 安装包与托盘产品名统一为 `api-doc-go`（需要空格处使用 `Api Doc Go`）。
-- 界面修复：编辑区高度占满、页内查找焦点跟随、生成数据表格确认框宽度、覆盖生成时写入响应体、字段表格行区滚动等。
-- 补充客户端保存 / 取消流程的自动化测试。
-
-## 2026-09-28 ~ 2026-10-25  0.1.0
-
-初始开发期（当前正式版基线），主要能力：
-
-- 工程与门禁：Wails v2 + Vue3/TS 骨架，集合为纯文本文件（文件即真相源）；`scripts/check.sh` 门禁（gofmt/build/vet/test/`-race`/vue-tsc/ESLint/i18n）、CI，以及 deb / NSIS 安装包与覆盖升级隔离。
-- 集合与索引：目录 / 请求 / 文档树、回收站（预览 / 还原 / 彻底删除）、集合 YAML 原子写盘、文件监听与外部改动回填、全文搜索与命令面板。
-- 请求执行：HTTP（重定向 / Cookie / 超时 / 代理 / 历史）、gRPC（unary 与服务器流式）、断言与脚本、集合运行器（桌面面板 + CLI/JUnit）。
-- 变量与环境：环境文件、变量默认值语法、敏感变量掩码、同步口令与系统密钥链。
-- 响应与文档：响应字段表格、响应类型徽标、接口文档生成，Markdown / HTML / OpenAPI / Postman 导出，契约校验。
-- MCP 服务：内嵌与独立 server（stdio/HTTP）、令牌鉴权、工作目录白名单、风险工具交互授权与调用审计、文档条目工具。
-- 双向同步：PAT 加密、增量拉取 / 推送、冲突副本、文档与示例同步、多工作目录。
-- 界面：工作台两栏布局、多页签、暗色主题与缩放、中英双语、移动端适配、托盘驻留与单实例。

@@ -44,6 +44,9 @@ export default {
     restoreFailed: 'Some workspaces could not be restored (skipped): {msg}',
     restoreTruncated:
       'Restored {n} workspace(s); {m} more were not restored (the startup limit is configurable in Settings). Open them from “Recent workspaces” in the toolbar.',
+    needsInitTitle: 'Initialize collection folder',
+    needsInitContent: 'This folder is not a collection yet (missing opencollection.yml). After initialization, existing .yml request files will be treated as requests of this project. Folder: {dir}',
+    needsInitOk: 'Initialize and open',
   },
   toolbar: {
     toggleSide: 'Toggle sidebar',
