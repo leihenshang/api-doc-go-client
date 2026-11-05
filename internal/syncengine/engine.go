@@ -484,7 +484,9 @@ func (e *Engine) applyGroup(uid string, p Payload) error {
 		if name == "" {
 			name = "未命名目录"
 		}
-		return e.Coll.CreateFolder(parent, name)
+		// 带服务端 uid 落盘：子分组的 parent_uid 与接口的 group_uid 都指向它，
+		// 用随机 uid 会让父子关系全部断掉（整棵树拍平到根）。
+		return e.Coll.CreateFolderWithUID(parent, name, uid)
 	}
 	// 父级变了 → 移动分组
 	curParent := filepath.ToSlash(filepath.Dir(dir))
