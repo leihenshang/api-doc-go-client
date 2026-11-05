@@ -103,6 +103,14 @@ func (a *App) SetSyncBindFor(req SyncBindReq) (*syncengine.BindInfo, error) {
 	if prev, perr := syncengine.LoadBind(c.Dir); perr == nil {
 		if prev.ProjectID == req.ProjectID {
 			b.Cursor = prev.Cursor
+		} else if prev.Linked {
+			// 已绑项目 A，现在要绑 B：直接拒绝。
+			//
+			// 服务端 group/api/doc 的 ext_uid 是**全局唯一**索引（不按项目），同一个集合推到
+			// 另一个项目时每一条都会撞唯一键 → CreateGroup 失败 → 整批 260 条 op 全部
+			// rejected（invalid / parent_missing），看起来像「同步坏了」。
+			// 与其让用户面对一堆看不懂的错误，不如在这里说清楚该怎么做。
+			return nil, errors.New("该集合已同步到另一个项目，不能直接切换。请先解除同步（同步设置 → 解除），或新建一个集合再绑定新项目")
 		}
 		if tok == "" && prev.ServerURL == base {
 			b.Token = prev.Token
