@@ -228,3 +228,32 @@ func TestEnvFilesAreOwnerOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateFolderWithUID 目录必须能用指定 uid 落盘。
+//
+// 这是同步拉取的命门：服务端下发的子分组 parent_uid、接口的 group_uid 都是**服务端 uid**，
+// 新目录若生成随机 uid，父级就找不到，整棵树会被拍平到根（dns 项目实测 10 个目录全在根层）。
+func TestCreateFolderWithUID(t *testing.T) {
+	c, err := Init(t.TempDir())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := c.CreateFolderWithUID("", "dns项目", "uid-root"); err != nil {
+		t.Fatalf("建父目录: %v", err)
+	}
+	if err := c.CreateFolderWithUID("dns项目", "DNS 配置", "uid-child"); err != nil {
+		t.Fatalf("建子目录: %v", err)
+	}
+
+	// 子目录的 uid 必须是我们指定的那个，且父级能按 uid 解析到
+	dir, err := c.findDir("uid-child")
+	if err != nil {
+		t.Fatalf("findDir(uid-child): %v", err)
+	}
+	if dir != "dns项目/DNS 配置" {
+		t.Fatalf("子目录路径不符: %q", dir)
+	}
+	if got, err := c.findDir("uid-root"); err != nil || got != "dns项目" {
+		t.Fatalf("父目录解析失败: %q %v", got, err)
+	}
+}

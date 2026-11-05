@@ -1726,6 +1726,14 @@ func (c *Collection) saveNewRequest(folder, name string, r *Request) (*Request, 
 // CreateFolder 新建分组（目录 + folder.yml）。
 // CreateFolder 在 parent（相对路径，空 = 根）下创建分组。
 func (c *Collection) CreateFolder(parent, name string) error {
+	return c.CreateFolderWithUID(parent, name, "")
+}
+
+// CreateFolderWithUID 同 CreateFolder，但用指定 uid 写 folder.yml。
+//
+// 同步拉取必须走这个：否则新目录会生成随机 uid，而子分组/接口的 parent_uid、group_uid
+// 指向的是**服务端 uid**，找不到父级就会把整棵树拍平到根（dns 项目实测：10 个目录全在根层）。
+func (c *Collection) CreateFolderWithUID(parent, name, uid string) error {
 	if !validEntryName(name) {
 		return fmt.Errorf("%w: %q（不能含路径分隔符，不能以点开头或结尾）", ErrInvalidEntryName, name)
 	}
@@ -1737,7 +1745,10 @@ func (c *Collection) CreateFolder(parent, name string) error {
 	if err := os.MkdirAll(filepath.Join(c.Dir, filepath.FromSlash(rel)), 0o755); err != nil {
 		return err
 	}
-	return c.ensureFolderYML(rel, name)
+	if strings.TrimSpace(uid) == "" {
+		return c.ensureFolderYML(rel, name)
+	}
+	return c.ensureFolderYMLWithUID(rel, name, uid)
 }
 
 // RenameFolder 改分组显示名（目录名与 uid 保持不变，避免路径漂移）。
@@ -2049,12 +2060,19 @@ func (c *Collection) folderUID(dir string) (string, bool) {
 }
 
 func (c *Collection) ensureFolderYML(dir, name string) error {
+	return c.ensureFolderYMLWithUID(dir, name, "")
+}
+
+// ensureFolderYMLWithUID 写 folder.yml；uid 为空时沿用已有或新建随机 uid。
+func (c *Collection) ensureFolderYMLWithUID(dir, name, uid string) error {
 	if _, err := os.Stat(filepath.Join(c.Dir, filepath.FromSlash(dir), "folder.yml")); err == nil {
 		return nil
 	}
-	uid := uuid.NewString()
-	if existing, ok := c.folderUID(dir); ok {
-		uid = existing
+	if strings.TrimSpace(uid) == "" {
+		uid = uuid.NewString()
+		if existing, ok := c.folderUID(dir); ok {
+			uid = existing
+		}
 	}
 	data, err := yaml.Marshal(map[string]any{
 		"info": map[string]any{"name": name, "type": "folder", "seq": 1},
