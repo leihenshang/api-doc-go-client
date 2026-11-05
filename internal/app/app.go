@@ -378,7 +378,9 @@ func (a *App) EnsureDefaultCollection() (*collection.CollectionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.OpenCollection(dir)
+	// 走 Init 而不是 Open：默认集合是本应用自己生成的兜底目录，不经过「未初始化让用户确认」的闸门
+	//（否则新机器首次启动会拿到 ErrNeedsInit，默认集合永远建不出来）。
+	return a.InitCollection(dir)
 }
 
 // InitCollection 用户确认后初始化一个「有内容但没有本项目清单」的目录。
