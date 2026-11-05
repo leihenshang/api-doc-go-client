@@ -14,7 +14,7 @@ import (
 // Mock 连接被重置。这里断言回退到 200 且响应体照常回放。
 func TestMockToleratesMissingStatus(t *testing.T) {
 	dir := t.TempDir()
-	c, err := collection.Open(dir)
+	c, err := collection.Init(dir)
 	if err != nil {
 		t.Fatalf("打开集合: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestMockToleratesMissingStatus(t *testing.T) {
 // 只关 listener 不等的话，反复启停会累积孤儿 goroutine；这里用「启停 N 次后
 // 再断言端口可被立刻重新绑定」间接证明旧的 Serve 已经退出（端口未被占用）。
 func TestStopWaitsForServeGoroutine(t *testing.T) {
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

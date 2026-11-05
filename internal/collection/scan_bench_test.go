@@ -39,7 +39,7 @@ func BenchmarkRebuildIndexLarge(b *testing.B) {
 func newBenchCollection(b *testing.B, n int) *Collection {
 	b.Helper()
 	dir := b.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		b.Fatal(err)
 	}

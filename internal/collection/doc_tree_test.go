@@ -12,7 +12,7 @@ import (
 // 表现就是「新建后树里没有 + 打开提示条目不存在」。
 func TestCreateDocInFolderAppearsInTree(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestCreateDocInFolderAppearsInTree(t *testing.T) {
 // 文件应真的落到目标目录，uid 与文件名主干不变。
 func TestMoveDocRootToFolder(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestMoveDocRootToFolder(t *testing.T) {
 // TestRootDocStillWorks 回归：docs/ 默认位与根级文档行为不变。
 func TestRootDocStillWorks(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

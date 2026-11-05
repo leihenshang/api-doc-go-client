@@ -38,7 +38,7 @@ func newTestApp(t *testing.T) (*App, string) {
 	dir := t.TempDir()
 	core := NewApp()
 	core.SetHeadlessDir(dir)
-	if _, err := core.OpenCollection(dir); err != nil {
+	if _, err := core.InitCollection(dir); err != nil {
 		t.Fatalf("打开集合失败: %v", err)
 	}
 	// 必须显式释放索引/watcher 句柄：否则 watcher 泄漏后会在后续测试的配置目录里

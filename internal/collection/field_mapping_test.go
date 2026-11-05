@@ -9,7 +9,7 @@ import (
 
 // TestFieldMappingsFileRoundTrip 字段字典单文件：增删改 + 排序 + 空表删文件。
 func TestFieldMappingsFileRoundTrip(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

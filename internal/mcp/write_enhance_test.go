@@ -162,7 +162,7 @@ func TestUpdateRespDocMergesPartial(t *testing.T) {
 func TestGRPCRejectsRespDoc(t *testing.T) {
 	root, svc := setup(t)
 	// 用集合层直接种一个 gRPC 请求（MCP 暂不创建 gRPC，绕开创建路径只测拒绝逻辑）
-	c, err := collection.Open(filepath.Join(root, "demo"))
+	c, err := collection.Init(filepath.Join(root, "demo"))
 	if err != nil {
 		t.Fatal(err)
 	}

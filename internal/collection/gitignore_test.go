@@ -204,7 +204,7 @@ func TestOpenAppendsToExistingGitignore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(user), 0o644); err != nil {
 		t.Fatalf("写初始 .gitignore: %v", err)
 	}
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

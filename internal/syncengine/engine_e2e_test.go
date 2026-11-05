@@ -106,7 +106,7 @@ func (f *fakeServer) pushedOps() []Op {
 // newBoundEngine 建一个真实集合目录并返回绑定好假服务端的 Engine。
 func newBoundEngine(t *testing.T, cli *Client) (*collection.Collection, *Engine) {
 	t.Helper()
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open collection: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestRunOneMirrorModeSkipsPush(t *testing.T) {
 
 // TestRunOneServerUnreachable 服务端不可达要报错而不是静默成功。
 func TestRunOneServerUnreachable(t *testing.T) {
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

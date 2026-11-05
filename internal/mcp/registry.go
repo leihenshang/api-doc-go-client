@@ -426,7 +426,9 @@ func (r *Registry) CreateProjectIn(base, name, dirName string) (Project, error) 
 	if _, err := os.Stat(filepath.Join(abs, "opencollection.yml")); err == nil {
 		return Project{}, fmt.Errorf("项目已存在: %s", rel)
 	}
-	c, err := collection.Open(abs)
+	// 走 Init：这里是「新建项目」，目录是刚建的（甚至可能不存在），
+	// 用 Open 会被「未初始化确认」闸门拦下（ErrNeedsInit）。
+	c, err := collection.Init(abs)
 	if err != nil {
 		return Project{}, err
 	}

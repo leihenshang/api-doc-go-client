@@ -76,7 +76,7 @@ func TestFieldMappingSnapshotApplyAndDelete(t *testing.T) {
 
 // TestFieldMappingCollectOpsUidHealAndDirty 本地脏检测与 uid 自愈。
 func TestFieldMappingCollectOpsUidHealAndDirty(t *testing.T) {
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestFieldMappingCollectOpsUidHealAndDirty(t *testing.T) {
 
 // TestFieldMappingApplyReplacesSameField 同名不同 uid：以服务端为准并清旧基线。
 func TestFieldMappingApplyReplacesSameField(t *testing.T) {
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

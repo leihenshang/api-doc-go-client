@@ -10,7 +10,7 @@ import (
 )
 
 func TestIndexHandleConcurrentUseAndClose(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestIndexHandleConcurrentUseAndClose(t *testing.T) {
 // TestSetIndexKeyBeforePublish 索引键只在集合还没登记时才允许改（App 侧约束的底层保证）：
 // 改键会关闭旧句柄，因此必须在任何人拿到引用之前完成。这里验证改键后能按新键重建。
 func TestSetIndexKeyBeforePublish(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -19,9 +19,9 @@ import (
 // qaOpenAndGitignore 打开集合目录并回读 .gitignore 原始字节 + mode。
 func qaOpenAndGitignore(t *testing.T, dir string) ([]byte, os.FileMode) {
 	t.Helper()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
-		t.Fatalf("Open(%s): %v", dir, err)
+		t.Fatalf("Init(%s): %v", dir, err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	gi := filepath.Join(dir, ".gitignore")
@@ -213,7 +213,7 @@ func TestQAOpenGitignoreModeAndSymlink(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(dir, ".gitignore")); err != nil {
 			t.Fatalf("Symlink: %v", err)
 		}
-		c, err := Open(dir)
+		c, err := Init(dir)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
@@ -263,8 +263,8 @@ func TestQAOpenGitignoreInRepoSubdir(t *testing.T) {
 	// 子目录已有用户 .gitignore
 	qaWriteFile(t, sub, ".gitignore", "/tmp-out/\n", 0o644)
 
-	if _, err := Open(sub); err != nil {
-		t.Fatalf("Open(sub): %v", err)
+	if _, err := Init(sub); err != nil {
+		t.Fatalf("Init(sub): %v", err)
 	}
 	// Open 里 StartWatch 会持有句柄，这里只读文件，不需要 Close 收尾
 
@@ -292,8 +292,8 @@ func TestQAOpenGitignoreInRepoSubdir(t *testing.T) {
 	if err := os.MkdirAll(fresh, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if _, err := Open(fresh); err != nil {
-		t.Fatalf("Open(fresh): %v", err)
+	if _, err := Init(fresh); err != nil {
+		t.Fatalf("Init(fresh): %v", err)
 	}
 	for _, p := range []string{"fresh-collection/.sync.json", "fresh-collection/environments/dev.secrets.yml"} {
 		cmd := exec.Command(gitBin, "check-ignore", "-q", p)

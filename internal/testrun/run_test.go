@@ -18,7 +18,7 @@ import (
 // newRunCollection 建临时集合并把 dev 环境的 host 指向 srv。
 func newRunCollection(t *testing.T, srv *httptest.Server) *collection.Collection {
 	t.Helper()
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

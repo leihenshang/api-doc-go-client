@@ -24,7 +24,7 @@ func TestSyncDocAssetsMirrorsAndSkips(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open collection: %v", err)
 	}

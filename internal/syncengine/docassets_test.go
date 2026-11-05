@@ -169,7 +169,7 @@ func TestPullLocalizesDocAndRequestImages(t *testing.T) {
 	srv.files["/api/file/"+hash] = png
 
 	// 构造一条 api 的 extra（带 docs，含两种图片写法）：直接用真实请求生成契约 JSON
-	seedColl, err := collection.Open(t.TempDir())
+	seedColl, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

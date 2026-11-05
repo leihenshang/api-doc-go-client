@@ -56,7 +56,7 @@ func assertContains(t *testing.T, path, want string) {
 // TestSaveEnvPreservesUnknownFields 覆盖两种调用形态：readEnv 读出的 Env、
 // 以及 UI 重建的 Env（不带 Extra，必须从磁盘补齐）。
 func TestSaveEnvPreservesUnknownFields(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestSaveEnvPreservesUnknownFields(t *testing.T) {
 
 // TestRenameEnvPreservesUnknownFields 改名时未知字段要随两个文件一起平移（M-1）。
 func TestRenameEnvPreservesUnknownFields(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

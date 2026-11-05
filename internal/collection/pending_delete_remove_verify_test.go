@@ -16,7 +16,7 @@ import (
 // qa21Open 新建临时集合。
 func qa21Open(t *testing.T) *Collection {
 	t.Helper()
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

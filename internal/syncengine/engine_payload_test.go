@@ -12,7 +12,7 @@ import (
 // 一个空条目写盘 —— 等于用垃圾覆盖本地真实数据，且用户完全无感。
 func TestApplyUpsertRejectsBrokenPayload(t *testing.T) {
 	dir := t.TempDir()
-	c, err := collection.Open(dir)
+	c, err := collection.Init(dir)
 	if err != nil {
 		t.Fatalf("open collection: %v", err)
 	}

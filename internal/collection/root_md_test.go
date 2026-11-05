@@ -45,7 +45,7 @@ func docsByPath(t *testing.T, c *Collection) map[string]*DocEntry {
 // 子目录里的 README.md 仍按说明文件排除。
 func TestRootMarkdownWithoutFrontmatter(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -146,7 +146,7 @@ func pathsOf(docs map[string]*DocEntry) []string {
 // （Markdown 分隔线 / 列表），不能整条丢弃：回落为「全文即正文」，uid 仍按路径哈希稳定生成。
 func TestRootMarkdownWithHorizontalRules(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestRootMarkdownWithHorizontalRules(t *testing.T) {
 // frontmatter，否则 rename 后路径变化会让 uid 改变（已开页签/引用失效）。
 func TestMoveDocKeepsSyntheticUID(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestMoveDocKeepsSyntheticUID(t *testing.T) {
 // 入口必须拒绝且不改动文件（uid、路径、树都保持原样）。
 func TestMoveRootReadmeIntoSudirRejected(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestMoveRootReadmeIntoSudirRejected(t *testing.T) {
 // 入口拒绝且不产生文件；根目录（folder="."）仍允许。
 func TestCreateDocReadmeInSubdirRejected(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestCreateDocReadmeInSubdirRejected(t *testing.T) {
 // TestRenameDocToReadmeInSubdirRejected 子目录里的文档改名为 README：入口拒绝，名称与文件都不变。
 func TestRenameDocToReadmeInSubdirRejected(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
