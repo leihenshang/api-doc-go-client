@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	// 标准库的 runtime 与下面的 wails runtime 同名，这里起别名避免撞车。
 	goruntime "runtime"
@@ -353,6 +354,33 @@ func (a *App) PickGrpcProtoFiles() ([]string, error) {
 //
 // 多根并存后语义从「替换」改为「追加」：同一目录重复打开是**幂等**的（只置为活动根、
 // 不重复起监听、不重建索引），这样「恢复上次打开的目录」与「欢迎页再点一次」都安全。
+// DefaultCollectionDir 默认集合目录：放在应用配置目录下（与 config.json / cookies.json 同处）。
+//
+// 为什么不用「文档目录」：默认集合是应用自己的兜底存储，不该污染用户的文档/桌面；
+// 放在配置目录下也方便随配置一起备份或清理。
+func (a *App) DefaultCollectionDir() (string, error) {
+	base, err := config.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "default-collection"), nil
+}
+
+// EnsureDefaultCollection 没有打开任何集合时，创建并打开默认集合（幂等）。
+//
+// 用途：客户端启动时若没有任何历史根，不再停在欢迎页 —— 直接把默认集合置为活动根，
+// 用户可以直接新建请求，保存后落在配置目录下。已有活动根时原样返回该集合。
+func (a *App) EnsureDefaultCollection() (*collection.CollectionInfo, error) {
+	if c, err := a.requireCollection(); err == nil && c != nil {
+		return a.refreshInfo(c)
+	}
+	dir, err := a.DefaultCollectionDir()
+	if err != nil {
+		return nil, err
+	}
+	return a.OpenCollection(dir)
+}
+
 // InitCollection 用户确认后初始化一个「有内容但没有本项目清单」的目录。
 //
 // 先把 opencollection.yml 补上（collection.Init），再走正常的打开流程 ——

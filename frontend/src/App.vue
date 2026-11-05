@@ -674,7 +674,18 @@ onMounted(() => {
   }, 5000)
   // 恢复上次打开的工作目录（多根）；单个失败只提示，不阻塞其它根。
   // 必须等设置读完再恢复：恢复上限在设置里，抢跑会拿到默认值，把超出上限的目录当成「不需要恢复」。
-  void settingsReady.then(() => restoreRoots())
+  void settingsReady.then(async () => {
+    await restoreRoots()
+    // 没有任何历史根：创建并打开默认集合，直接进主界面。
+    // 新建请求的保存位置就是它（应用配置目录下 default-collection），不再先挡一层欢迎页。
+    if (coll.ready) return
+    try {
+      await api.ensureDefaultCollection()
+      await coll.loadRoots()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
+  })
 })
 
 // 唯一的卸载清理入口：keydown / resize 监听与两个轮询定时器都在这里收尾。
