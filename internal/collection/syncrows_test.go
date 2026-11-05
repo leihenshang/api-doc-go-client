@@ -25,11 +25,15 @@ func decodeRows(t *testing.T, extraJSON, key string) []syncParamRow {
 }
 
 func TestSyncExtra_QueryHeadersAndBody(t *testing.T) {
+	off := false
 	r := &Request{
 		Name:   "新建用户",
 		Method: "POST",
 		URL:    "/api/users",
-		Params: []KV{{Name: "page", Value: "1", Description: "页码", Enabled: true}},
+		Params: []KV{
+			{Name: "page", Value: "1", Description: "页码", Enabled: true},
+			{Name: "debug", Value: "1", Enabled: false},
+		},
 		Headers: []KV{
 			{Name: "X-Token", Value: "abc", Enabled: true},
 			{Name: "X-Disabled", Value: "off", Enabled: false},
@@ -39,7 +43,7 @@ func TestSyncExtra_QueryHeadersAndBody(t *testing.T) {
 	}
 	extra := SyncExtra(r)
 
-	// headers 行契约：{name,value,description}，启停状态不参与同步（与服务端 Bruno 导入一致）。
+	// headers 行契约：{name,value,description,enabled?}；只在停用时写 enabled:false（缺键 = 启用）。
 	var hm map[string]any
 	_ = json.Unmarshal([]byte(extra), &hm)
 	headerJSON, _ := hm["headers"].(string)
@@ -49,7 +53,7 @@ func TestSyncExtra_QueryHeadersAndBody(t *testing.T) {
 	}
 	wantHeaders := []syncHeaderRow{
 		{Name: "X-Token", Value: "abc"},
-		{Name: "X-Disabled", Value: "off"},
+		{Name: "X-Disabled", Value: "off", Enabled: &off},
 	}
 	if !reflect.DeepEqual(headers, wantHeaders) {
 		t.Fatalf("headers=%v, want %v", headers, wantHeaders)
@@ -62,6 +66,7 @@ func TestSyncExtra_QueryHeadersAndBody(t *testing.T) {
 	got := decodeRows(t, extra, "params")
 	want := []syncParamRow{
 		{FieldName: "page", Type: "string", Description: "页码", Example: "1"},
+		{FieldName: "debug", Type: "string", Example: "1", Enabled: &off},
 		{FieldName: "addr", Type: "object"},
 		{FieldName: "addr.city", Type: "string", Example: "SH"},
 		{FieldName: "age", Type: "integer", Example: "20"},
@@ -258,8 +263,10 @@ func TestSyncExtra_ResponseDocRoundTripAndPersist(t *testing.T) {
 
 func TestApplySyncExtra_QueryAndNestedBody(t *testing.T) {
 	// 服务端行：简单名 → query；含点号/[] → 还原 JSON 体（含数组对象与类型推断）。
+	off := false
 	rows := []syncParamRow{
 		{FieldName: "page", Type: "string", Description: "页码", Example: "2"},
+		{FieldName: "off", Type: "string", Example: "0", Enabled: &off},
 		{FieldName: "ok", Type: "boolean", Example: "true"},
 		{FieldName: "data", Type: "object"},
 		{FieldName: "data.count", Type: "integer", Example: "3"},
@@ -269,7 +276,10 @@ func TestApplySyncExtra_QueryAndNestedBody(t *testing.T) {
 		{FieldName: "data.list[].name", Type: "string", Example: "n1"},
 	}
 	rb, _ := json.Marshal(rows)
-	hb, _ := json.Marshal([]syncHeaderRow{{Name: "X-Token", Value: "secret"}})
+	hb, _ := json.Marshal([]syncHeaderRow{
+		{Name: "X-Token", Value: "secret"},
+		{Name: "X-Off", Value: "o", Enabled: &off},
+	})
 	extraMap := map[string]any{
 		"desc":    "来自服务端",
 		"params":  string(rb),
@@ -283,11 +293,17 @@ func TestApplySyncExtra_QueryAndNestedBody(t *testing.T) {
 	if r.Docs != "来自服务端" {
 		t.Fatalf("docs=%q", r.Docs)
 	}
-	if !reflect.DeepEqual(r.Headers, []KV{{Name: "X-Token", Value: "secret", Enabled: true}}) {
+	if !reflect.DeepEqual(r.Headers, []KV{
+		{Name: "X-Token", Value: "secret", Enabled: true},
+		{Name: "X-Off", Value: "o", Enabled: false},
+	}) {
 		t.Fatalf("headers=%v", r.Headers)
 	}
-	// 简单行进 query（含描述与启用位）。
-	if !reflect.DeepEqual(r.Params[:1], []KV{{Name: "page", Value: "2", Description: "页码", Enabled: true}}) {
+	// 简单行进 query（含描述与启用位）；缺键按启用，显式 false 保持停用。
+	if !reflect.DeepEqual(r.Params[:2], []KV{
+		{Name: "page", Value: "2", Description: "页码", Enabled: true},
+		{Name: "off", Value: "0", Enabled: false},
+	}) {
 		t.Fatalf("query 参数=%v", r.Params)
 	}
 	if r.Body.Type != "json" {
@@ -349,12 +365,18 @@ func TestApplySyncExtra_ClearAndPreserve(t *testing.T) {
 
 func TestSyncExtra_RoundTrip(t *testing.T) {
 	src := &Request{
-		Method:  "POST",
-		URL:     "/u",
-		Params:  []KV{{Name: "page", Value: "1", Description: "p", Enabled: true}},
-		Headers: []KV{{Name: "H", Value: "v", Description: "d", Enabled: true}},
-		Body:    Body{Type: "json", Raw: `{"addr":{"city":"SH"},"age":20}`},
-		Docs:    "说明",
+		Method: "POST",
+		URL:    "/u",
+		Params: []KV{
+			{Name: "page", Value: "1", Description: "p", Enabled: true},
+			{Name: "off", Value: "0", Enabled: false},
+		},
+		Headers: []KV{
+			{Name: "H", Value: "v", Description: "d", Enabled: true},
+			{Name: "H-Off", Value: "x", Enabled: false},
+		},
+		Body: Body{Type: "json", Raw: `{"addr":{"city":"SH"},"age":20}`},
+		Docs: "说明",
 	}
 	got := &Request{Method: "POST", URL: "/u"}
 	ApplySyncExtra(got, SyncExtra(src))

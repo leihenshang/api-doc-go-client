@@ -3,8 +3,11 @@ package collection
 // 同步载荷 extra 与客户端 Request 的双向映射（请求头 / 请求参数 / 说明）。
 //
 // 服务端 api 表把结构化数据存成两段 JSON 文本（见服务端 model.Api）：
-//   - http_request_header：[{name,value,description}]
-//   - http_request_params：[{fieldName,type,required,description,example}]
+//   - http_request_header：[{name,value,description,enabled?}]
+//   - http_request_params：[{fieldName,type,required,description,example,enabled?}]
+//
+// enabled 为行级启用位：缺键 = 启用，只有显式 false 才停用（与服务端 apiHeaderRow /
+// apiParamRow 及 Web 详情页勾选列同口径）。只在停用时写键，保证老载荷字节稳定。
 //
 // 展平/还原口径必须与服务端 Bruno 导入（service/bruno.go buildBrunoApi）一致：
 // query 参数逐行映射，JSON 请求体按键名字典序展平为 a.b / a[].c 形式的参数行；
@@ -23,6 +26,8 @@ type syncHeaderRow struct {
 	Name        string `json:"name"`
 	Value       string `json:"value"`
 	Description string `json:"description"`
+	// Enabled nil = 启用；只有停用（false）才写键，缺键语义与服务端一致。
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // syncParamRow 请求参数行（对齐服务端 apiParamRow / Web ApiParam）。
@@ -32,6 +37,20 @@ type syncParamRow struct {
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
 	Example     string `json:"example"`
+	// Enabled nil = 启用；只有停用（false）才写键。
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// enabledOf 行级启用位：缺键/显式 null 都按启用，只有 false 才停用。
+func enabledOf(v *bool) bool { return v == nil || *v }
+
+// disabledPtr 把本地启用位映射成行字段：启用返回 nil（不落键），停用返回 false 指针。
+func disabledPtr(enabled bool) *bool {
+	if enabled {
+		return nil
+	}
+	off := false
+	return &off
 }
 
 // SyncExtra 把请求的可同步字段聚合成服务端 extra JSON（SyncPayload.extra）。
@@ -175,7 +194,9 @@ func marshalHeaderRows(headers []KV) string {
 	}
 	rows := make([]syncHeaderRow, 0, len(headers))
 	for _, h := range headers {
-		rows = append(rows, syncHeaderRow{Name: h.Name, Value: h.Value, Description: h.Description})
+		rows = append(rows, syncHeaderRow{
+			Name: h.Name, Value: h.Value, Description: h.Description, Enabled: disabledPtr(h.Enabled),
+		})
 	}
 	b, err := json.Marshal(rows)
 	if err != nil {
@@ -193,6 +214,7 @@ func marshalParamRows(r *Request) string {
 			Type:        "string",
 			Description: p.Description,
 			Example:     p.Value,
+			Enabled:     disabledPtr(p.Enabled),
 		})
 	}
 	if raw := strings.TrimSpace(bodyContent(r.Body)); strings.EqualFold(r.Body.Type, "json") && raw != "" {
@@ -296,7 +318,9 @@ func parseHeaderRows(s string) []KV {
 	}
 	out := make([]KV, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, KV{Name: row.Name, Value: row.Value, Description: row.Description, Enabled: true})
+		out = append(out, KV{
+			Name: row.Name, Value: row.Value, Description: row.Description, Enabled: enabledOf(row.Enabled),
+		})
 	}
 	return out
 }
@@ -335,7 +359,8 @@ func applyParamRows(r *Request, s string) {
 			continue
 		}
 		params = append(params, KV{
-			Name: row.FieldName, Value: row.Example, Description: row.Description, Enabled: true,
+			Name: row.FieldName, Value: row.Example, Description: row.Description,
+			Enabled: enabledOf(row.Enabled),
 		})
 	}
 	r.Params = params
