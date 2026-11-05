@@ -353,6 +353,17 @@ func (a *App) PickGrpcProtoFiles() ([]string, error) {
 //
 // 多根并存后语义从「替换」改为「追加」：同一目录重复打开是**幂等**的（只置为活动根、
 // 不重复起监听、不重建索引），这样「恢复上次打开的目录」与「欢迎页再点一次」都安全。
+// InitCollection 用户确认后初始化一个「有内容但没有本项目清单」的目录。
+//
+// 先把 opencollection.yml 补上（collection.Init），再走正常的打开流程 ——
+// 这样目录里的既有请求文件会被识别为本项目的接口（前端提示里已写明这一点）。
+func (a *App) InitCollection(dir string) (*collection.CollectionInfo, error) {
+	if _, err := collection.Init(dir); err != nil {
+		return nil, err
+	}
+	return a.OpenCollection(dir)
+}
+
 func (a *App) OpenCollection(dir string) (*collection.CollectionInfo, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("目录为空")
