@@ -40,6 +40,8 @@ go run ./cmd/clientctl run <collection-dir> --env dev --reporter junit --output 
 7. **Markdown 图片只落本地集合**：编辑器选图/粘贴走 `lib/md-image.ts` → `App.SaveDocImage`（PNG/JPEG/GIF/WebP、≤5MB、**文件头嗅探**）→ `<集合>/assets/<sha256>`（内容寻址去重），正文引用 `/doc-assets/<sha256>`；只读路由由桌面壳 `AssetServer.Handler` 与 devserver 共用 `App.DocAssetHandler()`（固定 Content-Type + `nosniff`，文件名只接受 64 位 hex）。MCP 对应工具 `save_doc_image`。同步由 `internal/syncengine/docassets.go` 在边界转换：推送前 `/doc-assets/<hash>` → 上传后服务端 URL（映射存 `.sync.json` 的 `assetUrls`），拉取后 `/uploads/*`、`/api/file/<hash>` → 下载到 `assets/` 并改写成本地引用；外链一律不动。导出打包与冲突「采用服务器版本」的图片本地化仍是后续项，不要在这里接 `/uploads`。
 8. **PAT 只以密文落盘**：`.sync.json` 只写 `tokenEnc`（`internal/patvault`，密钥在用户配置目录 `pat_vault.key`，0600），`BindInfo.Token` 仅内存且 `json:"-"`；旧版明文 `token` 首次 `LoadBind` 自动迁移。不要改回明文，也不要把令牌回传前端（`GetSyncBind` 已不返回）。
 
+9. **集合打开必须过初始化闸门**：`collection.Open` 只在「已有 `opencollection.yml`」或「空目录/不存在」时直接打开；目录里**有内容但没有清单**时返回 `ErrNeedsInit`，前端 confirm 说明影响后调 `App.InitCollection`（初始化后目录里既有的 `.yml` 会被识别为本项目接口）。取消则不载入、不写盘。没有任何打开的根时用 `App.EnsureDefaultCollection`（配置目录下 `default-collection`）：启动即进主界面，新建请求直接落在该目录。不要退回「先停在欢迎页」的旧行为，也不要恢复「随手选目录就默默生成清单」的旧逻辑。
+
 ## 文档约定
 
 | 目录 | 放什么 |
