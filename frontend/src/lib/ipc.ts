@@ -227,6 +227,8 @@ export const api = {
   pickDirectory: () => call<string>('PickDirectory'),
   pickFile: () => call<string>('PickFile'),
   /** 打开工作目录（多根：追加并置为活动根；同一目录重复打开是幂等的）。 */
+  /** 用户确认后初始化「有内容但无 opencollection.yml」的目录，随后直接打开 */
+  initCollection: (dir: string) => call<CollectionInfo>('InitCollection', dir),
   openCollection: (dir: string) => call<CollectionInfo>('OpenCollection', dir).then(normalizeInfo),
   /** 全部已打开的工作目录（按打开顺序），用于侧栏单树多根。 */
   listCollections: () => call<CollectionSummary[] | null>('ListCollections').then(normalizeSummaries),

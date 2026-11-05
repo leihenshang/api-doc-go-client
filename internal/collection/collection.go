@@ -99,9 +99,21 @@ var gitignoreEntries = func() []string {
 // NewUID 生成实体稳定身份（uuid v4）。环境/变量的 uid 由同步引擎首次推送时补齐。
 func NewUID() string { return uuid.NewString() }
 
-// Open 打开（不存在则初始化）一个集合目录。
+// ErrNeedsInit 目录里有内容但没有 opencollection.yml：需要用户确认后再初始化。
+//
+// 为什么不再默默生成清单：用户随手选一个杂项目录（含别人的 .yml/.md 或代码），
+// 旧逻辑会直接写清单并把它当成集合载入，目录里那些文件还会被扫成本项目的接口。
+var ErrNeedsInit = errors.New("目录尚未初始化")
+
+// Open 打开一个集合目录：已初始化（有 opencollection.yml）或空目录直接打开，
+// 有内容但没清单时返回 ErrNeedsInit，由用户确认后走 Init。
 // 原生 Bruno 目录（含 bruno.json 或 .bru）不能直接打开，须走导入流程。
-func Open(dir string) (*Collection, error) {
+func Open(dir string) (*Collection, error) { return open(dir, false) }
+
+// Init 确认初始化：给已有内容的目录补一份 opencollection.yml 再打开。
+func Init(dir string) (*Collection, error) { return open(dir, true) }
+
+func open(dir string, force bool) (*Collection, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -124,6 +136,11 @@ func Open(dir string) (*Collection, error) {
 
 	c := &Collection{Dir: abs}
 	mPath := filepath.Join(abs, "opencollection.yml")
+	if !force {
+		if _, err := os.Stat(mPath); os.IsNotExist(err) && hasForeignContent(abs) {
+			return nil, ErrNeedsInit
+		}
+	}
 	if data, err := os.ReadFile(mPath); err == nil {
 		m, err := share.DecodeManifest(data)
 		if err != nil {
@@ -2368,4 +2385,23 @@ func joinRel(folder, name string) string {
 		return name
 	}
 	return folder + "/" + name
+}
+
+// hasForeignContent 目录里是否有「不属于空集合」的内容。
+//
+// .git / .gitignore / .sync.json 之类是版本控制与同步的副产物，不算用户内容；
+// 其余任何条目（含子目录）都视为「这里本来就有东西」，需要用户确认才能初始化。
+func hasForeignContent(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		switch e.Name() {
+		case ".git", ".gitignore", ".sync.json", ".DS_Store":
+			continue
+		}
+		return true
+	}
+	return false
 }

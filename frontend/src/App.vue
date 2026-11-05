@@ -220,7 +220,32 @@ async function openCollection(dir: string): Promise<void> {
     }
     void refreshSyncStatus()
   } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
+    const msg = e instanceof Error ? e.message : String(e)
+    // 目录里有内容但没有 opencollection.yml：先问用户，确认后再初始化并重新打开。
+    if (msg.includes('尚未初始化')) {
+      const ok = window.confirm(
+        `该目录不是本项目创建的集合（缺少 opencollection.yml）。\n\n` +
+        `初始化后，目录里已有的 .yml 请求文件会被识别为本项目的接口。\n\n` +
+        `目录：${dir}\n\n是否初始化并载入？`,
+      )
+      if (!ok) return
+      try {
+        await api.initCollection(dir)
+        await coll.open(dir)
+        coll.restoring = true
+        try {
+          await tabs.restoreSession()
+        } finally {
+          await nextTick()
+          coll.restoring = false
+        }
+        void refreshSyncStatus()
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : String(err))
+      }
+      return
+    }
+    message.error(msg)
   }
 }
 
