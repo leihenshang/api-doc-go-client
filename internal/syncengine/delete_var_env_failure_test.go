@@ -11,7 +11,7 @@ import (
 
 func newDeleteFailureEngine(t *testing.T, env collection.Env) (*collection.Collection, *Engine) {
 	t.Helper()
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

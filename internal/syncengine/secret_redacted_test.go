@@ -12,7 +12,7 @@ import (
 
 // TestApplyRedactedSecretKeepsLocalValue 校验 redacted 载荷不覆盖本地值、不写脏基线。
 func TestApplyRedactedSecretKeepsLocalValue(t *testing.T) {
-	c, err := collection.Open(t.TempDir())
+	c, err := collection.Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

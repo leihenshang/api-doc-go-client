@@ -18,7 +18,7 @@ func openRoot(t *testing.T, core *App, name string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("建目录 %s: %v", name, err)
 	}
-	if _, err := core.OpenCollection(dir); err != nil {
+	if _, err := core.InitCollection(dir); err != nil {
 		t.Fatalf("打开 %s: %v", name, err)
 	}
 	// 用例结束先释放索引句柄再让 TempDir 清理（Windows 上句柄占住时会删不掉；
@@ -63,7 +63,7 @@ func TestMultiCollectionOpenListAndIsolation(t *testing.T) {
 	alphaRoot, betaRoot := list[0].Root, list[1].Root
 
 	// 重复打开同一目录 = 幂等（不新增根），并置为活动根
-	if _, err := core.OpenCollection(alpha); err != nil {
+	if _, err := core.InitCollection(alpha); err != nil {
 		t.Fatalf("重复打开 alpha: %v", err)
 	}
 	list, _ = core.ListCollections()
@@ -369,7 +369,7 @@ func TestTwoRootsWithSameCollectionUID(t *testing.T) {
 	core := NewApp()
 	t.Cleanup(core.closeAllCollections)
 	orig := filepath.Join(t.TempDir(), "orig")
-	if _, err := core.OpenCollection(orig); err != nil {
+	if _, err := core.InitCollection(orig); err != nil {
 		t.Fatalf("打开 orig: %v", err)
 	}
 	manifest, err := os.ReadFile(filepath.Join(orig, "opencollection.yml"))
@@ -383,7 +383,7 @@ func TestTwoRootsWithSameCollectionUID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(copied, "opencollection.yml"), manifest, 0o644); err != nil {
 		t.Fatalf("写拷贝清单: %v", err)
 	}
-	if _, err := core.OpenCollection(copied); err != nil {
+	if _, err := core.InitCollection(copied); err != nil {
 		t.Fatalf("打开拷贝目录: %v", err)
 	}
 

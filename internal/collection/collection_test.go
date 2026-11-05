@@ -10,7 +10,7 @@ import (
 
 func openTemp(t *testing.T) *Collection {
 	t.Helper()
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -19,7 +19,7 @@ func openTemp(t *testing.T) *Collection {
 
 func TestOpenCreatesManifestAndGitignore(t *testing.T) {
 	dir := t.TempDir()
-	c, err := Open(dir)
+	c, err := Init(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestOpenCreatesManifestAndGitignore(t *testing.T) {
 		}
 	}
 	// 再次打开：uid 稳定
-	c2, err := Open(dir)
+	c2, err := Init(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestEnvFilesAreOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 不使用 POSIX 权限位")
 	}
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

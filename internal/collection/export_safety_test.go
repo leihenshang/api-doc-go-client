@@ -34,7 +34,7 @@ func TestHTMLAllowedTagsAreSafe(t *testing.T) {
 // TestSanitizeDropsExecutableMarkup 端到端：带 script / onerror / javascript: 的内容导出后
 // 不能残留可执行片段（用户自己的集合也可能从别处粘进来一段 HTML）。
 func TestSanitizeDropsExecutableMarkup(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

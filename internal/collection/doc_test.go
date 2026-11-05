@@ -11,7 +11,7 @@ import (
 // 正文——正文里出现表格 / 连续列表时 YAML 解析失败，文档被当成「非法 YAML」丢掉：
 // 保存成功、树里却看不到，用户会以为文档丢了。
 func TestScanKeepsDocWithMarkdownTable(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

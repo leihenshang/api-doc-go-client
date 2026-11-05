@@ -17,7 +17,7 @@ import (
 // p110Open 打开一个临时集合（真实入口），测试结束关闭。
 func p110Open(t *testing.T) *Collection {
 	t.Helper()
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

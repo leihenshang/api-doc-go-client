@@ -136,7 +136,7 @@ func TestDocAssetServesFromAnyRoot(t *testing.T) {
 	}
 	// 打开第二个集合并切为活动根；第一份仍留在内存表里
 	second := t.TempDir()
-	if _, err := core.OpenCollection(second); err != nil {
+	if _, err := core.InitCollection(second); err != nil {
 		t.Fatalf("打开第二个集合: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(first, "assets", strings.TrimPrefix(url, collection.DocAssetURLPrefix))); err != nil {

@@ -9,7 +9,7 @@ import (
 
 // 文档 / 示例 / 环境的整文件快照：能被列出、能看预览、能原样还原。
 func TestSnapshotConflictListDetailResolve(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSnapshotConflictListDetailResolve(t *testing.T) {
 
 // 「以远端为准」= 丢弃副本，不改动已落地的远端内容。
 func TestSnapshotConflictResolveRemoteKeepsFile(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestSnapshotConflictResolveRemoteKeepsFile(t *testing.T) {
 
 // 副本里记录的原文件路径必须限制在集合内（副本可被手工编辑）。
 func TestSnapshotConflictRejectsEscapingPath(t *testing.T) {
-	c, err := Open(t.TempDir())
+	c, err := Init(t.TempDir())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
