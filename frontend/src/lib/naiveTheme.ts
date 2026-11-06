@@ -66,6 +66,9 @@ export function buildThemeOverrides(dark: boolean): GlobalThemeOverrides {
             thColor: dark ? '#202124' : '#fafafa',
             thFontWeight: '500',
         },
+        // 暗色下 naive 默认把开关滑块做成纯白：深底上过曝，也会被「暗色无浅色残留」
+        // 的视觉回归判成浅色令牌。改成与文字同级的近白灰，轨道用面板边框色。
+        Switch: dark ? { buttonColor: '#c9ced8', railColor: '#3a3d42' } : {},
         // 浮层（保存▾ 等）：naive 默认那套 `0 9px 28px` 浓投影看着像"大边框盒子"，
         // 换成 app 的轻投影令牌 + 8px 圆角；底色浅色用面板白、暗色用 surface-3（否则与面板同色，糊在一起）
         Popover: {
