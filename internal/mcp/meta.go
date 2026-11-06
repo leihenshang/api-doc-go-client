@@ -145,20 +145,20 @@ var toolMetas = []ToolMeta{
 	{
 		Name: "search_docs", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.4.0",
 		Brief:       "搜索文档正文",
-		Description: "在文档条目正文里按行搜索，返回 uid/路径/命中行号；定位后再用 get_doc 精读。",
+		Description: "按行搜索文档正文，返回 uid/路径/命中行号与所属标题；再用 get_doc(heading=…) 读该节。",
 		Output:      searchDocsOutput(),
 	},
 	{
 		Name: "list_docs", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
 		Brief:       "列出文档条目",
-		Description: "列出文档条目（.md）及路径与 hash；query 过滤，limit/offset 分页。不含接口说明。",
+		Description: "列出文档条目（.md）及路径与 hash；query 过滤，limit/offset 分页；withOutline=true 附标题清单（到 h2）。",
 		Output:      listDocsOutput(),
 	},
 	{
 		Name: "get_doc", Group: GroupDocs, Risk: RiskLow, InReadOnly: true, Since: "0.2.0",
 		Brief:       "读文档正文（单个或批量）",
 		Output:      getDocOutput(),
-		Description: "读文档正文与完整 hash：uid 取单篇，uids 批量 1–10 篇；长文用 outline 或 startLine+maxLines。",
+		Description: "读文档正文与 hash（单篇/批量）。长文先看结构 outline=true；只读某节 heading=…；分段 startLine+maxLines。",
 	},
 
 	// ---- 环境读（只读模式也注册）----
@@ -535,6 +535,8 @@ func listDocsOutput() map[string]any {
 		"hash": strSchema(),
 		"icon": strSchema(),
 		"seq":  intSchema(),
+		// withOutline=true 时的极简标题清单（到 h2、最多 12 条）
+		"headings": arrSchema(strSchema()),
 	}, "uid", "path")
 	return objSchema(map[string]any{
 		"project": strSchema(), "total": intSchema(), "returned": intSchema(),
@@ -545,8 +547,10 @@ func listDocsOutput() map[string]any {
 func searchDocsOutput() map[string]any {
 	hit := objSchema(map[string]any{
 		"uid": strSchema(), "name": strSchema(), "path": strSchema(), "project": strSchema(),
-		"count":   intSchema(),
-		"matches": arrSchema(objSchema(map[string]any{"line": intSchema(), "snippet": strSchema()}, "line", "snippet")),
+		"count": intSchema(),
+		"matches": arrSchema(objSchema(map[string]any{
+			"line": intSchema(), "snippet": strSchema(), "headingPath": strSchema(),
+		}, "line", "snippet")),
 	}, "uid", "path")
 	return objSchema(map[string]any{
 		"pattern": strSchema(), "total": intSchema(), "returned": intSchema(), "docs": arrSchema(hit),
@@ -774,10 +778,30 @@ func getDocOutput() map[string]any {
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "path": strSchema(),
 		"size": intSchema(), "hash": strSchema(), "planned": strSchema(),
 		"content": strSchema(), "error": strSchema(),
+		// 视图模式：full（全文）/ range（分段、按标题）/ outline（结构概览）
+		"kind": strSchema(), "lines": intSchema(), "chars": intSchema(),
+		"startLine": intSchema(), "endLine": intSchema(), "totalLines": intSchema(),
+		// 超长全文时附「先看结构」建议
+		"hint": strSchema(),
+		// 大纲
+		"depth": intSchema(), "totalHeadings": intSchema(), "omitted": intSchema(),
+		"headings": arrSchema(objSchema(map[string]any{
+			"level": intSchema(), "text": strSchema(), "line": intSchema(),
+			"endLine": intSchema(), "lines": intSchema(), "lead": strSchema(),
+			"codeBlocks": intSchema(), "tables": intSchema(),
+		}, "level", "text", "line")),
 	}, "project")
 	return objSchema(map[string]any{
 		"project": strSchema(), "uid": strSchema(), "name": strSchema(), "path": strSchema(),
 		"size": intSchema(), "hash": strSchema(), "planned": strSchema(), "content": strSchema(),
+		"kind": strSchema(), "lines": intSchema(), "chars": intSchema(),
+		"startLine": intSchema(), "endLine": intSchema(), "totalLines": intSchema(), "hint": strSchema(),
+		"depth": intSchema(), "totalHeadings": intSchema(), "omitted": intSchema(),
+		"headings": arrSchema(objSchema(map[string]any{
+			"level": intSchema(), "text": strSchema(), "line": intSchema(),
+			"endLine": intSchema(), "lines": intSchema(), "lead": strSchema(),
+			"codeBlocks": intSchema(), "tables": intSchema(),
+		}, "level", "text", "line")),
 		// 批量形态
 		"total": intSchema(), "returned": intSchema(), "docs": arrSchema(item),
 	}, "project")

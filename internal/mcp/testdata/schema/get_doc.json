@@ -1,5 +1,20 @@
 {
   "properties": {
+    "depth": {
+      "type": "integer"
+    },
+    "heading": {
+      "type": "string"
+    },
+    "headingIndex": {
+      "type": "integer"
+    },
+    "leads": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
     "maxLines": {
       "type": "integer"
     },

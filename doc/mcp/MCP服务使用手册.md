@@ -374,7 +374,7 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `list_docs` | `project?`、`query?`、`limit?`、`offset?`、`includeHash?` | 列清单（名称/路径/字节数/**hash**）；`query` 按名称与路径过滤；`limit` 默认 200（上限 1000）、`offset` 分页（首行给总数）；`includeHash` 默认 true（可直接回传 `update_doc.ifMatch`；会逐篇读文件算 hash，超大项目可传 false 提速） |
-| `get_doc` | `project?`、`uid?` / `path?` / `uids?` / `paths?`（单篇或批量二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`（`docs/guide.md` 与 `docs/guide` 都认，找不到会列候选）；批量传 `uids` 或 `paths`。默认全文；长文档先 `outline=true` 看标题大纲（带 `L行号`），再 `startLine` + `maxLines` 分段读取（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
+| `get_doc` | `project?`、`uid?` / `path?` / `uids?` / `paths?`（单篇或批量二选一，批量 1–10）、`startLine?`、`maxLines?`、`outline?`、`depth?`、`leads?`、`heading?`、`headingIndex?` | 读正文（Markdown 原文）+ **完整 `hash`**（回传给 `update_doc.ifMatch`）。单个可传 `uid` 或 `path`；批量传 `uids` 或 `paths`。**默认全文**；超过 8000 字符时末尾追加「先看结构」建议（不截断）。看结构用 `outline=true`（`depth` 默认 2、`leads` 默认带每节首句，约 500 token）；只读某节用 `heading="标题"`（同名取第几个用 `headingIndex`，与 `outline` 互斥）；按行分段用 `startLine`+`maxLines`（默认 100 行、上限 500）。区间读取带行号，**行号仅供阅读，写回时不要带**；`hash` 始终是全文 hash，只读一段也能安全 `ifMatch` |
 | `create_doc` | `project?`、`name` ✅、`folder?`、`content?`、`uid?`、`onConflict?` | 身份以 **uid/path** 为准（`name` 只是显示名，可重复）；同名/同 uid 默认报 `[CONFLICT]`（含已有 uid/path），`onConflict=suffix` 自动加 `-2`、`overwrite` 复用已有条目并覆盖正文；`uid` 可做幂等导入；`folder` 须为**已存在**的目录（否则 `[NOT_FOUND]`），留空或写 `docs` 时用默认目录（不存在会自动创建） |
 | `update_doc` | `project?`、`uid?` / `path?`、`content?` / `replaces?` / `append?` / `insertAfter?`（正文四选一）、`name?`、`folder?`、`section?`、`ifMatch?` | 只改传入的字段：`content` 覆盖正文（空串=清空）、`replaces` 局部替换、`append` 末尾追加、`insertAfter` 在某段后插入（`anchor` 默认必须唯一、`occurrence=N` 指定第 N 处；也可用 `anchorHeading="## 附录"` 插到该小节末尾，标题按归一化比较：全角空格、连续空格、闭合式 `## 附录 ##`、尾部 `*` 都认，找不到时列出文内标题）—— 四者互斥；`section=content` 只允许正文类字段、`section=meta` 只允许 `name/folder`；成功附「改动行 ±1 / 前 5 行」落盘确认 |
 | `delete_doc` | `project?`、`uid` ✅ | 文件进 `.trash`，可人工找回 |
@@ -389,7 +389,8 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 {"project":"shop","uid":"142310aa-ce1f-4c9a-af33-0fa761e68aae","content":"# 接入指南\n…","ifMatch":"<get_doc 返回的 hash>"}
 
 // 长文档：先看大纲，再分段精读（search_docs 的 L 行号可直接当 startLine）
-{"project":"shop","uid":"142310aa-…","outline":true}
+{"project":"shop","uid":"142310aa-…","outline":true,"depth":2}
+{"project":"shop","uid":"142310aa-…","heading":"安装"}
 {"project":"shop","uid":"142310aa-…","startLine":51,"maxLines":50}
 ```
 
@@ -403,6 +404,10 @@ Postman 的目录映射为模块、OpenAPI 的 tag 映射为子模块；已存�
 ```
 
 写回仍用 `replaces`（`old` 取原文、**去掉行号**），`ifMatch` 用同一次响应里的 hash。
+
+> **结构概览（省 token 的关键）**：`outline=true` 返回「标题 + 行范围 + 每节首句 + 代码块/表格数量」，
+> 结构化输出里**不含正文**。`search_docs` 的命中行带 `headingPath`（如 `设计 > 背景 > 现状`），
+> 定位后直接 `get_doc(heading="现状")` 只读那一节。`list_docs(withOutline=true)` 可先看每篇的标题清单再挑。
 
 `get_request_detail` 返回的 `relatedDocs` 里能看到「与该接口相关的文档条目」，拿其中的 uid 直接 `get_doc` 即可。
 

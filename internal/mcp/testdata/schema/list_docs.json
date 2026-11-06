@@ -17,6 +17,9 @@
     },
     "query": {
       "type": "string"
+    },
+    "withOutline": {
+      "type": "boolean"
     }
   },
   "type": "object"

@@ -593,6 +593,9 @@ func renderDocs(project string, docs []DocItem, total, offset int) string {
 	fmt.Fprintf(&sb, "项目 %s 共 %d 篇文档（本次返回 %d 篇，offset %d）：\n", project, total, len(docs), offset)
 	for _, d := range docs {
 		fmt.Fprintf(&sb, "\n- %s · %s · %d 字节", d.Name, d.Path, d.Size)
+		if len(d.Headings) > 0 {
+			fmt.Fprintf(&sb, "\n    标题：%s", strings.Join(d.Headings, " / "))
+		}
 		if d.Hash != "" {
 			fmt.Fprintf(&sb, " · hash %s", d.Hash)
 		}
@@ -611,6 +614,11 @@ func renderDocs(project string, docs []DocItem, total, offset int) string {
 
 // renderDocDetail get_doc / create_doc / update_doc 的结果：头部元信息 + 正文原文。
 func renderDocDetail(d *DocDetail, v LineView) string {
+	return renderDocDetailView(d, buildDocView(d.Content, v, d.UID+"|"+d.Hash))
+}
+
+// renderDocDetailView 用已构建的视图渲染：文本与结构化输出同源，不会一边截断一边带全文。
+func renderDocDetailView(d *DocDetail, res DocViewResult) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s\n路径 %s · uid %s", d.Name, d.Path, d.UID)
 	if d.Hash != "" {
@@ -618,12 +626,11 @@ func renderDocDetail(d *DocDetail, v LineView) string {
 		fmt.Fprintf(&sb, " · hash %s", d.Hash)
 	}
 	sb.WriteString("\n")
-	if strings.TrimSpace(d.Content) == "" {
+	if res.Mode == "empty" || strings.TrimSpace(d.Content) == "" {
 		sb.WriteString("\n（正文为空，可用 update_doc 写入）\n")
 		return sb.String()
 	}
-	// 全文原样给出（不转义）；区间/大纲模式带行号，超长全文只加一行「建议分段」提示
 	sb.WriteString("\n")
-	sb.WriteString(renderDocContent(d.Content, v))
+	sb.WriteString(res.Text)
 	return sb.String()
 }

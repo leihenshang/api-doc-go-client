@@ -150,9 +150,10 @@ func TestGetRequestDetailDocsRangeAndOutline(t *testing.T) {
 
 func TestGetDocFullReadHintsLongDoc(t *testing.T) {
 	cs := connectSelf(t)
-	lines := make([]string, 500)
+	// 阈值按字符（8000）：1500 行 × 约 8 字才够长，纯行数不够
+	lines := make([]string, 1500)
 	for i := range lines {
-		lines[i] = fmt.Sprintf("第 %d 行", i+1)
+		lines[i] = fmt.Sprintf("第 %d 行的正文内容", i+1)
 	}
 	callTool(t, cs, "create_doc", map[string]any{
 		"project": "demo", "name": "很长", "content": strings.Join(lines, "\n"),
@@ -160,10 +161,10 @@ func TestGetDocFullReadHintsLongDoc(t *testing.T) {
 	uid := uidAfter(t, mustCall(t, cs, "list_docs", map[string]any{"project": "demo", "query": "很长"}))
 
 	full := mustCall(t, cs, "get_doc", map[string]any{"project": "demo", "uid": uid})
-	if !strings.Contains(full, "建议用 startLine+maxLines 分段读取") {
-		t.Errorf("超长全文应给分段建议：\n%s", full[:200])
+	if !strings.Contains(full, "先看结构") || !strings.Contains(full, "outline=true") {
+		t.Errorf("超长全文应给「先看结构」建议：\n%s", full[:300])
 	}
-	if !strings.Contains(full, "第 500 行") {
+	if !strings.Contains(full, "第 1500 行的正文内容") {
 		t.Errorf("建议归建议，正文不能被截断")
 	}
 }
