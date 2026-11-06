@@ -32,6 +32,10 @@ test('[I7] MCP 白名单：空白名单安全默认 / 勾选目录（默认可�
   const item = page.getByTestId('settings.mcpAllowItem')
   await expect(item).toHaveCount(1)
   await expect(item).toContainText('basic')
+  // 安全：设置页只显示工作区名称与序号，不能把集合真实路径摊出来
+  // （路径只允许出现在集合概览与「打开当前目录」）。
+  await expect(item).not.toContainText(dir)
+  await expect(item).not.toContainText(app.runDir)
   await expect(writable).toHaveClass(/--disabled/) // 只读模式下可写不可勾
 
   // ③ 关闭「只读模式」→ 可写恢复，且授权默认可写 → 保存（保存会关掉弹窗）：配置落盘

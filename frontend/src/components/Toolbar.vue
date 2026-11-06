@@ -17,7 +17,6 @@ import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   name: string
-  dir: string
   envs: Env[]
   currentEnv: string
   /** 已打开的工作目录（多根：菜单里可以直接切换活动根） */
@@ -63,8 +62,7 @@ const recentOptions = computed(() =>
   props.recent.map((r) => ({
     key: `dir:${r.dir}`,
     label: r.name,
-    // 同名目录不少见：把完整路径放进 title，悬停可分辨
-    title: r.dir,
+    // 不把完整路径放进 title：真实路径只在集合概览与「打开当前目录」里出现。
   })),
 )
 

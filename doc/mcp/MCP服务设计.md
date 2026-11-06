@@ -230,6 +230,7 @@ status/headers/body/contentType 直接落盘；`UpdateResponseExample` 按 UID �
 | 风险工具确认 | 内嵌服务默认对 `send_request` 与全部写工具弹窗确认（T2，见第七节）；独立 mcpserver 默认不拦截，可用 `-require-consent` 切为全拒绝 |
 | 工作目录边界 | 只扫 / 只操作**白名单**目录（路径比较按绝对路径 + 软链复核，拒绝 `..` 逃逸）；`create_project` 只能在白名单内的可写目录里建（以前 `root` 参数可以指向任意路径 = 越权） |
 | 授权粒度 | 每条白名单独立只读/可写：只读授权下写工具直接拒绝，`send_request` 的示例也不落盘 |
+| 路径不外泄 | 工具输出（文本 + structuredContent）与错误信息里不出现真实文件路径：工作目录统一用 `ws_N` 别名（`use_workspace` / `create_project` 都认），项目用相对标识；`MCPStatus` 不再带白名单路径。真实路径只出现在客户端（集合概览 / 右键「打开当前目录」） |
 
 ## 十、客户端内嵌（状态栏 MCP 入口 → 设置 MCP 分区）
 

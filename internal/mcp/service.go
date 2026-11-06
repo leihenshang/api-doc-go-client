@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -153,25 +154,122 @@ func (s *Service) workspaceHint() string {
 		return "可用项目：" + strings.Join(usable, "、")
 	}
 	if bad := s.reg.BadDirs(); len(bad) > 0 {
-		return "当前没有可用项目：授权目录不可用 " + strings.Join(bad, "、")
+		labels := make([]string, 0, len(bad))
+		for _, d := range bad {
+			labels = append(labels, s.wsLabel(d)) // 只给别名，不回绝对路径
+		}
+		return "当前没有可用项目：授权目录不可用 " + strings.Join(labels, "、")
 	}
 	return "当前没有可用项目：客户端设置里的 MCP 工作目录白名单可能为空（安全默认 = 不授权任何目录）"
 }
 
 // WorkspaceItem list_workspaces 的输出项：一个授权工作目录及其中的项目。
 type WorkspaceItem struct {
-	// Path 工作目录绝对路径（可直接传给 use_workspace）
-	Path string `json:"path"`
-	// Name 目录基名（便于口头指代）
+	// ID 对外标识（ws_1、ws_2……按白名单顺序），可直接传给 use_workspace。
+	// 为什么不给真实路径：MCP 面向外部 AI，路径一旦出去就能被直接拿去读写文件，
+	// 而 AI 实际只需要一个能指代目标的稳定标识。
+	ID string `json:"id"`
+	// Name 目录基名（便于口头指代；只有最后一段，不含上层目录）
 	Name string `json:"name"`
 	// Writable 是否可写授权（false = 只读：写工具会被拒）
 	Writable bool `json:"writable"`
-	// Projects 该目录下的项目标识（可取 name/path/uid，直接当 project 传）
+	// Projects 该目录下的项目标识（相对工作目录，直接当 project 传）
 	Projects []string `json:"projects,omitempty"`
 	// Selected 当前默认工作目录是否落在它里面
 	Selected bool `json:"selected,omitempty"`
 	// Error 目录不可用时的原因（不存在等）
 	Error string `json:"error,omitempty"`
+}
+
+// wsID 授权目录 → 对外别名（ws_1 起，按白名单顺序）；不在白名单里返回空串。
+func (s *Service) wsID(path string) string {
+	for i, a := range s.reg.Allow() {
+		if a.Path == path {
+			return "ws_" + strconv.Itoa(i+1)
+		}
+	}
+	return ""
+}
+
+// wsPath 对外别名 → 授权目录；不是合法别名（格式不对 / 越界）返回空串。
+func (s *Service) wsPath(id string) string {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, "ws_") {
+		return ""
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "ws_"))
+	if err != nil || n < 1 {
+		return ""
+	}
+	allow := s.reg.Allow()
+	if n > len(allow) {
+		return ""
+	}
+	return allow[n-1].Path
+}
+
+// wsLabel 对外的目录称谓：能对上白名单就给别名，否则只给目录名 —— 绝不回绝对路径。
+func (s *Service) wsLabel(path string) string {
+	if id := s.wsID(path); id != "" {
+		return id
+	}
+	return filepath.Base(path)
+}
+
+// Redact 把文本里出现的授权目录（绝对路径）替换成对外别名。
+//
+// 为什么要做这一层：MCP 的输出与错误信息里有大量「工作目录 %s」的句式（只读授权、
+// 白名单外、新建项目失败……），逐个改容易漏；统一在出口处替换，新增文案也不会再漏。
+func (s *Service) Redact(text string) string {
+	if text == "" {
+		return text
+	}
+	allow := s.reg.Allow()
+	// 长的先换：白名单里同时有 /a/b 与 /a/b/c 时，先处理更长的，避免只换掉前缀留下残尾。
+	sorted := make([]AllowDir, len(allow))
+	copy(sorted, allow)
+	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i].Path) > len(sorted[j].Path) })
+	for _, a := range sorted {
+		if a.Path == "" {
+			continue
+		}
+		label := s.wsLabel(a.Path)
+		text = strings.ReplaceAll(text, a.Path, label)
+		// Windows 上错误信息里可能混用分隔符：补一次斜杠形式。
+		if slashed := filepath.ToSlash(a.Path); slashed != a.Path {
+			text = strings.ReplaceAll(text, slashed, label)
+		}
+	}
+	return text
+}
+
+// RedactAny 结构化输出（map/slice/字符串）的同样脱敏：AI 既读文本也读 structuredContent，
+// 只在文本上做替换等于留了个后门。
+func (s *Service) RedactAny(v any) any {
+	switch x := v.(type) {
+	case string:
+		return s.Redact(x)
+	case map[string]any:
+		if x == nil {
+			return x
+		}
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = s.RedactAny(val)
+		}
+		return out
+	case []any:
+		if x == nil {
+			return x
+		}
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = s.RedactAny(val)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // ListWorkspaces 列出授权的工作目录与其中的项目。
@@ -180,7 +278,7 @@ func (s *Service) ListWorkspaces(selected string) []WorkspaceItem {
 	entries := s.reg.Entries()
 	out := make([]WorkspaceItem, 0, len(s.reg.Allow()))
 	for _, a := range s.reg.Allow() {
-		it := WorkspaceItem{Path: a.Path, Name: filepath.Base(a.Path), Writable: a.Writable}
+		it := WorkspaceItem{ID: s.wsID(a.Path), Name: filepath.Base(a.Path), Writable: a.Writable}
 		if !isDir(a.Path) {
 			it.Error = "目录不存在或不是目录"
 			out = append(out, it)
@@ -208,7 +306,11 @@ func (s *Service) ListWorkspaces(selected string) []WorkspaceItem {
 func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) {
 	key := strings.TrimSpace(workspace)
 	if key == "" {
-		return WorkspaceItem{}, "", withInvalid(fmt.Errorf("缺少 workspace：请传 list_workspaces 返回的工作目录 path，或一个项目标识"))
+		return WorkspaceItem{}, "", withInvalid(fmt.Errorf("缺少 workspace：请传 list_workspaces 返回的工作目录 id（如 ws_1），或一个项目标识"))
+	}
+	// ⓪ 别名先还原成真实目录：对外只发 id，内部仍按路径做白名单校验。
+	if p := s.wsPath(key); p != "" {
+		key = p
 	}
 	// ① 先按工作目录解析（授权目录集合里有它才算数）
 	if a, err := s.reg.allowFor(key, false); err == nil {
@@ -220,11 +322,11 @@ func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) 
 		}
 		switch len(projects) {
 		case 0:
-			return WorkspaceItem{}, "", withNotFound(fmt.Errorf("工作目录 %s 下没有可用项目（用 list_workspaces 查看）", a.Path))
+			return WorkspaceItem{}, "", withNotFound(fmt.Errorf("工作目录 %s 下没有可用项目（用 list_workspaces 查看）", s.wsLabel(a.Path)))
 		case 1:
 			return s.workspaceItem(projects[0], a), projects[0], nil
 		default:
-			return WorkspaceItem{}, "", withInvalid(fmt.Errorf("工作目录 %s 下有多个项目：%s；请直接指定其中之一", a.Path, strings.Join(projects, "、")))
+			return WorkspaceItem{}, "", withInvalid(fmt.Errorf("工作目录 %s 下有多个项目：%s；请直接指定其中之一", s.wsLabel(a.Path), strings.Join(projects, "、")))
 		}
 	}
 	// ② 再按项目解析
@@ -244,12 +346,13 @@ func (s *Service) UseWorkspace(workspace string) (WorkspaceItem, string, error) 
 
 // workspaceItem 组出「projectKey 所在工作目录」的输出项（Selected 按 projectKey 标记）。
 func (s *Service) workspaceItem(projectKey string, a *AllowDir) WorkspaceItem {
+	id := s.wsID(a.Path)
 	for _, it := range s.ListWorkspaces(projectKey) {
-		if it.Path == a.Path {
+		if it.ID == id {
 			return it
 		}
 	}
-	return WorkspaceItem{Path: a.Path, Name: filepath.Base(a.Path), Writable: a.Writable}
+	return WorkspaceItem{ID: id, Name: filepath.Base(a.Path), Writable: a.Writable}
 }
 
 // 默认输出裁剪：响应体 8 KiB、列表 50 条。AI 上下文有限，超出必须显式标注而不是静默丢弃。
@@ -1723,7 +1826,12 @@ func upsertFields(rows []collection.BodyField, add []BodyFieldInput) []collectio
 // root 为空时用第一个可写的授权目录。以前这里接受任意 root（临时建一个 registry 就在那儿建集合），
 // 等于把「能写哪里」交给调用方 —— 现在白名单外一律拒绝。
 func (s *Service) CreateProject(root, name, dirName string) (Project, error) {
-	if strings.TrimSpace(root) == "" {
+	root = strings.TrimSpace(root)
+	// 对外只发别名（ws_1）：先还原成真实目录，再走白名单校验。
+	if p := s.wsPath(root); p != "" {
+		root = p
+	}
+	if root == "" {
 		p, err := s.reg.CreateProject(name, dirName)
 		if err != nil {
 			return Project{}, classifyCreateProjectErr(err)
@@ -1742,7 +1850,7 @@ func (s *Service) CreateProject(root, name, dirName string) (Project, error) {
 	}
 	absRoot = filepath.Clean(absRoot)
 	if _, serr := os.Stat(filepath.Join(absRoot, "opencollection.yml")); serr == nil {
-		return Project{}, withInvalid(fmt.Errorf("root %s 本身是项目目录，不能在其中新建项目；请传它的父级工作目录（list_workspaces 里可写的那个）", absRoot))
+		return Project{}, withInvalid(fmt.Errorf("root %s 本身是项目目录，不能在其中新建项目；请传它的父级工作目录（list_workspaces 里可写的那个）", s.wsLabel(absRoot)))
 	}
 	p, err := s.reg.CreateProjectIn(al.Path, name, dirName)
 	if err != nil {
@@ -2008,7 +2116,7 @@ func (s *Service) SendRequest(in SendRequestInput) (*SendOutcome, error) {
 	if in.SaveExample != nil && *in.SaveExample {
 		// 只读授权目录不能写示例：发送本身允许（只读 / 镜像集合同样要能试打），落盘要拦
 		if e != nil && !e.Writable() {
-			return &out, fmt.Errorf("响应已返回，但工作目录 %s 是只读授权，示例未保存（需要保存请在客户端设置里把该目录改成可写）", e.AllowRoot())
+			return &out, fmt.Errorf("响应已返回，但工作目录 %s 是只读授权，示例未保存（需要保存请在客户端设置里把该目录改成可写）", s.wsLabel(e.AllowRoot()))
 		}
 		// 只有集合内真实请求才存示例（临时请求没有文件可挂靠）
 		if !strings.HasPrefix(req.UID, "mcp-tmp") && req.UID != "" {

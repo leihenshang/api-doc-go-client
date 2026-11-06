@@ -23,7 +23,9 @@ type Project struct {
 	Name string `json:"name"` // 集合名（manifest 的 info.name，缺省用目录名）
 	UID  string `json:"uid"`  // 集合 uid
 	Path string `json:"path"` // 相对 root 的路径（工具入参用它最直观）
-	Dir  string `json:"dir"`  // 绝对路径
+	// Dir 绝对路径。json:"-"：这是内部字段，任何序列化都不该把它带出去
+	// （MCP 面向外部 AI，真实路径外泄等于给了直接读写文件的入口）。
+	Dir string `json:"-"`
 
 	// 以下统计在项目首次打开后填充（懒加载，见 Registry）
 	Requests int      `json:"requests"` // 请求数

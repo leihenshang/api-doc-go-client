@@ -570,7 +570,7 @@ func (ts *toolSet) listWorkspaces(_ context.Context, req *mcp.CallToolRequest, _
 
 // useWorkspaceIn use_workspace 的入参。
 type useWorkspaceIn struct {
-	Workspace string `json:"workspace" jsonschema:"工作目录 path（list_workspaces）或项目名/路径/uid；须在授权白名单内"`
+	Workspace string `json:"workspace" jsonschema:"工作目录 id（list_workspaces 返回的 ws_1 之类）或项目名/路径/uid；须在授权白名单内"`
 }
 
 func (ts *toolSet) useWorkspace(_ context.Context, req *mcp.CallToolRequest, in useWorkspaceIn) (*mcp.CallToolResult, any, error) {
@@ -1420,7 +1420,7 @@ func (ts *toolSet) createModule(ctx context.Context, req *mcp.CallToolRequest, i
 type createProjectIn struct {
 	Name    string `json:"name" jsonschema:"项目名（写进 manifest 的 info.name）"`
 	DirName string `json:"dirName,omitempty" jsonschema:"目录名；留空 = 与 name 相同"`
-	Root    string `json:"root,omitempty" jsonschema:"项目根目录（必须是授权且可写的工作目录）；留空 = 第一个可写工作目录"`
+	Root    string `json:"root,omitempty" jsonschema:"工作目录 id（list_workspaces 返回的 ws_1 之类，须可写）；留空 = 第一个可写工作目录"`
 }
 
 func (ts *toolSet) createProject(ctx context.Context, req *mcp.CallToolRequest, in createProjectIn) (*mcp.CallToolResult, any, error) {
@@ -1953,14 +1953,28 @@ func (ts *toolSet) wrap(fn func() (string, error)) (*mcp.CallToolResult, any, er
 	text, err := fn()
 	if err != nil {
 		// 未分类错误统一补 [INTERNAL]：调用方可按 [CODE] 前缀稳定分流，不必匹配中文散文
-		err = coded(CodeOf(err), err)
+		err = ts.redactErr(coded(CodeOf(err), err))
 		return &mcp.CallToolResult{
 			IsError:           true,
 			Content:           []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
 			StructuredContent: errorData(err),
 		}, nil, nil
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ts.svc.Redact(text)}}}, nil, nil
+}
+
+// redactErr 保住错误码、只替换文案里的绝对路径（授权目录 → ws_N）。
+//
+// MCP 面向外部 AI：真实路径一旦进到错误信息里，调用方就能直接拿它去读写文件，
+// 绕过集合这一层。错误文案由很多地方拼出来（只读授权 / 白名单外 / 新建项目冲突…），
+// 逐个改成别名容易漏，统一在出口处替换。
+func (ts *toolSet) redactErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	code := CodeOf(err)
+	msg := strings.TrimPrefix(err.Error(), "["+code+"] ")
+	return coded(code, errors.New(ts.svc.Redact(msg)))
 }
 
 // nonNilSlice 让空结果序列化为 [] 而不是 null（outputSchema 声明的是 array）。
@@ -1983,16 +1997,16 @@ func errorData(err error) map[string]any {
 func (ts *toolSet) wrapData(fn func() (string, any, error)) (*mcp.CallToolResult, any, error) {
 	text, data, err := fn()
 	if err != nil {
-		err = coded(CodeOf(err), err)
+		err = ts.redactErr(coded(CodeOf(err), err))
 		return &mcp.CallToolResult{
 			IsError:           true,
 			Content:           []mcp.Content{&mcp.TextContent{Text: "失败: " + err.Error()}},
 			StructuredContent: errorData(err),
 		}, nil, nil
 	}
-	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+	res := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ts.svc.Redact(text)}}}
 	if data != nil {
-		res.StructuredContent = data
+		res.StructuredContent = ts.svc.RedactAny(data)
 	}
 	return res, nil, nil
 }

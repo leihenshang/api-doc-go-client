@@ -922,7 +922,7 @@ watch(
       <title-bar :dark="settings.isDark" :layout="tabs.active ? settings.responseLayout : null"
         @toggle-theme="toggleTheme" @set-layout="setLayout">
         <!-- 集合 / 环境 / 本地搜索并入标题栏（原先独占一行的工具栏） -->
-        <toolbar v-if="coll.ready && coll.info" :name="coll.name" :dir="coll.dir" :envs="coll.info.envs"
+        <toolbar v-if="coll.ready && coll.info" :name="coll.name" :envs="coll.info.envs"
           :current-env="coll.currentEnv" :roots="coll.roots" :active-root="coll.activeRoot" :recent="recentDirs"
           :has-recent="hasRecentHistory" @clear-recent="clearRecentHistory" @activate="activateRoot"
           @open-dir="openCollection" @open-other="openCollection('')" @palette="showPalette = true"

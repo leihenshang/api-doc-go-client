@@ -724,6 +724,7 @@ export default {
     mcpAllowWritable: '可写',
     mcpAllowCount: '已授权 {n} 个',
     mcpAllowEmpty: '当前没有加载的工作区，打开工作区后即可在这里勾选授权给 MCP。',
+    mcpAllowNoPath: '这里只显示工作区名称：真实路径请看集合概览，或在工作区上右键「打开当前目录」。',
     mcpOrigins: '浏览器来源',
     mcpOriginsPlaceholder: 'http://localhost:5173（留空 = 拒绝一切浏览器来源）',
     mcpToken: '访问令牌',

@@ -31,7 +31,7 @@ func (f *fakeMCPBackend) Start(req MCPRequest) (*MCPStatus, error) {
 	return &MCPStatus{
 		Enabled: req.Enabled, Running: req.Enabled,
 		Addr: req.Addr, Port: req.Port, Token: req.Token,
-		ReadOnly: req.ReadOnly, Origins: req.AllowOrigins, Root: req.Root,
+		ReadOnly: req.ReadOnly, Origins: req.AllowOrigins,
 	}, nil
 }
 
