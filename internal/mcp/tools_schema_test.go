@@ -152,8 +152,12 @@ func TestToolSchemaContract(t *testing.T) {
 //
 // 契约快照刻意剔除了 description，因此快照大小看不出文案成本；而每次会话开始
 // 客户端都会拉一遍 tools/list，这是固定开销。上限给 5% 余量，反弹会立刻变红。
+// 2026-11-06 从 70000 放宽到 75000：get_doc 上线「结构概览」，入参多了 depth / leads /
+// heading / headingIndex，输出 schema 补了 headings 等字段 —— 这是每个会话的固定成本，
+// 但换来读长文档时省下几个数量级的 token（4.6 万字：全文 ~3.1 万 token → 概览 ~520 token）。
+// 之后若再涨，仍应优先压缩文案，而不是直接抬上限。
 func TestToolsListBudget(t *testing.T) {
-	const maxBytes = 70000
+	const maxBytes = 75000
 	cs := connectSelf(t)
 	res, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
 	if err != nil {

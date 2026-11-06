@@ -1,12 +1,16 @@
 # api-doc-go-client 更新日志
 
 dev:
-当前版本 0.1.11-dev
+当前版本 0.1.12-dev
 prod:
 当前版本 0.1.9
 
 > 版本口径：`prod` 与 `wails.json` 的 `info.productVersion` 一致（发布时抬升）；
 > `dev` 为开发线版本，每新增一条日期条目 patch +1。维护规则见 `AGENTS.md`。
+
+## 2026-11-07  0.1.12-dev
+
+- MCP **读文档不再只能吞全文**：`get_doc(outline=true)` 升级为「结构概览」（标题 + 行范围 + 每节首句 + 代码块/表格数，`depth` 默认 2），结构化输出不再夹带全文；新增 `get_doc(heading="标题")` 只读某节、`search_docs` 命中带 `headingPath`、`list_docs(withOutline=true)` 给标题清单。实测 4.6 万字文档：全文 ~3.1 万 token → 结构概览 ~520 token（60 倍），按标题读某节再按需展开。默认仍返回全文，超 8000 字符时末尾附「先看结构」建议。
 
 ## 2026-11-06  0.1.11-dev
 

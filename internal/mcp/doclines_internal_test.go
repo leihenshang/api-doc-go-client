@@ -123,22 +123,19 @@ func TestRenderDocOutlineNoHeadings(t *testing.T) {
 
 func TestRenderDocFullReadHintsOnlyWhenLong(t *testing.T) {
 	short := renderDocContent("a\nb", LineView{Suggest: true})
-	if strings.Contains(short, "建议用 startLine") {
+	if strings.Contains(short, "先看结构") {
 		t.Errorf("短文档不应加建议：\n%s", short)
 	}
-	lines := make([]string, docFullHintLines+1)
-	for i := range lines {
-		lines[i] = "x"
+	// 阈值按字符（不是行数）：造一段刚超过 docOutlineSuggestChars 的正文
+	long := renderDocContent(strings.Repeat("字", docOutlineSuggestChars+10), LineView{Suggest: true})
+	if !strings.Contains(long, "先看结构") || !strings.Contains(long, "outline=true") {
+		t.Errorf("超长全文应加「先看结构」建议：\n%s", long[len(long)-200:])
 	}
-	long := renderDocContent(strings.Join(lines, "\n"), LineView{Suggest: true})
-	if !strings.Contains(long, "建议用 startLine+maxLines 分段读取") {
-		t.Errorf("超长全文应加建议：\n%s", long[:150])
-	}
-	if strings.Count(long, "x") <= docFullHintLines {
+	if strings.Count(long, "字") <= docOutlineSuggestChars {
 		t.Errorf("加建议不能截断正文")
 	}
 	// 不要求提示时（create/update 的正文回显）保持原样
-	if plain := renderDocContent(strings.Join(lines, "\n"), LineView{}); strings.Contains(plain, "建议用 startLine") {
+	if plain := renderDocContent(strings.Repeat("字", docOutlineSuggestChars+10), LineView{}); strings.Contains(plain, "先看结构") {
 		t.Errorf("Suggest=false 不应加建议")
 	}
 }

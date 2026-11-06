@@ -36,6 +36,9 @@ type DocItem struct {
 	Size int    `json:"size"` // 正文字节数：AI 可据此判断要不要 get_doc 取全文
 	// Hash 文档文件当前 hash（默认返回）：可直接回传 update_doc.ifMatch，省一次 get_doc。
 	Hash string `json:"hash,omitempty"`
+	// Headings 极简标题清单（list_docs 的 withOutline=true 才有，最多 12 条、到 h2）：
+	// 让 AI 先看「这篇讲什么」再决定要不要 get_doc。
+	Headings []string `json:"headings,omitempty"`
 }
 
 // DocDetail 文档详情：正文 + 磁盘 hash。
@@ -52,7 +55,7 @@ type DocDetail struct {
 
 // ListDocs 列出项目里的文档条目（按路径排序）；query 对名称/路径做大小写不敏感的子串过滤。
 // limit/offset 分页（limit<=0 用默认 200，上限 1000）；includeHash 默认由调用方传 true。
-func (s *Service) ListDocs(project, query string, limit, offset int, includeHash bool) ([]DocItem, int, error) {
+func (s *Service) ListDocs(project, query string, limit, offset int, includeHash, withOutline bool) ([]DocItem, int, error) {
 	a, _, err := s.resolve(project)
 	if err != nil {
 		return nil, 0, err
@@ -62,6 +65,13 @@ func (s *Service) ListDocs(project, query string, limit, offset int, includeHash
 		return nil, 0, coded(CodeIO, fmt.Errorf("列不出文档: %w", err))
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
+	var contentByUID map[string]*collection.DocEntry
+	if withOutline {
+		contentByUID = make(map[string]*collection.DocEntry, len(docs))
+		for _, d := range docs {
+			contentByUID[d.UID] = d
+		}
+	}
 	out := make([]DocItem, 0, len(docs))
 	for _, d := range docs {
 		if q != "" &&
@@ -90,6 +100,16 @@ func (s *Service) ListDocs(project, query string, limit, offset int, includeHash
 		end = total
 	}
 	page := out[offset:end]
+	if withOutline {
+		for i := range page {
+			d := contentByUID[page[i].UID]
+			if d == nil {
+				continue
+			}
+			o := cachedOutline(outlineKey(d.UID, d.Content), d.Content)
+			page[i].Headings = o.briefHeadings(2, 12)
+		}
+	}
 	if includeHash {
 		if hashes, herr := a.DocHashes(); herr == nil {
 			for i := range page {
@@ -624,6 +644,9 @@ func docItem(d *collection.DocEntry) DocItem {
 type DocHitLine struct {
 	Line    int    `json:"line"`
 	Snippet string `json:"snippet"`
+	// HeadingPath 命中行所属的标题路径（「设计 > 背景 > 现状」），
+	// 让 AI 命中后直接知道该读哪一节，省一次 outline 往返。
+	HeadingPath string `json:"headingPath,omitempty"`
 }
 
 // maxDocHitLines 每篇文档最多回几处命中行（避免正文长时把上下文打爆）。
@@ -695,13 +718,17 @@ func (s *Service) SearchDocs(project, pattern string, exact bool, limit int, inc
 		for _, d := range docs {
 			var lines []DocHitLine
 			count := 0
-			for i, line := range strings.Split(d.Content, "\n") {
+			text := strings.Split(d.Content, "\n")
+			for i, line := range text {
 				if !docLineHit(line, pattern, exact) {
 					continue
 				}
 				count++
 				if len(lines) < maxDocHitLines {
-					lines = append(lines, DocHitLine{Line: i + 1, Snippet: clipRunes(strings.TrimSpace(line), 200)})
+					lines = append(lines, DocHitLine{
+						Line: i + 1, Snippet: clipRunes(strings.TrimSpace(line), 200),
+						HeadingPath: headingPathAt(text, i+1),
+					})
 				}
 			}
 			if count == 0 {

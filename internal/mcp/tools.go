@@ -1072,6 +1072,8 @@ type listDocsIn struct {
 	Offset  int    `json:"offset,omitempty" jsonschema:"跳过前 N 条（分页；返回首行会给出总数）"`
 	// IncludeHash 默认 true：列表直接带 hash，省掉「列表 → 每篇 get_doc」的 N 次往返。
 	IncludeHash *bool `json:"includeHash,omitempty" jsonschema:"默认 true = 每条带 hash（可回传 ifMatch）；大项目可传 false 省读盘"`
+	// WithOutline 每条附「极简标题清单」（到 h2、最多 12 条）：先看这篇讲什么，再决定要不要 get_doc。
+	WithOutline bool `json:"withOutline,omitempty" jsonschema:"附标题清单（到 h2）"`
 }
 
 func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in listDocsIn) (*mcp.CallToolResult, any, error) {
@@ -1081,7 +1083,7 @@ func (ts *toolSet) listDocs(_ context.Context, req *mcp.CallToolRequest, in list
 		if in.IncludeHash != nil {
 			includeHash = *in.IncludeHash
 		}
-		docs, total, err := ts.svc.ListDocs(in.Project, in.Query, in.Limit, in.Offset, includeHash)
+		docs, total, err := ts.svc.ListDocs(in.Project, in.Query, in.Limit, in.Offset, includeHash, in.WithOutline)
 		if err != nil {
 			return "", nil, err
 		}
@@ -1099,10 +1101,14 @@ type getDocIn struct {
 	Path    string   `json:"path,omitempty" jsonschema:"文档路径（如 docs/guide.md）；与 uid 二选一，批量用 paths"`
 	UIDs    []string `json:"uids,omitempty" jsonschema:"文档 uid 列表，一次 1–10（与 uid/path/paths 二选一）"`
 	Paths   []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（批量；与 uids 二选一）"`
-	// 长文档分段读取：不传 startLine/maxLines/outline = 全文（旧行为）
-	StartLine int  `json:"startLine,omitempty" jsonschema:"起始行（1 基）；与 maxLines 分段读（行号仅供阅读）"`
-	MaxLines  int  `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
-	Outline   bool `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号），先看结构再分段读取"`
+	// 长文档分段读取：不传 startLine/maxLines/outline/heading = 全文（旧行为；超长只追加建议，不截断）
+	StartLine    int    `json:"startLine,omitempty" jsonschema:"起始行（1 基）；与 maxLines 分段读（行号仅供阅读）"`
+	MaxLines     int    `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
+	Outline      bool   `json:"outline,omitempty" jsonschema:"true = 只返回结构概览（标题 + 行范围 + 每节首句），先看结构再读某一节"`
+	Depth        int    `json:"depth,omitempty" jsonschema:"大纲展开到第几级标题（默认 2，最大 6）；更深的只给数量"`
+	Leads        *bool  `json:"leads,omitempty" jsonschema:"大纲是否带每节首句（默认 true）；关掉只剩标题，更省 token"`
+	Heading      string `json:"heading,omitempty" jsonschema:"只读某一节：按标题文本定位（如「安装」或「## 安装」）；与 outline 二选一"`
+	HeadingIndex int    `json:"headingIndex,omitempty" jsonschema:"同名标题取第几个（1 基，默认 1）"`
 }
 
 func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDocIn) (*mcp.CallToolResult, any, error) {
@@ -1120,20 +1126,38 @@ func (ts *toolSet) getDoc(_ context.Context, req *mcp.CallToolRequest, in getDoc
 			return "", nil, withInvalid(errors.New("uids 与 paths 只能给一组：批量按 uid 或按路径"))
 		}
 		if batch {
+			if strings.TrimSpace(in.Heading) != "" {
+				return "", nil, withInvalid(errors.New("heading 只能用于单篇（uid / path）；批量请先看 outline 再逐篇读"))
+			}
 			return ts.batchDocs(getDocsIn{
 				Project: in.Project, UIDs: in.UIDs, Paths: in.Paths,
 				StartLine: in.StartLine, MaxLines: in.MaxLines, Outline: in.Outline,
+				Depth: in.Depth, Leads: in.Leads,
 			})
 		}
 		if !single {
 			return "", nil, withInvalid(errors.New("缺少 uid / path / uids / paths：单篇传 uid 或 path，批量传 uids 或 paths（1–10 篇）"))
 		}
+		if in.Outline && strings.TrimSpace(in.Heading) != "" {
+			return "", nil, withInvalid(errors.New("outline 与 heading 二选一：先看结构（outline=true），再按标题读某一节（heading=…）"))
+		}
 		d, err := ts.svc.GetDocAt(in.Project, in.UID, in.Path)
 		if err != nil {
 			return "", nil, err
 		}
-		view := LineView{Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true}
-		return renderDocDetail(d, view), docDetailData(in.Project, d, true), nil
+		depth := in.Depth
+		if depth == 0 {
+			depth = docOutlineDefaultDepth // MCP 侧默认 h2 概览：约 500 token 就能判断要不要读
+		}
+		view := LineView{
+			Start: in.StartLine, Max: in.MaxLines, Outline: in.Outline, Suggest: true,
+			Depth: depth, Leads: in.Leads, Heading: in.Heading, HeadingIndex: in.HeadingIndex,
+		}
+		res := buildDocView(d.Content, view, outlineKey(d.UID, d.Content))
+		if res.Err != nil {
+			return "", nil, res.Err
+		}
+		return renderDocDetailView(d, res), docDetailViewData(in.Project, d, res), nil
 	})
 }
 
@@ -1226,6 +1250,36 @@ func docDetailData(project string, d *DocDetail, withContent bool) map[string]an
 	return m
 }
 
+// docDetailViewData 读取结果的结构化输出：按视图模式给 content / headings。
+//
+// 大纲与分段模式**不带全文**：以前这里对 outline 也塞 d.Content，客户端读 structuredContent
+// 等于又吞一次全文，省 token 完全失效。
+func docDetailViewData(project string, d *DocDetail, res DocViewResult) map[string]any {
+	m := docDetailData(project, d, false)
+	switch res.Mode {
+	case "outline":
+		for k, v := range docOutlineData(res.Outline, res.Depth, res.Leads) {
+			m[k] = v
+		}
+		m["hint"] = "读全文：不带 outline；读某一节：heading=\"标题\"；关首句更省：leads=false"
+	case "range":
+		m["kind"] = "range"
+		m["startLine"], m["endLine"], m["totalLines"] = res.Start, res.End, res.Total
+		m["content"] = res.RangeText
+	case "empty":
+		m["kind"] = "empty"
+		m["content"] = ""
+	default:
+		m["kind"] = "full"
+		m["content"] = d.Content
+		m["lines"], m["chars"] = res.Total, res.Chars
+		if res.Hint != "" {
+			m["hint"] = res.Hint
+		}
+	}
+	return m
+}
+
 // getDocsIn get_docs（批量）的入参。
 type getDocsIn struct {
 	Project   string   `json:"project,omitempty" jsonschema:"项目路径/名称/uid；省略 = 会话默认工作目录"`
@@ -1233,7 +1287,9 @@ type getDocsIn struct {
 	Paths     []string `json:"paths,omitempty" jsonschema:"文档路径列表，一次 1–10 个（与 uids 二选一）"`
 	StartLine int      `json:"startLine,omitempty" jsonschema:"起始行（1 基）；与 maxLines 分段读（行号仅供阅读）"`
 	MaxLines  int      `json:"maxLines,omitempty" jsonschema:"本次最多返回行数（默认 100，最大 500）"`
-	Outline   bool     `json:"outline,omitempty" jsonschema:"true = 只返回 Markdown 标题大纲（带行号）"`
+	Outline   bool     `json:"outline,omitempty" jsonschema:"true = 结构概览"`
+	Depth     int      `json:"depth,omitempty" jsonschema:"层级（默认 2）"`
+	Leads     *bool    `json:"leads,omitempty"`
 }
 
 // batchDocs 批量取文档详情：一次最多 10 篇，结果按条目分组；单个失败不影响其它。
@@ -1283,8 +1339,9 @@ func (ts *toolSet) batchDocs(in getDocsIn) (string, any, error) {
 		}
 		ok++
 		fmt.Fprintf(&sb, "===== %s =====\n", label)
-		sb.WriteString(renderDocDetail(d, view))
-		items = append(items, docDetailData(in.Project, d, true))
+		res := buildDocView(d.Content, view, outlineKey(d.UID, d.Content))
+		sb.WriteString(renderDocDetailView(d, res))
+		items = append(items, docDetailViewData(in.Project, d, res))
 	}
 	fmt.Fprintf(&sb, "\n（成功 %d / %d）", ok, len(refs))
 	data := map[string]any{
