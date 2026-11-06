@@ -44,15 +44,10 @@ test.describe('外壳、布局与命令面板', () => {
   test('[A1] 外壳常驻 / 概览页 / 状态栏计数 @smoke', async ({ page, app }) => {
     await app.newCollection('basic')
 
-    // 未打开集合时标题栏与主题按钮已在（无边框窗口必须有拖动区与主题入口）。
-    // newCollection 是经后端门面直接打开的，页面启动会自动恢复它 —— 想复现「冷启动」的欢迎页，
-    // 得先把这个根关掉，否则直接落到集合概览、根本没有「打开集合目录…」按钮。
-    for (const r of await app.ipc<{ root: string }[]>('ListCollections')) {
-      await app.ipc('CloseCollection', r.root)
-    }
-    await page.goto(app.url)
+    // 走统一入口：清掉上次会话的根，再按后端状态恢复（可能直接是集合页，也可能是欢迎页）。
+    // 不要手写「关掉所有根再 goto」—— 无根时应用会自动建默认集合，欢迎页时有时无。
+    await openCollection(page, app)
     await expect(page.getByTestId('titlebar.theme')).toBeVisible()
-    await page.getByRole('button', { name: t('welcome.open') }).click()
     await expect(page.getByTestId('toolbar.collection')).toBeVisible()
 
     // 未选中请求时是集合概览页
@@ -63,6 +58,10 @@ test.describe('外壳、布局与命令面板', () => {
     const counts = page.getByTestId('statusbar.counts')
     await expect(counts).toContainText(t('status.requests', { n: 2 }))
     await expect(counts).toContainText(t('status.envs', { n: 1 }))
+
+    // 启动即恢复该根的环境选择：空着的话顶栏是「No Environment」，
+    // 所有 {{变量}} 都解析不了（请求直接发不出去，报「变量未定义」）。
+    await expect(page.getByTestId('env.select')).toContainText('dev')
   })
 
   test('[A2] tab↔树联动：选中态跟随 / 祖先收起后切 tab 自动展开 / 窗口标题', async ({ page, app }) => {
