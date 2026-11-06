@@ -44,7 +44,12 @@ test.describe('外壳、布局与命令面板', () => {
   test('[A1] 外壳常驻 / 概览页 / 状态栏计数 @smoke', async ({ page, app }) => {
     await app.newCollection('basic')
 
-    // 未打开集合时标题栏与主题按钮已在（无边框窗口必须有拖动区与主题入口）
+    // 未打开集合时标题栏与主题按钮已在（无边框窗口必须有拖动区与主题入口）。
+    // newCollection 是经后端门面直接打开的，页面启动会自动恢复它 —— 想复现「冷启动」的欢迎页，
+    // 得先把这个根关掉，否则直接落到集合概览、根本没有「打开集合目录…」按钮。
+    for (const r of await app.ipc<{ root: string }[]>('ListCollections')) {
+      await app.ipc('CloseCollection', r.root)
+    }
     await page.goto(app.url)
     await expect(page.getByTestId('titlebar.theme')).toBeVisible()
     await page.getByRole('button', { name: t('welcome.open') }).click()

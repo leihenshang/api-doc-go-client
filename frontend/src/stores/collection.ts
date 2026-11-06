@@ -161,7 +161,10 @@ export const useCollectionStore = defineStore('collection', {
     },
     /** 关闭一个工作目录（其它根不受影响）。 */
     async closeRoot(root: string): Promise<void> {
+      // 先记下目录：关掉后 roots 里就查不到了，但「最近打开」应保留它（可一键重开）。
+      const dir = this.roots.find((r) => r.root === root)?.info.dir ?? ''
       await api.closeCollection(root)
+      if (dir) pushRecentDir(dir)
       await this.loadRoots()
       this.restoreEnv()
       this.loadFavs()
