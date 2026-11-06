@@ -152,12 +152,8 @@ func (b *embedBackend) Start(req app.MCPRequest) (*app.MCPStatus, error) {
 		Token:     req.Token,
 		ReadOnly:  req.ReadOnly,
 		Origins:   req.AllowOrigins,
-		Allow:     req.Allow,
 		Groups:    NormalizeGroups(req.Groups),
 		CrossHost: !IsLoopbackAddr(req.Addr),
-	}
-	if len(allow) > 0 {
-		st.Root = allow[0].Path // 展示用：第一个授权目录
 	}
 	switch {
 	case !req.Enabled:

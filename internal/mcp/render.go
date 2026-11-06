@@ -554,7 +554,7 @@ func renderWorkspaces(items []WorkspaceItem, selected string) string {
 		if it.Selected {
 			mark = "  ← 当前默认"
 		}
-		fmt.Fprintf(&sb, "- %s（%s，%s）%s\n", it.Path, it.Name, perm, mark)
+		fmt.Fprintf(&sb, "- %s（%s，%s）%s\n", it.ID, it.Name, perm, mark)
 		if it.Error != "" {
 			fmt.Fprintf(&sb, "    不可用：%s\n", it.Error)
 			continue
@@ -580,7 +580,7 @@ func renderWorkspaceSelected(it WorkspaceItem, selected string) string {
 		perm = "可写"
 	}
 	return fmt.Sprintf("已选定默认工作目录：%s（%s，%s）\n后续工具可以省略 project 参数（仍可显式指定）。当前默认目标：%s",
-		it.Path, it.Name, perm, selected)
+		it.ID, it.Name, perm, selected)
 }
 
 // renderDocs list_docs 的结果：一篇文档一行（名称 · 路径 · 字节数）+ 下一层的 uid。

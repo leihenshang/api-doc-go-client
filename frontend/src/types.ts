@@ -624,10 +624,7 @@ export interface MCPStatus {
   origins: string[]
   /** 生效的工具组（空/缺省 = 全部启用） */
   groups?: string[]
-  /** 生效的工作目录白名单（空 = 未授权任何目录） */
-  allow?: MCPAllowDir[]
-  /** 展示用：第一个授权目录（空 = 白名单为空） */
-  root: string
+  // 刻意不含白名单目录与根目录路径：这是对外可见的状态，真实路径不出现在这里。
   /** 可见项目数 */
   projects: number
   /** 监听非回环地址（跨主机 / WSL / 局域网） */

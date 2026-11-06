@@ -59,10 +59,9 @@ type MCPStatus struct {
 	Origins  []string `json:"origins"`  // 允许的浏览器来源（Origin 白名单）
 	// Groups 启用的工具组（空 = 全部）；设置页据此回填勾选状态
 	Groups []string `json:"groups,omitempty"`
-	// Allow MCP 可访问的工作目录白名单（路径 + 只读/可写）；空 = 不授权任何目录
-	Allow []config.MCPAllowDir `json:"allow,omitempty"`
-	// Root 展示用：第一个授权目录（空 = 白名单为空）
-	Root      string `json:"root"`
+	// 注意：这里刻意不带白名单目录与根目录路径。
+	// MCP 状态是「对外」可见的状态（设置页、状态栏，外部工具也能读到），
+	// 真实路径只在集合概览与「打开当前目录」里出现；白名单的编辑走设置表单本身。
 	Projects  int    `json:"projects"`  // 可见项目数
 	CrossHost bool   `json:"crossHost"` // 监听非回环地址（跨主机 / WSL / 局域网）
 	Error     string `json:"error"`     // 启动失败原因（端口占用等）；正常为空
@@ -152,7 +151,7 @@ func (a *App) MCPStatusText() *MCPStatus {
 	}
 	st := &MCPStatus{
 		Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow, Groups: cfg.ToolGroups,
+		ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Groups: cfg.ToolGroups,
 		CrossHost: !isLoopbackHost(cfg.Addr),
 	}
 	switch {
@@ -220,7 +219,7 @@ func (a *App) applyMCP(newToken string) *MCPStatus {
 	if err != nil {
 		st = &MCPStatus{
 			Enabled: cfg.Enabled, Addr: cfg.Addr, Port: cfg.Port, Token: cfg.Token,
-			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Allow: cfg.Allow, Groups: cfg.ToolGroups,
+			ReadOnly: cfg.ReadOnly, Origins: cfg.AllowOrigins, Groups: cfg.ToolGroups,
 			CrossHost: !isLoopbackHost(cfg.Addr),
 			Error:     err.Error(),
 		}

@@ -706,10 +706,12 @@ function close(): void {
               <span class="muted">{{ t('settings.mcpAllowCount', { n: form.mcp.allow.length }) }}</span>
             </div>
             <div v-if="coll.roots.length" class="dirs" data-testid="settings.mcpAllowList">
-              <div v-for="r in coll.roots" :key="r.info.dir" class="dir" data-testid="settings.mcpAllowItem">
+              <!-- 只显示工作区名称：真实路径会暴露给读数的人 / 截屏 / 外部工具，
+                   需要看路径时走集合概览，或在工作区上右键「打开当前目录」。 -->
+              <div v-for="(r, i) in coll.roots" :key="r.info.dir" class="dir" data-testid="settings.mcpAllowItem">
                 <n-checkbox :checked="isAllow(r.info.dir)" :disabled="!form.mcp.enabled" size="small"
                   data-testid="settings.mcpAllowCheck" @update:checked="(v: boolean) => toggleAllow(r.info.dir, v)">
-                  <span class="mono p" :title="r.info.dir">{{ r.info.dir }}</span>
+                  <span class="p">{{ i + 1 }}. {{ r.info.name || '未命名工作区' }}</span>
                 </n-checkbox>
                 <n-checkbox :checked="writableOf(r.info.dir)"
                   :disabled="!form.mcp.enabled || form.mcp.readOnly || !isAllow(r.info.dir)" size="small"
@@ -720,6 +722,7 @@ function close(): void {
               </div>
             </div>
             <p v-else class="hint muted" data-testid="settings.mcpAllowEmpty">{{ t('settings.mcpAllowEmpty') }}</p>
+            <p v-if="coll.roots.length" class="hint muted">{{ t('settings.mcpAllowNoPath') }}</p>
           </div>
 
           <!-- 来源白名单 -->

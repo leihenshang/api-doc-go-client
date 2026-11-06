@@ -160,9 +160,14 @@ GOPROXY=https://goproxy.cn,direct go build -o mcpserver.exe ./cmd/mcpserver
 ### 4.0.2 `list_workspaces` / `use_workspace`
 
 - `list_workspaces`：列出**授权的工作目录**（含只读/可写）、其中项目与当前默认目标；AI 拿不到项目时先看它。
-- `use_workspace`：选定默认工作目录（传工作目录 path，或项目标识：名称/路径/uid）。选定后其余工具的
-  `project` 都可省略（**按会话生效**：同一次连接内有效，不会改到别的客户端）；不在白名单内会直接拒绝。
-  未选定且未传 `project` 时，工具会报错并提示用 `use_workspace` 或显式传 `project`。
+  每个目录给的标识是 `ws_1`、`ws_2` 这样的**别名**，不是真实路径。
+- `use_workspace`：选定默认工作目录（传 `list_workspaces` 返回的别名 `ws_N`，或项目标识：名称/路径/uid）。
+  选定后其余工具的 `project` 都可省略（**按会话生效**：同一次连接内有效，不会改到别的客户端）；
+  不在白名单内会直接拒绝。未选定且未传 `project` 时，工具会报错并提示用 `use_workspace` 或显式传 `project`。
+
+> **路径不外泄**：MCP 是给外部 AI 用的，所有工具输出（文本与结构化内容）与错误信息里都不会出现
+> 真实文件路径 —— 白名单目录统一显示为别名，项目用相对标识。AI 因此无法绕开工具直接读写文件。
+> 真实路径只在客户端可见：集合概览页，或在工作区上右键「打开当前目录」。
 
 ### 4.1 `list_projects`
 `project?`（按名/路径模糊过滤）、`refresh?`（重新扫描授权目录）。

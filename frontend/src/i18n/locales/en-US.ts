@@ -720,6 +720,7 @@ export default {
     mcpAllowWritable: 'Writable',
     mcpAllowCount: '{n} authorized',
     mcpAllowEmpty: 'No workspaces loaded yet — open a workspace, then check the ones MCP may access.',
+    mcpAllowNoPath: 'Only names are shown here: see the collection overview or right-click → Open current folder for the real path.',
     mcpOrigins: 'Browser origins',
     mcpOriginsPlaceholder: 'http://localhost:5173 (empty = deny every browser origin)',
     mcpToken: 'Access token',

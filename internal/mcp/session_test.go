@@ -151,9 +151,11 @@ func TestWorkspaceSelectionIsPerSession(t *testing.T) {
 		t.Fatalf("没选过的会话不该继承别人的默认目标：%s", text)
 	}
 
-	// 显式传 project 仍然优先，且不该改掉本会话的默认目标
-	if text, isErr := callTool(t, sessA, "get_project_modules", map[string]any{"project": projB}); isErr || !strings.Contains(text, projB) {
-		t.Fatalf("显式 project 应生效：isErr=%v text=%s", isErr, text)
+	// 显式传 project 仍然优先，且不该改掉本会话的默认目标。
+	// 注意：入参可以是绝对路径（兼容旧调用方），但**输出里不能再出现它** ——
+	// MCP 对外只回别名/相对标识，真实路径不出去。
+	if text, isErr := callTool(t, sessA, "get_project_modules", map[string]any{"project": projB}); isErr || !strings.Contains(text, "beta") || strings.Contains(text, rootB) {
+		t.Fatalf("显式 project 应生效且输出不含真实路径：isErr=%v text=%s", isErr, text)
 	}
 	if text, _ := callTool(t, sessA, "get_project_modules", map[string]any{}); !strings.Contains(text, "alpha") {
 		t.Fatalf("显式传 project 不该改掉本会话默认：%s", text)
