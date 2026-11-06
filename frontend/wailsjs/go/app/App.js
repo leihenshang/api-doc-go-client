@@ -26,6 +26,10 @@ export function CancelSend(arg1) {
   return window['go']['app']['App']['CancelSend'](arg1);
 }
 
+export function CheckUpdate(arg1) {
+  return window['go']['app']['App']['CheckUpdate'](arg1);
+}
+
 export function ClearCookies() {
   return window['go']['app']['App']['ClearCookies']();
 }
@@ -90,6 +94,10 @@ export function CreateRequestWithOpts(arg1) {
   return window['go']['app']['App']['CreateRequestWithOpts'](arg1);
 }
 
+export function DefaultCollectionDir() {
+  return window['go']['app']['App']['DefaultCollectionDir']();
+}
+
 export function DeleteCookie(arg1, arg2, arg3) {
   return window['go']['app']['App']['DeleteCookie'](arg1, arg2, arg3);
 }
@@ -142,6 +150,14 @@ export function DocHashes() {
   return window['go']['app']['App']['DocHashes']();
 }
 
+export function DownloadUpdate(arg1, arg2) {
+  return window['go']['app']['App']['DownloadUpdate'](arg1, arg2);
+}
+
+export function EnsureDefaultCollection() {
+  return window['go']['app']['App']['EnsureDefaultCollection']();
+}
+
 export function EnvFileHash(arg1) {
   return window['go']['app']['App']['EnvFileHash'](arg1);
 }
@@ -160,6 +176,10 @@ export function ExportMCPAudit(arg1) {
 
 export function ExportRunReport(arg1, arg2) {
   return window['go']['app']['App']['ExportRunReport'](arg1, arg2);
+}
+
+export function FetchShare(arg1) {
+  return window['go']['app']['App']['FetchShare'](arg1);
 }
 
 export function FileHash(arg1) {
@@ -228,6 +248,14 @@ export function ImportCollection(arg1, arg2, arg3) {
 
 export function ImportGrpcProtos(arg1, arg2) {
   return window['go']['app']['App']['ImportGrpcProtos'](arg1, arg2);
+}
+
+export function InitCollection(arg1) {
+  return window['go']['app']['App']['InitCollection'](arg1);
+}
+
+export function InstallUpdate(arg1) {
+  return window['go']['app']['App']['InstallUpdate'](arg1);
 }
 
 export function IsDev() {
@@ -542,6 +570,10 @@ export function SendRequest(arg1, arg2) {
   return window['go']['app']['App']['SendRequest'](arg1, arg2);
 }
 
+export function SendSharedRequest(arg1, arg2) {
+  return window['go']['app']['App']['SendSharedRequest'](arg1, arg2);
+}
+
 export function SetActiveCollection(arg1) {
   return window['go']['app']['App']['SetActiveCollection'](arg1);
 }
@@ -584,6 +616,10 @@ export function StartAutoSync(arg1) {
 
 export function StartMock(arg1) {
   return window['go']['app']['App']['StartMock'](arg1);
+}
+
+export function Startup(arg1) {
+  return window['go']['app']['App']['Startup'](arg1);
 }
 
 export function StopAutoSync() {
