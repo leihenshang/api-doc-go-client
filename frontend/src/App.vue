@@ -681,12 +681,25 @@ onMounted(() => {
     await restoreRoots()
     // 没有任何历史根：创建并打开默认集合，直接进主界面。
     // 新建请求的保存位置就是它（应用配置目录下 default-collection），不再先挡一层欢迎页。
-    if (coll.ready) return
-    try {
-      await api.ensureDefaultCollection()
-      await coll.loadRoots()
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
+    if (!coll.ready) {
+      try {
+        await api.ensureDefaultCollection()
+        await coll.loadRoots()
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+    // 现场恢复：根不是从 client.dirs 恢复的（`-dir` 启动、刷新时历史被清、默认集合）时，
+    // restoreRoots 不会走到恢复分支 —— 这里补一次，否则刷新后页签全丢。
+    // tabs 已有内容说明恢复过了，不重复打开。
+    if (coll.ready && tabs.tabs.length === 0) {
+      coll.restoring = true
+      try {
+        await tabs.restoreSession()
+      } finally {
+        await nextTick()
+        coll.restoring = false
+      }
     }
   })
 })

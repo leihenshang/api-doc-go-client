@@ -126,6 +126,13 @@ export const useCollectionStore = defineStore('collection', {
       this.roots = roots
       this.activeRoot = active || (roots[0]?.root ?? '')
       this.ready = this.roots.length > 0
+      // 启动时后端可能已经打开了根（-dir / 刷新页面）：这里必须把该根的环境选择恢复出来。
+      // 漏掉的话 currentEnv 一直是空串，顶栏显示「No Environment」，所有 {{变量}} 都解析不了 ——
+      // 表现是「打开集合后所有请求都发不出去：变量未定义」。
+      if (this.ready) {
+        this.restoreEnv()
+        this.loadFavs()
+      }
     },
     /**
      * 打开一个工作目录（追加为新的根并置为活动根；同一目录重复打开幂等）。
