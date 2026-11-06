@@ -318,6 +318,169 @@ export namespace app {
 	        this.title = source["title"];
 	    }
 	}
+	export class ShareApi {
+	    id: number;
+	    group_id: number;
+	    priority: number;
+	    api_name: string;
+	    http_method_type: string;
+	    url: string;
+	    description: string;
+	    http_request_summary: string;
+	    http_request_params: string;
+	    http_request_header: string;
+	    http_request_body_type: string;
+	    http_request_body: string;
+	    http_request_body_form: string;
+	    http_request_body_descs: string;
+	    http_request_body_fields: string;
+	    http_auth: string;
+	    http_script: string;
+	    script_vars: string;
+	    script_asserts: string;
+	    http_return_type: string;
+	    http_return_params: string;
+	    http_return_sample: string;
+	    http_return_content_type: string;
+	    status: number;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareApi(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.group_id = source["group_id"];
+	        this.priority = source["priority"];
+	        this.api_name = source["api_name"];
+	        this.http_method_type = source["http_method_type"];
+	        this.url = source["url"];
+	        this.description = source["description"];
+	        this.http_request_summary = source["http_request_summary"];
+	        this.http_request_params = source["http_request_params"];
+	        this.http_request_header = source["http_request_header"];
+	        this.http_request_body_type = source["http_request_body_type"];
+	        this.http_request_body = source["http_request_body"];
+	        this.http_request_body_form = source["http_request_body_form"];
+	        this.http_request_body_descs = source["http_request_body_descs"];
+	        this.http_request_body_fields = source["http_request_body_fields"];
+	        this.http_auth = source["http_auth"];
+	        this.http_script = source["http_script"];
+	        this.script_vars = source["script_vars"];
+	        this.script_asserts = source["script_asserts"];
+	        this.http_return_type = source["http_return_type"];
+	        this.http_return_params = source["http_return_params"];
+	        this.http_return_sample = source["http_return_sample"];
+	        this.http_return_content_type = source["http_return_content_type"];
+	        this.status = source["status"];
+	        this.version = source["version"];
+	    }
+	}
+	export class ShareDoc {
+	    id: number;
+	    group_id: number;
+	    priority: number;
+	    title: string;
+	    content: string;
+	    icon: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareDoc(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.group_id = source["group_id"];
+	        this.priority = source["priority"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.icon = source["icon"];
+	    }
+	}
+	export class ShareGroup {
+	    id: number;
+	    p_id: number;
+	    title: string;
+	    type: number;
+	    priority: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareGroup(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.p_id = source["p_id"];
+	        this.title = source["title"];
+	        this.type = source["type"];
+	        this.priority = source["priority"];
+	    }
+	}
+	export class ShareProject {
+	    id: number;
+	    title: string;
+	    description: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.version = source["version"];
+	    }
+	}
+	export class ShareBundle {
+	    project: ShareProject;
+	    groups: ShareGroup[];
+	    apis: ShareApi[];
+	    docs: ShareDoc[];
+	    remark: string;
+	    expire_time?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShareBundle(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project = this.convertValues(source["project"], ShareProject);
+	        this.groups = this.convertValues(source["groups"], ShareGroup);
+	        this.apis = this.convertValues(source["apis"], ShareApi);
+	        this.docs = this.convertValues(source["docs"], ShareDoc);
+	        this.remark = source["remark"];
+	        this.expire_time = source["expire_time"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
 	export class SyncBindReq {
 	    root: string;
 	    serverUrl: string;
@@ -383,6 +546,30 @@ export namespace app {
 		    }
 		    return a;
 		}
+	}
+	export class UpdateInfo {
+	    current: string;
+	    latest: string;
+	    available: boolean;
+	    url: string;
+	    notes: string;
+	    assetUrl: string;
+	    assetName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.available = source["available"];
+	        this.url = source["url"];
+	        this.notes = source["notes"];
+	        this.assetUrl = source["assetUrl"];
+	        this.assetName = source["assetName"];
+	    }
 	}
 
 }
@@ -512,24 +699,6 @@ export namespace collection {
 	        this.value = source["value"];
 	        this.enabled = source["enabled"];
 	        this.secret = source["secret"];
-	    }
-	}
-	export class ExportSelection {
-	    all: boolean;
-	    groups: string[];
-	    requests: string[];
-	    docs: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new ExportSelection(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.all = source["all"];
-	        this.groups = source["groups"];
-	        this.requests = source["requests"];
-	        this.docs = source["docs"];
 	    }
 	}
 	export class Env {
@@ -875,6 +1044,24 @@ export namespace collection {
 		    }
 		    return a;
 		}
+	}
+	export class ExportSelection {
+	    all: boolean;
+	    groups: string[];
+	    requests: string[];
+	    docs: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportSelection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.all = source["all"];
+	        this.groups = source["groups"];
+	        this.requests = source["requests"];
+	        this.docs = source["docs"];
+	    }
 	}
 	
 	export class FieldMapping {

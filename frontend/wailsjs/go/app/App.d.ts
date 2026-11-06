@@ -28,6 +28,8 @@ export function Authorize(arg1:context.Context,arg2:mcpauth.Request):Promise<mcp
 
 export function CancelSend(arg1:string):Promise<void>;
 
+export function CheckUpdate(arg1:string):Promise<app.UpdateInfo>;
+
 export function ClearCookies():Promise<void>;
 
 export function ClearHistory():Promise<void>;
@@ -60,6 +62,8 @@ export function CreateRequestFromDraftEx(arg1:string,arg2:string,arg3:collection
 
 export function CreateRequestWithOpts(arg1:collection.RequestCreateOpts):Promise<collection.Request>;
 
+export function DefaultCollectionDir():Promise<string>;
+
 export function DeleteCookie(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteDoc(arg1:string):Promise<void>;
@@ -86,6 +90,10 @@ export function DocFileHash(arg1:string):Promise<string>;
 
 export function DocHashes():Promise<Record<string, string>>;
 
+export function DownloadUpdate(arg1:string,arg2:string):Promise<string>;
+
+export function EnsureDefaultCollection():Promise<collection.CollectionInfo>;
+
 export function EnvFileHash(arg1:string):Promise<string>;
 
 export function ExportDoc(arg1:string,arg2:string):Promise<string>;
@@ -95,6 +103,8 @@ export function ExportDocSelected(arg1:string,arg2:string,arg3:collection.Export
 export function ExportMCPAudit(arg1:string):Promise<string>;
 
 export function ExportRunReport(arg1:string,arg2:string):Promise<string>;
+
+export function FetchShare(arg1:string):Promise<app.ShareBundle>;
 
 export function FileHash(arg1:string):Promise<string>;
 
@@ -129,6 +139,10 @@ export function ImportBrunoDir(arg1:string):Promise<collection.ImportSummary>;
 export function ImportCollection(arg1:string,arg2:string,arg3:string):Promise<collection.ImportSummary>;
 
 export function ImportGrpcProtos(arg1:Array<string>,arg2:Array<string>):Promise<app.GrpcSchemaInfo>;
+
+export function InitCollection(arg1:string):Promise<collection.CollectionInfo>;
+
+export function InstallUpdate(arg1:string):Promise<void>;
 
 export function IsDev():Promise<boolean>;
 
@@ -286,6 +300,8 @@ export function SearchIndexFor(arg1:string,arg2:string,arg3:number):Promise<Arra
 
 export function SendRequest(arg1:collection.Request,arg2:string):Promise<runner.Result>;
 
+export function SendSharedRequest(arg1:app.ShareApi,arg2:string):Promise<runner.Result>;
+
 export function SetActiveCollection(arg1:string):Promise<void>;
 
 export function SetCollectionDefaults(arg1:app.CollectionDefaults):Promise<void>;
@@ -307,6 +323,8 @@ export function SetSyncPassphrase(arg1:string):Promise<void>;
 export function StartAutoSync(arg1:number):Promise<void>;
 
 export function StartMock(arg1:number):Promise<mocksrv.Status>;
+
+export function Startup(arg1:context.Context):Promise<void>;
 
 export function StopAutoSync():Promise<void>;
 
