@@ -514,6 +514,24 @@ export namespace collection {
 	        this.secret = source["secret"];
 	    }
 	}
+	export class ExportSelection {
+	    all: boolean;
+	    groups: string[];
+	    requests: string[];
+	    docs: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new ExportSelection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.all = source["all"];
+	        this.groups = source["groups"];
+	        this.requests = source["requests"];
+	        this.docs = source["docs"];
+	    }
+	}
 	export class Env {
 	    uid?: string;
 	    name: string;

@@ -8,6 +8,7 @@ import CookieDialog from '@/components/CookieDialog.vue'
 import CurlImportDialog from '@/components/CurlImportDialog.vue'
 import DocEditor from '@/components/DocEditor.vue'
 import EnvManager from '@/components/EnvManager.vue'
+import ExportDocDialog from '@/components/ExportDocDialog.vue'
 import FieldMappingsDialog from '@/components/FieldMappingsDialog.vue'
 import HistoryDialog from '@/components/HistoryDialog.vue'
 import ImportDialog from '@/components/ImportDialog.vue'
@@ -40,7 +41,7 @@ import { clearRecentDirs as clearStoredRecentDirs, savedActiveDir, savedRecentDi
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
-import type { AuthzRequest, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
+import type { AuthzRequest, ExportSelection, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import {
   NButton,
@@ -90,6 +91,9 @@ const showImport = ref(false)
 const showRun = ref(false)
 const showCodegen = ref(false)
 const showMock = ref(false)
+/** 导出范围弹窗：md / html 先选范围再落盘（整包与 OpenAPI 仍直接导出）。 */
+const showExport = ref(false)
+const exportFormat = ref<'markdown' | 'html'>('markdown')
 const showCollDefaults = ref(false)
 const showFieldMappings = ref(false)
 const showSync = ref(false)
@@ -487,11 +491,27 @@ function onCommand(key: string): void {
 }
 
 // ---- 导出（H10：Markdown / HTML；item 26：集合整包 apidocgo）----
-async function exportDoc(format: 'markdown' | 'html' | 'apidocgo' | 'openapi'): Promise<void> {
+/** 导出入口：Markdown / HTML 先选范围（全部或部分目录/请求/文档），其余格式是整包语义直接导。 */
+function exportDoc(format: 'markdown' | 'html' | 'apidocgo' | 'openapi'): void {
+  if (format === 'markdown' || format === 'html') {
+    exportFormat.value = format
+    showExport.value = true
+    return
+  }
+  void doExport(format, { all: true, groups: [], requests: [], docs: [] })
+}
+
+/** 真正落盘：sel.all 走旧接口（与 headless / 命令行行为完全一致），否则按范围裁剪。 */
+async function doExport(
+  format: 'markdown' | 'html' | 'apidocgo' | 'openapi',
+  sel: ExportSelection,
+): Promise<void> {
   try {
     const ext =
       format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : format === 'openapi' ? '.openapi.json' : '.md'
-    const path = await api.exportDoc(format, coll.name + ext)
+    const path = sel.all
+      ? await api.exportDoc(format, coll.name + ext)
+      : await api.exportDocSelected(format, coll.name + ext, sel)
     if (path) message.success(t('export.saved', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -1000,6 +1020,8 @@ watch(
       <run-collection-dialog v-model:show="showRun" :envs="coll.info?.envs ?? []" :collection-name="coll.info?.name ?? ''" />
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
+      <export-doc-dialog v-model:show="showExport" :format="exportFormat" :tree="coll.tree"
+        @confirm="doExport(exportFormat, $event)" />
       <collection-defaults-dialog v-model:show="showCollDefaults" />
       <field-mappings-dialog v-model:show="showFieldMappings" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />

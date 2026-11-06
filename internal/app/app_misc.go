@@ -761,9 +761,19 @@ func renderBodyForCode(b collection.Body, vars map[string]string) string {
 
 // ---- 导出（H10）----
 
-// ExportDoc 导出集合（format：markdown | html | apidocgo）。
+// ExportDoc 导出集合（format：markdown | html | apidocgo），全量。
 // desktop 弹「另存为」；headless 落 headlessDir。返回保存路径（取消时为空串）。
 func (a *App) ExportDoc(format, defaultName string) (string, error) {
+	return a.exportDoc(format, defaultName, collection.ExportSelection{All: true})
+}
+
+// ExportDocSelected 与 ExportDoc 相同，但只导出选定范围（目录 / 请求 / 文档）。
+// markdown / html 支持按范围裁剪；apidocgo / openapi 是整包语义，范围参数被忽略。
+func (a *App) ExportDocSelected(format, defaultName string, sel collection.ExportSelection) (string, error) {
+	return a.exportDoc(format, defaultName, sel)
+}
+
+func (a *App) exportDoc(format, defaultName string, sel collection.ExportSelection) (string, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return "", err
@@ -772,9 +782,9 @@ func (a *App) ExportDoc(format, defaultName string) (string, error) {
 	var raw []byte
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "markdown", "md":
-		content, err = c.ExportMarkdown()
+		content, err = c.ExportMarkdownSelected(sel)
 	case "html":
-		content, err = c.ExportHTML()
+		content, err = c.ExportHTMLSelected(sel)
 	case "apidocgo":
 		// 集合整包（目录 + 请求 + 文档），可被其他 api-doc-go 客户端直接导入
 		raw, err = c.ExportBundle()

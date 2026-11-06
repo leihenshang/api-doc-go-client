@@ -282,6 +282,17 @@ export interface TreeNode {
   children?: TreeNode[]
 }
 
+/**
+ * 导出范围：all=true 或三个数组皆空 → 全部导出。
+ * groups 是目录 uid（整棵子树都算选中），requests / docs 是叶子 uid。
+ */
+export interface ExportSelection {
+  all: boolean
+  groups: string[]
+  requests: string[]
+  docs: string[]
+}
+
 export interface EnvVar {
   name: string
   value: string

@@ -2,6 +2,7 @@ package collection
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"os"
@@ -357,9 +358,108 @@ func toRev(v any) int64 {
 	return 0
 }
 
+// ExportSelection 导出范围：All=true 或三个集合都为空 → 全部导出（兼容旧调用）。
+// Groups 是目录 uid（整棵子树都算选中），Requests / Docs 是叶子 uid。
+// uid 对不上集合里的任何条目时直接忽略，不会报错（集合被改过、条目被删）。
+type ExportSelection struct {
+	All      bool     `json:"all"`
+	Groups   []string `json:"groups"`
+	Requests []string `json:"requests"`
+	Docs     []string `json:"docs"`
+}
+
+// IsAll 是否导出全部：显式 All，或压根没指定任何条目。
+func (s ExportSelection) IsAll() bool {
+	return s.All || (len(s.Groups) == 0 && len(s.Requests) == 0 && len(s.Docs) == 0)
+}
+
+// ErrNothingSelected 选中范围内没有任何条目（前端已过滤过 uid，走到这里说明集合刚被改过）。
+var ErrNothingSelected = errors.New("所选范围内没有可导出的内容")
+
+// filterTree 按范围裁剪集合树，返回新切片（不改动传入的树）：
+//   - 选中的目录：整棵子树都保留；
+//   - 未选中的目录：只有含选中后代时才保留 —— 祖先目录是层级结构的一部分，
+//     去掉它会让标题层级错乱，所以哪怕只选了一个请求，它的父目录也要留下当标题；
+//   - 请求 / 文档：仅保留 uid 命中者。
+func filterTree(nodes []*Node, sel ExportSelection) []*Node {
+	groups := make(map[string]bool, len(sel.Groups))
+	for _, uid := range sel.Groups {
+		groups[uid] = true
+	}
+	reqs := make(map[string]bool, len(sel.Requests))
+	for _, uid := range sel.Requests {
+		reqs[uid] = true
+	}
+	docs := make(map[string]bool, len(sel.Docs))
+	for _, uid := range sel.Docs {
+		docs[uid] = true
+	}
+
+	// forced=true 表示祖先目录已选中：后代一律保留，无需再看 uid。
+	var walk func(ns []*Node, forced bool) []*Node
+	walk = func(ns []*Node, forced bool) []*Node {
+		out := make([]*Node, 0, len(ns))
+		for _, n := range ns {
+			if n == nil {
+				continue
+			}
+			if n.Type == "folder" {
+				if forced || groups[n.UID] {
+					cp := *n
+					cp.Children = walk(n.Children, true)
+					out = append(out, &cp)
+					continue
+				}
+				if kids := walk(n.Children, false); len(kids) > 0 {
+					cp := *n
+					cp.Children = kids
+					out = append(out, &cp)
+				}
+				continue
+			}
+			hit := forced
+			if !hit {
+				if n.Type == "doc" {
+					hit = docs[n.UID]
+				} else {
+					hit = reqs[n.UID]
+				}
+			}
+			if hit {
+				cp := *n
+				out = append(out, &cp)
+			}
+		}
+		return out
+	}
+	return walk(nodes, false)
+}
+
+// exportData 一次扫描拿到「扫描结果 + 按范围裁剪后的树」。
+// 导出 Markdown 与 HTML 都从这里出发：同一次扫描、同一棵树，正文与侧边目录不会对不上。
+func (c *Collection) exportData(sel ExportSelection) (*scanResult, []*Node, error) {
+	res, err := c.scan()
+	if err != nil {
+		return nil, nil, err
+	}
+	tree := c.treeFromScan(res)
+	if !sel.IsAll() {
+		tree = filterTree(tree, sel)
+		if len(tree) == 0 {
+			return nil, nil, ErrNothingSelected
+		}
+	}
+	return res, tree, nil
+}
+
 // ExportMarkdown 把集合导出为一份 Markdown 文档（标题层级 = 目录树，请求含方法/URL/参数/头/体/文档）。
 func (c *Collection) ExportMarkdown() (string, error) {
-	return c.exportMarkdown(false)
+	return c.exportMarkdown(false, ExportSelection{All: true})
+}
+
+// ExportMarkdownSelected 只导出选定范围（目录 / 请求 / 文档），产物结构与全量导出一致。
+func (c *Collection) ExportMarkdownSelected(sel ExportSelection) (string, error) {
+	return c.exportMarkdown(false, sel)
 }
 
 // exportMarkdown 生成集合 Markdown。
@@ -367,20 +467,21 @@ func (c *Collection) ExportMarkdown() (string, error) {
 // HTML 单节展示按标题级别圈定一节，Docs 若与请求标题同级（生成的 Docs 都是 ## 起）会被整段排除，
 // 用户点开 API 看不到文档内容；降级后 Docs 连同其响应字段/示例小节都归属于该请求。
 // 同时标题级别在该模式下封顶 5，给 Docs 留出 h6 的位置。
-func (c *Collection) exportMarkdown(shiftDocs bool) (string, error) {
-	res, err := c.scan()
+func (c *Collection) exportMarkdown(shiftDocs bool, sel ExportSelection) (string, error) {
+	res, tree, err := c.exportData(sel)
 	if err != nil {
 		return "", err
 	}
-	tree, err := c.Tree()
-	if err != nil {
-		return "", err
-	}
+	return c.markdownFrom(res, tree, shiftDocs), nil
+}
+
+// markdownFrom 用已扫描的树与扫描结果拼 Markdown（HTML 导出复用同一次扫描）。
+func (c *Collection) markdownFrom(res *scanResult, tree []*Node, shiftDocs bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", c.Name)
 	fmt.Fprintf(&b, "> 由 api-doc-go 客户端导出；集合目录 `%s`\n\n", c.Dir)
 	walkMDTree(&b, tree, res, shiftDocs, 0)
-	return b.String(), nil
+	return b.String()
 }
 
 // walkMDTree 按集合树先序输出 Markdown：folder 只出标题并递归，request 交给 writeMDRequest。
@@ -632,20 +733,22 @@ func escapePipe(s string) string {
 // 但把 ~300 行样式/脚本留在函数体里会让本函数无法维护，故按块拆成包级常量，
 // 这里只保留「取数据 → 装配」。
 func (c *Collection) ExportHTML() (string, error) {
-	// Docs 标题降级到请求标题之下（否则单节展示会把 Docs 整段排除在 API 小节之外）
-	md, err := c.exportMarkdown(true)
+	return c.exportHTML(ExportSelection{All: true})
+}
+
+// ExportHTMLSelected 只导出选定范围；正文与左侧目录树用同一棵裁剪后的树，不会出现「点了没内容」的链接。
+func (c *Collection) ExportHTMLSelected(sel ExportSelection) (string, error) {
+	return c.exportHTML(sel)
+}
+
+func (c *Collection) exportHTML(sel ExportSelection) (string, error) {
+	// res 同时供正文（Docs 标题降级）与 TOC（为请求之后的文档标题预留 toc-N，见 buildExportTOC）
+	res, tree, err := c.exportData(sel)
 	if err != nil {
 		return "", err
 	}
 	// 轻量 Markdown → HTML（标题/代码块/粗体/表格/分隔线/段落），避免再引依赖
-	body := mdToHTML(md)
-
-	tree, err := c.Tree()
-	if err != nil {
-		return "", err
-	}
-	// scan 拿到每个请求的 Docs：TOC 需为请求之后的文档标题预留 toc-N（见 buildExportTOC）
-	res, _ := c.scan()
+	body := mdToHTML(c.markdownFrom(res, tree, true))
 
 	var b strings.Builder
 	b.WriteString(htmlDocHead)
