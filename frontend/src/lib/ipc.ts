@@ -15,6 +15,7 @@ import type {
   DocEntry,
   Env,
   EnvVar,
+  ExportSelection,
   FieldMapping,
   ShareApi,
   ShareBundle,
@@ -403,6 +404,9 @@ export const api = {
     call<ImportSummary>('ImportCollection', parent, format, text),
   importBrunoDir: (srcDir: string) => call<ImportSummary>('ImportBrunoDir', srcDir),
   exportDoc: (format: string, defaultName: string) => call<string>('ExportDoc', format, defaultName),
+  /** 按范围导出（markdown / html）：只导出选中的目录 / 请求 / 文档。 */
+  exportDocSelected: (format: string, defaultName: string, sel: ExportSelection) =>
+    call<string>('ExportDocSelected', format, defaultName, sel),
   /** RM-02：运行当前集合（读取磁盘文件），返回逐请求报告。 */
   runCollection: (opts: RunCollectionOptions) => call<RunReport>('RunCollection', opts),
   /** 导出最近一次运行报告（junit / json / text）。 */
