@@ -366,6 +366,14 @@ func (a *App) DefaultCollectionDir() (string, error) {
 	return filepath.Join(base, "default-collection"), nil
 }
 
+// FindCollectionDir 在 oldDir 的父目录里找 uid 匹配的集合目录，用于跟随「目录被改名/移动」。
+//
+// 返回空串 = 没找到（改名到别的父目录、或目录已被删除），调用方按「目录不存在」处理。
+// 不返回错误：找不到是正常结果，不该让启动恢复因为一次搜索失败而中断。
+func (a *App) FindCollectionDir(oldDir, uid string) (string, error) {
+	return collection.FindByUID(filepath.Dir(oldDir), uid)
+}
+
 // EnsureDefaultCollection 没有打开任何集合时，创建并打开默认集合（幂等）。
 //
 // 用途：客户端启动时若没有任何历史根，不再停在欢迎页 —— 直接把默认集合置为活动根，

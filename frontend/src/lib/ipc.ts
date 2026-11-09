@@ -233,6 +233,8 @@ export const api = {
   /** 用户确认后初始化「有内容但无 opencollection.yml」的目录，随后直接打开 */
   initCollection: (dir: string) => call<CollectionInfo>('InitCollection', dir),
   openCollection: (dir: string) => call<CollectionInfo>('OpenCollection', dir).then(normalizeInfo),
+  /** 在 oldDir 的父目录里按 uid 找改名 / 移动后的同一集合（空串 = 没找到）。 */
+  findCollectionDir: (oldDir: string, uid: string) => call<string>('FindCollectionDir', oldDir, uid),
   /** 全部已打开的工作目录（按打开顺序），用于侧栏单树多根。 */
   listCollections: () => call<CollectionSummary[] | null>('ListCollections').then(normalizeSummaries),
   /** 当前活动根的标识（空串 = 未打开任何目录）。 */

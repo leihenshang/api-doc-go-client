@@ -37,7 +37,17 @@ import { buildThemeOverrides } from '@/lib/naiveTheme'
 import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
-import { clearRecentDirs as clearStoredRecentDirs, removeSavedRootDir, savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
+import {
+  clearRecentDirs as clearStoredRecentDirs,
+  removeSavedRootDir,
+  savedActiveDir,
+  savedRecentDirs,
+  savedRootDirs,
+  savedRootEntries,
+  useCollectionStore,
+  writeSavedRootEntries,
+} from '@/stores/collection'
+import type { SavedRootEntry } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
@@ -446,31 +456,54 @@ async function revealRoot(root: string): Promise<void> {
  * 被截断的**不静默丢** —— 明确提示还剩几个，工具条「最近打开」里一点就能补开。
  */
 async function restoreRoots(): Promise<void> {
-  const saved = savedRootDirs()
+  const saved = savedRootEntries()
   const limit = Math.max(1, settings.form.restoreLimit || MAX_RESTORE_ROOTS)
-  const dirs = saved.slice(0, limit)
+  const entries = saved.slice(0, limit)
   const wantActive = savedActiveDir()
-  if (!dirs.length) return
+  if (!entries.length) return
   coll.restoring = true
+  // 恢复期间 saveDirs 被守卫跳过：先把「恢复后仍该保留的根」攒在内存里，结束时一次落盘。
+  // 否则中途落盘会用「已恢复的那部分」覆盖掉还没轮到的根（部分失败时会丢记录）。
+  const keep: SavedRootEntry[] = []
+  let firstError = ''
+  let followed = ''
   try {
-    if (saved.length > dirs.length) {
-      message.info(t('welcome.restoreTruncated', { n: dirs.length, m: saved.length - dirs.length }), {
+    if (saved.length > entries.length) {
+      message.info(t('welcome.restoreTruncated', { n: entries.length, m: saved.length - entries.length }), {
         duration: 8000,
       })
     }
-    let firstError = ''
-    for (const d of dirs) {
+    for (const e of entries) {
       try {
-        await coll.open(d)
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        // 目录不在了（改名 / 移动 / 删除）：摘掉恢复记录，避免每次启动都为一个死路径失败一次。
-        // 后端不会重建目录，所以这里只需处理「记录」这件事。
-        const missing = msg.includes(DIR_MISSING)
-        if (missing) removeSavedRootDir(d)
-        if (!firstError) firstError = missing ? t('welcome.dirMissing', { dir: d }) : `${d}: ${msg}`
+        await coll.open(e.dir)
+        keep.push({ dir: e.dir, uid: coll.uid || e.uid })
+        continue
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (!msg.includes(DIR_MISSING)) {
+          // 其它失败（无权限、清单损坏…）：保留记录，下次启动还能再试
+          keep.push(e)
+          if (!firstError) firstError = `${e.dir}: ${msg}`
+          continue
+        }
+        // 目录不在了：先按 uid 在同一个父目录里找 —— 命中说明只是改了名 / 挪了位置
+        const moved = e.uid ? await api.findCollectionDir(e.dir, e.uid) : ''
+        if (!moved) {
+          if (!firstError) firstError = t('welcome.dirMissing', { dir: e.dir })
+          continue // 真没了：摘掉记录（不再每次启动为一个死路径失败一次）
+        }
+        try {
+          await coll.open(moved)
+          keep.push({ dir: moved, uid: e.uid })
+          if (!followed) followed = moved
+        } catch (err2) {
+          // 找到了却打不开（权限 / 清单损坏）：按新路径保留，用户下次还能看到它
+          keep.push({ dir: moved, uid: e.uid })
+          if (!firstError) firstError = `${moved}: ${err2 instanceof Error ? err2.message : String(err2)}`
+        }
       }
     }
+    if (followed) message.info(t('welcome.dirFollowed', { dir: followed }), { duration: 8000 })
     if (!coll.roots.length) {
       if (firstError) message.error(t('welcome.restoreFailed', { msg: firstError }))
       return
@@ -483,6 +516,8 @@ async function restoreRoots(): Promise<void> {
     void refreshSyncStatus()
     if (firstError) message.warning(t('welcome.restoreFailed', { msg: firstError }), { duration: 8000 })
   } finally {
+    // 统一落盘：成功的根 + 改名后跟到的新路径 + 因其它原因失败的根；真没了的已被跳过。
+    writeSavedRootEntries(keep, coll.dir)
     // 等一次 watcher flush 再解除：恢复会话写入 activeUid 的 watch 可能在 finally 之后才跑
     await nextTick()
     coll.restoring = false

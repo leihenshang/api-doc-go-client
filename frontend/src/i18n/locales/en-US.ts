@@ -43,6 +43,7 @@ export default {
     pickFailed: 'No directory selected',
     restoreFailed: 'Some workspaces could not be restored (skipped): {msg}',
     dirMissing: 'Collection folder no longer exists (renamed or moved?): {dir}',
+    dirFollowed: 'Collection folder was renamed — following it to: {dir}',
     restoreTruncated:
       'Restored {n} workspace(s); {m} more were not restored (the startup limit is configurable in Settings). Open them from “Recent workspaces” in the toolbar.',
     needsInitTitle: 'Initialize collection folder',

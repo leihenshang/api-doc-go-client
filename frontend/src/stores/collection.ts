@@ -62,19 +62,79 @@ export function clearRecentDirs(): void {
 }
 
 /**
+ * 启动恢复的一条记录：目录 + 集合 uid。
+ *
+ * 为什么要存 uid：目录被改名后路径就失效了，但 opencollection.yml 里的 uid 不变 ——
+ * 靠它才能在后端把「同一个集合」找回来（见 App.vue 的 restoreRoots）。
+ */
+export interface SavedRootEntry {
+  dir: string
+  uid: string
+}
+
+/** 解析 client.dirs：兼容旧格式（纯路径字符串数组），坏项直接丢。 */
+function parseRootEntries(raw: string | null): SavedRootEntry[] {
+  if (!raw) return []
+  const arr = JSON.parse(raw) as unknown
+  if (!Array.isArray(arr)) return []
+  const out: SavedRootEntry[] = []
+  for (const x of arr) {
+    if (typeof x === 'string') {
+      if (x) out.push({ dir: x, uid: '' })
+      continue
+    }
+    if (x && typeof x === 'object') {
+      const rec = x as { dir?: unknown; uid?: unknown }
+      if (typeof rec.dir === 'string' && rec.dir) {
+        out.push({ dir: rec.dir, uid: typeof rec.uid === 'string' ? rec.uid : '' })
+      }
+    }
+  }
+  return out
+}
+
+/**
  * 启动时要恢复的工作目录：优先新的 client.dirs，其次旧版本的 client.lastDir（自动迁移）。
  * 只读 localStorage，不碰后端，便于 App.vue 在挂载时决定要开哪些根。
  */
-export function savedRootDirs(): string[] {
+export function savedRootEntries(): SavedRootEntry[] {
   try {
-    const raw = localStorage.getItem(DIRS_KEY)
-    const dirs = raw ? (JSON.parse(raw) as string[]) : []
-    if (Array.isArray(dirs) && dirs.length) return dirs.filter((d) => typeof d === 'string' && d)
+    const entries = parseRootEntries(localStorage.getItem(DIRS_KEY))
+    if (entries.length) return entries
   } catch {
     // 解析失败按「没有记录」处理
   }
   const legacy = localStorage.getItem('client.lastDir')
-  return legacy ? [legacy] : []
+  return legacy ? [{ dir: legacy, uid: '' }] : []
+}
+
+/** 只取路径（欢迎页 lastDir 等只需要路径的地方用）。 */
+export function savedRootDirs(): string[] {
+  return savedRootEntries().map((e) => e.dir)
+}
+
+/**
+ * 一次性写回启动恢复列表与活动目录。
+ *
+ * 为什么不复用 saveDirs：启动恢复期间 `roots` 只是「已恢复的那部分」，
+ * 中途落盘会把还没轮到的根抹掉；恢复流程自己攒完整列表后调这里。
+ */
+export function writeSavedRootEntries(entries: SavedRootEntry[], activeDir = ''): void {
+  try {
+    const list = entries.filter((e) => e.dir).map((e) => ({ dir: e.dir, uid: e.uid }))
+    if (list.length) localStorage.setItem(DIRS_KEY, JSON.stringify(list))
+    else localStorage.removeItem(DIRS_KEY)
+    if (activeDir) {
+      localStorage.setItem(ACTIVE_DIR_KEY, activeDir)
+      // 旧键保留一份，方便回退旧版本时仍能记住上次目录
+      localStorage.setItem('client.lastDir', activeDir)
+    } else {
+      localStorage.removeItem(ACTIVE_DIR_KEY)
+      localStorage.removeItem('client.lastDir')
+    }
+  } catch {
+    // 忽略：localStorage 不可用不影响主流程
+  }
 }
 
 /**
@@ -87,14 +147,14 @@ export function savedRootDirs(): string[] {
 export function removeSavedRootDir(dir: string): void {
   const key = dir.trim().toLowerCase()
   if (!key) return
-  const rest = savedRootDirs().filter((d) => d.trim().toLowerCase() !== key)
+  const rest = savedRootEntries().filter((e) => e.dir.trim().toLowerCase() !== key)
   try {
     if (rest.length) {
       localStorage.setItem(DIRS_KEY, JSON.stringify(rest))
       return
     }
     localStorage.removeItem(DIRS_KEY)
-    // 旧版本键同样要清：savedRootDirs 在 DIRS_KEY 为空时会回退到它
+    // 旧版本键同样要清：savedRootEntries 在 DIRS_KEY 为空时会回退到它
     if ((localStorage.getItem('client.lastDir') ?? '').trim().toLowerCase() === key) {
       localStorage.removeItem('client.lastDir')
     }
@@ -235,17 +295,13 @@ export const useCollectionStore = defineStore('collection', {
     },
     /** 把「已打开目录 + 当前根」落 localStorage（重启恢复用）。 */
     saveDirs(): void {
-      try {
-        const dirs = this.roots.map((r) => r.info.dir).filter(Boolean)
-        if (dirs.length) localStorage.setItem(DIRS_KEY, JSON.stringify(dirs))
-        else localStorage.removeItem(DIRS_KEY)
-        if (this.dir) localStorage.setItem(ACTIVE_DIR_KEY, this.dir)
-        else localStorage.removeItem(ACTIVE_DIR_KEY)
-        // 旧键保留一份，方便回退旧版本时仍能记住上次目录
-        if (this.dir) localStorage.setItem('client.lastDir', this.dir)
-      } catch {
-        // 忽略：localStorage 不可用不影响主流程
-      }
+      // 启动恢复期间不写：此时 roots 只是「已恢复的那部分」，落盘会把还没轮到的根抹掉。
+      // 恢复流程自己攒一份完整列表，结束时统一 writeSavedRootEntries。
+      if (this.restoring) return
+      writeSavedRootEntries(
+        this.roots.map((r) => ({ dir: r.info.dir, uid: r.info.uid })),
+        this.dir,
+      )
     },
     /** 新建请求（folder 为空 = 根）；返回落盘后的文档供调用方开 tab。 */
     async createRequest(folder: string, name: string, method: string): Promise<RequestDoc> {
