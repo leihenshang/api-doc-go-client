@@ -181,7 +181,9 @@ func renderReport(rep *testrun.Report, format string) ([]byte, error) {
 }
 
 func initCmd(dir string) {
-	c, err := collection.Open(dir)
+	// Init 而不是 Open：init 的语义就是「建集合」，目录不存在时应当创建。
+	// Open 是只读语义，路径不在就报错（否则会把改名/删除留下的旧路径重新建出来）。
+	c, err := collection.Init(dir)
 	if err != nil {
 		fatal(err)
 	}

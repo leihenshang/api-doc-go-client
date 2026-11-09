@@ -105,6 +105,13 @@ func NewUID() string { return uuid.NewString() }
 // 旧逻辑会直接写清单并把它当成集合载入，目录里那些文件还会被扫成本项目的接口。
 var ErrNeedsInit = errors.New("目录尚未初始化")
 
+// ErrDirMissing 集合目录不存在（被改名 / 移动 / 删除）。
+//
+// 必须与 ErrNeedsInit 分开：前者是「路径没了」，后者是「路径在、缺清单」。
+// 混为一谈时前端会给一个不存在的路径弹「是否初始化」，而初始化第一步就是建目录 ——
+// 于是「集合目录改名后，下次启动又把旧名字建回来」。
+var ErrDirMissing = errors.New("集合目录不存在")
+
 // Open 打开一个集合目录：已初始化（有 opencollection.yml）或空目录直接打开，
 // 有内容但没清单时返回 ErrNeedsInit，由用户确认后走 Init。
 // 原生 Bruno 目录（含 bruno.json 或 .bru）不能直接打开，须走导入流程。
@@ -126,6 +133,13 @@ func open(dir string, force bool) (*Collection, error) {
 	if st, err := os.Stat(abs); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, err
+		}
+		// Open 不是「创建」：目录不在了就是不在。这里曾无条件 MkdirAll，
+		// 于是「集合目录改名后，下次启动又把旧路径建回来」—— 建出的是没有清单的空目录，
+		// 看着像原集合，其实是空壳；用户一旦确认初始化，就凭空多出一个旧名字的空集合。
+		// 只有明确要建集合的入口（Init / 新建集合 / 默认集合）才允许创建目录。
+		if !force {
+			return nil, fmt.Errorf("%w：%s", ErrDirMissing, abs)
 		}
 		if err := os.MkdirAll(abs, 0o755); err != nil {
 			return nil, err

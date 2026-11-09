@@ -77,6 +77,32 @@ export function savedRootDirs(): string[] {
   return legacy ? [legacy] : []
 }
 
+/**
+ * 从「启动恢复」列表里移除一个目录（只影响 client.dirs，不动「最近打开」）。
+ *
+ * 为什么要移除：目录被改名 / 删除后，后端会返回「集合目录不存在」而不是把它重建出来；
+ * 若不摘掉这条记录，每次启动都要为一个已不存在的路径失败一次。
+ * 「最近打开」保留旧路径与用户之后手动打开的新路径，需要时仍可一键重开。
+ */
+export function removeSavedRootDir(dir: string): void {
+  const key = dir.trim().toLowerCase()
+  if (!key) return
+  const rest = savedRootDirs().filter((d) => d.trim().toLowerCase() !== key)
+  try {
+    if (rest.length) {
+      localStorage.setItem(DIRS_KEY, JSON.stringify(rest))
+      return
+    }
+    localStorage.removeItem(DIRS_KEY)
+    // 旧版本键同样要清：savedRootDirs 在 DIRS_KEY 为空时会回退到它
+    if ((localStorage.getItem('client.lastDir') ?? '').trim().toLowerCase() === key) {
+      localStorage.removeItem('client.lastDir')
+    }
+  } catch {
+    // 忽略：localStorage 不可用不影响主流程
+  }
+}
+
 /** 上次的活动根目录（重启后优先把它设为活动根）。 */
 export function savedActiveDir(): string {
   return localStorage.getItem(ACTIVE_DIR_KEY) ?? ''
