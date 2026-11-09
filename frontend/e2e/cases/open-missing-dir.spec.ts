@@ -34,4 +34,37 @@ test.describe('集合目录改名后重启', () => {
 
     rmSync(renamed, { recursive: true, force: true })
   })
+
+  test('带 uid 的恢复记录会自动跟到改名后的新目录', async ({ page, app }) => {
+    const dir = await app.newCollection('basic')
+    const list = await app.ipc<{ root: string; info: { dir: string; uid: string } }[]>('ListCollections')
+    const uid = list.find((s) => s.info.dir === dir)?.info.uid ?? ''
+    expect(uid).not.toBe('')
+    // 模拟应用已退出：否则后端还开着这个根，走不到「打开失败 → 按 uid 找」的分支
+    for (const s of list) await app.ipc('CloseCollection', s.root)
+
+    const renamed = `${dir}-moved`
+    renameSync(dir, renamed)
+
+    // 新格式的恢复记录：路径 + uid（uid 是 opencollection.yml 里的稳定身份，改名不变）
+    await page.addInitScript(
+      ({ oldDir, id }) => {
+        localStorage.setItem('client.dirs', JSON.stringify([{ dir: oldDir, uid: id }]))
+        localStorage.removeItem('client.activeDir')
+      },
+      { oldDir: dir, id: uid },
+    )
+
+    await page.goto(app.url)
+    await expect(page.getByTestId('toolbar.collection')).toBeVisible({ timeout: 20_000 })
+
+    // ① 自动打开了改名后的目录，并把新路径写回记录
+    await expect
+      .poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('client.dirs') || '[]')[0]?.dir))
+      .toBe(renamed)
+    // ② 旧路径依然没有被创建
+    expect(existsSync(dir)).toBe(false)
+
+    rmSync(renamed, { recursive: true, force: true })
+  })
 })

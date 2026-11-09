@@ -43,6 +43,7 @@ export default {
     pickFailed: '未选择目录',
     restoreFailed: '部分工作目录恢复失败（已跳过）：{msg}',
     dirMissing: '集合目录已不存在（可能被改名或移动）：{dir}',
+    dirFollowed: '集合目录已改名，已自动跟随到：{dir}',
     restoreTruncated:
       '已恢复 {n} 个工作目录，另有 {m} 个未恢复（启动恢复上限可在设置里调整）；可从工具条「最近打开」补开。',
     needsInitTitle: '初始化集合目录',

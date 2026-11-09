@@ -100,6 +100,8 @@ export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 
 export function ExportDocSelected(arg1:string,arg2:string,arg3:collection.ExportSelection):Promise<string>;
 
+export function FindCollectionDir(arg1:string,arg2:string):Promise<string>;
+
 export function ExportMCPAudit(arg1:string):Promise<string>;
 
 export function ExportRunReport(arg1:string,arg2:string):Promise<string>;

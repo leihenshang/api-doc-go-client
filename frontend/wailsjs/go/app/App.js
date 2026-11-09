@@ -170,6 +170,10 @@ export function ExportDocSelected(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDocSelected'](arg1, arg2, arg3);
 }
 
+export function FindCollectionDir(arg1, arg2) {
+  return window['go']['app']['App']['FindCollectionDir'](arg1, arg2);
+}
+
 export function ExportMCPAudit(arg1) {
   return window['go']['app']['App']['ExportMCPAudit'](arg1);
 }
