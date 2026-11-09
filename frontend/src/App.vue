@@ -37,7 +37,7 @@ import { buildThemeOverrides } from '@/lib/naiveTheme'
 import { dialog, message } from '@/lib/notice'
 import { requestQuit } from '@/lib/quit'
 import { isDark, nextTheme } from '@/lib/theme'
-import { clearRecentDirs as clearStoredRecentDirs, savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
+import { clearRecentDirs as clearStoredRecentDirs, removeSavedRootDir, savedActiveDir, savedRecentDirs, savedRootDirs, useCollectionStore } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
@@ -187,6 +187,14 @@ function clearRecentHistory(): void {
 }
 
 /** 按目录找已打开的根（Windows 上目录大小写不敏感）。 */
+/**
+ * 后端 collection.ErrDirMissing 的文案特征（「集合目录不存在：<路径>」）。
+ *
+ * 必须与「尚未初始化」分开处理：后者是「目录在、缺清单」，可以弹框确认初始化；
+ * 前者是「路径没了」，一旦弹框并确认，就会把改名前的旧目录重新建出来 —— 那正是之前的 bug。
+ */
+const DIR_MISSING = '集合目录不存在'
+
 function rootOfDir(dir: string): string {
   const want = dir.trim().toLowerCase()
   return coll.roots.find((r) => r.info.dir.trim().toLowerCase() === want)?.root ?? ''
@@ -227,6 +235,13 @@ async function openCollection(dir: string, create = false): Promise<void> {
     void refreshSyncStatus()
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
+    // 目录被改名 / 移动 / 删除：不能再弹「是否初始化」——那一步会把旧路径重新建出来。
+    // 只提示，并把它从启动恢复列表里摘掉（「最近打开」保留，用户可指向新路径重开）。
+    if (msg.includes(DIR_MISSING)) {
+      removeSavedRootDir(dir)
+      message.warning(t('welcome.dirMissing', { dir }))
+      return
+    }
     // 缺 opencollection.yml（含空目录）：弹居中确认框，确认后才初始化并载入。
     if (msg.includes('尚未初始化')) {
       needsInitDir.value = dir
@@ -448,7 +463,12 @@ async function restoreRoots(): Promise<void> {
       try {
         await coll.open(d)
       } catch (e) {
-        if (!firstError) firstError = `${d}: ${e instanceof Error ? e.message : String(e)}`
+        const msg = e instanceof Error ? e.message : String(e)
+        // 目录不在了（改名 / 移动 / 删除）：摘掉恢复记录，避免每次启动都为一个死路径失败一次。
+        // 后端不会重建目录，所以这里只需处理「记录」这件事。
+        const missing = msg.includes(DIR_MISSING)
+        if (missing) removeSavedRootDir(d)
+        if (!firstError) firstError = missing ? t('welcome.dirMissing', { dir: d }) : `${d}: ${msg}`
       }
     }
     if (!coll.roots.length) {
