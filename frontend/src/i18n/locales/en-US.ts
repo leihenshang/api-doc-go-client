@@ -394,6 +394,8 @@ export default {
     more: 'Collection actions',
     folderName: 'Folder name',
     subFolderName: 'Subfolder name',
+    duplicate: 'Duplicate API',
+    duplicated: 'Duplicated as "{name}"',
     rename: 'Rename',
     move: 'Move to…',
     moveTitle: 'Move to folder',

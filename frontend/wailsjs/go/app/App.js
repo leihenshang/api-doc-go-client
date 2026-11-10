@@ -54,6 +54,10 @@ export function CloseProject() {
   return window['go']['app']['App']['CloseProject']();
 }
 
+export function CloneRequest(arg1) {
+  return window['go']['app']['App']['CloneRequest'](arg1);
+}
+
 export function ConflictDetail(arg1) {
   return window['go']['app']['App']['ConflictDetail'](arg1);
 }
