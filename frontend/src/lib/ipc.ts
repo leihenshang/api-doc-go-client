@@ -457,6 +457,10 @@ export const api = {
   saveDocImage: (dataBase64: string) => call<string>('SaveDocImage', dataBase64),
   /** B19：文档文件当前磁盘 hash（文档不进索引，单独取；空串 = 取不到） */
   docFileHash: (uid: string) => call<string | null>('DocFileHash', uid),
+  /** 在同一分组内复制文档：显示名自动加「副本N」。 */
+  cloneDoc: (uid: string) => call<DocEntry>('CloneDoc', uid),
+  /** 递归复制分组（含子分组 / 请求 / 文档）；返回副本的显示名。 */
+  cloneFolder: (uid: string) => call<string>('CloneFolder', uid),
   deleteDoc: (uid: string) => call<null>('DeleteDoc', uid),
   moveDoc: (uid: string, destFolder: string) => call<null>('MoveDoc', uid, destFolder),
   renameDoc: (uid: string, name: string) => call<null>('RenameDoc', uid, name),

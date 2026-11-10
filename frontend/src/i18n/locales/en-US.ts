@@ -395,6 +395,8 @@ export default {
     folderName: 'Folder name',
     subFolderName: 'Subfolder name',
     duplicate: 'Duplicate API',
+    duplicateFolder: 'Duplicate group',
+    duplicateDoc: 'Duplicate doc',
     duplicated: 'Duplicated as "{name}"',
     rename: 'Rename',
     move: 'Move to…',

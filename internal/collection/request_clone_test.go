@@ -38,8 +38,8 @@ func TestCloneRequestNameFolderAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CloneRequest: %v", err)
 	}
-	if cp.Name != "ping复制1" {
-		t.Fatalf("首个副本名应为 ping复制1，实际 %q", cp.Name)
+	if cp.Name != "ping 副本1" {
+		t.Fatalf("首个副本名应为 ping 副本1，实际 %q", cp.Name)
 	}
 	if folderOfPath(cp.Path) != folderOfPath(src.Path) {
 		t.Fatalf("副本应落在同一分组：src=%s cp=%s", src.Path, cp.Path)
@@ -56,8 +56,8 @@ func TestCloneRequestNameFolderAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("第二次 CloneRequest: %v", err)
 	}
-	if cp2.Name != "ping复制2" {
-		t.Fatalf("第二个副本名应为 ping复制2，实际 %q", cp2.Name)
+	if cp2.Name != "ping 副本2" {
+		t.Fatalf("第二个副本名应为 ping 副本2，实际 %q", cp2.Name)
 	}
 	if cp2.Path == cp.Path {
 		t.Fatalf("两个副本不能共用路径：%s", cp2.Path)
@@ -101,15 +101,15 @@ func TestCloneRequestNameIsPerFolder(t *testing.T) {
 	if err := c.CreateFolder("", "other"); err != nil {
 		t.Fatalf("CreateFolder(other): %v", err)
 	}
-	if _, err := c.CreateRequest("other", "ping复制1", "GET"); err != nil {
-		t.Fatalf("CreateRequest(other/ping复制1): %v", err)
+	if _, err := c.CreateRequest("other", "ping 副本1", "GET"); err != nil {
+		t.Fatalf("CreateRequest(other/ping 副本1): %v", err)
 	}
 
 	cp, err := c.CloneRequest(src.UID)
 	if err != nil {
 		t.Fatalf("CloneRequest: %v", err)
 	}
-	if cp.Name != "ping复制1" {
+	if cp.Name != "ping 副本1" {
 		t.Fatalf("别的分组同名不该影响本层序号，实际 %q", cp.Name)
 	}
 	if !strings.HasPrefix(cp.Path, "shop/") {

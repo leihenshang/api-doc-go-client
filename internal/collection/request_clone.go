@@ -36,14 +36,17 @@ func folderOfPath(p string) string {
 	return dir
 }
 
-// nextCloneName 「原名复制1」「原名复制2」…里取第一个没被占用的。
+// nextCloneName 「原名 副本1」「原名 副本2」…里取第一个没被占用的。
+//
+// 用「副本」而不是「复制」：后者是动词，读起来像「复制这个动作 1」；
+// 中间留一个空格，英文名才不会和中文后缀粘成一串（ping 副本1 vs ping复制1）。
 func (c *Collection) nextCloneName(folder, base string) (string, error) {
-	taken, err := c.requestNamesIn(folder)
+	taken, err := c.namesIn(folder)
 	if err != nil {
 		return "", err
 	}
 	for i := 1; i <= 999; i++ {
-		name := fmt.Sprintf("%s复制%d", base, i)
+		name := fmt.Sprintf("%s 副本%d", base, i)
 		if !taken[name] {
 			return name, nil
 		}
@@ -51,16 +54,29 @@ func (c *Collection) nextCloneName(folder, base string) (string, error) {
 	return "", fmt.Errorf("「%s」的副本过多（已到 999），请先清理", base)
 }
 
-// requestNamesIn 某个分组下现有的请求显示名集合（只比同一层，跨分组的同名互不影响）。
-func (c *Collection) requestNamesIn(folder string) (map[string]bool, error) {
+// namesIn 某个分组下现有的条目显示名（请求 / 文档 / 子分组一起算）。
+//
+// 同一层在树里是并列的：只比请求名会让「副本」与同名文档或分组撞名，
+// 用户看到两行一模一样的东西。
+func (c *Collection) namesIn(folder string) (map[string]bool, error) {
 	res, err := c.scan()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool, len(res.reqs))
+	out := make(map[string]bool, len(res.reqs)+len(res.docs)+len(res.nameByDir))
 	for _, r := range res.reqs {
 		if folderOfPath(r.Path) == folder {
 			out[r.Name] = true
+		}
+	}
+	for _, d := range res.docs {
+		if folderOfPath(d.Path) == folder {
+			out[d.Name] = true
+		}
+	}
+	for dir, name := range res.nameByDir {
+		if parentDir(dir) == folder {
+			out[name] = true
 		}
 	}
 	return out, nil
