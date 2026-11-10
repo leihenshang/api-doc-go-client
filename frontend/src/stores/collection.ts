@@ -309,11 +309,23 @@ export const useCollectionStore = defineStore('collection', {
       await this.reload()
       return r
     },
-    /** 在同一分组内复制请求（显示名自动加「复制N」）；返回副本，树已刷新。 */
+    /** 在同一分组内复制请求（显示名自动加「副本N」）；返回副本，树已刷新。 */
     async cloneRequest(uid: string): Promise<RequestDoc> {
       const r = await api.cloneRequest(uid)
       await this.reload()
       return r
+    },
+    /** 在同一分组内复制文档（显示名自动加「副本N」）；返回副本，树已刷新。 */
+    async cloneDoc(uid: string): Promise<DocEntry> {
+      const d = await api.cloneDoc(uid)
+      await this.reload()
+      return d
+    },
+    /** 递归复制分组（子分组 / 请求 / 文档一起）；返回副本显示名，树已刷新。 */
+    async cloneFolder(uid: string): Promise<string> {
+      const name = await api.cloneFolder(uid)
+      await this.reload()
+      return name
     },
     /** 新建分组：parent 为相对路径（空 = 根）。 */
     async createFolder(parent: string, name: string): Promise<void> {

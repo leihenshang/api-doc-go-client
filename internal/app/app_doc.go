@@ -417,6 +417,24 @@ func (a *App) CloneRequest(uid string) (*collection.Request, error) {
 	return c.CloneRequest(uid)
 }
 
+// CloneDoc 在同一分组内复制一篇文档（名称加「副本N」）。
+func (a *App) CloneDoc(uid string) (*collection.DocEntry, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.CloneDoc(uid)
+}
+
+// CloneFolder 递归复制分组（含子分组 / 请求 / 文档），返回副本的显示名。
+func (a *App) CloneFolder(uid string) (string, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return "", err
+	}
+	return c.CloneFolder(uid)
+}
+
 // MoveRequest 把请求移动到目标分组（destFolder 空 = 根）。
 func (a *App) MoveRequest(uid, destFolder string) error {
 	c, err := a.requireCollection()

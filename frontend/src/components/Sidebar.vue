@@ -713,6 +713,7 @@ function rowMenuOptions(row: Row): DropdownOption[] {
       { key: 'subfolder', label: t('tree.newSubFolder'), icon: () => h(NIcon, { component: FolderOpenOutline }) },
       { key: 'doc', label: t('tree.newDoc'), icon: () => h(NIcon, { component: DocumentTextOutline }), testid: 'tree.row.newDoc' },
       { type: 'divider', key: 'd1' },
+      { key: 'duplicate', label: t('tree.duplicateFolder'), icon: () => h(NIcon, { component: DuplicateOutline }), testid: 'tree.row.duplicate' },
       { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
       { key: 'delete', label: t('tree.delDir'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
     ]
@@ -726,6 +727,8 @@ function rowMenuOptions(row: Row): DropdownOption[] {
   if (n.type === 'doc') {
     return [
       ...copyItems,
+      { key: 'duplicate', label: t('tree.duplicateDoc'), icon: () => h(NIcon, { component: DuplicateOutline }), testid: 'tree.row.duplicate' },
+      { type: 'divider', key: 'd-dup' },
       { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
       { key: 'delete', label: t('tree.delDoc'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
     ]
@@ -783,6 +786,26 @@ async function duplicateRequest(node: TreeNode): Promise<void> {
   try {
     const cp = await coll.cloneRequest(node.uid)
     message.success(t('tree.duplicated', { name: cp.name }))
+  } catch (e) {
+    fail(e)
+  }
+}
+
+/** 「复制分组」：递归复制整组（子分组 / 请求 / 文档），只刷新树、不展开副本。 */
+async function duplicateFolder(node: TreeNode): Promise<void> {
+  try {
+    const name = await coll.cloneFolder(node.uid)
+    message.success(t('tree.duplicated', { name }))
+  } catch (e) {
+    fail(e)
+  }
+}
+
+/** 「复制文档」：同层级生成「原名 副本N」，只刷新树。 */
+async function duplicateDoc(node: TreeNode): Promise<void> {
+  try {
+    const d = await coll.cloneDoc(node.uid)
+    message.success(t('tree.duplicated', { name: d.name }))
   } catch (e) {
     fail(e)
   }
@@ -917,6 +940,7 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
       collapsed.value = next
       emit('new-doc', n.path)
     }
+    else if (key === 'duplicate') void duplicateFolder(n)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'folder')
   } else if (n.type === 'request') {
@@ -925,7 +949,8 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'request')
   } else if (n.type === 'doc') {
-    if (key === 'rename') void startRename(row.root, n)
+    if (key === 'duplicate') void duplicateDoc(n)
+    else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'doc')
   }
 }
