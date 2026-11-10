@@ -408,6 +408,15 @@ func (a *App) RenameRequest(uid, name string) error {
 	return c.RenameRequest(uid, name)
 }
 
+// CloneRequest 在同一分组内复制一个请求（名称自动加「复制N」），返回新请求。
+func (a *App) CloneRequest(uid string) (*collection.Request, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return nil, err
+	}
+	return c.CloneRequest(uid)
+}
+
 // MoveRequest 把请求移动到目标分组（destFolder 空 = 根）。
 func (a *App) MoveRequest(uid, destFolder string) error {
 	c, err := a.requireCollection()

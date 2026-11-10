@@ -42,6 +42,8 @@ export function CloseCollection(arg1:string):Promise<void>;
 
 export function CloseProject():Promise<void>;
 
+export function CloneRequest(arg1:string):Promise<collection.Request>;
+
 export function ConflictDetail(arg1:string):Promise<collection.ConflictDetail>;
 
 export function ConflictDetailFor(arg1:string,arg2:string):Promise<collection.ConflictDetail>;

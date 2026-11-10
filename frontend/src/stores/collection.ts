@@ -309,6 +309,12 @@ export const useCollectionStore = defineStore('collection', {
       await this.reload()
       return r
     },
+    /** 在同一分组内复制请求（显示名自动加「复制N」）；返回副本，树已刷新。 */
+    async cloneRequest(uid: string): Promise<RequestDoc> {
+      const r = await api.cloneRequest(uid)
+      await this.reload()
+      return r
+    },
     /** 新建分组：parent 为相对路径（空 = 根）。 */
     async createFolder(parent: string, name: string): Promise<void> {
       await api.createFolder(parent, name)

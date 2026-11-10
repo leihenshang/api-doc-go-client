@@ -252,6 +252,8 @@ export const api = {
   reload: () => call<CollectionInfo>('ReloadCollection').then(normalizeInfo),
   createRequest: (folder: string, name: string, method: string) =>
     call<RequestDoc>('CreateRequest', folder, name, method).then(normalizeRequest),
+  /** 在同一分组内复制请求：显示名自动加「复制N」，返回副本。 */
+  cloneRequest: (uid: string) => call<RequestDoc>('CloneRequest', uid).then(normalizeRequest),
   /** 新建流程：把内存草稿落盘成新请求（uid/路径/序号由集合层分配）。 */
   createRequestFromDraft: (folder: string, name: string, doc: RequestDoc) =>
     call<RequestDoc>('CreateRequestFromDraft', folder, name, doc).then(normalizeRequest),

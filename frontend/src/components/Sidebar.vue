@@ -32,6 +32,7 @@ import {
   CopyOutline,
   CreateOutline,
   DocumentTextOutline,
+  DuplicateOutline,
   EllipsisHorizontalOutline,
   ExpandOutline,
   FolderOpenOutline,
@@ -732,6 +733,8 @@ function rowMenuOptions(row: Row): DropdownOption[] {
   const fav = coll.isFav(n.uid)
   return [
     ...copyItems,
+    { key: 'duplicate', label: t('tree.duplicate'), icon: () => h(NIcon, { component: DuplicateOutline }), testid: 'tree.row.duplicate' },
+    { type: 'divider', key: 'd-dup' },
     { key: 'fav', label: fav ? t('tree.unfav') : t('tree.fav'), icon: () => h(NIcon, { component: fav ? Star : StarOutline }), testid: 'tree.row.fav' },
     { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
     { key: 'delete', label: t('tree.delApi'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
@@ -773,6 +776,16 @@ async function shortHashOf(node: TreeNode): Promise<string> {
   // 请求 hash 来自索引：复制前刷一次，保证是磁盘当前内容
   await tabs.refreshHashes()
   return (tabs.hashes[node.uid] ?? '').slice(0, 12)
+}
+
+/** 「复制 API」：在同一分组生成「原名复制N」，只刷新树、不切走当前编辑。 */
+async function duplicateRequest(node: TreeNode): Promise<void> {
+  try {
+    const cp = await coll.cloneRequest(node.uid)
+    message.success(t('tree.duplicated', { name: cp.name }))
+  } catch (e) {
+    fail(e)
+  }
 }
 
 /** 「复制 ID」：只复制 uid，便于贴进任意 MCP 模板。 */
@@ -907,7 +920,8 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'folder')
   } else if (n.type === 'request') {
-    if (key === 'fav') coll.toggleFav(n.uid)
+    if (key === 'duplicate') void duplicateRequest(n)
+    else if (key === 'fav') coll.toggleFav(n.uid)
     else if (key === 'rename') void startRename(row.root, n)
     else if (key === 'delete') confirmDelete(row.root, n, 'request')
   } else if (n.type === 'doc') {

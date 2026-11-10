@@ -394,6 +394,8 @@ export default {
     more: '集合操作',
     folderName: '分组名称',
     subFolderName: '子分组名称',
+    duplicate: '复制 API',
+    duplicated: '已复制为「{name}」',
     rename: '重命名',
     move: '移动到…',
     moveTitle: '移动到分组',
