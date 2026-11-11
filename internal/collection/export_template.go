@@ -145,6 +145,18 @@ const htmlStyleBlock = `</title>
     .toc { flex: 0 0 auto; position: static; max-height: none; width: 100%; }
     .ol, .layout.ol-collapsed .ol-open { display: none !important; }
   }
+  /* 打印（导出 PDF）：只留正文。左右两栏目录在纸上没有意义，还会挤掉正文宽度；
+     代码块 / 表格 / 图片不跨页切断，标题不落在页脚。 */
+  @media print {
+    .toc, .ol, .ol-open, .toc-toggle { display: none !important; }
+    .layout { display: block !important; max-width: none; margin: 0; padding: 0; }
+    main.content { max-width: none; }
+    body { font-size: 11pt; }
+    pre, table, blockquote, img { break-inside: avoid; }
+    h1, h2, h3, h4 { break-after: avoid; }
+    a { color: inherit; text-decoration: none; }
+    @page { size: A4; margin: 16mm 14mm; }
+  }
 </style>
 </head>
 <body>

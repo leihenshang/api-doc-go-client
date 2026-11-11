@@ -26,6 +26,8 @@ export function ArrangeNode(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function Authorize(arg1:context.Context,arg2:mcpauth.Request):Promise<mcpauth.Result>;
 
+export function BuildDocHTML(arg1:app.ExportOptions):Promise<string>;
+
 export function CancelSend(arg1:string):Promise<void>;
 
 export function CheckUpdate(arg1:string):Promise<app.UpdateInfo>;
@@ -105,6 +107,8 @@ export function EnvFileHash(arg1:string):Promise<string>;
 export function ExportDoc(arg1:string,arg2:string):Promise<string>;
 
 export function ExportDocSelected(arg1:string,arg2:string,arg3:collection.ExportSelection):Promise<string>;
+
+export function ExportDocWithOptions(arg1:string,arg2:string,arg3:app.ExportOptions):Promise<string>;
 
 export function FindCollectionDir(arg1:string,arg2:string):Promise<string>;
 

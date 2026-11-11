@@ -15,6 +15,7 @@ import type {
   DocEntry,
   Env,
   EnvVar,
+  ExportOptions,
   ExportSelection,
   FieldMapping,
   ShareApi,
@@ -411,6 +412,11 @@ export const api = {
   /** 按范围导出（markdown / html）：只导出选中的目录 / 请求 / 文档。 */
   exportDocSelected: (format: string, defaultName: string, sel: ExportSelection) =>
     call<string>('ExportDocSelected', format, defaultName, sel),
+  /** 按选项导出（HTML 可把本地/网络图片内联成单文件）。 */
+  exportDocWithOptions: (format: string, defaultName: string, opts: ExportOptions) =>
+    call<string>('ExportDocWithOptions', format, defaultName, opts),
+  /** 只生成 HTML 内容、不落盘：供「打印为 PDF」在 iframe 里渲染后调系统打印。 */
+  buildDocHTML: (opts: ExportOptions) => call<string>('BuildDocHTML', opts),
   /** RM-02：运行当前集合（读取磁盘文件），返回逐请求报告。 */
   runCollection: (opts: RunCollectionOptions) => call<RunReport>('RunCollection', opts),
   /** 导出最近一次运行报告（junit / json / text）。 */

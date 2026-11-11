@@ -293,6 +293,15 @@ export interface ExportSelection {
   docs: string[]
 }
 
+/** 导出选项：范围 + 图片内联（Markdown 忽略图片相关字段）。 */
+export interface ExportOptions {
+  selection: ExportSelection
+  /** 把集合 assets/ 里的图片内联成 data URL，产物是单个 HTML 文件。 */
+  inlineImages: boolean
+  /** 同时下载 http(s) 外链图片（依赖 inlineImages）。 */
+  inlineRemote: boolean
+}
+
 export interface EnvVar {
   name: string
   value: string

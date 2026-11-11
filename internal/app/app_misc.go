@@ -763,21 +763,55 @@ func renderBodyForCode(b collection.Body, vars map[string]string) string {
 
 // ExportDoc 导出集合（format：markdown | html | apidocgo），全量。
 // desktop 弹「另存为」；headless 落 headlessDir。返回保存路径（取消时为空串）。
+// ExportOptions 导出选项：范围 + 图片内联。
+//
+// InlineImages 在各入口默认 true：导出的 HTML 应该能直接发给别人打开，
+// 而不是一打开满屏破图（图片存在集合 assets/ 里，导出文件引用不到）。
+type ExportOptions struct {
+	Selection    collection.ExportSelection `json:"selection"`
+	InlineImages bool                       `json:"inlineImages"`
+	InlineRemote bool                       `json:"inlineRemote"` // 依赖 InlineImages；下载 http(s) 图片
+}
+
 func (a *App) ExportDoc(format, defaultName string) (string, error) {
-	return a.exportDoc(format, defaultName, collection.ExportSelection{All: true})
+	return a.exportDoc(format, defaultName, ExportOptions{
+		Selection: collection.ExportSelection{All: true}, InlineImages: true,
+	})
 }
 
 // ExportDocSelected 与 ExportDoc 相同，但只导出选定范围（目录 / 请求 / 文档）。
 // markdown / html 支持按范围裁剪；apidocgo / openapi 是整包语义，范围参数被忽略。
 func (a *App) ExportDocSelected(format, defaultName string, sel collection.ExportSelection) (string, error) {
-	return a.exportDoc(format, defaultName, sel)
+	return a.exportDoc(format, defaultName, ExportOptions{Selection: sel, InlineImages: true})
 }
 
-func (a *App) exportDoc(format, defaultName string, sel collection.ExportSelection) (string, error) {
+// ExportDocWithOptions 按选项导出（HTML 可把本地 / 网络图片内联成单文件）。
+func (a *App) ExportDocWithOptions(format, defaultName string, opts ExportOptions) (string, error) {
+	return a.exportDoc(format, defaultName, opts)
+}
+
+// BuildDocHTML 只生成 HTML 内容、不落盘：供前端「打印为 PDF」（走系统打印对话框）。
+func (a *App) BuildDocHTML(opts ExportOptions) (string, error) {
 	c, err := a.requireCollection()
 	if err != nil {
 		return "", err
 	}
+	out, err := c.ExportHTMLSelected(opts.Selection)
+	if err != nil {
+		return "", err
+	}
+	if opts.InlineImages {
+		out, _ = c.InlineImages(out, opts.InlineRemote)
+	}
+	return out, nil
+}
+
+func (a *App) exportDoc(format, defaultName string, opts ExportOptions) (string, error) {
+	c, err := a.requireCollection()
+	if err != nil {
+		return "", err
+	}
+	sel := opts.Selection
 	var content string
 	var raw []byte
 	switch strings.ToLower(strings.TrimSpace(format)) {
@@ -785,6 +819,9 @@ func (a *App) exportDoc(format, defaultName string, sel collection.ExportSelecti
 		content, err = c.ExportMarkdownSelected(sel)
 	case "html":
 		content, err = c.ExportHTMLSelected(sel)
+		if err == nil && opts.InlineImages {
+			content, _ = c.InlineImages(content, opts.InlineRemote)
+		}
 	case "apidocgo":
 		// 集合整包（目录 + 请求 + 文档），可被其他 api-doc-go 客户端直接导入
 		raw, err = c.ExportBundle()

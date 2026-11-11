@@ -22,6 +22,10 @@ export function Authorize(arg1, arg2) {
   return window['go']['app']['App']['Authorize'](arg1, arg2);
 }
 
+export function BuildDocHTML(arg1) {
+  return window['go']['app']['App']['BuildDocHTML'](arg1);
+}
+
 export function CancelSend(arg1) {
   return window['go']['app']['App']['CancelSend'](arg1);
 }
@@ -180,6 +184,10 @@ export function ExportDoc(arg1, arg2) {
 
 export function ExportDocSelected(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDocSelected'](arg1, arg2, arg3);
+}
+
+export function ExportDocWithOptions(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ExportDocWithOptions'](arg1, arg2, arg3);
 }
 
 export function FindCollectionDir(arg1, arg2) {

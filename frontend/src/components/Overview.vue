@@ -24,7 +24,7 @@ const emit = defineEmits<{
   'new-request': []
   run: []
   import: []
-  export: [format: 'markdown' | 'html' | 'apidocgo' | 'openapi']
+  export: [format: 'markdown' | 'html' | 'pdf' | 'apidocgo' | 'openapi']
   mock: []
   'collection-defaults': []
   'field-mappings': []
@@ -114,6 +114,13 @@ const shortcuts = computed(() => [
             <n-icon :component="CloudUploadOutline" :size="14" />
           </template>
           {{ t('export.html') }}
+        </n-button>
+        <!-- PDF：走系统打印对话框（排版交给 WebView，中文/表格/代码块不用自己渲染） -->
+        <n-button class="act" size="medium" secondary data-testid="overview.exportPdf" @click="emit('export', 'pdf')">
+          <template #icon>
+            <n-icon :component="CloudUploadOutline" :size="14" />
+          </template>
+          {{ t('export.pdf') }}
         </n-button>
         <!-- 集合整包：目录 + 请求 + 文档，可被另一个 api-doc-go 客户端直接导入（item 26） -->
         <n-button class="act" size="medium" secondary data-testid="overview.exportBundle" @click="emit('export', 'apidocgo')">

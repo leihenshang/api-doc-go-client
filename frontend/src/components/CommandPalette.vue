@@ -130,6 +130,7 @@ const COMMANDS: { key: string; labelKey: string; icon: Component }[] = [
   { key: 'open-share', labelKey: 'palette.openShare', icon: LinkOutline },
   { key: 'export-md', labelKey: 'export.markdown', icon: FolderOpenOutline },
   { key: 'export-html', labelKey: 'export.html', icon: FolderOpenOutline },
+  { key: 'export-pdf', labelKey: 'export.pdf', icon: FolderOpenOutline },
 ]
 
 function collectRequests(

@@ -873,6 +873,8 @@ export default {
     openapi: 'OpenAPI 3.0',
     bundle: '导出 api-doc-go 集合',
     saved: '已导出到 {path}',
+    pdf: '导出 PDF',
+    printFailed: '无法创建打印视图',
   },
   exportDialog: {
     title: '导出 {format}',
@@ -886,6 +888,10 @@ export default {
     noMatch: '没有匹配的目录 / 请求 / 文档',
     empty: '至少选择一项',
     confirm: '导出',
+    inlineImages: '内嵌图片（单文件）',
+    inlineRemote: '同时下载网络图片',
+    inlineHint: '图片会转成 base64 内嵌，导出的 HTML 单个文件即可直接分享。',
+    pdfHint: '将打开系统打印对话框，在那里选择「另存为 PDF」。',
   },
   mock: {
     title: '本地 Mock',
