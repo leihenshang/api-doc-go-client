@@ -574,6 +574,7 @@ async function doExport(
   sel: ExportSelection,
   inlineImages = true,
   inlineRemote = false,
+  baseName = '',
 ): Promise<void> {
   try {
     const opts: ExportOptions = { selection: sel, inlineImages, inlineRemote }
@@ -583,17 +584,32 @@ async function doExport(
     }
     const ext =
       format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : format === 'openapi' ? '.openapi.json' : '.md'
+    // 单条目导出用条目名，整份导出用集合名
+    const stem = baseName || coll.name
     // md / html 走带选项的接口（图片内联）；整包格式沿用旧接口，headless / 命令行行为不变
     const path =
       format === 'markdown' || format === 'html'
-        ? await api.exportDocWithOptions(format, coll.name + ext, opts)
+        ? await api.exportDocWithOptions(format, stem + ext, opts)
         : sel.all
-          ? await api.exportDoc(format, coll.name + ext)
-          : await api.exportDocSelected(format, coll.name + ext, sel)
+          ? await api.exportDoc(format, stem + ext)
+          : await api.exportDocSelected(format, stem + ext, sel)
     if (path) message.success(t('export.saved', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
+}
+
+/** 右键导出单个条目：范围就一个 uid，文件名用条目名（不再弹范围选择）。 */
+function exportNode(p: {
+  uid: string
+  name: string
+  kind: 'request' | 'doc'
+  format: ExportFormat
+}): void {
+  const sel: ExportSelection = { all: false, groups: [], requests: [], docs: [] }
+  if (p.kind === 'request') sel.requests.push(p.uid)
+  else sel.docs.push(p.uid)
+  void doExport(p.format, sel, true, false, p.name)
 }
 
 /**
@@ -1064,7 +1080,8 @@ watch(
                 @reload-root="reloadRoot" @reveal-root="revealRoot" @close-root="closeRoot"
                 @open="tabs.openRequest($event)" @new-request="newDraft" @new-grpc-request="newGrpcDraft"
                 @new-doc="newDocAt" @import-curl="openCurl" @sync="openSyncSettings()" @sync-root="syncRootNow"
-                @open-collection="openCollection('')" @create-collection="(d: string) => openCollection(d, true)" />
+                @open-collection="openCollection('')" @create-collection="(d: string) => openCollection(d, true)"
+                @export-node="exportNode" />
             </aside>
 
             <!-- 侧栏拖宽手柄：夹在 [标题自然宽, 页面 50%] 之间，松手记入 localStorage -->

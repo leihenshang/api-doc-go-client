@@ -397,6 +397,7 @@ export default {
     duplicate: '复制 API',
     duplicateFolder: '复制分组',
     duplicateDoc: '复制文档',
+    export: '导出',
     duplicated: '已复制为「{name}」',
     rename: '重命名',
     move: '移动到…',

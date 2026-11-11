@@ -28,6 +28,7 @@ import {
   ChevronDownOutline,
   ChevronForwardOutline,
   CloseOutline,
+  CloudUploadOutline,
   ContractOutline,
   CopyOutline,
   CreateOutline,
@@ -86,6 +87,10 @@ const emit = defineEmits<{
   'open-collection': []
   /** 工具条「创建集合」：已选好父目录并填了名称，dir 为完整目标路径（不存在由 OpenCollection 初始化） */
   'create-collection': [dir: string]
+  /** 右键导出单个条目：App 侧按 uid 组范围直接导出，不再弹范围选择 */
+  'export-node': [
+    payload: { uid: string; name: string; kind: 'request' | 'doc'; format: 'markdown' | 'html' | 'pdf' },
+  ]
 }>()
 const { t } = useI18n()
 const coll = useCollectionStore()
@@ -703,6 +708,20 @@ async function removeDoc(root: string, node: TreeNode): Promise<void> {
  * 行内「···」菜单：把分组/请求的常用操作（新建子项、重命名、删除、收藏）收进一个下拉，
  * 不再在行内堆一排图标按钮；「更新」(根行立即同步) 仍作为直接按钮，不进菜单。
  */
+/**
+ * 右键「导出」子菜单：直接导出这一个请求 / 文档。
+ *
+ * 为什么不复用导出弹窗：用户已经指明了对象，再让他去树里勾一次纯属多余；
+ * 图片选项用默认值（内嵌本地图片、不下载网络图），需要细调时仍可走「导出」按钮。
+ */
+function exportMenuItems(): DropdownOption[] {
+  return [
+    { key: 'export-md', label: t('export.markdown'), testid: 'tree.row.exportMd' },
+    { key: 'export-html', label: t('export.html'), testid: 'tree.row.exportHtml' },
+    { key: 'export-pdf', label: t('export.pdf'), testid: 'tree.row.exportPdf' },
+  ]
+}
+
 function rowMenuOptions(row: Row): DropdownOption[] {
   const n = row.node!
   if (n.type === 'folder') {
@@ -728,6 +747,7 @@ function rowMenuOptions(row: Row): DropdownOption[] {
     return [
       ...copyItems,
       { key: 'duplicate', label: t('tree.duplicateDoc'), icon: () => h(NIcon, { component: DuplicateOutline }), testid: 'tree.row.duplicate' },
+      { key: 'export', label: t('tree.export'), icon: () => h(NIcon, { component: CloudUploadOutline }), children: exportMenuItems(), testid: 'tree.row.export' },
       { type: 'divider', key: 'd-dup' },
       { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
       { key: 'delete', label: t('tree.delDoc'), icon: () => h(NIcon, { component: TrashOutline }), testid: 'tree.row.delete' },
@@ -737,6 +757,7 @@ function rowMenuOptions(row: Row): DropdownOption[] {
   return [
     ...copyItems,
     { key: 'duplicate', label: t('tree.duplicate'), icon: () => h(NIcon, { component: DuplicateOutline }), testid: 'tree.row.duplicate' },
+    { key: 'export', label: t('tree.export'), icon: () => h(NIcon, { component: CloudUploadOutline }), children: exportMenuItems(), testid: 'tree.row.export' },
     { type: 'divider', key: 'd-dup' },
     { key: 'fav', label: fav ? t('tree.unfav') : t('tree.fav'), icon: () => h(NIcon, { component: fav ? Star : StarOutline }), testid: 'tree.row.fav' },
     { key: 'rename', label: t('tree.rename'), icon: () => h(NIcon, { component: CreateOutline }), testid: 'tree.row.rename' },
@@ -926,6 +947,13 @@ async function onRowMenu(row: Row, key: string | number): Promise<void> {
   }
   if (key === 'copyMcp') {
     await copyMcpPrompt(n)
+    return
+  }
+  // 导出子菜单：只导出被点的这一条（请求 / 文档），范围由 App 侧按 uid 组
+  if (key === 'export-md' || key === 'export-html' || key === 'export-pdf') {
+    if (n.type === 'folder') return
+    const format = key === 'export-md' ? 'markdown' : key === 'export-html' ? 'html' : 'pdf'
+    emit('export-node', { uid: n.uid, name: n.name, kind: n.type === 'doc' ? 'doc' : 'request', format })
     return
   }
   if (n.type === 'folder') {

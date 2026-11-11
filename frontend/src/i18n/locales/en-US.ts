@@ -397,6 +397,7 @@ export default {
     duplicate: 'Duplicate API',
     duplicateFolder: 'Duplicate group',
     duplicateDoc: 'Duplicate doc',
+    export: 'Export',
     duplicated: 'Duplicated as "{name}"',
     rename: 'Rename',
     move: 'Move to…',
