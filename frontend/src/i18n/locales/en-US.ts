@@ -869,6 +869,8 @@ export default {
     openapi: 'OpenAPI 3.0',
     bundle: 'Export api-doc-go collection',
     saved: 'Exported to {path}',
+    pdf: 'Export PDF',
+    printFailed: 'Could not create the print view',
   },
   exportDialog: {
     title: 'Export {format}',
@@ -882,6 +884,10 @@ export default {
     noMatch: 'No matching folders, requests or docs',
     empty: 'Select at least one item',
     confirm: 'Export',
+    inlineImages: 'Embed images (single file)',
+    inlineRemote: 'Also download remote images',
+    inlineHint: 'Images are embedded as base64, so the exported HTML is one shareable file.',
+    pdfHint: 'The system print dialog opens — choose "Save as PDF" there.',
   },
   mock: {
     title: 'Local Mock',

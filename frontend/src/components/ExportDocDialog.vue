@@ -2,21 +2,21 @@
 // 「导出 Markdown / HTML」的范围选择弹窗：全部导出，或只挑部分目录 / 请求 / 文档。
 // 集合大时一份文档几百节，用户经常只想给某个模块出文档，所以导出前先选范围。
 // 组件只负责「选出了什么」，落盘仍由 App.vue 调 Go 侧（与直接导出走同一条链路）。
-import { NButton, NInput, NModal, NTree } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NModal, NTree } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ExportSelection, TreeNode } from '@/types'
+import type { ExportOptions, ExportSelection, TreeNode } from '@/types'
 
 const props = defineProps<{
   show: boolean
   /** 导出格式，只用于标题与默认文件名展示。 */
-  format: 'markdown' | 'html'
+  format: 'markdown' | 'html' | 'pdf'
   /** 集合树（与侧栏同源：folder / request / doc 混排）。 */
   tree: TreeNode[]
 }>()
 const emit = defineEmits<{
   'update:show': [v: boolean]
-  confirm: [sel: ExportSelection]
+  confirm: [opts: ExportOptions]
 }>()
 
 const { t } = useI18n()
@@ -25,6 +25,12 @@ const { t } = useI18n()
 const mode = ref<'all' | 'pick'>('all')
 const keyword = ref('')
 const checkedKeys = ref<string[]>([])
+/** HTML / PDF 的图片选项：默认内联本地图片（产物是单文件），网络图片默认不下载。 */
+const inlineImages = ref(true)
+const inlineRemote = ref(false)
+
+/** 标题里的格式名（PDF 与 HTML 共用同一套选择界面）。 */
+const formatLabel = computed(() => (props.format === 'html' ? 'HTML' : props.format === 'pdf' ? 'PDF' : 'Markdown'))
 
 /** n-tree 只认 key / label / children：方法名与文档图标直接拼进 label，省掉自定义渲染槽。 */
 interface PickNode {
@@ -110,6 +116,8 @@ watch(
     mode.value = 'all'
     keyword.value = ''
     checkedKeys.value = [...allKeys.value]
+    inlineImages.value = true
+    inlineRemote.value = false
   },
 )
 
@@ -142,13 +150,13 @@ function confirm(): void {
       else if (kind === 'request') sel.requests.push(key)
     }
   }
-  emit('confirm', sel)
+  emit('confirm', { selection: sel, inlineImages: inlineImages.value, inlineRemote: inlineRemote.value })
   emit('update:show', false)
 }
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="t('exportDialog.title', { format: format === 'html' ? 'HTML' : 'Markdown' })"
+  <n-modal :show="show" preset="card" :title="t('exportDialog.title', { format: formatLabel })"
     style="width: 560px; max-width: 94vw" data-testid="export.dialog" @update:show="emit('update:show', $event)">
     <div class="ex-body">
       <div class="ex-modes">
@@ -176,6 +184,17 @@ function confirm(): void {
         </p>
       </template>
       <p v-else class="ex-sum">{{ t('exportDialog.allHint', { n: summary.reqs + summary.docs }) }}</p>
+
+      <!-- 图片选项：HTML 与 PDF 都走 HTML 渲染，图片内联后产物才是单文件 -->
+      <div v-if="format !== 'markdown'" class="ex-opts">
+        <n-checkbox v-model:checked="inlineImages" data-testid="export.inlineImages">
+          {{ t('exportDialog.inlineImages') }}
+        </n-checkbox>
+        <n-checkbox v-model:checked="inlineRemote" :disabled="!inlineImages" data-testid="export.inlineRemote">
+          {{ t('exportDialog.inlineRemote') }}
+        </n-checkbox>
+        <p class="ex-hint">{{ format === 'pdf' ? t('exportDialog.pdfHint') : t('exportDialog.inlineHint') }}</p>
+      </div>
     </div>
 
     <template #footer>
@@ -244,6 +263,22 @@ function confirm(): void {
 }
 
 .ex-sum {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--app-muted);
+}
+
+.ex-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--app-border, #e3e3e3);
+}
+
+.ex-hint {
+  flex: 1 1 100%;
   margin: 0;
   font-size: 11.5px;
   color: var(--app-muted);

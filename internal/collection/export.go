@@ -1190,6 +1190,16 @@ func inlineMD(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		switch {
+		case strings.HasPrefix(s[i:], "!["):
+			// Markdown 图片语法：此前落到 default 被整段转义，导出的 HTML 里只剩
+			// 字面量「![](/doc-assets/…)」—— 图片在导出产物里等于丢了。
+			if img, n, ok := parseMDImage(s[i:]); ok {
+				b.WriteString(img)
+				i += n
+				continue
+			}
+			b.WriteString(html.EscapeString("!["))
+			i += 2
 		case s[i] == '`':
 			if end := strings.IndexByte(s[i+1:], '`'); end >= 0 {
 				b.WriteString("<code>")
@@ -1224,7 +1234,10 @@ func inlineMD(s string) string {
 			i++
 		default:
 			j := i + 1
-			for j < len(s) && s[j] != '`' && s[j] != '<' && !strings.HasPrefix(s[j:], "**") {
+			// 遇到下一个行内标记就停：` 代码、< 标签、** 粗体、![ 图片。
+			// 这里必须把 ![ 也算上，否则一段话里的图片会被 default 整段吞掉
+			// （只有图片独占一行时才会走上方的 case）。
+			for j < len(s) && s[j] != '`' && s[j] != '<' && !strings.HasPrefix(s[j:], "**") && !strings.HasPrefix(s[j:], "![") {
 				j++
 			}
 			b.WriteString(html.EscapeString(s[i:j]))
@@ -1232,6 +1245,61 @@ func inlineMD(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// parseMDImage 解析行内图片语法 ![alt](src "title")，返回 <img> 与消耗的字节数。
+//
+// 只接受安全地址（/doc-assets/、http(s)://、data:image、无 scheme 的相对路径）；
+// javascript:/vbscript:/file: 一律判为「不是图片」，交回调用方按普通文本转义 ——
+// 导出的 HTML 会被到处转发，属性注入面越小越好。
+func parseMDImage(s string) (string, int, bool) {
+	if !strings.HasPrefix(s, "![") {
+		return "", 0, false
+	}
+	closeAlt := strings.IndexByte(s[2:], ']')
+	if closeAlt < 0 {
+		return "", 0, false
+	}
+	alt := s[2 : 2+closeAlt]
+	rest := s[2+closeAlt+1:]
+	if !strings.HasPrefix(rest, "(") {
+		return "", 0, false
+	}
+	closeURL := strings.IndexByte(rest, ')')
+	if closeURL < 0 {
+		return "", 0, false
+	}
+	raw := strings.TrimSpace(rest[1:closeURL])
+	// 可选的 "title"：`url "标题"`；标题不写进输出，少一个可注入的属性。
+	if i := strings.IndexAny(raw, " \t"); i >= 0 {
+		raw = raw[:i]
+	}
+	raw = strings.Trim(raw, "<>")
+	if !safeImageSrc(raw) {
+		return "", 0, false
+	}
+	return `<img src="` + html.EscapeString(raw) + `" alt="` + html.EscapeString(alt) + `" loading="lazy">`,
+		2 + closeAlt + 1 + closeURL + 1, true
+}
+
+// safeImageSrc 图片地址白名单：集合内附件、http(s)、data:image、无 scheme 的相对路径。
+func safeImageSrc(src string) bool {
+	if src == "" {
+		return false
+	}
+	lower := strings.ToLower(src)
+	switch {
+	case strings.HasPrefix(lower, "javascript:"), strings.HasPrefix(lower, "vbscript:"):
+		return false
+	case strings.HasPrefix(lower, "data:"):
+		return strings.HasPrefix(lower, "data:image/")
+	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
+		return true
+	case strings.Contains(lower, ":"):
+		// 其它 scheme（file:/ftp:…）不认；相对路径里不会出现冒号。
+		return false
+	}
+	return true
 }
 
 // headingLevel 返回 ATX 标题级别（1..6）：行首连续 # 的个数（>6 按 6），规则与 mdToHTML 一致；

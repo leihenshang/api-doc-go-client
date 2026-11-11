@@ -51,7 +51,7 @@ import type { SavedRootEntry } from '@/stores/collection'
 import { useSettingsStore } from '@/stores/settings'
 import type { Tab } from '@/stores/tabs'
 import { blankGrpcRequest, useTabsStore } from '@/stores/tabs'
-import type { AuthzRequest, ExportSelection, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
+import type { AuthzRequest, ExportOptions, ExportSelection, MCPStatus, RequestDoc, SyncStatus, TreeNode } from '@/types'
 import { WarningOutline } from '@vicons/ionicons5'
 import {
   NButton,
@@ -103,7 +103,7 @@ const showCodegen = ref(false)
 const showMock = ref(false)
 /** 导出范围弹窗：md / html 先选范围再落盘（整包与 OpenAPI 仍直接导出）。 */
 const showExport = ref(false)
-const exportFormat = ref<'markdown' | 'html'>('markdown')
+const exportFormat = ref<'markdown' | 'html' | 'pdf'>('markdown')
 const showCollDefaults = ref(false)
 const showFieldMappings = ref(false)
 const showSync = ref(false)
@@ -543,12 +543,16 @@ function onCommand(key: string): void {
   else if (key === 'open-share') showShareBrowser.value = true
   else if (key === 'export-md') void exportDoc('markdown')
   else if (key === 'export-html') void exportDoc('html')
+  else if (key === 'export-pdf') void exportDoc('pdf')
 }
 
 // ---- 导出（H10：Markdown / HTML；item 26：集合整包 apidocgo）----
-/** 导出入口：Markdown / HTML 先选范围（全部或部分目录/请求/文档），其余格式是整包语义直接导。 */
-function exportDoc(format: 'markdown' | 'html' | 'apidocgo' | 'openapi'): void {
-  if (format === 'markdown' || format === 'html') {
+/** 导出格式：md / html / pdf 需要先选范围，整包格式（apidocgo / openapi）直接导。 */
+type ExportFormat = 'markdown' | 'html' | 'pdf' | 'apidocgo' | 'openapi'
+
+/** 导出入口：Markdown / HTML / PDF 先选范围（全部或部分目录/请求/文档），其余格式是整包语义直接导。 */
+function exportDoc(format: ExportFormat): void {
+  if (format === 'markdown' || format === 'html' || format === 'pdf') {
     exportFormat.value = format
     showExport.value = true
     return
@@ -556,21 +560,75 @@ function exportDoc(format: 'markdown' | 'html' | 'apidocgo' | 'openapi'): void {
   void doExport(format, { all: true, groups: [], requests: [], docs: [] })
 }
 
-/** 真正落盘：sel.all 走旧接口（与 headless / 命令行行为完全一致），否则按范围裁剪。 */
+/** 弹窗确认：范围 + 图片选项一并交给落盘 / 打印。 */
+function onExportConfirm(opts: ExportOptions): void {
+  void doExport(exportFormat.value, opts.selection, opts.inlineImages, opts.inlineRemote)
+}
+
+/**
+ * 真正导出：markdown / html 落盘，PDF 走系统打印（生成 HTML → iframe → 系统打印对话框）。
+ * 图片选项只对 html / pdf 有意义（markdown 是纯文本，保留原引用）。
+ */
 async function doExport(
-  format: 'markdown' | 'html' | 'apidocgo' | 'openapi',
+  format: ExportFormat,
   sel: ExportSelection,
+  inlineImages = true,
+  inlineRemote = false,
 ): Promise<void> {
   try {
+    const opts: ExportOptions = { selection: sel, inlineImages, inlineRemote }
+    if (format === 'pdf') {
+      printHTML(await api.buildDocHTML(opts))
+      return
+    }
     const ext =
       format === 'html' ? '.html' : format === 'apidocgo' ? '.apidocgo.json' : format === 'openapi' ? '.openapi.json' : '.md'
-    const path = sel.all
-      ? await api.exportDoc(format, coll.name + ext)
-      : await api.exportDocSelected(format, coll.name + ext, sel)
+    // md / html 走带选项的接口（图片内联）；整包格式沿用旧接口，headless / 命令行行为不变
+    const path =
+      format === 'markdown' || format === 'html'
+        ? await api.exportDocWithOptions(format, coll.name + ext, opts)
+        : sel.all
+          ? await api.exportDoc(format, coll.name + ext)
+          : await api.exportDocSelected(format, coll.name + ext, sel)
     if (path) message.success(t('export.saved', { path }))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
+}
+
+/**
+ * 系统打印（导出 PDF）：把导出的 HTML 塞进一个 A4 尺寸的隐藏 iframe，再调 iframe 自己的 print()。
+ *
+ * 为什么不直接 window.print()：那会把整个应用界面（侧栏、工具栏、状态栏）一起打到纸上。
+ * 为什么给 A4 尺寸：0 尺寸 iframe 的排版宽度会塌成 0，打印出来是空白页。
+ */
+function printHTML(html: string): void {
+  document.getElementById('app-print-frame')?.remove()
+  const frame = document.createElement('iframe')
+  frame.id = 'app-print-frame'
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;'
+  document.body.appendChild(frame)
+  const doc = frame.contentDocument
+  const win = frame.contentWindow
+  if (!doc || !win) {
+    frame.remove()
+    message.error(t('export.printFailed'))
+    return
+  }
+  doc.open()
+  doc.write(html)
+  doc.close()
+  // 等一帧再打印：字体与布局就位，否则偶发空白页
+  window.setTimeout(() => {
+    try {
+      win.focus()
+      win.print()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
+    // 打印对话框关闭前拿不到回调；留足时间后清理，避免 iframe 常驻
+    window.setTimeout(() => frame.remove(), 60_000)
+  }, 400)
 }
 
 /** 拉取内嵌 MCP 服务运行状态（后端不支持时静默降级为 null）。 */
@@ -1089,7 +1147,7 @@ watch(
       <code-gen-dialog v-model:show="showCodegen" :request="tabs.active?.request ?? null" />
       <mock-dialog v-model:show="showMock" />
       <export-doc-dialog v-model:show="showExport" :format="exportFormat" :tree="coll.tree"
-        @confirm="doExport(exportFormat, $event)" />
+        @confirm="onExportConfirm" />
       <collection-defaults-dialog v-model:show="showCollDefaults" />
       <field-mappings-dialog v-model:show="showFieldMappings" />
       <sync-dialog v-model:show="showSync" :root="syncRoot" @synced="onSynced" />
