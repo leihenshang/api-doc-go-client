@@ -51,7 +51,7 @@ SHOT_BASE=http://localhost:5275/ SHOT_OUT=./screenshots node doc/ui-review-2026-
 
 ### 2.1 集合树 + 工作台（首屏）
 
-![集合树与工作台](screenshots/01-overview-and-tree.png)
+![集合树与工作台](../../doc/screenshots/02-collection-overview.png)
 
 **做得好**
 - 侧栏结构清晰：根 → 分组 → 请求/文档，方法色徽标（GET 绿 / POST 橙）一眼分辨；
@@ -323,8 +323,7 @@ UI-11/12 行高与状态栏权重、UI-14 `docs/` 收敛为虚拟节点、UI-16 
 | 桌面态 | 20px | 两层生效 | 1600 |
 | 最大化 | 0 | none | 全屏 |
 
-效果对比：`screenshots/20-window-shadow-web.png`（前）、`21-window-shadow-desktop.png`（第一版）、
-`22-window-shadow-final.png`（对齐参考图的最终版）。
+效果对比：浏览器态（前）、桌面态第一版、对齐参考图的最终版，三态依次收敛到上表数值。
 
 > 调参经验：先定 blur，再定留白（留白 ≥ blur/2 才不会裁出硬边），最后定透明度
 > （0.18~0.20 之间最接近系统窗口；超过 0.25 会显得"贴纸感"）。
