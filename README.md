@@ -1,3 +1,5 @@
+**中文** | [English](README.en.md)
+
 # API-DOC-GO 客户端
 
 **API-DOC-GO** 是一套轻量的接口文档协作工具。本仓库是它的**桌面客户端**：Wails v2（Go 内核 + Vue 3 / TypeScript 前端），
