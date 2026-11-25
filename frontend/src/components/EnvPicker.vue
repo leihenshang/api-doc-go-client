@@ -26,6 +26,9 @@ const options = computed<DropdownOption[]>(() => [
 
 const current = computed(() => props.modelValue || t('env.none'))
 
+/** 没有环境（或当前环境已被删掉）时文字置灰：按钮还在，只是没得选。 */
+const empty = computed(() => !props.envs.some((e) => e.name === props.modelValue))
+
 function pick(key: string | number): void {
   if (key === MANAGE) {
     emit('manage')
@@ -37,7 +40,7 @@ function pick(key: string | number): void {
 
 <template>
   <n-dropdown trigger="click" :options="options" @select="pick">
-    <button class="env" type="button" data-testid="env.select" :title="t('env.current')">
+    <button class="env" :class="{ empty }" type="button" data-testid="env.select" :title="t('env.current')">
       <n-icon :component="GlobeOutline" :size="15" class="ic" />
       <span class="nm">{{ current }}</span>
       <n-icon :component="ChevronDownOutline" :size="12" class="ar" />
@@ -60,6 +63,11 @@ function pick(key: string | number): void {
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
+}
+
+/* 无环境：文字走占位色，按钮形态不变（点开还能进「环境设置…」） */
+.env.empty .nm {
+  color: var(--app-placeholder);
 }
 
 .env:hover {

@@ -1011,7 +1011,7 @@ export default {
   env: {
     title: '环境变量',
     current: '当前环境',
-    none: 'No Environment',
+    none: '无环境',
     add: '新建环境',
     addVar: '添加变量',
     name: '环境名',

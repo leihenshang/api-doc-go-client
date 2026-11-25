@@ -1575,7 +1575,10 @@ func (c *Collection) DeleteEnv(name string) error {
 			continue
 		}
 		if err := c.moveToTrash(p); err != nil {
-			return err
+			// 回收站只是个便利：它不可用时也要能删掉，否则用户会卡在一个删不掉的环境上。
+			if rmErr := os.Remove(p); rmErr != nil {
+				return fmt.Errorf("删除环境失败：%v（回收站：%v）", rmErr, err)
+			}
 		}
 	}
 	return nil

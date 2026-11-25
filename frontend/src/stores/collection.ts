@@ -469,7 +469,12 @@ export const useCollectionStore = defineStore('collection', {
       // 同上：删掉的环境不在新列表里，reload 后 currentEnv 已被校正，须先记下是否删的是当前项
       const wasCurrent = this.currentEnv === name
       await api.deleteEnv(name)
-      await this.reload()
+      // 文件已经删掉了：reload 出问题也不该反过来告诉用户「删除失败」。
+      try {
+        await this.reload()
+      } catch {
+        /* 忽略：下次刷新会跟上 */
+      }
       if (wasCurrent) this.setEnv(this.envNames[0] ?? '')
     },
   },
